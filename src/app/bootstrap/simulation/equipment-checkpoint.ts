@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readQ2FoundationCheckpoint } from "../../../persistence/q2-foundation.ts";
 import { readHandGrenadesCheckpoint } from "../../../persistence/q2-hand-grenades.ts";
 import { readSavedActor } from "../../../persistence/save-image.ts";

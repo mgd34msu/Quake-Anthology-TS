@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../persistence/value.ts";
 import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
@@ -14,15 +15,25 @@ export class PrecompToken {
   context: SourceTokenContext = { path: "", column: 1, leadingWhitespace: "" };
   unsupported: string | undefined;
 
-  constructor(readonly id: number, readonly allocation: ScriptMemoryAllocation) {
+  constructor(
+    readonly id: number,
+    readonly allocation: ScriptMemoryAllocation,
+  ) {
     this.token = new SourceTokenMemory(() => allocation.bytes);
   }
 
-  captureSaveState() { return { token: this.token.captureSaveState(), context: { ...this.context }, unsupported: this.unsupported ?? null }; }
+  captureSaveState() {
+    return { token: this.token.captureSaveState(), context: { ...this.context }, unsupported: this.unsupported ?? null };
+  }
   restoreSaveState(value: unknown, verifyBytes = false): void {
-    const reader = new SaveReader(value, "script.precompToken"), context = reader.field("context");
+    const reader = new SaveReader(value, "script.precompToken"),
+      context = reader.field("context");
     this.token.restoreSaveState(reader.field("token").value, verifyBytes);
-    this.context = { path: context.field("path").string(), column: context.field("column").integer(0), leadingWhitespace: context.field("leadingWhitespace").string() };
+    this.context = {
+      path: context.field("path").string(),
+      column: context.field("column").integer(0),
+      leadingWhitespace: context.field("leadingWhitespace").string(),
+    };
     this.unsupported = reader.field("unsupported").nullable(cell => cell.string()) ?? undefined;
   }
   copyFrom(other: PrecompToken): void {
@@ -46,7 +57,11 @@ export function localToken(): PrecompToken {
 export class PrecompDefine {
   private cachedView: DataView | null = null;
 
-  constructor(readonly id: number, readonly allocation: ScriptMemoryAllocation, readonly owner: PrecompMemory) {}
+  constructor(
+    readonly id: number,
+    readonly allocation: ScriptMemoryAllocation,
+    readonly owner: PrecompMemory,
+  ) {}
 
   get name(): string {
     const bytes = this.allocation.bytes;
@@ -61,21 +76,51 @@ export class PrecompDefine {
     }
     throw new RangeError("define name has no terminator in its allocation");
   }
-  get flags(): number { return this.view.getInt32(4, true); }
-  set flags(value: number) { this.view.setInt32(4, value, true); }
-  get builtin(): number { return this.view.getInt32(8, true); }
-  set builtin(value: number) { this.view.setInt32(8, value, true); }
-  get numparms(): number { return this.view.getInt32(12, true); }
-  set numparms(value: number) { this.view.setInt32(12, value, true); }
-  get parms(): number { return this.view.getUint32(16, true); }
-  set parms(value: number) { this.view.setUint32(16, value, true); }
-  get tokens(): number { return this.view.getUint32(20, true); }
-  set tokens(value: number) { this.view.setUint32(20, value, true); }
-  get next(): number { return this.view.getUint32(24, true); }
-  set next(value: number) { this.view.setUint32(24, value, true); }
-  get hashnext(): number { return this.view.getUint32(28, true); }
-  set hashnext(value: number) { this.view.setUint32(28, value, true); }
-  get fixed(): boolean { return (this.flags & 1) !== 0; }
+  get flags(): number {
+    return this.view.getInt32(4, true);
+  }
+  set flags(value: number) {
+    this.view.setInt32(4, value, true);
+  }
+  get builtin(): number {
+    return this.view.getInt32(8, true);
+  }
+  set builtin(value: number) {
+    this.view.setInt32(8, value, true);
+  }
+  get numparms(): number {
+    return this.view.getInt32(12, true);
+  }
+  set numparms(value: number) {
+    this.view.setInt32(12, value, true);
+  }
+  get parms(): number {
+    return this.view.getUint32(16, true);
+  }
+  set parms(value: number) {
+    this.view.setUint32(16, value, true);
+  }
+  get tokens(): number {
+    return this.view.getUint32(20, true);
+  }
+  set tokens(value: number) {
+    this.view.setUint32(20, value, true);
+  }
+  get next(): number {
+    return this.view.getUint32(24, true);
+  }
+  set next(value: number) {
+    this.view.setUint32(24, value, true);
+  }
+  get hashnext(): number {
+    return this.view.getUint32(28, true);
+  }
+  set hashnext(value: number) {
+    this.view.setUint32(28, value, true);
+  }
+  get fixed(): boolean {
+    return (this.flags & 1) !== 0;
+  }
 
   parameterIndex(name: string): number {
     let index = 0;
@@ -108,19 +153,25 @@ export class PrecompMemory {
   constructor(private readonly memory: ScriptMemory | undefined) {}
 
   captureSaveState(capture: ScriptMemoryCapture) {
-    return { nextToken: this.nextToken, nextDefine: this.nextDefine,
+    return {
+      nextToken: this.nextToken,
+      nextDefine: this.nextDefine,
       tokens: [...this.tokens.values()].map(token => ({ id: token.id, allocation: capture.reference(token.allocation), state: token.captureSaveState() })),
-      defines: [...this.defines.values()].map(define => ({ id: define.id, allocation: capture.reference(define.allocation) })) };
+      defines: [...this.defines.values()].map(define => ({ id: define.id, allocation: capture.reference(define.allocation) })),
+    };
   }
   restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
     const reader = new SaveReader(value, "script.heap");
-    this.nextToken = reader.field("nextToken").integer(1); this.nextDefine = reader.field("nextDefine").integer(1);
-    this.tokens.clear(); this.defines.clear();
+    this.nextToken = reader.field("nextToken").integer(1);
+    this.nextDefine = reader.field("nextDefine").integer(1);
+    this.tokens.clear();
+    this.defines.clear();
     for (const entry of reader.field("tokens").list(cell => cell)) {
       const id = entry.field("id").integer(1);
       if (id >= this.nextToken || this.tokens.has(id)) entry.fail("invalid token identity");
       const token = new PrecompToken(id, restore.allocation(entry.field("allocation").integer(0)));
-      token.restoreSaveState(entry.field("state").value, true); this.tokens.set(id, token);
+      token.restoreSaveState(entry.field("state").value, true);
+      this.tokens.set(id, token);
     }
     for (const entry of reader.field("defines").list(cell => cell)) {
       const id = entry.field("id").integer(1);
@@ -146,7 +197,7 @@ export class PrecompMemory {
 
   *chain(head: number): Generator<PrecompToken, undefined, undefined> {
     let remaining = this.tokens.size + 1;
-    for (let id = head; id !== 0;) {
+    for (let id = head; id !== 0; ) {
       if (--remaining === 0) throw new RangeError("source token chain contains a cycle");
       const token = this.token(id);
       yield token;
@@ -160,7 +211,7 @@ export class PrecompMemory {
   }
 
   freeTokens(head: number): void {
-    for (let id = head; id !== 0;) {
+    for (let id = head; id !== 0; ) {
       const token = this.token(id);
       id = token.token.next;
       this.freeToken(token);

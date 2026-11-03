@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* quakec_mg3/mg3_upgrades.qc and client.qc. GPL-2.0-or-later. */
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -12,8 +13,13 @@ import { finishMg3Pickup, MG3_ITEM_PREFIX, startMg3Item } from "./common.ts";
 
 export type Mg3Upgrade = "health" | "shells" | "nails" | "rockets" | "cells";
 interface UpgradeDefinition {
-  readonly type: Mg3Upgrade; readonly parm: string; readonly base: number; readonly deathmatch: number;
-  readonly model: string; readonly label: string; readonly ammo: ItemId | null;
+  readonly type: Mg3Upgrade;
+  readonly parm: string;
+  readonly base: number;
+  readonly deathmatch: number;
+  readonly model: string;
+  readonly label: string;
+  readonly ammo: ItemId | null;
 }
 const upgrades: readonly UpgradeDefinition[] = [
   { type: "health", parm: "parm10", base: 50, deathmatch: 100, model: "item_h_player", label: "health", ammo: null },
@@ -30,30 +36,40 @@ export function captureMg3UpgradeTravel(context: Q1AddonContext, player: Q1Playe
 }
 
 export function restoreMg3UpgradeTravel(context: Q1AddonContext, player: Q1PlayerState, bytes: Uint8Array): undefined {
-  const reader = new SaveReader(decodeCheckpointValue(bytes), "mg3:upgrade-travel"), values = reader.list(value => {
-    const number = value.integer(0); return number <= 8388607 ? number : value.fail("MG3 source parameter exceeds its flag word");
-  });
+  const reader = new SaveReader(decodeCheckpointValue(bytes), "mg3:upgrade-travel"),
+    values = reader.list(value => {
+      const number = value.integer(0);
+      return number <= 8388607 ? number : value.fail("MG3 source parameter exceeds its flag word");
+    });
   if (values.length !== travelParms.length) return reader.fail("expected six MG3 source travel parameters");
   for (const [index, parm] of travelParms.entries()) {
-    const value = values[index]; if (value === undefined) return reader.fail("missing source travel parameter");
+    const value = values[index];
+    if (value === undefined) return reader.fail("missing source travel parameter");
     context.setPlayerNumber(player.actor.id, parm, value);
   }
-  const { game, base } = context, flags = base.campaign.readFlags();
+  const { game, base } = context,
+    flags = base.campaign.readFlags();
   if ((flags & BLOODY_NIGHTMARE_ACTIVE) !== 0) {
     if (context.services.cvar("skill") !== 3) base.campaign.writeFlags(flags & ~BLOODY_NIGHTMARE_ACTIVE);
     else {
       const hammer = game.host.inventory.count(player.actor.id, game.weaponItem("mg3:mjolnir")) !== 0;
       const bloodySuper = (context.playerNumber(player.actor.id, "parm15") & MG3_BLOODY_SUPER_SHOTGUN) !== 0;
-      for (const entry of game.host.inventory.entries(player.actor.id)) if (entry.item.startsWith("q1:weapon/")) {
-        const owned = entry.item === game.weaponItem("axe") || entry.item === game.weaponItem("shotgun")
-          || hammer && entry.item === game.weaponItem("mg3:mjolnir") || bloodySuper && entry.item === game.weaponItem("supershotgun");
-        game.host.inventory.configure(player.actor, { ...entry, count: owned ? 1 : 0 });
-      }
+      for (const entry of game.host.inventory.entries(player.actor.id))
+        if (entry.item.startsWith("q1:weapon/")) {
+          const owned =
+            entry.item === game.weaponItem("axe") ||
+            entry.item === game.weaponItem("shotgun") ||
+            (hammer && entry.item === game.weaponItem("mg3:mjolnir")) ||
+            (bloodySuper && entry.item === game.weaponItem("supershotgun"));
+          game.host.inventory.configure(player.actor, { ...entry, count: owned ? 1 : 0 });
+        }
       if (bloodySuper) game.host.inventory.configure(player.actor, { item: game.weaponItem("supershotgun"), count: 1, capacity: 1 });
       if (player.weapon !== "axe" && player.weapon !== "mg3:mjolnir" && player.weapon !== "shotgun") player.weapon = "shotgun";
     }
   }
-  initializeMg3Capacities(context, player); game.selectWeapon(player.actor, player.weapon); return undefined;
+  initializeMg3Capacities(context, player);
+  game.selectWeapon(player.actor, player.weapon);
+  return undefined;
 }
 
 export function mg3UpgradeFlag(map: string): number {
@@ -84,7 +100,11 @@ export function initializeMg3Capacities(context: Q1AddonContext, player: Q1Playe
       if (game.health(player.actor.id) > capacity) game.host.combat.setHealth(player.actor, capacity);
     } else {
       setMg3InventoryCapacity(context, player, upgrade.ammo, capacity);
-      game.host.inventory.configure(player.actor, { item: upgrade.ammo, capacity, count: Math.min(capacity, game.host.inventory.count(player.actor.id, upgrade.ammo)) });
+      game.host.inventory.configure(player.actor, {
+        item: upgrade.ammo,
+        capacity,
+        count: Math.min(capacity, game.host.inventory.count(player.actor.id, upgrade.ammo)),
+      });
     }
   }
   return undefined;
@@ -110,13 +130,16 @@ export function setMg3InventoryCapacity(context: Q1AddonContext, player: Q1Playe
 }
 
 function upgradeTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId): undefined {
-  const { game } = context, player = game.player(other);
+  const { game } = context,
+    player = game.player(other);
   if (player === null) return undefined;
-  const upgrade = definition(entity.text("mg3.upgrade")), flag = entity.number("upgrade_flag"), flags = context.playerNumber(other, upgrade.parm);
+  const upgrade = definition(entity.text("mg3.upgrade")),
+    flag = entity.number("upgrade_flag"),
+    flags = context.playerNumber(other, upgrade.parm);
   const collected = (flags & flag) !== 0;
   let maximum = player.maxHealth;
   if (!collected) {
-    const capacity = upgrade.ammo === null ? null : game.host.inventory.entries(other).find(entry => entry.item === upgrade.ammo)?.capacity ?? upgrade.base;
+    const capacity = upgrade.ammo === null ? null : (game.host.inventory.entries(other).find(entry => entry.item === upgrade.ammo)?.capacity ?? upgrade.base);
     context.setPlayerNumber(other, upgrade.parm, flags | flag);
     if (upgrade.ammo === null) {
       maximum = player.maxHealth = Math.fround(player.maxHealth + 10);
@@ -130,39 +153,55 @@ function upgradeTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId):
     }
   }
   // GiveUpgradeBonus only bounds existing ammunition; its former bonus is commented out in QC.
-  for (const entry of game.host.inventory.entries(other)) if (entry.item.startsWith("q1:ammo/") && entry.count > entry.capacity)
-    game.host.inventory.configure(player.actor, { ...entry, count: entry.capacity });
+  for (const entry of game.host.inventory.entries(other))
+    if (entry.item.startsWith("q1:ammo/") && entry.count > entry.capacity) game.host.inventory.configure(player.actor, { ...entry, count: entry.capacity });
   game.selectWeapon(player.actor, player.weapon);
-  return finishMg3Pickup(context, entity, other, collected ? "$mg3_qc_upgrade_fail" : "$mg3_qc_upgrade_success",
-    upgrade.type === "health" ? "player/tornoff2.wav" : "weapons/lock4.wav", collected ? [`$mg3_qc_upgrade_${upgrade.label}`] : [`$mg3_qc_upgrade_${upgrade.label}`, maximum]);
+  return finishMg3Pickup(
+    context,
+    entity,
+    other,
+    collected ? "$mg3_qc_upgrade_fail" : "$mg3_qc_upgrade_success",
+    upgrade.type === "health" ? "player/tornoff2.wav" : "weapons/lock4.wav",
+    collected ? [`$mg3_qc_upgrade_${upgrade.label}`] : [`$mg3_qc_upgrade_${upgrade.label}`, maximum],
+  );
 }
 
 export function registerMg3Upgrades(context: Q1AddonContext): undefined {
   const { game } = context;
   game.named.register(MG3_ITEM_PREFIX + "upgrade_touch", { touch: (_game, entity, other) => upgradeTouch(context, entity, other) });
-  game.named.register(MG3_ITEM_PREFIX + "upgrade_start", { action: (_game, entity) => {
-    const upgrade = definition(entity.text("mg3.upgrade"));
-    if (game.host.players().some(player => (context.playerNumber(player, upgrade.parm) & entity.number("upgrade_flag")) !== 0)) context.alpha(entity, 0.6);
-    entity.solid = "trigger"; entity.touch = game.named.touch(entity, MG3_ITEM_PREFIX + "upgrade_touch");
-    return startMg3Item(context, entity);
-  } });
-  for (const upgrade of upgrades) game.registerSpawn(`item_upgrade_${upgrade.type}`, (_game, entity) => {
-    if (entity.number("upgrade_flag") === 0) context.setNumber(entity, "upgrade_flag", mg3UpgradeFlag(game.mapName));
-    entity.fields.set("mg3.upgrade", upgrade.type); entity.fields.set("netname", `$mg3_qc_upgrade_${upgrade.label}`);
-    entity.model = `progs/${upgrade.model}.mdl`;
-    if (upgrade.type === "health") game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 8 }));
-    game.setBounds(entity, { min: { x: -16, y: -16, z: upgrade.type === "health" ? -8 : 0 }, max: { x: 16, y: 16, z: upgrade.type === "health" ? 48 : 56 } });
-    return game.schedule(entity, 0.5, game.named.action(entity, MG3_ITEM_PREFIX + "upgrade_start"));
+  game.named.register(MG3_ITEM_PREFIX + "upgrade_start", {
+    action: (_game, entity) => {
+      const upgrade = definition(entity.text("mg3.upgrade"));
+      if (game.host.players().some(player => (context.playerNumber(player, upgrade.parm) & entity.number("upgrade_flag")) !== 0)) context.alpha(entity, 0.6);
+      entity.solid = "trigger";
+      entity.touch = game.named.touch(entity, MG3_ITEM_PREFIX + "upgrade_touch");
+      return startMg3Item(context, entity);
+    },
   });
+  for (const upgrade of upgrades)
+    game.registerSpawn(`item_upgrade_${upgrade.type}`, (_game, entity) => {
+      if (entity.number("upgrade_flag") === 0) context.setNumber(entity, "upgrade_flag", mg3UpgradeFlag(game.mapName));
+      entity.fields.set("mg3.upgrade", upgrade.type);
+      entity.fields.set("netname", `$mg3_qc_upgrade_${upgrade.label}`);
+      entity.model = `progs/${upgrade.model}.mdl`;
+      if (upgrade.type === "health") game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 8 }));
+      game.setBounds(entity, { min: { x: -16, y: -16, z: upgrade.type === "health" ? -8 : 0 }, max: { x: 16, y: 16, z: upgrade.type === "health" ? 48 : 56 } });
+      return game.schedule(entity, 0.5, game.named.action(entity, MG3_ITEM_PREFIX + "upgrade_start"));
+    });
   return undefined;
 }
 
 /** The source debug impulse grants the next uncollected bit through the ordinary touch path. */
 export function giveNextMg3Upgrade(context: Q1AddonContext, type: Mg3Upgrade, player: Q1PlayerState): boolean {
-  const upgrade = definition(type), flags = context.playerNumber(player.actor.id, upgrade.parm);
-  for (let bit = 1; bit <= 16384; bit *= 2) if ((flags & bit) === 0) {
-    const entity = context.game.create(`item_upgrade_${type}`); entity.fields.set("mg3.upgrade", type); context.setNumber(entity, "upgrade_flag", bit);
-    upgradeTouch(context, entity, player.actor.id); return true;
-  }
+  const upgrade = definition(type),
+    flags = context.playerNumber(player.actor.id, upgrade.parm);
+  for (let bit = 1; bit <= 16384; bit *= 2)
+    if ((flags & bit) === 0) {
+      const entity = context.game.create(`item_upgrade_${type}`);
+      entity.fields.set("mg3.upgrade", type);
+      context.setNumber(entity, "upgrade_flag", bit);
+      upgradeTouch(context, entity, player.actor.id);
+      return true;
+    }
   return false;
 }

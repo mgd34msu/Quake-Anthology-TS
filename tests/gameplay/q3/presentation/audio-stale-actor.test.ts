@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,24 +14,42 @@ import { Q3PresentationAudio, Q3PresentationSoundBank } from "../../../../src/co
 test("Q3 presentation audio ignores entities released after snapshot capture", async () => {
   const root = await mkdtemp(join(tmpdir(), "q3-audio-stale-"));
   const content = "q3:classic:baseq3:installed";
-  const mount = { kind: "loose", identity: createMountIdentity("mount:q3-audio:stale", content, 0), rootPath: root } satisfies Parameters<typeof openMountPlan>[0]["mounts"][number];
+  const mount = { kind: "loose", identity: createMountIdentity("mount:q3-audio:stale", content, 0), rootPath: root } satisfies Parameters<
+    typeof openMountPlan
+  >[0]["mounts"][number];
   using mounts = await openMountPlan({ id: "mount-plan:q3-audio:stale", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] });
   try {
     const asset: SoundAsset = {
-      resource: "resource:q3-audio-stale", name: "sound/test.wav",
+      resource: "resource:q3-audio-stale",
+      name: "sound/test.wav",
       pcm: { samples: new Int16Array([1]), channels: 1, sampleRate: 22050, frameCount: 1, loopStart: null },
     };
     const sounds = new Q3PresentationSoundBank(new SoundBank(mounts), null, () => asset);
     const pcm = sounds.sound("sound/test.wav", false);
     if (pcm === null) throw new Error("Missing fake sound");
-    const identity = createIdentityOwner("q3-audio-stale"), seat = identity.seat(0);
-    const played: PlaySound[] = [], looped: LoopSound[] = [], positions: { actor: ActorId; position: unknown }[] = [], stopped: ActorId[] = [];
+    const identity = createIdentityOwner("q3-audio-stale"),
+      seat = identity.seat(0);
+    const played: PlaySound[] = [],
+      looped: LoopSound[] = [],
+      positions: { actor: ActorId; position: unknown }[] = [],
+      stopped: ActorId[] = [];
     const audio = new Q3PresentationAudio({
-      seat, sounds, actor: () => null, frameNumber: () => 1,
-      play: sound => { played.push(sound); },
-      loop: sound => { looped.push(sound); },
-      updateActor: (actor, position) => { positions.push({ actor, position }); },
-      stopLoop: (_seat, actor) => { stopped.push(actor); },
+      seat,
+      sounds,
+      actor: () => null,
+      frameNumber: () => 1,
+      play: sound => {
+        played.push(sound);
+      },
+      loop: sound => {
+        looped.push(sound);
+      },
+      updateActor: (actor, position) => {
+        positions.push({ actor, position });
+      },
+      stopLoop: (_seat, actor) => {
+        stopped.push(actor);
+      },
     });
     const origin = { x: 1, y: 2, z: 3 };
 

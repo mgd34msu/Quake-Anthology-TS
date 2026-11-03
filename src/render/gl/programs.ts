@@ -151,18 +151,23 @@ function finiteUniforms(a: readonly number[] | number, b = 0, c = 0, d = 0): voi
     if (worst === worst && !(magnitude <= worst)) worst = magnitude;
     magnitude = Math.abs(d);
     if (worst === worst && !(magnitude <= worst)) worst = magnitude;
-  } else for (let index = 0; index < a.length; index++) {
-    const magnitude = Math.abs(a[index] ?? 0);
-    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
-  }
+  } else
+    for (let index = 0; index < a.length; index++) {
+      const magnitude = Math.abs(a[index] ?? 0);
+      if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+    }
   if (!(worst < 3.4028235677973366e38)) throw new RangeError("OpenGL lighting uniforms must be finite float32 values");
 }
 
 export function compileProgram(library: ReturnType<typeof loadGlPrograms>, vertex: string, fragment: string): number {
-  const gl = library.symbols, shaders: number[] = [];
+  const gl = library.symbols,
+    shaders: number[] = [];
   let program = 0;
   try {
-    for (const [kind, source] of [[0x8b31, vertex], [0x8b30, fragment]] satisfies readonly (readonly [number, string])[]) {
+    for (const [kind, source] of [
+      [0x8b31, vertex],
+      [0x8b30, fragment],
+    ] satisfies readonly (readonly [number, string])[]) {
       const shader = gl.glCreateShader(kind);
       if (shader === 0) throw new Error("OpenGL could not allocate a shader");
       shaders.push(shader);
@@ -171,7 +176,8 @@ export function compileProgram(library: ReturnType<typeof loadGlPrograms>, verte
       const status = new Int32Array(1);
       gl.glGetShaderiv(shader, 0x8b81, status);
       if (status[0] !== 1) {
-        const log = new Uint8Array(8192), size = new Int32Array(1);
+        const log = new Uint8Array(8192),
+          size = new Int32Array(1);
         gl.glGetShaderInfoLog(shader, log.length, size, log);
         throw new Error(`OpenGL shader compilation failed: ${new TextDecoder().decode(log).replace(/\0.*$/s, "")}`);
       }
@@ -183,7 +189,8 @@ export function compileProgram(library: ReturnType<typeof loadGlPrograms>, verte
     const status = new Int32Array(1);
     gl.glGetProgramiv(program, 0x8b82, status);
     if (status[0] !== 1) {
-      const log = new Uint8Array(8192), size = new Int32Array(1);
+      const log = new Uint8Array(8192),
+        size = new Int32Array(1);
       gl.glGetProgramInfoLog(program, log.length, size, log);
       throw new Error(`OpenGL program linking failed: ${new TextDecoder().decode(log).replace(/\0.*$/s, "")}`);
     }
@@ -201,8 +208,37 @@ export class StageProgram {
   private readonly program: number;
   private readonly depthProgram: number;
   private readonly uniforms = new Map<string, number>();
-  private readonly locations: Partial<Record<"u_fog_mode" | "u_fog_color" | "u_fog_amount" | "secondaryMode" | "alphaMode" | "u_luminance_alpha" | "u_lighting_mode" | "u_light_count" | "u_shadow_texel" | "u_shadow_near" | "u_shade_scale", number>> = {};
-  private readonly lightLocations: Partial<Record<"u_light_pos" | "u_light_radius" | "u_light_color" | "u_light_scale" | "u_light_cone_cos" | "u_light_cone_dir" | "u_light_frac" | "u_light_shadow" | "u_light_atlas" | "u_light_matrix", number>>[] = [];
+  private readonly locations: Partial<
+    Record<
+      | "u_fog_mode"
+      | "u_fog_color"
+      | "u_fog_amount"
+      | "secondaryMode"
+      | "alphaMode"
+      | "u_luminance_alpha"
+      | "u_lighting_mode"
+      | "u_light_count"
+      | "u_shadow_texel"
+      | "u_shadow_near"
+      | "u_shade_scale",
+      number
+    >
+  > = {};
+  private readonly lightLocations: Partial<
+    Record<
+      | "u_light_pos"
+      | "u_light_radius"
+      | "u_light_color"
+      | "u_light_scale"
+      | "u_light_cone_cos"
+      | "u_light_cone_dir"
+      | "u_light_frac"
+      | "u_light_shadow"
+      | "u_light_atlas"
+      | "u_light_matrix",
+      number
+    >
+  >[] = [];
   private readonly integers = new Map<number, number>();
   private readonly scalars = new Map<number, number>();
   private readonly vectors3 = new Map<number, readonly [number, number, number]>();
@@ -212,15 +248,20 @@ export class StageProgram {
 
   constructor(context: SdlRenderContext) {
     this.library = loadGlPrograms(context);
-    let program = 0, depthProgram = 0;
+    let program = 0,
+      depthProgram = 0;
     try {
       this.program = compileProgram(this.library, stageVertexShader, stageFragmentShader);
       program = this.program;
-      this.depthProgram = compileProgram(this.library, `#version 120
+      this.depthProgram = compileProgram(
+        this.library,
+        `#version 120
 void main() { gl_Position = gl_Vertex; }
-`, `#version 120
+`,
+        `#version 120
 void main() { gl_FragColor = vec4(1.0); }
-`);
+`,
+      );
       depthProgram = this.depthProgram;
       const gl = this.library.symbols;
       gl.glUseProgram(this.program);
@@ -248,54 +289,106 @@ void main() { gl_FragColor = vec4(1.0); }
 
   private integer(location: number, value: number): void {
     if (Object.is(this.integers.get(location), value)) return;
-    this.library.symbols.glUniform1i(location, value); this.integers.set(location, value);
+    this.library.symbols.glUniform1i(location, value);
+    this.integers.set(location, value);
   }
 
   private scalar(location: number, value: number): void {
     if (Object.is(this.scalars.get(location), value)) return;
-    this.library.symbols.glUniform1f(location, value); this.scalars.set(location, value);
+    this.library.symbols.glUniform1f(location, value);
+    this.scalars.set(location, value);
   }
 
   private vector3(location: number, x: number, y: number, z: number): void {
     const previous = this.vectors3.get(location);
     if (previous !== undefined && Object.is(previous[0], x) && Object.is(previous[1], y) && Object.is(previous[2], z)) return;
-    this.library.symbols.glUniform3f(location, x, y, z); this.vectors3.set(location, [x, y, z]);
+    this.library.symbols.glUniform3f(location, x, y, z);
+    this.vectors3.set(location, [x, y, z]);
   }
 
   private vector4(location: number, x: number, y: number, z: number, w: number): void {
     const previous = this.vectors4.get(location);
     if (previous !== undefined && Object.is(previous[0], x) && Object.is(previous[1], y) && Object.is(previous[2], z) && Object.is(previous[3], w)) return;
-    this.library.symbols.glUniform4f(location, x, y, z, w); this.vectors4.set(location, [x, y, z, w]);
+    this.library.symbols.glUniform4f(location, x, y, z, w);
+    this.vectors4.set(location, [x, y, z, w]);
   }
 
   private matrix(location: number, value: Mat4): void {
     const previous = this.matrices.get(location);
     if (previous !== undefined) {
       let equal = true;
-      for (let index = 0; index < value.length; index++) if (!Object.is(previous[index], value[index])) { equal = false; break; }
+      for (let index = 0; index < value.length; index++)
+        if (!Object.is(previous[index], value[index])) {
+          equal = false;
+          break;
+        }
       if (equal) return;
     }
     this.library.symbols.glUniformMatrix4fv(location, 1, 0, new Float32Array(value));
     this.matrices.set(location, [...value]);
   }
 
-  use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }, luminanceAlpha = false, fog?: BatchFog): void {
+  use(
+    environment: TextureBundle["environment"] | null,
+    alphaTest: RenderState["alphaTest"],
+    lighting: BatchLighting = { kind: "vertex" },
+    luminanceAlpha = false,
+    fog?: BatchFog,
+  ): void {
     if (this.closed) throw new Error("OpenGL stage program is closed");
     const gl = this.library.symbols;
     gl.glUseProgram(this.program);
-    this.integer((this.locations.u_fog_mode ??= this.uniform("u_fog_mode")), fog === undefined ? 0 : fog.kind === "constant" ? 2 : fog.effect === "none" ? 0 : fog.effect === "rgb" ? 3 : fog.effect === "alpha" ? 4 : fog.effect === "rgba" ? 5 : fog.effect === "overlay" ? 6 : 1);
+    this.integer(
+      (this.locations.u_fog_mode ??= this.uniform("u_fog_mode")),
+      fog === undefined
+        ? 0
+        : fog.kind === "constant"
+          ? 2
+          : fog.effect === "none"
+            ? 0
+            : fog.effect === "rgb"
+              ? 3
+              : fog.effect === "alpha"
+                ? 4
+                : fog.effect === "rgba"
+                  ? 5
+                  : fog.effect === "overlay"
+                    ? 6
+                    : 1,
+    );
     this.vector3((this.locations.u_fog_color ??= this.uniform("u_fog_color")), fog?.color.x ?? 0, fog?.color.y ?? 0, fog?.color.z ?? 0);
     this.scalar((this.locations.u_fog_amount ??= this.uniform("u_fog_amount")), fog === undefined ? 0 : fog.kind === "exp2" ? fog.density : fog.amount);
     this.integer((this.locations.secondaryMode ??= this.uniform("secondaryMode")), environment === null ? 0 : secondaryModes[environment]);
     this.integer((this.locations.alphaMode ??= this.uniform("alphaMode")), alphaModes[alphaTest]);
     this.integer((this.locations.u_luminance_alpha ??= this.uniform("u_luminance_alpha")), luminanceAlpha ? 1 : 0);
-    this.integer((this.locations.u_lighting_mode ??= this.uniform("u_lighting_mode")), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : lighting.pass === "model" ? 5 : 2);
-    if (lighting.kind === "vertex") { this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), 0); return; }
+    this.integer(
+      (this.locations.u_lighting_mode ??= this.uniform("u_lighting_mode")),
+      lighting.kind === "vertex"
+        ? 0
+        : lighting.kind === "q2-model-shadow"
+          ? 3
+          : lighting.pass === "lightmap"
+            ? 1
+            : lighting.pass === "material-lightmap"
+              ? 4
+              : lighting.pass === "model"
+                ? 5
+                : 2,
+    );
+    if (lighting.kind === "vertex") {
+      this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), 0);
+      return;
+    }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
     this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), lighting.lights.length);
     if (lighting.atlas !== null) {
       finiteUniforms(lighting.atlas.texelSize, lighting.atlas.nearPlane);
-      if (!Number.isFinite(lighting.atlas.texelSize) || lighting.atlas.texelSize <= 0 || !Number.isFinite(lighting.atlas.nearPlane) || lighting.atlas.nearPlane <= 0)
+      if (
+        !Number.isFinite(lighting.atlas.texelSize) ||
+        lighting.atlas.texelSize <= 0 ||
+        !Number.isFinite(lighting.atlas.nearPlane) ||
+        lighting.atlas.nearPlane <= 0
+      )
         throw new RangeError("Q2 shadow atlas texel size and near plane must be positive");
       this.scalar((this.locations.u_shadow_texel ??= this.uniform("u_shadow_texel")), lighting.atlas.texelSize);
       this.scalar((this.locations.u_shadow_near ??= this.uniform("u_shadow_near")), lighting.atlas.nearPlane);
@@ -308,7 +401,7 @@ void main() { gl_FragColor = vec4(1.0); }
     for (let index = 0; index < lighting.lights.length; index++) {
       const light = lighting.lights[index];
       if (light === undefined) continue;
-      const locations = this.lightLocations[index] ??= {};
+      const locations = (this.lightLocations[index] ??= {});
       finiteUniforms(light.origin.x, light.origin.y, light.origin.z, light.radius);
       if (light.radius <= 0) throw new RangeError("Q2 fragment light radius must be positive");
       this.vector3((locations.u_light_pos ??= this.uniform(`u_light_pos[${index}]`)), light.origin.x, light.origin.y, light.origin.z);
@@ -341,8 +434,12 @@ void main() { gl_FragColor = vec4(1.0); }
     }
   }
 
-  useDepth(): void { this.library.symbols.glUseProgram(this.depthProgram); }
-  restore(program: number): void { this.library.symbols.glUseProgram(program); }
+  useDepth(): void {
+    this.library.symbols.glUseProgram(this.depthProgram);
+  }
+  restore(program: number): void {
+    this.library.symbols.glUseProgram(program);
+  }
 
   close(): void {
     if (this.closed) return;
@@ -351,6 +448,10 @@ void main() { gl_FragColor = vec4(1.0); }
     this.library.symbols.glDeleteProgram(this.depthProgram);
     this.library.close();
     this.closed = true;
-    this.integers.clear(); this.scalars.clear(); this.vectors3.clear(); this.vectors4.clear(); this.matrices.clear();
+    this.integers.clear();
+    this.scalars.clear();
+    this.vectors3.clear();
+    this.vectors4.clear();
+    this.matrices.clear();
   }
 }

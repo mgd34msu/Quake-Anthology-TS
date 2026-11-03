@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Translated numeric semantics from Quake III Arena's q_math.c, q_shared.h,
  * and qcommon/vm_interpreted.c OP_CVFI.
@@ -7,7 +8,17 @@
 
 import type { NumericOperations, NumericProfile, RandomSource, RandomState, RandomStep } from "../contracts/numeric.ts";
 import { float32Bits, float32FromBits, float64FromBits } from "../foundation/binary.ts";
-export type { ArithmeticProfile, FloatingRounding, FloatToIntProfile, NumericOperations, NumericProfile, NumericProfileId, RandomSource, RandomState, RandomStep } from "../contracts/numeric.ts";
+export type {
+  ArithmeticProfile,
+  FloatingRounding,
+  FloatToIntProfile,
+  NumericOperations,
+  NumericProfile,
+  NumericProfileId,
+  RandomSource,
+  RandomState,
+  RandomStep,
+} from "../contracts/numeric.ts";
 
 /** Converts a JavaScript number with C-style signed 32-bit wraparound. */
 export function int32(value: number): number {
@@ -162,7 +173,9 @@ export class Q3Random implements RandomSource {
     return this.seed;
   }
 
-  nextUnit(): number { return (this.nextInteger() & 0xffff) / 0x10000; }
+  nextUnit(): number {
+    return (this.nextInteger() & 0xffff) / 0x10000;
+  }
 
   checkpoint(): Extract<RandomState, { kind: "q3-lcg" }> {
     return { kind: "q3-lcg", seed: this.seed, draws: this.draws };
@@ -282,11 +295,7 @@ function parseNanPayload(text: string, offset: number): bigint {
   let end = offset + 1;
   while (end < text.length) {
     const byte = text.charCodeAt(end);
-    const isPayloadCharacter =
-      (byte >= 48 && byte <= 57) ||
-      (byte >= 65 && byte <= 90) ||
-      byte === 95 ||
-      (byte >= 97 && byte <= 122);
+    const isPayloadCharacter = (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || byte === 95 || (byte >= 97 && byte <= 122);
     if (!isPayloadCharacter) break;
     end++;
   }
@@ -295,8 +304,7 @@ function parseNanPayload(text: string, offset: number): bigint {
   let cursor = offset + 1;
   let radix = 10;
   if (text.charCodeAt(cursor) === 48) {
-    if ((text.charCodeAt(cursor + 1) === 120 || text.charCodeAt(cursor + 1) === 88) &&
-        digitValue(text.charCodeAt(cursor + 2), 16) >= 0) {
+    if ((text.charCodeAt(cursor + 1) === 120 || text.charCodeAt(cursor + 1) === 88) && digitValue(text.charCodeAt(cursor + 2), 16) >= 0) {
       radix = 16;
       cursor += 2;
     } else {
@@ -357,9 +365,7 @@ function convertHex(significand: bigint, exponent2: bigint, negative: boolean): 
   }
 
   const subnormalShift = exponent2 + 1074n;
-  const fraction = subnormalShift >= 0n
-    ? significand << subnormalShift
-    : roundRightToEven(significand, Number(-subnormalShift));
+  const fraction = subnormalShift >= 0n ? significand << subnormalShift : roundRightToEven(significand, Number(-subnormalShift));
   if (fraction === 0n) return signedZero(negative);
   if (fraction === 1n << 52n) return finiteDouble(negative, 1, 0n);
   return finiteDouble(negative, 0, fraction & DOUBLE_FRACTION_MASK);
@@ -384,8 +390,7 @@ function parseSignedDecimalExponent(text: string, offset: number): bigint {
 }
 
 function parseHex(text: string, offset: number, negative: boolean): number | null {
-  if (text.charCodeAt(offset) !== 48 ||
-      (text.charCodeAt(offset + 1) !== 120 && text.charCodeAt(offset + 1) !== 88)) return null;
+  if (text.charCodeAt(offset) !== 48 || (text.charCodeAt(offset + 1) !== 120 && text.charCodeAt(offset + 1) !== 88)) return null;
 
   let cursor = offset + 2;
   let significand = 0n;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_mem.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -41,25 +42,34 @@ export class GameMemory {
   }
   restoreAllocation(value: unknown): GameMemoryAllocation {
     const reader = new SaveReader(value, "q3.memory.pointer");
-    const offset = reader.field("offset").integer(0), length = reader.field("length").integer(0);
+    const offset = reader.field("offset").integer(0),
+      length = reader.field("length").integer(0);
     if (offset > this.pool.length || length > this.pool.length - offset) reader.fail("allocation outside game pool");
     return new GameMemoryAllocation(this.pool.subarray(offset, offset + length));
   }
-  captureSaveState() { return { pool: this.pool.slice(), allocPoint: this.allocPoint }; }
+  captureSaveState() {
+    return { pool: this.pool.slice(), allocPoint: this.allocPoint };
+  }
   restoreSaveState(value: unknown): void {
-    const reader = new SaveReader(value, "q3.memory"), bytes = reader.field("pool").bytes();
+    const reader = new SaveReader(value, "q3.memory"),
+      bytes = reader.field("pool").bytes();
     const point = reader.field("allocPoint").integer(0);
     if (bytes.length !== GAME_MEMORY_BYTES || point > GAME_MEMORY_BYTES || point % 32 !== 0) reader.fail("invalid module memory extent");
-    this.pool.set(bytes); this.allocPoint = point;
+    this.pool.set(bytes);
+    this.allocPoint = point;
   }
-
 
   private readonly pool = new Uint8Array(GAME_MEMORY_BYTES);
   private allocPoint = 0;
 
-  constructor(private readonly debugInteger: () => number, private readonly print: (text: string) => void) {}
+  constructor(
+    private readonly debugInteger: () => number,
+    private readonly print: (text: string) => void,
+  ) {}
 
-  get allocatedBytes(): number { return this.allocPoint; }
+  get allocatedBytes(): number {
+    return this.allocPoint;
+  }
 
   allocate(size: number): GameMemoryAllocation {
     if (!Number.isInteger(size) || size < 0 || size > 0x7fffffff) throw new RangeError("G_Alloc requires a nonnegative source int size");
@@ -71,7 +81,11 @@ export class GameMemory {
     return allocation;
   }
 
-  initialize(): void { this.allocPoint = 0; }
+  initialize(): void {
+    this.allocPoint = 0;
+  }
 
-  status(): void { this.print(`Game memory status: ${this.allocPoint} out of ${GAME_MEMORY_BYTES} bytes allocated\n`); }
+  status(): void {
+    this.print(`Game memory status: ${this.allocPoint} out of ${GAME_MEMORY_BYTES} bytes allocated\n`);
+  }
 }

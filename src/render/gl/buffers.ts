@@ -26,8 +26,7 @@ interface PackedCacheEntry {
 
 function packKeyParts(batch: DrawBatch): { readonly worldPositions: readonly unknown[] | null; readonly normals: readonly unknown[] | null } {
   if (batch.lighting.kind === "vertex") return { worldPositions: null, normals: null };
-  return { worldPositions: batch.lighting.worldPositions,
-    normals: batch.lighting.kind === "q2-world" ? batch.lighting.normals : null };
+  return { worldPositions: batch.lighting.worldPositions, normals: batch.lighting.kind === "q2-world" ? batch.lighting.normals : null };
 }
 
 /** Packed copies of vertex arrays that repeat across frames (world batch
@@ -53,11 +52,22 @@ export class GeometryBuffer {
       this.nextLayout = 0;
     }
     const previous = this.arrays;
-    if (previous !== null && previous.positions.buffer === this.storage && previous.positions.length === vertices * 4
-      && previous.worldPositions.length === world && previous.normals.length === normals && previous.indices.length === indices) return previous;
+    if (
+      previous !== null &&
+      previous.positions.buffer === this.storage &&
+      previous.positions.length === vertices * 4 &&
+      previous.worldPositions.length === world &&
+      previous.normals.length === normals &&
+      previous.indices.length === indices
+    )
+      return previous;
     for (const layout of this.layouts) {
-      if (layout.positions.length === vertices * 4 && layout.worldPositions.length === world
-        && layout.normals.length === normals && layout.indices.length === indices) {
+      if (
+        layout.positions.length === vertices * 4 &&
+        layout.worldPositions.length === world &&
+        layout.normals.length === normals &&
+        layout.indices.length === indices
+      ) {
         this.arrays = layout;
         return layout;
       }
@@ -68,11 +78,21 @@ export class GeometryBuffer {
       offset += length * 4;
       return array;
     };
-    const positions = floats(vertices * 4), colors = floats(vertices * 4);
-    const coordinates = floats(vertices * 2), coordinates2 = floats(vertices * 2);
-    const worldPositions = floats(world), normalValues = floats(normals);
-    this.arrays = { positions, colors, coordinates, coordinates2, worldPositions, normals: normalValues,
-      indices: new Uint32Array(this.storage, offset, indices) };
+    const positions = floats(vertices * 4),
+      colors = floats(vertices * 4);
+    const coordinates = floats(vertices * 2),
+      coordinates2 = floats(vertices * 2);
+    const worldPositions = floats(world),
+      normalValues = floats(normals);
+    this.arrays = {
+      positions,
+      colors,
+      coordinates,
+      coordinates2,
+      worldPositions,
+      normals: normalValues,
+      indices: new Uint32Array(this.storage, offset, indices),
+    };
     this.layouts[this.nextLayout] = this.arrays;
     this.nextLayout = (this.nextLayout + 1) % 8;
     return this.arrays;
@@ -81,8 +101,14 @@ export class GeometryBuffer {
   pack(batch: DrawBatch): GeometryArrays {
     const parts = packKeyParts(batch);
     const entry = packedCache.get(batch.vertices);
-    if (entry !== undefined && entry.indices === batch.indices && entry.lighting === batch.lighting.kind && entry.texturing === batch.texturing
-      && entry.worldPositions === parts.worldPositions && entry.normals === parts.normals) {
+    if (
+      entry !== undefined &&
+      entry.indices === batch.indices &&
+      entry.lighting === batch.lighting.kind &&
+      entry.texturing === batch.texturing &&
+      entry.worldPositions === parts.worldPositions &&
+      entry.normals === parts.normals
+    ) {
       if (entry.arrays !== null) return entry.arrays;
       entry.seen++;
       if (entry.seen >= 2) {
@@ -90,8 +116,15 @@ export class GeometryBuffer {
         return entry.arrays;
       }
     } else if (batch.vertices.length >= 64) {
-      packedCache.set(batch.vertices, { indices: batch.indices, lighting: batch.lighting.kind, texturing: batch.texturing,
-        worldPositions: parts.worldPositions, normals: parts.normals, seen: 1, arrays: null });
+      packedCache.set(batch.vertices, {
+        indices: batch.indices,
+        lighting: batch.lighting.kind,
+        texturing: batch.texturing,
+        worldPositions: parts.worldPositions,
+        normals: parts.normals,
+        seen: 1,
+        arrays: null,
+      });
     }
     return pack(batch, this.allocate);
   }
@@ -102,10 +135,13 @@ export class GeometryBuffer {
 const validatedIndices = new WeakMap<readonly number[], number>();
 
 const allocateFresh: AllocateGeometry = (vertices, indices, lighting) => ({
-  positions: new Float32Array(vertices * 4), colors: new Float32Array(vertices * 4),
-  coordinates: new Float32Array(vertices * 2), coordinates2: new Float32Array(vertices * 2),
+  positions: new Float32Array(vertices * 4),
+  colors: new Float32Array(vertices * 4),
+  coordinates: new Float32Array(vertices * 2),
+  coordinates2: new Float32Array(vertices * 2),
   worldPositions: new Float32Array(lighting === "vertex" ? 0 : vertices * 3),
-  normals: new Float32Array(lighting === "q2-world" ? vertices * 3 : 0), indices: new Uint32Array(indices),
+  normals: new Float32Array(lighting === "q2-world" ? vertices * 3 : 0),
+  indices: new Uint32Array(indices),
 });
 
 /** Own every native client pointer until the draw disables its arrays. */
@@ -116,16 +152,14 @@ export function packGeometry(batch: DrawBatch): GeometryArrays {
 function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   const { vertices, indices } = batch;
   const size = batch.primitive === "lines" ? 2 : 3;
-  if (indices.length % size !== 0 || indices.length > 0x7fffffff)
-    throw new RangeError("OpenGL primitive index count is invalid");
+  if (indices.length % size !== 0 || indices.length > 0x7fffffff) throw new RangeError("OpenGL primitive index count is invalid");
   if (vertices.length > 0x1fffffff) throw new RangeError("OpenGL vertex allocation is too large");
   if (batch.primitive === "lines" && (!Number.isFinite(Math.fround(batch.lineWidth)) || batch.lineWidth <= 0))
     throw new RangeError("OpenGL line width must be positive and finite");
   if (validatedIndices.get(indices) !== vertices.length) {
     for (let offset = 0; offset < indices.length; offset++) {
       const index = indices[offset] ?? -1;
-      if (!(index >= 0) || index >= vertices.length || (index | 0) !== index)
-        throw new RangeError("OpenGL vertex index is outside its allocation");
+      if (!(index >= 0) || index >= vertices.length || (index | 0) !== index) throw new RangeError("OpenGL vertex index is outside its allocation");
     }
     validatedIndices.set(indices, vertices.length);
   }
@@ -136,24 +170,45 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   // are packed: the running maximum magnitude stays finite and in range
   // exactly when every stored float32 would (NaN poisons the maximum).
   let worst = 0;
-  const positions = arrays.positions, colors = arrays.colors, coordinates = arrays.coordinates;
-  let four = 0, two = 0;
+  const positions = arrays.positions,
+    colors = arrays.colors,
+    coordinates = arrays.coordinates;
+  let four = 0,
+    two = 0;
   for (const vertex of vertices) {
     const { position, color, texCoord } = vertex;
-    positions[four] = position.x; positions[four + 1] = position.y;
-    positions[four + 2] = position.z; positions[four + 3] = position.w;
-    colors[four] = color.x; colors[four + 1] = color.y;
-    colors[four + 2] = color.z; colors[four + 3] = color.w;
-    coordinates[two] = texCoord.x; coordinates[two + 1] = texCoord.y;
+    positions[four] = position.x;
+    positions[four + 1] = position.y;
+    positions[four + 2] = position.z;
+    positions[four + 3] = position.w;
+    colors[four] = color.x;
+    colors[four + 1] = color.y;
+    colors[four + 2] = color.z;
+    colors[four + 3] = color.w;
+    coordinates[two] = texCoord.x;
+    coordinates[two + 1] = texCoord.y;
     // Math.max propagates NaN exactly like the guarded running maximum.
-    worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z), Math.abs(position.w),
-      Math.abs(color.x), Math.abs(color.y), Math.abs(color.z), Math.abs(color.w), Math.abs(texCoord.x), Math.abs(texCoord.y));
-    four += 4; two += 2;
+    worst = Math.max(
+      worst,
+      Math.abs(position.x),
+      Math.abs(position.y),
+      Math.abs(position.z),
+      Math.abs(position.w),
+      Math.abs(color.x),
+      Math.abs(color.y),
+      Math.abs(color.z),
+      Math.abs(color.w),
+      Math.abs(texCoord.x),
+      Math.abs(texCoord.y),
+    );
+    four += 4;
+    two += 2;
   }
   if (batch.texturing === "pair") {
     let offset = 0;
     for (const vertex of batch.vertices) {
-      arrays.coordinates2[offset] = vertex.texCoord2.x; arrays.coordinates2[offset + 1] = vertex.texCoord2.y;
+      arrays.coordinates2[offset] = vertex.texCoord2.x;
+      arrays.coordinates2[offset + 1] = vertex.texCoord2.y;
       worst = Math.max(worst, Math.abs(vertex.texCoord2.x), Math.abs(vertex.texCoord2.y));
       offset += 2;
     }
@@ -162,7 +217,9 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
     if (batch.lighting.worldPositions.length !== vertices.length) throw new RangeError("Q2 world positions must match the draw's vertex count");
     let offset = 0;
     for (const position of batch.lighting.worldPositions) {
-      arrays.worldPositions[offset] = position.x; arrays.worldPositions[offset + 1] = position.y; arrays.worldPositions[offset + 2] = position.z;
+      arrays.worldPositions[offset] = position.x;
+      arrays.worldPositions[offset + 1] = position.y;
+      arrays.worldPositions[offset + 2] = position.z;
       worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z));
       offset += 3;
     }
@@ -170,7 +227,9 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
       if (batch.lighting.normals.length !== vertices.length) throw new RangeError("Q2 normals must match the draw's vertex count");
       offset = 0;
       for (const normal of batch.lighting.normals) {
-        arrays.normals[offset] = normal.x; arrays.normals[offset + 1] = normal.y; arrays.normals[offset + 2] = normal.z;
+        arrays.normals[offset] = normal.x;
+        arrays.normals[offset + 1] = normal.y;
+        arrays.normals[offset + 2] = normal.z;
         worst = Math.max(worst, Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z));
         offset += 3;
       }
@@ -178,7 +237,6 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   }
   // The bound is the float32 overflow midpoint: magnitudes at or below it
   // round to a finite float32, exactly matching the stored-value scan.
-  if (!(worst < 3.4028235677973366e38))
-    throw new RangeError("OpenGL attributes must be finite float32 values");
+  if (!(worst < 3.4028235677973366e38)) throw new RangeError("OpenGL attributes must be finite float32 values");
   return arrays;
 }

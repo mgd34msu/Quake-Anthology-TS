@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { expect, test } from "bun:test";
 import { GameMemory } from "../../../../src/content/q3/base/game/memory.ts";
@@ -9,10 +10,15 @@ import { decodeCheckpointValue, encodeCheckpointValue } from "../../../../src/pe
 import { findItemForWeapon } from "../../../../src/content/q3/base/shared/items.ts";
 import { Weapon } from "../../../../src/content/q3/base/shared/definitions.ts";
 
-function persisted(value: unknown): unknown { return decodeCheckpointValue(encodeCheckpointValue(value)); }
+function persisted(value: unknown): unknown {
+  return decodeCheckpointValue(encodeCheckpointValue(value));
+}
 
 test("module memory restores allocation position and retained source bytes", () => {
-  const memory = new GameMemory(() => 0, () => {});
+  const memory = new GameMemory(
+    () => 0,
+    () => {},
+  );
   memory.allocate(16).writeString("retained");
   const saved = persisted(memory.captureSaveState());
   memory.initialize();
@@ -27,12 +33,14 @@ test("module memory restores allocation position and retained source bytes", () 
 });
 
 test("registered items and shader remaps survive fresh module reconstruction", () => {
-  const items = new ItemRegistry("missionpack"), restored = new ItemRegistry("missionpack");
+  const items = new ItemRegistry("missionpack"),
+    restored = new ItemRegistry("missionpack");
   const weapon = findItemForWeapon("missionpack", Weapon.WP_PROX_LAUNCHER);
   items.register(weapon);
   restored.restoreSaveState(persisted(items.captureSaveState()));
   expect(restored.isRegistered(weapon)).toBe(true);
-  const remaps = new ShaderRemapRegistry(() => {}), next = new ShaderRemapRegistry(() => {});
+  const remaps = new ShaderRemapRegistry(() => {}),
+    next = new ShaderRemapRegistry(() => {});
   remaps.add("textures/base", "textures/changed", 1.25);
   next.restoreSaveState(persisted(remaps.captureSaveState()));
   expect(next.buildShaderStateConfig()).toBe(remaps.buildShaderStateConfig());
@@ -56,7 +64,10 @@ test("cached game settings retain their source update boundary", () => {
 });
 
 test("missionpack settings restore cvar identities first registered by the skirmish UI", () => {
-  const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("missionpack-settings-save").session, origin: { kind: "server-console" } } });
+  const cvars = new CvarRegistry({
+    dialect: "q3",
+    context: { session: createIdentityOwner("missionpack-settings-save").session, origin: { kind: "server-console" } },
+  });
   cvars.set("g_redTeam", "Pagans", true);
   cvars.set("g_blueTeam", "Stroggs", true);
   const host = { cvars, sendServerCommand: () => {}, remapTeams: () => {} };
@@ -72,8 +83,8 @@ test("missionpack settings restore cvar identities first registered by the skirm
   expect(restored.string("g_blueteam")).toBe("Stroggs");
   for (const invalid of [
     captured.slice(1),
-    captured.map(snapshot => snapshot.name === "g_blueTeam" ? { ...snapshot, name: "G_REDTEAM" } : snapshot),
-    captured.map(snapshot => snapshot.name === "g_blueTeam" ? { ...snapshot, name: "unknown_setting" } : snapshot),
+    captured.map(snapshot => (snapshot.name === "g_blueTeam" ? { ...snapshot, name: "G_REDTEAM" } : snapshot)),
+    captured.map(snapshot => (snapshot.name === "g_blueTeam" ? { ...snapshot, name: "unknown_setting" } : snapshot)),
   ]) {
     expect(() => restored.restoreSaveState(persisted(invalid))).toThrow("invalid settings snapshot names");
     expect(restored.captureSaveState()).toEqual(captured);

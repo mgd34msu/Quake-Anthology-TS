@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { testCorpusRoot } from "../../support/corpus.ts";
 
@@ -16,7 +17,10 @@ function duplicatePak(path = "Models\\duplicate.mdl"): Uint8Array {
   bytes[13] = 42;
   for (let ordinal = 0; ordinal < 2; ordinal++) {
     const offset = 14 + ordinal * 64;
-    bytes.set(Uint8Array.from(path, character => character.charCodeAt(0)), offset);
+    bytes.set(
+      Uint8Array.from(path, character => character.charCodeAt(0)),
+      offset,
+    );
     view.setInt32(offset + 56, 12 + ordinal, true);
     view.setInt32(offset + 60, 1, true);
   }
@@ -65,7 +69,9 @@ test("archive name indexes retain duplicate order and distinct case rules", () =
       expect(archive.findEntries("missing", "case-insensitive")).toEqual([]);
     }
     expect(() => archive.findEntries("../escape", "case-insensitive")).toThrow("Unsafe archive member path");
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test("loose reads stay within their root and reject changed retained bytes", async () => {
@@ -77,11 +83,15 @@ test("loose reads stay within their root and reject changed retained bytes", asy
     try {
       writeFileSync(join(root, "asset"), "changed");
       await expect(retained.read()).rejects.toThrow("source changed");
-    } finally { retained.close(); }
+    } finally {
+      retained.close();
+    }
     symlinkSync("/etc/passwd", join(root, "outside"));
     expect(() => openLooseEntry(root, "outside")).toThrow("escapes root");
     expect(() => openLooseEntry(root, "../outside")).toThrow("Unsafe archive member path");
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const corpus = testCorpusRoot();
@@ -98,7 +108,9 @@ test.skipIf(!existsSync(q3Archive))("parallel Sarge asset reads match sequential
     const sequential: Uint8Array[] = [];
     for (const entry of entries) sequential.push(await archive.readEntry(entry));
     expect(await Promise.all(entries.map(entry => archive.readEntry(entry)))).toEqual(sequential);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 const witnesses = [
@@ -122,9 +134,14 @@ for (const witness of witnesses) {
       expect(new TextDecoder().decode(bytes)).toMatch(/bind|exec/);
       if (archive.format === "kpf") {
         const memory = decodeArchive(new Uint8Array(await Bun.file(path).arrayBuffer()), "kpf");
-        try { expect(memory.readEntrySync(entry.ordinal)).toEqual(bytes); }
-        finally { memory.close(); }
+        try {
+          expect(memory.readEntrySync(entry.ordinal)).toEqual(bytes);
+        } finally {
+          memory.close();
+        }
       }
-    } finally { archive.close(); }
+    } finally {
+      archive.close();
+    }
   });
 }

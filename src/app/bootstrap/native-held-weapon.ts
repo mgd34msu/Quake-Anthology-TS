@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../../contracts/content.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ModelTransform, SceneEntity } from "../../contracts/scene.ts";
@@ -24,7 +25,8 @@ export class NativeHeldWeapons {
   constructor(private readonly assets: NativeHeldAssets) {}
 
   private grip(content: ContentId, entity: SceneEntity): Promise<Grip | null> {
-    const key = `${content}/${entity.resource.id}`, existing = this.grips.get(key);
+    const key = `${content}/${entity.resource.id}`,
+      existing = this.grips.get(key);
     if (existing !== undefined) return existing;
     const pending = (async () => {
       const path = `${entity.resource.requestedPath}.attachment.json`;
@@ -32,18 +34,25 @@ export class NativeHeldWeapons {
       const definition = file === null ? q2WeaponAttachment(entity.resource.digest) : readModelAttachment(file.bytes);
       return definition === null ? null : createModelGrip(entity, definition);
     })();
-    this.grips.set(key, pending); return pending;
+    this.grips.set(key, pending);
+    return pending;
   }
 
   /** A carrier model with no attachment definition (a third-party player model) holds no weapon: null, not a fault. */
   async attachment(content: ContentId, carrier: SceneEntity): Promise<((child: SceneEntity) => ResolvedHeldEntity) | null> {
-    const original = await this.grip(content, carrier), replacement = replacementEntity(carrier);
+    const original = await this.grip(content, carrier),
+      replacement = replacementEntity(carrier);
     if (original === null) return null;
     const enhanced = replacement === null ? null : await this.grip(content, replacement);
     return child => {
-      const inherit = (entity: SceneEntity): SceneEntity => ({ ...entity, flags: carrier.flags,
-        opacity: carrier.opacity ?? 1, lightingOrigin: carrier.lightingOrigin, shadowPlane: carrier.shadowPlane,
-        attachments: entity.attachments.map(attachment => ({ ...attachment, entity: inherit(attachment.entity) })) });
+      const inherit = (entity: SceneEntity): SceneEntity => ({
+        ...entity,
+        flags: carrier.flags,
+        opacity: carrier.opacity ?? 1,
+        lightingOrigin: carrier.lightingOrigin,
+        shadowPlane: carrier.shadowPlane,
+        attachments: entity.attachments.map(attachment => ({ ...attachment, entity: inherit(attachment.entity) })),
+      });
       const held = inherit(child);
       return (camera, purpose) => {
         const selected = selectModelEntity(carrier, camera, this.assets.modelPolicy, purpose);

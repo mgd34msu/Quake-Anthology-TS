@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { readSeatLanguage, writeSeatLanguage } from "../../ui/settings/language.ts";
 /* Q2 rerelease configstrings, svc_locprint and cg_screen.cpp story draws. GPL-2.0-or-later. */
@@ -16,7 +17,11 @@ import { NativeLanguageSettings } from "../../ui/settings/services.ts";
 import type { SettingBinding, SettingCvars } from "../../ui/settings/index.ts";
 import { q2LocalizedText } from "./q2-localization.ts";
 
-export interface RereleasePresentationSeat { readonly seat: SeatId; readonly actor: ActorId; readonly language?: string; }
+export interface RereleasePresentationSeat {
+  readonly seat: SeatId;
+  readonly actor: ActorId;
+  readonly language?: string;
+}
 export type RereleaseSkyView = NonNullable<WorldViewInput["q2Sky"]>;
 type RereleaseSource = Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>;
 interface SeatState {
@@ -50,22 +55,65 @@ export class ApplicationRereleasePresentation {
   private skySource: { readonly content: ContentId; readonly name: string } | null = null;
 
   async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
-    const next = this.sky === null || this.skySource === null ? null
-      : { ...this.sky, images: await this.loadSkyImages(providers, this.skySource.content, this.skySource.name) };
-    const seats = await Promise.all(this.seats.map(async seat => ({ seat, sky: seat.sky === null ? null
-      : { source: seat.sky.source, view: { ...seat.sky.view, images: await this.loadSkyImages(providers, seat.sky.source.content, seat.sky.source.name) } } })));
-    return () => { this.skies.clear(); this.sky = next; for (const value of seats) value.seat.sky = value.sky; };
+    const next =
+      this.sky === null || this.skySource === null
+        ? null
+        : { ...this.sky, images: await this.loadSkyImages(providers, this.skySource.content, this.skySource.name) };
+    const seats = await Promise.all(
+      this.seats.map(async seat => ({
+        seat,
+        sky:
+          seat.sky === null
+            ? null
+            : {
+                source: seat.sky.source,
+                view: { ...seat.sky.view, images: await this.loadSkyImages(providers, seat.sky.source.content, seat.sky.source.name) },
+              },
+      })),
+    );
+    return () => {
+      this.skies.clear();
+      this.sky = next;
+      for (const value of seats) value.seat.sky = value.sky;
+    };
   }
 
-  constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[], private readonly languageSettings: SettingCvars | null = null) {
-    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>(), names: new Map<number, string>(), sky: null }));
+  constructor(
+    private readonly assets: Pick<ApplicationAssets, "provider">,
+    seats: readonly RereleasePresentationSeat[],
+    private readonly languageSettings: SettingCvars | null = null,
+  ) {
+    this.seats = seats.map(binding => ({
+      binding,
+      language: binding.language ?? "english",
+      catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(),
+      fog: new RereleaseFog(),
+      fogReceived: false,
+      story: "",
+      storySource: null,
+      hiddenItems: new Set<ActorId>(),
+      names: new Map<number, string>(),
+      sky: null,
+    }));
   }
 
   publishSeats(bindings: readonly RereleasePresentationSeat[]): void {
     this.seats = bindings.map(binding => {
       const retained = this.seats.find(seat => seat.binding.seat.equals(binding.seat) && seat.binding.actor.equals(binding.actor));
-      return retained ?? { binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(),
-        fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>(), names: new Map<number, string>(), sky: null };
+      return (
+        retained ?? {
+          binding,
+          language: binding.language ?? "english",
+          catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(),
+          fog: new RereleaseFog(),
+          fogReceived: false,
+          story: "",
+          storySource: null,
+          hiddenItems: new Set<ActorId>(),
+          names: new Map<number, string>(),
+          sky: null,
+        }
+      );
     });
   }
 
@@ -75,22 +123,33 @@ export class ApplicationRereleasePresentation {
       if (source.kind !== "q2-rerelease") continue;
       const event = source.event;
       if (event.kind === "item-visibility") {
-        for (const seat of this.seats) if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) {
-          for (const hidden of seat.hiddenItems) if (hidden.equals(event.item)) seat.hiddenItems.delete(hidden);
-          if (!event.visible) seat.hiddenItems.add(event.item);
-        }
+        for (const seat of this.seats)
+          if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) {
+            for (const hidden of seat.hiddenItems) if (hidden.equals(event.item)) seat.hiddenItems.delete(hidden);
+            if (!event.visible) seat.hiddenItems.add(event.item);
+          }
       }
-      if (event.kind === "fog") { for (const seat of this.seats) if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) { seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds); seat.fogReceived = true; } }
-      else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.admit(source);
+      if (event.kind === "fog") {
+        for (const seat of this.seats)
+          if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) {
+            seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds);
+            seat.fogReceived = true;
+          }
+      } else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.admit(source);
     }
   }
 
   selectedLanguage(id: SeatId): string {
-    return this.languageSettings === null ? this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english" : readSeatLanguage(this.languageSettings, id.index);
+    return this.languageSettings === null
+      ? (this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english")
+      : readSeatLanguage(this.languageSettings, id.index);
   }
   private syncLanguage(seat: SeatState): void {
     const language = this.selectedLanguage(seat.binding.seat);
-    if (language !== seat.language) { seat.language = language; seat.catalogs.clear(); }
+    if (language !== seat.language) {
+      seat.language = language;
+      seat.catalogs.clear();
+    }
   }
 
   itemVisible(actor: ActorId, item: ActorId): boolean {
@@ -117,15 +176,20 @@ export class ApplicationRereleasePresentation {
     if (family !== "q1" && family !== "q2") return undefined;
     const seat = this.seats.find(seat => seat.binding.seat.equals(id));
     if (seat === undefined) throw new Error("Unknown localization seat");
-    const settings = await this.catalog(seat, content), binding = settings.binding();
+    const settings = await this.catalog(seat, content),
+      binding = settings.binding();
     if (binding.kind !== "choice") throw new Error("Language setting must be a choice");
-    return { ...binding, read: () => this.selectedLanguage(id), write: (value: string) => {
-      if (!binding.choices().some(choice => choice.id === value)) throw new Error(`Language is not installed: ${value}`);
-      if (this.languageSettings !== null) writeSeatLanguage(this.languageSettings, id.index, value);
-      else seat.language = value;
-      seat.catalogs.clear();
-      this.catalog(seat, content).catch(failed);
-    } };
+    return {
+      ...binding,
+      read: () => this.selectedLanguage(id),
+      write: (value: string) => {
+        if (!binding.choices().some(choice => choice.id === value)) throw new Error(`Language is not installed: ${value}`);
+        if (this.languageSettings !== null) writeSeatLanguage(this.languageSettings, id.index, value);
+        else seat.language = value;
+        seat.catalogs.clear();
+        this.catalog(seat, content).catch(failed);
+      },
+    };
   }
 
   private async catalog(seat: SeatState, content: ContentId): Promise<NativeLanguageSettings> {
@@ -140,16 +204,31 @@ export class ApplicationRereleasePresentation {
       const provider = await this.assets.provider(content);
       const languages = new Set(["english", languageSelection]);
       for (const file of await provider.mounts.listFiles("localization", ".txt")) {
-        const match = /^loc_([a-z]+)\.txt$/iu.exec(file), language = match?.[1];
+        const match = /^loc_([a-z]+)\.txt$/iu.exec(file),
+          language = match?.[1];
         if (language !== undefined) languages.add(language.toLowerCase());
       }
-      const result = new NativeLanguageSettings(new LocalizationCatalog(seat.binding.seat, provider.family === "q1" ? "q1-rerelease" : "q2-rerelease"), [...languages].sort().map(language => ({
-        id: language, label: language.charAt(0).toUpperCase() + language.slice(1), load: async () => {
-          const [primary, mod, english, englishMod] = await Promise.all([provider.mounts.open(`localization/loc_${language}.txt`), provider.mounts.open(`localization/loc_${language}_mod.txt`),
-            language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt"), language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english_mod.txt")]);
-          return { primary: { base: primary?.bytes ?? null, mods: mod === null ? [] : [mod.bytes] }, fallback: { base: english?.bytes ?? null, mods: englishMod === null ? [] : [englishMod.bytes] } };
-        },
-      })), languageSelection, () => undefined);
+      const result = new NativeLanguageSettings(
+        new LocalizationCatalog(seat.binding.seat, provider.family === "q1" ? "q1-rerelease" : "q2-rerelease"),
+        [...languages].sort().map(language => ({
+          id: language,
+          label: language.charAt(0).toUpperCase() + language.slice(1),
+          load: async () => {
+            const [primary, mod, english, englishMod] = await Promise.all([
+              provider.mounts.open(`localization/loc_${language}.txt`),
+              provider.mounts.open(`localization/loc_${language}_mod.txt`),
+              language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt"),
+              language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english_mod.txt"),
+            ]);
+            return {
+              primary: { base: primary?.bytes ?? null, mods: mod === null ? [] : [mod.bytes] },
+              fallback: { base: english?.bytes ?? null, mods: englishMod === null ? [] : [englishMod.bytes] },
+            };
+          },
+        })),
+        languageSelection,
+        () => undefined,
+      );
       await result.select(languageSelection);
       return result;
     })();
@@ -158,42 +237,63 @@ export class ApplicationRereleasePresentation {
       const result = await pending;
       if (this.selectedLanguage(seat.binding.seat) !== languageSelection) return this.catalog(seat, content);
       return result;
-    } catch (error) { if (seat.catalogs.get(content) === pending) seat.catalogs.delete(content); throw error; }
+    } catch (error) {
+      if (seat.catalogs.get(content) === pending) seat.catalogs.delete(content);
+      throw error;
+    }
   }
 
   private skyImages(content: ContentId, name: string): Promise<readonly RendererImage[]> {
-    let cache = this.skies.get(content); if (cache === undefined) { cache = new Map<string, Promise<readonly RendererImage[]>>(); this.skies.set(content, cache); }
-    const existing = cache.get(name); if (existing !== undefined) return existing;
+    let cache = this.skies.get(content);
+    if (cache === undefined) {
+      cache = new Map<string, Promise<readonly RendererImage[]>>();
+      this.skies.set(content, cache);
+    }
+    const existing = cache.get(name);
+    if (existing !== undefined) return existing;
     const pending = this.loadSkyImages(this.assets, content, name);
-    cache.set(name, pending); return pending;
+    cache.set(name, pending);
+    return pending;
   }
 
   private async loadSkyImages(providers: Pick<ApplicationAssets, "provider">, content: ContentId, name: string): Promise<readonly RendererImage[]> {
-      const provider = await providers.provider(content), images: RendererImage[] = [];
-      for (const suffix of SKY_FACE_SUFFIXES) {
-        const image = await provider.textures.load(`env/${name}${suffix}`, { family: "q2", wrap: "clamp", mipmap: false, usage: "sky" });
-        images.push((image ?? provider.textures.missing).image);
-      }
-      return images;
+    const provider = await providers.provider(content),
+      images: RendererImage[] = [];
+    for (const suffix of SKY_FACE_SUFFIXES) {
+      const image = await provider.textures.load(`env/${name}${suffix}`, { family: "q2", wrap: "clamp", mipmap: false, usage: "sky" });
+      images.push((image ?? provider.textures.missing).image);
+    }
+    return images;
   }
 
   async prepare(): Promise<void> {
-    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
+    const pending = this.pending.take(this.pendingCursor);
+    this.pending.retire();
     for (const source of pending) {
       if (source.kind === "q2-player") {
         if (source.event.kind === "userinfo") {
           const { slot, name } = source.event;
-          if (source.recipient === undefined) { this.names.set(slot, name); for (const seat of this.seats) seat.names.delete(slot); }
-          else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.names.set(slot, name);
+          if (source.recipient === undefined) {
+            this.names.set(slot, name);
+            for (const seat of this.seats) seat.names.delete(slot);
+          } else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.names.set(slot, name);
         }
         continue;
       }
       const event = source.event;
       if (event.kind === "sky") {
         const skySource = { content: source.content, name: event.name };
-        const sky = { images: await this.skyImages(source.content, event.name), rotation: event.rotation, autoRotate: event.rotation !== 0 && event.autoRotate, axis: { ...event.axis } };
-        if (source.recipient === undefined) { this.skySource = skySource; this.sky = sky; for (const seat of this.seats) seat.sky = null; }
-        else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.sky = { source: skySource, view: sky };
+        const sky = {
+          images: await this.skyImages(source.content, event.name),
+          rotation: event.rotation,
+          autoRotate: event.rotation !== 0 && event.autoRotate,
+          axis: { ...event.axis },
+        };
+        if (source.recipient === undefined) {
+          this.skySource = skySource;
+          this.sky = sky;
+          for (const seat of this.seats) seat.sky = null;
+        } else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.sky = { source: skySource, view: sky };
         continue;
       }
       if (event.kind !== "story" && event.kind !== "localized-print") continue;
@@ -201,28 +301,46 @@ export class ApplicationRereleasePresentation {
         if (source.recipient !== undefined && !source.recipient.equals(seat.binding.actor)) continue;
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;
         const text = await this.localizeMessage(seat.binding.seat, source.content, event.text, event.kind === "localized-print" ? event.args : []);
-        if (event.kind === "story") { seat.story = text; seat.storySource = { content: source.content, text: event.text }; }
-        else this.prints.admit({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
-          ...(source.recipient === undefined ? {} : { recipient: source.recipient }),
-          ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }), event: { kind: "print", target: seat.binding.actor, level: event.level, text } });
+        if (event.kind === "story") {
+          seat.story = text;
+          seat.storySource = { content: source.content, text: event.text };
+        } else
+          this.prints.admit({
+            kind: "q2-player",
+            content: source.content,
+            seconds: source.seconds,
+            sequence: source.sequence,
+            ...(source.recipient === undefined ? {} : { recipient: source.recipient }),
+            ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }),
+            event: { kind: "print", target: seat.binding.actor, level: event.level, text },
+          });
       }
     }
-    for (const seat of this.seats) if (seat.storySource !== null) {
-      seat.story = await this.localizeMessage(seat.binding.seat, seat.storySource.content, seat.storySource.text);
-    }
+    for (const seat of this.seats)
+      if (seat.storySource !== null) {
+        seat.story = await this.localizeMessage(seat.binding.seat, seat.storySource.content, seat.storySource.text);
+      }
   }
 
-  drainPrints(): readonly SimulationPresentationEvent[] { const taken = this.prints.take(this.printsCursor); this.prints.retire(); return taken; }
-  storyActive(actor: ActorId): boolean { return this.seats.some(seat => seat.binding.actor.equals(actor) && seat.story !== ""); }
+  drainPrints(): readonly SimulationPresentationEvent[] {
+    const taken = this.prints.take(this.printsCursor);
+    this.prints.retire();
+    return taken;
+  }
+  storyActive(actor: ActorId): boolean {
+    return this.seats.some(seat => seat.binding.actor.equals(actor) && seat.story !== "");
+  }
   view(actor: ActorId, seconds: number): Pick<WorldViewInput, "q2Fog"> & { readonly q2Sky?: RereleaseSkyView } {
     const seat = this.seats.find(seat => seat.binding.actor.equals(actor));
     const sky = seat?.sky?.view ?? this.sky;
     return { ...(seat?.fogReceived ? { q2Fog: seat.fog.current(seconds) } : {}), ...(sky === null ? {} : { q2Sky: sky }) };
   }
   drawStory(actor: ActorId, draw: Draw2D, text: SeatTextPresentation, scale: number): void {
-    const seat = this.seats.find(seat => seat.binding.actor.equals(actor)); if (seat === undefined || seat.story === "") return;
+    const seat = this.seats.find(seat => seat.binding.actor.equals(actor));
+    if (seat === undefined || seat.story === "") return;
     if (!text.seat.equals(seat.binding.seat)) throw new Error("Story font belongs to another seat");
     const options = { text: seat.story, scale, color: { x: 1, y: 1, z: 1, w: 1 }, align: "center" } satisfies Parameters<SeatTextPresentation["layout"]>[0];
-    const layout = text.layout(options); text.draw(draw, { ...options, maxWidth: Math.max(1, layout.width) }, { x: (draw.width - layout.width) / 2, y: (draw.height - layout.height) / 2 }, scale);
+    const layout = text.layout(options);
+    text.draw(draw, { ...options, maxWidth: Math.max(1, layout.width) }, { x: (draw.width - layout.width) / 2, y: (draw.height - layout.height) / 2 }, scale);
   }
 }

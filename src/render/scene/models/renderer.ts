@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { compiledDrawGroup, sequenceDrawGroup, shadowVolumeGroup, sourceDrawGroup } from "../submissions.ts";
 import type { SceneModelGroup, SceneShadowGroup } from "../submissions.ts";
 import type { GameFamily } from "../../../contracts/content.ts";
@@ -26,7 +27,15 @@ import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts
 import { shadowCaster, shadowMesh } from "../shadows.ts";
 import type { ShadowCaster, ShadowMesh, ShadowSphere } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
-import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q1AliasShadowDirection, q1AliasShadowPoint, q2AliasLight, q2ShellColor } from "./lighting.ts";
+import {
+  Q2_SHELL_MASK,
+  aliasShadeDivisor,
+  aliasShadowLightFractions,
+  q1AliasShadowDirection,
+  q1AliasShadowPoint,
+  q2AliasLight,
+  q2ShellColor,
+} from "./lighting.ts";
 import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
 import { stencilShadowVolume } from "./stencil-shadow.ts";
 import { replacementEntity } from "./replacements.ts";
@@ -34,7 +43,14 @@ import type { ModelReplacementPolicy } from "./replacements.ts";
 import { ANORM_DOTS_ROW, SHADEDOT_QUANT, r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, modelWorldDirection, q3ModelViewOrigin } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
-import type { ModelVertexLighting, ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
+import type {
+  ModelVertexLighting,
+  ModelImageSelection,
+  ModelSkinningFrame,
+  ModelSourceOptions,
+  PreparedModelSurface,
+  PreparedVertexLighting,
+} from "./types.ts";
 
 export interface ModelRenderProvider {
   readonly modelPolicy?: ModelReplacementPolicy;
@@ -45,16 +61,23 @@ export interface ModelRenderProvider {
 }
 type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
 type ModelResource = Pick<SceneEntity, "resource" | "model">;
-type Material = { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial }
+type Material =
+  | { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
 const RF_SHADOW_PLANE = 256;
 const normalIndices = new Map<number, Map<number, Map<number, number>>>();
 for (const [index, normal] of ALIAS_NORMALS.entries()) {
   let ys = normalIndices.get(normal.x);
-  if (ys === undefined) { ys = new Map<number, Map<number, number>>(); normalIndices.set(normal.x, ys); }
+  if (ys === undefined) {
+    ys = new Map<number, Map<number, number>>();
+    normalIndices.set(normal.x, ys);
+  }
   let zs = ys.get(normal.y);
-  if (zs === undefined) { zs = new Map<number, number>(); ys.set(normal.y, zs); }
+  if (zs === undefined) {
+    zs = new Map<number, number>();
+    ys.set(normal.y, zs);
+  }
   zs.set(normal.z, index);
 }
 /** Decoded frame normals are immutable per-vertex objects; resolve the
@@ -68,10 +91,12 @@ function aliasNormalIndex(normal: Vec3): number {
   return index;
 }
 
-const keyNumber = (value: number): string => Object.is(value, -0) ? "-0" : `${value}`;
-function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
+const keyNumber = (value: number): string => (Object.is(value, -0) ? "-0" : `${value}`);
+function frames<T>(value: TimedFrames<T>): readonly T[] {
+  return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame);
+}
 function materialKey(entity: ModelResource, image: ModelImageSelection, options: ModelSourceOptions): string {
-  const translated = image.kind === "indexed" || entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement";
+  const translated = image.kind === "indexed" || (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement");
   const translation = translated && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
   return `${entity.resource.id}\0${image.kind}\0${"name" in image ? image.name : image.kind === "default" ? image.reason : ""}\0${translation}`;
 }
@@ -88,27 +113,34 @@ export class SceneModelRenderer {
   private readonly shadeVertexCache = new WeakMap<object, Map<string, DrawBatch["vertices"]>>();
   private textures: SceneTextureLoader;
 
-  constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
+  constructor(
+    readonly provider: ModelRenderProvider,
+    readonly world: WorldScene,
+  ) {
     this.textures = provider.textures;
     this.lighting = new ModelLightSampler(world);
   }
 
   async preload(entities: readonly SceneEntity[], options: SourceOptions = () => ({})): Promise<void> {
     if (this.textures !== this.provider.textures) {
-      this.materials.clear(); this.pending.clear(); this.textures = this.provider.textures;
+      this.materials.clear();
+      this.pending.clear();
+      this.textures = this.provider.textures;
     }
     const work: Promise<void>[] = [];
     const visit = (entity: SceneEntity): void => {
-      const source = options(entity), selections = this.selections(entity, source);
+      const source = options(entity),
+        selections = this.selections(entity, source);
       for (const selection of selections) {
         const pending = this.load(entity, selection, source);
         if (pending !== null) work.push(pending);
       }
       const replacement = entity.model.kind === "q1-mdl" && source.indexedSkin !== undefined ? null : replacementEntity(entity);
-      if (replacement !== null) for (const selection of this.selections(replacement, source)) {
-        const pending = this.load(replacement, selection, source);
-        if (pending !== null) work.push(pending);
-      }
+      if (replacement !== null)
+        for (const selection of this.selections(replacement, source)) {
+          const pending = this.load(replacement, selection, source);
+          if (pending !== null) work.push(pending);
+        }
       for (const attachment of entity.attachments) visit(attachment.entity);
     };
     for (const entity of entities) visit(entity);
@@ -117,7 +149,9 @@ export class SceneModelRenderer {
 
   async preloadModel(resource: ModelResource, options: ModelSourceOptions = {}, allowCinematics = true): Promise<void> {
     if (this.textures !== this.provider.textures) {
-      this.materials.clear(); this.pending.clear(); this.textures = this.provider.textures;
+      this.materials.clear();
+      this.pending.clear();
+      this.textures = this.provider.textures;
     }
     const work: Promise<void>[] = [];
     for (const selection of this.selections(resource, options)) {
@@ -127,17 +161,20 @@ export class SceneModelRenderer {
     const model = resource.model;
     if ((model.kind === "q1-mdl" || model.kind === "q2-md2") && !(model.kind === "q1-mdl" && options.indexedSkin !== undefined)) {
       const replacement = model.replacement;
-      if (replacement != null) for (const selection of this.selections(replacement, options)) {
-        const pending = this.load(replacement, selection, options, allowCinematics);
-        if (pending !== null) work.push(pending);
-      }
+      if (replacement != null)
+        for (const selection of this.selections(replacement, options)) {
+          const pending = this.load(replacement, selection, options, allowCinematics);
+          if (pending !== null) work.push(pending);
+        }
     }
     await Promise.all(work);
   }
 
   private selections(entity: ModelResource, options: ModelSourceOptions): readonly ModelImageSelection[] {
     const result: ModelImageSelection[] = [{ kind: "white" }, { kind: "default", reason: "missing-skin-surface" }, { kind: "default", reason: "no-skin" }];
-    const external = (name: string): void => { result.push({ kind: "external", name }); };
+    const external = (name: string): void => {
+      result.push({ kind: "external", name });
+    };
     if (options.customShader != null) external(options.customShader);
     for (const skin of options.customSkin ?? []) external(skin.shader);
     const model = entity.model;
@@ -147,31 +184,62 @@ export class SceneModelRenderer {
           result.push({ kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true });
           break;
         }
-        for (const [skin, group] of model.skins.entries()) for (const [frame, pixels] of frames(group).entries()) result.push({ kind: "indexed",
-          name: `${entity.resource.id}:skin:${skin}:${frame}`, width: model.skinWidth, height: model.skinHeight, pixels, transparentIndex: null, fullbright: true });
+        for (const [skin, group] of model.skins.entries())
+          for (const [frame, pixels] of frames(group).entries())
+            result.push({
+              kind: "indexed",
+              name: `${entity.resource.id}:skin:${skin}:${frame}`,
+              width: model.skinWidth,
+              height: model.skinHeight,
+              pixels,
+              transparentIndex: null,
+              fullbright: true,
+            });
         break;
       case "q1-spr":
-        for (const [frame, group] of model.frames.entries()) for (const [subframe, sprite] of frames(group).entries()) result.push({ kind: "indexed",
-          name: `${entity.resource.id}:frame:${frame}:${subframe}`, width: sprite.width, height: sprite.height, pixels: sprite.pixels, transparentIndex: 255, fullbright: true });
+        for (const [frame, group] of model.frames.entries())
+          for (const [subframe, sprite] of frames(group).entries())
+            result.push({
+              kind: "indexed",
+              name: `${entity.resource.id}:frame:${frame}:${subframe}`,
+              width: sprite.width,
+              height: sprite.height,
+              pixels: sprite.pixels,
+              transparentIndex: 255,
+              fullbright: true,
+            });
         break;
-      case "q2-md2": for (const skin of model.skins) external(skin); break;
-      case "q2-sp2": for (const frame of model.frames) external(frame.image); break;
-      case "q3-md3": for (const lod of options.q3Lods ?? [model]) if (lod !== null) for (const surface of lod.surfaces) for (const shader of surface.shaders) external(shader); break;
-      case "q3-md4": for (const lod of model.lods) for (const surface of lod.surfaces) external(surface.shader); break;
+      case "q2-md2":
+        for (const skin of model.skins) external(skin);
+        break;
+      case "q2-sp2":
+        for (const frame of model.frames) external(frame.image);
+        break;
+      case "q3-md3":
+        for (const lod of options.q3Lods ?? [model])
+          if (lod !== null) for (const surface of lod.surfaces) for (const shader of surface.shaders) external(shader);
+        break;
+      case "q3-md4":
+        for (const lod of model.lods) for (const surface of lod.surfaces) external(surface.shader);
+        break;
       case "md5":
-        if (model.skinSelection.kind === "q1-mdl-replacement") for (const mesh of model.skinSelection.meshSkinGroups) for (const group of mesh) for (const name of frames(group)) external(`${name}.lmp`);
+        if (model.skinSelection.kind === "q1-mdl-replacement")
+          for (const mesh of model.skinSelection.meshSkinGroups) for (const group of mesh) for (const name of frames(group)) external(`${name}.lmp`);
         else if (model.skinSelection.kind === "q2-md2-replacement") for (const name of model.skinSelection.skins) external(name);
         else for (const mesh of model.meshes) external(mesh.shader);
         break;
-      case "brush-model": break;
+      case "brush-model":
+        break;
     }
     return result;
   }
 
   private load(entity: ModelResource, selection: ModelImageSelection, options: ModelSourceOptions, allowCinematics = true): Promise<void> | null {
     if (!allowCinematics && this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
-      const name = selection.kind === "external" ? selection.name : "*default", remap = this.world.shaders.registrations.owner.remapDefinition(name);
-      if ((remap?.source ?? this.provider.shaders).hasCinematic(remap?.replacement ?? name)) return Promise.reject(new Error(`Model cinematic deferred until use: ${remap?.replacement ?? name}`));
+      const name = selection.kind === "external" ? selection.name : "*default",
+        remap = this.world.shaders.registrations.owner.remapDefinition(name);
+      if ((remap?.source ?? this.provider.shaders).hasCinematic(remap?.replacement ?? name))
+        return Promise.reject(new Error(`Model cinematic deferred until use: ${remap?.replacement ?? name}`));
     }
     const key = materialKey(entity, selection, options);
     if (this.materials.has(key)) return null;
@@ -181,37 +249,70 @@ export class SceneModelRenderer {
       if (this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
         const name = selection.kind === "external" ? selection.name : "*default";
         const original = await this.provider.shaders.register(name);
-        this.materials.set(key, { kind: "q3", name, original }); return;
+        this.materials.set(key, { kind: "q3", name, original });
+        return;
       }
-      const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
-        : selection.kind === "indexed" ? this.indexedTexture(entity, selection, options) : await this.externalTexture(entity, selection.name, options);
+      const texture =
+        selection.kind === "white"
+          ? this.provider.textures.white
+          : selection.kind === "default"
+            ? this.provider.textures.missing
+            : selection.kind === "indexed"
+              ? this.indexedTexture(entity, selection, options)
+              : await this.externalTexture(entity, selection.name, options);
       this.materials.set(key, { kind: "legacy", texture });
     })();
     this.pending.set(key, pending);
     return pending;
   }
 
-  private indexedTexture(entity: ModelResource, selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
+  private indexedTexture(
+    entity: ModelResource,
+    selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>,
+    options: ModelSourceOptions,
+  ): SceneTexture {
     if (this.provider.palette === null) throw new Error(`Indexed model ${selection.name} has no content palette`);
-    const colors = options.playerColors, translation = colors === undefined ? null : q1PlayerTranslation(colors.top, colors.bottom);
-    const image = entity.model.kind === "q1-mdl" ? { ...selection, pixels: floodSkin(selection.pixels, selection.width, selection.height, this.provider.palette) } : selection;
-    return this.provider.textures.register(colors === undefined ? selection.name : `${selection.name}:${colors.top}:${colors.bottom}`, modelImage(image, this.provider.palette, translation),
-      { wrap: "repeat", filter: "linear" });
+    const colors = options.playerColors,
+      translation = colors === undefined ? null : q1PlayerTranslation(colors.top, colors.bottom);
+    const image =
+      entity.model.kind === "q1-mdl"
+        ? { ...selection, pixels: floodSkin(selection.pixels, selection.width, selection.height, this.provider.palette) }
+        : selection;
+    return this.provider.textures.register(
+      colors === undefined ? selection.name : `${selection.name}:${colors.top}:${colors.bottom}`,
+      modelImage(image, this.provider.palette, translation),
+      { wrap: "repeat", filter: "linear" },
+    );
   }
 
   private async externalTexture(entity: ModelResource, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
     const sprite = entity.model.kind === "q2-sp2";
-    const texture = await this.provider.textures.load(modelImagePath(name), { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite }) ?? this.provider.textures.missing;
+    const texture =
+      (await this.provider.textures.load(modelImagePath(name), { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite })) ??
+      this.provider.textures.missing;
     const colors = options.playerColors;
-    if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement" && colors !== undefined && texture.content.kind === "indexed8") {
-      return this.provider.textures.register(`${name}:${colors.top}:${colors.bottom}`,
+    if (
+      entity.model.kind === "md5" &&
+      entity.model.skinSelection.kind === "q1-mdl-replacement" &&
+      colors !== undefined &&
+      texture.content.kind === "indexed8"
+    ) {
+      return this.provider.textures.register(
+        `${name}:${colors.top}:${colors.bottom}`,
         { ...texture.content, translation: q1PlayerTranslation(colors.top, colors.bottom) },
-        { wrap: "repeat", filter: "linear-mipmap-nearest" }, texture.image.source);
+        { wrap: "repeat", filter: "linear-mipmap-nearest" },
+        texture.image.source,
+      );
     }
     return texture;
   }
 
-  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly (SceneModelGroup | SceneShadowGroup)[] {
+  prepare(
+    entities: readonly SceneEntity[],
+    input: WorldViewInput,
+    sourceOptions: SourceOptions = () => ({}),
+    skinningFrame?: ModelSkinningFrame,
+  ): readonly (SceneModelGroup | SceneShadowGroup)[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
     const preparedLights = new Map<SceneEntity, PreparedVertexLighting>();
@@ -219,17 +320,37 @@ export class SceneModelRenderer {
 
     const options: SourceOptions = entity => {
       let value = optionCache.get(entity);
-      if (value === undefined) { value = sourceOptions(entity); optionCache.set(entity, value); }
+      if (value === undefined) {
+        value = sourceOptions(entity);
+        optionCache.set(entity, value);
+      }
       return value;
     };
-    const coneLights = input.q2FragmentLighting?.lights.some(light => light.cone !== null) === true
-      ? input.q2FragmentLighting.lights.filter(light => light.cone !== null) : null;
-    const q2Lighting = this.provider.family === "q2" || this.provider.family === "q1" && this.world.map.kind === "q2-bsp";
-    const lightingInput = q2Lighting && input.q2FragmentLighting !== undefined
-      ? { ...input, lights: input.lights === undefined
-        ? (coneLights === null ? input.q2FragmentLighting.lights : input.q2FragmentLighting.lights.filter(light => light.cone === null)).map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))
-        : [...input.lights, ...input.q2FragmentLighting.lights.filter(light => light.cone === null && light.shadow.kind !== "none")
-          .map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))] } : input;
+    const coneLights =
+      input.q2FragmentLighting?.lights.some(light => light.cone !== null) === true
+        ? input.q2FragmentLighting.lights.filter(light => light.cone !== null)
+        : null;
+    const q2Lighting = this.provider.family === "q2" || (this.provider.family === "q1" && this.world.map.kind === "q2-bsp");
+    const lightingInput =
+      q2Lighting && input.q2FragmentLighting !== undefined
+        ? {
+            ...input,
+            lights:
+              input.lights === undefined
+                ? (coneLights === null ? input.q2FragmentLighting.lights : input.q2FragmentLighting.lights.filter(light => light.cone === null)).map(light => ({
+                    origin: light.origin,
+                    color: light.color,
+                    radius: light.radius,
+                    minimum: 0,
+                  }))
+                : [
+                    ...input.lights,
+                    ...input.q2FragmentLighting.lights
+                      .filter(light => light.cone === null && light.shadow.kind !== "none")
+                      .map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 })),
+                  ],
+          }
+        : input;
     const prepareVertexLighting = (entity: SceneEntity, source: ModelSourceOptions): PreparedVertexLighting => {
       const prepared = preparedLights.get(entity);
       if (prepared !== undefined) return prepared;
@@ -241,21 +362,30 @@ export class SceneModelRenderer {
       const vertexLights = this.provider.family === "q2" && !skinned ? new Map<Vec3, Vec3>() : null;
       const indexedLights: (Vec3 | undefined)[] = [];
       // Triangle strips/fans repeat the same vertex on consecutive corners.
-      let lastNormal: Vec3 | null = null, lastLight: Vec3 | null = null;
+      let lastNormal: Vec3 | null = null,
+        lastLight: Vec3 | null = null;
       const illuminate: ModelVertexLighting = (normal, _position, corner) => {
         if (this.provider.family === "q3") return unit;
         let previousNormalIndex: number | undefined;
         if (this.provider.family === "q1" && entity.model.kind === "q1-mdl" && entity.pose.kind === "frame") {
-          const triangle = entity.model.triangles[Math.trunc(corner / 3)], vertex = triangle?.vertices[corner % 3];
+          const triangle = entity.model.triangles[Math.trunc(corner / 3)],
+            vertex = triangle?.vertices[corner % 3];
           const oldFrames = entity.model.frames[entity.pose.previousFrame];
-          if (vertex !== undefined && oldFrames !== undefined) previousNormalIndex = sampleTimedFrame(oldFrames, time, source.syncBase ?? 0).compressedVertices[vertex]?.normalIndex;
+          if (vertex !== undefined && oldFrames !== undefined)
+            previousNormalIndex = sampleTimedFrame(oldFrames, time, source.syncBase ?? 0).compressedVertices[vertex]?.normalIndex;
         }
         if (this.provider.family === "q1" && this.world.map.kind === "q3-bsp") {
           let lighting = entityLighting;
-          if (lighting === undefined) { lighting = this.lighting.entityLighting(entity, input); entityLighting = lighting; }
-          const current = diffuseColor(normal, lighting), previous = previousNormalIndex === undefined ? undefined : ALIAS_NORMALS[previousNormalIndex];
-          const color = previous === undefined || entity.pose.kind !== "frame" ? current
-            : add3(scale3(current, 1 - entity.pose.backLerp), scale3(diffuseColor(previous, lighting), entity.pose.backLerp));
+          if (lighting === undefined) {
+            lighting = this.lighting.entityLighting(entity, input);
+            entityLighting = lighting;
+          }
+          const current = diffuseColor(normal, lighting),
+            previous = previousNormalIndex === undefined ? undefined : ALIAS_NORMALS[previousNormalIndex];
+          const color =
+            previous === undefined || entity.pose.kind !== "frame"
+              ? current
+              : add3(scale3(current, 1 - entity.pose.backLerp), scale3(diffuseColor(previous, lighting), entity.pose.backLerp));
           return scale3(color, 1 / 255);
         }
         if (previousNormalIndex === undefined && normal === lastNormal && lastLight !== null) return lastLight;
@@ -265,10 +395,18 @@ export class SceneModelRenderer {
         const normalIndex = skinned ? (normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z) ?? -1) : aliasNormalIndex(normal);
         if (normalIndex >= 0) {
           const indexed = indexedLights[normalIndex];
-          if (indexed !== undefined) { lastNormal = normal; lastLight = indexed; return indexed; }
+          if (indexed !== undefined) {
+            lastNormal = normal;
+            lastLight = indexed;
+            return indexed;
+          }
         }
         const cached = vertexLights?.get(normal);
-        if (cached !== undefined) { lastNormal = normal; lastLight = cached; return cached; }
+        if (cached !== undefined) {
+          lastNormal = normal;
+          lastLight = cached;
+          return cached;
+        }
         if (light === undefined) {
           const sampled = this.lighting.sample(entity.transform.origin, lightingInput, q2Lighting).color;
           if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
@@ -276,20 +414,27 @@ export class SceneModelRenderer {
           else {
             const staticLight = this.world.map.kind === "q2-bsp" ? this.lighting.sample(entity.transform.origin, lightingInput, false).color : sampled;
             const channel = (value: number, total: number): number => {
-              let ambient = value * 255, shade = ambient;
+              let ambient = value * 255,
+                shade = ambient;
               if (source.viewModel === true && ambient < 24) ambient = shade = 24;
               if (this.world.map.kind === "q2-bsp") {
                 const amount = (total - value) * 255;
-                ambient += amount; shade += amount;
+                ambient += amount;
+                shade += amount;
               }
-              for (const dynamic of this.world.map.kind === "q2-bsp" ? [] : input.lights ?? []) {
-                const difference = sub3(entity.transform.origin, dynamic.origin), amount = dynamic.radius - Math.hypot(difference.x, difference.y, difference.z);
-                if (amount > 0) { ambient += amount; shade += amount; }
+              for (const dynamic of this.world.map.kind === "q2-bsp" ? [] : (input.lights ?? [])) {
+                const difference = sub3(entity.transform.origin, dynamic.origin),
+                  amount = dynamic.radius - Math.hypot(difference.x, difference.y, difference.z);
+                if (amount > 0) {
+                  ambient += amount;
+                  shade += amount;
+                }
               }
-              ambient = Math.min(128, ambient); shade = Math.min(shade, 192 - ambient);
+              ambient = Math.min(128, ambient);
+              shade = Math.min(shade, 192 - ambient);
               if ((source.player === true || entity.resource.requestedPath === "progs/player.mdl") && ambient < 8) shade = 8;
               if (["progs/flame.mdl", "progs/flame2.mdl"].includes(entity.resource.requestedPath)) shade = 256;
-              return shade / 200 * (source.overbrightModels === false ? 1 : 2);
+              return (shade / 200) * (source.overbrightModels === false ? 1 : 2);
             };
             light = { x: channel(staticLight.x, sampled.x), y: channel(staticLight.y, sampled.y), z: channel(staticLight.z, sampled.z) };
           }
@@ -297,11 +442,12 @@ export class SceneModelRenderer {
         }
         if (entity.flags.kind === "q2" && q2ShellColor(entity.flags.bits) !== null) return light;
         if (basis === undefined) {
-          const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * SHADEDOT_QUANT / (2 * Math.PI)) & (SHADEDOT_QUANT - 1);
+          const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x),
+            row = Math.trunc((yaw * SHADEDOT_QUANT) / (2 * Math.PI)) & (SHADEDOT_QUANT - 1);
           basis = { yaw, row, direction: null };
         }
         const { row } = basis;
-        let shade = normalIndex < 0 ? null : r_avertexnormal_dots[row * ANORM_DOTS_ROW + normalIndex] ?? null;
+        let shade = normalIndex < 0 ? null : (r_avertexnormal_dots[row * ANORM_DOTS_ROW + normalIndex] ?? null);
         if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
           const oldShade = r_avertexnormal_dots[row * ANORM_DOTS_ROW + previousNormalIndex] ?? shade;
           shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
@@ -317,7 +463,10 @@ export class SceneModelRenderer {
           if (normalIndex >= 0) indexedLights[normalIndex] = result;
           else vertexLights.set(normal, result);
         }
-        if (previousNormalIndex === undefined) { lastNormal = normal; lastLight = result; }
+        if (previousNormalIndex === undefined) {
+          lastNormal = normal;
+          lastLight = result;
+        }
         return result;
       };
       let key: string | null = null;
@@ -336,51 +485,107 @@ export class SceneModelRenderer {
       preparedLights.set(entity, built);
       return built;
     };
-    return entities.flatMap(entity => preparedModelGroups(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
-      ...(skinningFrame === undefined ? {} : { skinningFrame }),
-      ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
-      frustum: cameraFrustum(input.camera), options, prepareVertexLighting, paletteColor: (_entity, index) => this.paletteColor(index) }),
-    { draw: (surface, personalModel) => this.draw(surface, input, surface.options, coneLights, lightCache.get(surface.entity), personalModel) }));
+    return entities.flatMap(entity =>
+      preparedModelGroups(
+        prepareSceneEntity(entity, {
+          camera: input.camera,
+          timeSeconds: time,
+          ...(skinningFrame === undefined ? {} : { skinningFrame }),
+          ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
+          frustum: cameraFrustum(input.camera),
+          options,
+          prepareVertexLighting,
+          paletteColor: (_entity, index) => this.paletteColor(index),
+        }),
+        { draw: (surface, personalModel) => this.draw(surface, input, surface.options, coneLights, lightCache.get(surface.entity), personalModel) },
+      ),
+    );
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
-  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame,
-    retainBody?: (sphere: ShadowSphere) => boolean): readonly ShadowCaster[] {
-    const result: ShadowCaster[] = [], time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+  prepareShadowCasters(
+    entities: readonly SceneEntity[],
+    input: WorldViewInput,
+    options: SourceOptions = () => ({}),
+    skinningFrame?: ModelSkinningFrame,
+    retainBody?: (sphere: ShadowSphere) => boolean,
+  ): readonly ShadowCaster[] {
+    const result: ShadowCaster[] = [],
+      time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const visit = (entity: SceneEntity, original: SceneEntity): void => {
       const source = options(original);
       if (!entityCastsShadow(entity, source.viewModel)) return;
-      const body: SceneEntity = { ...entity, attachments: [],
+      const body: SceneEntity = {
+        ...entity,
+        attachments: [],
         flags: entity.flags.kind === "q2" ? { kind: "q2", bits: entity.flags.bits & ~Q2_SHELL_MASK } : entity.flags,
-        pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose };
-      const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, purpose: "shadow",
-        ...(retainBody === undefined ? {} : { retainShadowBody: (selected: SceneEntity, sphere: ShadowSphere, images: readonly ModelImageSelection[], selectedOptions: ModelSourceOptions): boolean => {
-          if (images.some(image => {
-            const material = this.materials.get(materialKey(selected, image, selectedOptions));
-            return material === undefined || material.kind === "q3" && (currentRemap(material.original)?.material ?? material.original).registered.definition.deforms.length !== 0;
-          })) return true;
-          return retainBody(sphere);
-        } }),
+        pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose,
+      };
+      const prepared = prepareSceneEntity(body, {
+        camera: input.camera,
+        timeSeconds: time,
+        noCull: true,
+        purpose: "shadow",
+        ...(retainBody === undefined
+          ? {}
+          : {
+              retainShadowBody: (
+                selected: SceneEntity,
+                sphere: ShadowSphere,
+                images: readonly ModelImageSelection[],
+                selectedOptions: ModelSourceOptions,
+              ): boolean => {
+                if (
+                  images.some(image => {
+                    const material = this.materials.get(materialKey(selected, image, selectedOptions));
+                    return (
+                      material === undefined ||
+                      (material.kind === "q3" && (currentRemap(material.original)?.material ?? material.original).registered.definition.deforms.length !== 0)
+                    );
+                  })
+                )
+                  return true;
+                return retainBody(sphere);
+              },
+            }),
         ...(skinningFrame === undefined ? {} : { skinningFrame }),
-        ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }), options: () => source });
+        ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
+        options: () => source,
+      });
       const meshes: ShadowMesh[] = [];
       for (const surface of prepared.surfaces) {
         const material = this.materials.get(materialKey(surface.entity, surface.image, source));
         if (material === undefined) throw new Error(`Shadow material was not preloaded: ${entity.resource.requestedPath}/${surface.name}`);
-        if (material.kind === "legacy") { meshes.push(shadowMesh(surface.geometry)); continue; }
+        if (material.kind === "legacy") {
+          meshes.push(shadowMesh(surface.geometry));
+          continue;
+        }
         const axis = surface.transform.axis;
-        const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
+        const transform = {
+          origin: surface.transform.origin,
+          axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)],
+        } satisfies Parameters<WorldScene["materialContext"]>[1];
         const base = this.world.materialContext(input, transform);
-        const context = { ...base, entityRGBA: byteColor(entity.color),
+        const context = {
+          ...base,
+          entityRGBA: byteColor(entity.color),
           localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, source.nonNormalizedAxes === true),
-          timeOffset: (entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000),
-          deformView: { ...base.deformView, nonNormalizedAxis: source.nonNormalizedAxes === true ? transform.axis[0] : null } };
+          timeOffset: entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000,
+          deformView: { ...base.deformView, nonNormalizedAxis: source.nonNormalizedAxes === true ? transform.axis[0] : null },
+        };
         const remap = currentRemap(material.original);
-        const geometry = shadowMaterialGeometry(remap?.material ?? material.original, surface.localGeometry, { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0) });
-        if (geometry !== null) meshes.push({ positions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)), indices: geometry.indices });
+        const geometry = shadowMaterialGeometry(remap?.material ?? material.original, surface.localGeometry, {
+          ...context,
+          timeOffset: context.timeOffset + (remap?.timeOffset ?? 0),
+        });
+        if (geometry !== null)
+          meshes.push({ positions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)), indices: geometry.indices });
       }
       if (meshes.length !== 0) result.push(shadowCaster(entity.transform.origin, meshes));
-      const parent = { ...prepared.entity, pose: body.pose.kind === "frame" ? { ...body.pose, frame: prepared.frame, previousFrame: prepared.previousFrame } : body.pose };
+      const parent = {
+        ...prepared.entity,
+        pose: body.pose.kind === "frame" ? { ...body.pose, frame: prepared.frame, previousFrame: prepared.previousFrame } : body.pose,
+      };
       for (const attachment of entity.attachments) {
         const tag = modelAttachmentTag(parent, attachment.tag);
         if (tag !== null) visit(attachSceneEntity(parent, attachment.entity, tag), attachment.entity);
@@ -397,31 +602,55 @@ export class SceneModelRenderer {
   }
 
   private fogFor(surface: PreparedModelSurface): WorldScene["fogSelections"][number] | null {
-    const entity = surface.entity, model = entity.model, frame = entity.pose.kind === "frame" ? entity.pose.frame : 0;
+    const entity = surface.entity,
+      model = entity.model,
+      frame = entity.pose.kind === "frame" ? entity.pose.frame : 0;
     if (surface.options.noWorldModel === true) return null;
-    let center = entity.transform.origin, radius = 0;
+    let center = entity.transform.origin,
+      radius = 0;
     if (surface.fogSphere !== null) {
       const sphere = surface.fogSphere;
-      center = { x: Math.fround(center.x + sphere.localOrigin.x), y: Math.fround(center.y + sphere.localOrigin.y),
-        z: Math.fround(center.z + sphere.localOrigin.z) };
+      center = {
+        x: Math.fround(center.x + sphere.localOrigin.x),
+        y: Math.fround(center.y + sphere.localOrigin.y),
+        z: Math.fround(center.z + sphere.localOrigin.z),
+      };
       radius = sphere.radius;
-      return this.world.fogSelections.find(({ volume }) => Math.fround(center.x - radius) < volume.bounds.max.x
-        && Math.fround(center.x + radius) > volume.bounds.min.x && Math.fround(center.y - radius) < volume.bounds.max.y
-        && Math.fround(center.y + radius) > volume.bounds.min.y && Math.fround(center.z - radius) < volume.bounds.max.z
-        && Math.fround(center.z + radius) > volume.bounds.min.z) ?? null;
+      return (
+        this.world.fogSelections.find(
+          ({ volume }) =>
+            Math.fround(center.x - radius) < volume.bounds.max.x &&
+            Math.fround(center.x + radius) > volume.bounds.min.x &&
+            Math.fround(center.y - radius) < volume.bounds.max.y &&
+            Math.fround(center.y + radius) > volume.bounds.min.y &&
+            Math.fround(center.z - radius) < volume.bounds.max.z &&
+            Math.fround(center.z + radius) > volume.bounds.min.z,
+        ) ?? null
+      );
     }
     if (model.kind === "q3-md3") throw new Error("Prepared MD3 surface lost its selected-frame fog sphere");
     if (surface.options.source !== undefined && model.kind === "q3-md4") return null;
     if (model.kind === "q3-md4") {
       const pose = model.frames[frame] ?? model.frames[0];
-      if (pose !== undefined) { center = add3(center, pose.localOrigin); radius = pose.radius; }
+      if (pose !== undefined) {
+        center = add3(center, pose.localOrigin);
+        radius = pose.radius;
+      }
     } else if (model.kind === "md5") {
       const pose = model.frames[frame] ?? model.frames[0];
       if (pose !== undefined) radius = radiusFromBounds(pose.bounds);
     } else if (model.kind !== "brush-model") radius = radiusFromBounds(model.bounds);
-    return this.world.fogSelections.find(({ volume }) => center.x - radius < volume.bounds.max.x && center.x + radius > volume.bounds.min.x
-      && center.y - radius < volume.bounds.max.y && center.y + radius > volume.bounds.min.y
-      && center.z - radius < volume.bounds.max.z && center.z + radius > volume.bounds.min.z) ?? null;
+    return (
+      this.world.fogSelections.find(
+        ({ volume }) =>
+          center.x - radius < volume.bounds.max.x &&
+          center.x + radius > volume.bounds.min.x &&
+          center.y - radius < volume.bounds.max.y &&
+          center.y + radius > volume.bounds.min.y &&
+          center.z - radius < volume.bounds.max.z &&
+          center.z + radius > volume.bounds.min.z,
+      ) ?? null
+    );
   }
 
   /** World positions/normals of retained geometry are fixed; share the
@@ -429,8 +658,7 @@ export class SceneModelRenderer {
   private worldArraysFor(geometry: MaterialGeometry): { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] } {
     let arrays = this.modelWorldArrays.get(geometry);
     if (arrays === undefined) {
-      arrays = { worldPositions: geometry.vertices.map(vertex => vertex.position),
-        normals: geometry.vertices.map(vertex => normalize3(vertex.normal)) };
+      arrays = { worldPositions: geometry.vertices.map(vertex => vertex.position), normals: geometry.vertices.map(vertex => normalize3(vertex.normal)) };
       this.modelWorldArrays.set(geometry, arrays);
     }
     return arrays;
@@ -440,15 +668,23 @@ export class SceneModelRenderer {
   private shadeDivided(batch: Extract<DrawBatch, { texturing: "pair" }>, shadeScale: number): Extract<DrawBatch, { texturing: "pair" }>["vertices"];
   private shadeDivided(batch: DrawBatch, shadeScale: number): DrawBatch["vertices"] {
     let byScale = this.shadeVertexCache.get(batch.vertices);
-    if (byScale === undefined) { byScale = new Map<string, DrawBatch["vertices"]>(); this.shadeVertexCache.set(batch.vertices, byScale); }
+    if (byScale === undefined) {
+      byScale = new Map<string, DrawBatch["vertices"]>();
+      this.shadeVertexCache.set(batch.vertices, byScale);
+    }
     const key = `${batch.texturing}|${Object.is(shadeScale, -0) ? "-0" : `${shadeScale}`}`;
     const hit = byScale.get(key);
     if (hit !== undefined) return hit;
-    const divide = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] =>
-      ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
-    const mapped = batch.texturing === "single"
-      ? batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }))
-      : batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }));
+    const divide = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] => ({
+      x: value.x / shadeScale,
+      y: value.y / shadeScale,
+      z: value.z / shadeScale,
+      w: value.w,
+    });
+    const mapped =
+      batch.texturing === "single"
+        ? batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }))
+        : batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }));
     if (byScale.size >= 64) byScale.clear();
     byScale.set(key, mapped);
     return mapped;
@@ -458,135 +694,292 @@ export class SceneModelRenderer {
    * R_AddMD3Surfaces resubmits each opaque, unfogged surface with the stencil shadow shader (r_shadows 2) or, for
    * RF_SHADOW_PLANE entities, the projection shadow shader (r_shadows 3).
    */
-  private modelShadowGroups(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, compiled: CompiledMaterial,
-    context: MaterialDrawContext, project: (point: Vec3) => Vec4, unfogged: boolean, personalModel: boolean): readonly (SceneModelGroup | SceneShadowGroup)[] {
-    const mode = input.modelShadows, lighting = context.lighting, entity = surface.entity;
-    if (mode === undefined || !unfogged || compiled.finished.sort !== 3 || lighting === null || lighting === undefined || this.provider.family !== "q3") return [];
+  private modelShadowGroups(
+    surface: PreparedModelSurface,
+    input: WorldViewInput,
+    options: ModelSourceOptions,
+    compiled: CompiledMaterial,
+    context: MaterialDrawContext,
+    project: (point: Vec3) => Vec4,
+    unfogged: boolean,
+    personalModel: boolean,
+  ): readonly (SceneModelGroup | SceneShadowGroup)[] {
+    const mode = input.modelShadows,
+      lighting = context.lighting,
+      entity = surface.entity;
+    if (mode === undefined || !unfogged || compiled.finished.sort !== 3 || lighting === null || lighting === undefined || this.provider.family !== "q3")
+      return [];
     const source = options.source === undefined ? undefined : { ...options.source, surface: surface.surfaceIndex, fog: 0, dlight: 0 };
     if (mode === 2) {
       if (personalModel || !entityCastsShadow(entity, options.viewModel)) return [];
-      const volume = stencilShadowVolume(surface.localGeometry.vertices.map(vertex => vertex.position), surface.localGeometry.indices, lighting.lightDir);
+      const volume = stencilShadowVolume(
+        surface.localGeometry.vertices.map(vertex => vertex.position),
+        surface.localGeometry.indices,
+        lighting.lightDir,
+      );
       if (volume === null || volume.indices.length === 0) return [];
       const camera = input.camera;
-      return [shadowVolumeGroup(this.provider.shaders.sourceMaterials.stencilShadow, source, { kind: "shadow-volume",
-        positions: volume.positions.map(point => project(modelWorldPoint(surface.transform, point))), indices: volume.indices,
-        mirror: camera.clip.kind === "portal" && camera.clip.mirror, whiteImage: this.provider.textures.white.image })];
+      return [
+        shadowVolumeGroup(this.provider.shaders.sourceMaterials.stencilShadow, source, {
+          kind: "shadow-volume",
+          positions: volume.positions.map(point => project(modelWorldPoint(surface.transform, point))),
+          indices: volume.indices,
+          mirror: camera.clip.kind === "portal" && camera.clip.mirror,
+          whiteImage: this.provider.textures.white.image,
+        }),
+      ];
     }
     if (entity.flags.kind !== "q3" || (entity.flags.bits & RF_SHADOW_PLANE) === 0) return [];
-    const material = this.provider.shaders.sourceMaterials.projectionShadow, remap = currentRemap(material), projection = remap?.material ?? material;
-    const axis = surface.transform.axis, scaled = surface.transform.scale;
-    const batches = prepareMaterialBatches(projection, surface.localGeometry, { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0),
-      projectionShadow: { axis: [scale3(axis[0], scaled.x), scale3(axis[1], scaled.y), scale3(axis[2], scaled.z)], origin: surface.transform.origin,
-        shadowPlane: entity.shadowPlane, lightDir: lighting.lightDir } });
+    const material = this.provider.shaders.sourceMaterials.projectionShadow,
+      remap = currentRemap(material),
+      projection = remap?.material ?? material;
+    const axis = surface.transform.axis,
+      scaled = surface.transform.scale;
+    const batches = prepareMaterialBatches(projection, surface.localGeometry, {
+      ...context,
+      timeOffset: context.timeOffset + (remap?.timeOffset ?? 0),
+      projectionShadow: {
+        axis: [scale3(axis[0], scaled.x), scale3(axis[1], scaled.y), scale3(axis[2], scaled.z)],
+        origin: surface.transform.origin,
+        shadowPlane: entity.shadowPlane,
+        lightDir: lighting.lightDir,
+      },
+    });
     return [source === undefined ? compiledDrawGroup(projection, batches) : sourceDrawGroup(material, source, batches)];
   }
 
-  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, coneLights: readonly Q2FragmentLight[] | null, shade?: Vec3, personalModel = false): readonly (SceneModelGroup | SceneShadowGroup)[] {
+  private draw(
+    surface: PreparedModelSurface,
+    input: WorldViewInput,
+    options: ModelSourceOptions,
+    coneLights: readonly Q2FragmentLight[] | null,
+    shade?: Vec3,
+    personalModel = false,
+  ): readonly (SceneModelGroup | SceneShadowGroup)[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
-    const flags = surface.entity.flags.kind === "q2" ? surface.entity.flags.bits : 0, shadows = input.q2FragmentLighting;
-    const receivesCone = coneLights !== null && shadows !== undefined && !surface.unlit && options.viewModel !== true
-      && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0 && !(options.infrared === true && (flags & 32768) !== 0);
+    const flags = surface.entity.flags.kind === "q2" ? surface.entity.flags.bits : 0,
+      shadows = input.q2FragmentLighting;
+    const receivesCone =
+      coneLights !== null &&
+      shadows !== undefined &&
+      !surface.unlit &&
+      options.viewModel !== true &&
+      (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0 &&
+      !(options.infrared === true && (flags & 32768) !== 0);
     if (material.kind === "q3") {
-      const remap = currentRemap(material.original), compiled = remap?.material ?? material.original;
+      const remap = currentRemap(material.original),
+        compiled = remap?.material ?? material.original;
       const axis = surface.transform.axis;
-      const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
+      const transform = {
+        origin: surface.transform.origin,
+        axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)],
+      } satisfies Parameters<WorldScene["materialContext"]>[1];
       const fog = this.fogFor(surface);
       const base = this.world.materialContext(input, transform, fog?.volume ?? null);
       const project = createViewProjector(input.camera);
       const modelLighting: import("../../../materials/evaluate.ts").MaterialDrawContext["modelLighting"] = receivesCone
-        ? geometry => ({ kind: "q2-world", pass: "model", shadeScale: null, atlas: shadows.atlas,
-          lights: coneLights.map(light => ({ ...light, fraction: { x: 0, y: 0, z: 0 } })),
-          worldPositions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)),
-          normals: geometry.vertices.map(vertex => normalize3(modelWorldDirection(surface.transform, vertex.normal))) }) : undefined;
-      const context = { ...base, ...(modelLighting === undefined ? {} : { modelLighting }), entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
+        ? geometry => ({
+            kind: "q2-world",
+            pass: "model",
+            shadeScale: null,
+            atlas: shadows.atlas,
+            lights: coneLights.map(light => ({ ...light, fraction: { x: 0, y: 0, z: 0 } })),
+            worldPositions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)),
+            normals: geometry.vertices.map(vertex => normalize3(modelWorldDirection(surface.transform, vertex.normal))),
+          })
+        : undefined;
+      const context = {
+        ...base,
+        ...(modelLighting === undefined ? {} : { modelLighting }),
+        entityRGBA: byteColor(surface.entity.color),
+        lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
         shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
-        localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, options.nonNormalizedAxes === true), depthRange: surface.depthRange,
-        timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + (remap?.timeOffset ?? 0),
+        localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, options.nonNormalizedAxes === true),
+        depthRange: surface.depthRange,
+        timeOffset:
+          (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + (remap?.timeOffset ?? 0),
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
-        project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
+        project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)),
+      };
       const batches = prepareMaterialBatches(compiled, surface.localGeometry, context);
       // R_AddMD3Surfaces and R_AddAnimSurfaces submit no frontend dlight bits.
       const shadowGroups = this.modelShadowGroups(surface, input, options, compiled, context, project, fog === null, personalModel);
       if (personalModel) return shadowGroups;
-      return [options.source === undefined ? compiledDrawGroup(compiled, batches)
-        : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches), ...shadowGroups];
+      return [
+        options.source === undefined
+          ? compiledDrawGroup(compiled, batches)
+          : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches),
+        ...shadowGroups,
+      ];
     }
-    const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;
+    const texture = material.texture,
+      alpha = surface.translucent ? surface.entity.color.w : 1;
     const lighting = { kind: "vertex" } satisfies Parameters<typeof createQ1Material>[2];
-    const definition = this.provider.family === "q1" ? createQ1Material(texture.name, texture.image, lighting, { alpha })
-      : { ...createQ2Material(texture.name, [texture.image], lighting), alpha };
+    const definition =
+      this.provider.family === "q1"
+        ? createQ1Material(texture.name, texture.image, lighting, { alpha })
+        : { ...createQ2Material(texture.name, [texture.image], lighting), alpha };
     const project = createViewProjector(input.camera);
     // World-space emission (same gate as world surfaces) makes the mapped
     // vertices camera-independent, so retained geometry reuses one batch —
     // and one GL pack — across frames. Liquids animate UVs by time and the
     // mirror flip is a clip-space operation; both stay per-frame.
-    const liquid = definition.kind === "q1"
-      ? definition.surface === "water" || definition.surface === "slime" || definition.surface === "lava" || definition.surface === "teleport"
-      : definition.warp || definition.flowing;
+    const liquid =
+      definition.kind === "q1"
+        ? definition.surface === "water" || definition.surface === "slime" || definition.surface === "lava" || definition.surface === "teleport"
+        : definition.warp || definition.flowing;
     const worldSpace = input.worldSpaceBatches === true && input.camera.clip.kind === "none" && !surface.mirrorWeapon && !liquid;
     let batches: readonly DrawBatch[];
     if (worldSpace) {
       const key = `${alpha}|${surface.unlit ? 1 : 0}|${surface.cull}|${surface.depthRange[0]},${surface.depthRange[1]}`;
       let byTexture = this.legacyBatchCache.get(surface.geometry);
-      if (byTexture === undefined) { byTexture = new WeakMap<object, Map<string, readonly DrawBatch[]>>(); this.legacyBatchCache.set(surface.geometry, byTexture); }
+      if (byTexture === undefined) {
+        byTexture = new WeakMap<object, Map<string, readonly DrawBatch[]>>();
+        this.legacyBatchCache.set(surface.geometry, byTexture);
+      }
       let byKey = byTexture.get(texture);
-      if (byKey === undefined) { byKey = new Map<string, readonly DrawBatch[]>(); byTexture.set(texture, byKey); }
+      if (byKey === undefined) {
+        byKey = new Map<string, readonly DrawBatch[]>();
+        byTexture.set(texture, byKey);
+      }
       const hit = byKey.get(key);
       if (hit !== undefined) batches = hit;
       else {
-        batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
-          fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
-          project: point => ({ x: point.x, y: point.y, z: point.z, w: 1 }) }).map((batch): DrawBatch => ({ ...batch, space: "world" }));
+        batches = prepareLegacyMaterialBatches(definition, surface.geometry, {
+          time,
+          animationFrame: 0,
+          alternateAnimation: false,
+          fullbright: surface.unlit ? null : texture.fullbright,
+          q1LightmapEncoding: "rgb",
+          cull: surface.cull,
+          depthRange: surface.depthRange,
+          project: point => ({ x: point.x, y: point.y, z: point.z, w: 1 }),
+        }).map((batch): DrawBatch => ({ ...batch, space: "world" }));
         if (byKey.size >= 16) byKey.clear();
         byKey.set(key, batches);
       }
     } else {
-      batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
-        fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
-        project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
+      batches = prepareLegacyMaterialBatches(definition, surface.geometry, {
+        time,
+        animationFrame: 0,
+        alternateAnimation: false,
+        fullbright: surface.unlit ? null : texture.fullbright,
+        q1LightmapEncoding: "rgb",
+        cull: surface.cull,
+        depthRange: surface.depthRange,
+        project: point => {
+          const projected = project(point);
+          return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected;
+        },
+      });
     }
 
-    const receives = this.provider.family === "q2" && shade !== undefined && shadows !== undefined && shadows.atlas !== null
-      && !surface.unlit && options.viewModel !== true && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0
-      && !(options.infrared === true && (flags & 32768) !== 0);
-    const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, coneLights === null ? shadows.lights : shadows.lights.filter(light => light.cone === null)) : [];
+    const receives =
+      this.provider.family === "q2" &&
+      shade !== undefined &&
+      shadows !== undefined &&
+      shadows.atlas !== null &&
+      !surface.unlit &&
+      options.viewModel !== true &&
+      (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0 &&
+      !(options.infrared === true && (flags & 32768) !== 0);
+    const affecting = receives
+      ? aliasShadowLightFractions(
+          surface.entity.transform.origin,
+          shade,
+          coneLights === null ? shadows.lights : shadows.lights.filter(light => light.cone === null),
+        )
+      : [];
     const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
     const preparedBatches = batches.map((batch, index): DrawBatch => {
-      const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
-        cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
+      const state = {
+        ...batch.state,
+        alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
+        cull: surface.mirrorWeapon ? (batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none") : batch.state.cull,
+      } satisfies DrawBatch["state"];
       if (index !== 0) return { ...batch, state };
-      const alias: DrawBatch["lighting"] = affecting.length === 0 || shadows === undefined || shadows.atlas === null ? batch.lighting
-        : { kind: "q2-model-shadow", worldPositions: this.worldArraysFor(surface.geometry).worldPositions, lights: affecting, shadeScale, atlas: shadows.atlas };
-      const corrected: DrawBatch = alias.kind !== "q2-model-shadow" ? { ...batch, state } : batch.texturing === "single"
-        ? { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) }
-        : { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) };
+      const alias: DrawBatch["lighting"] =
+        affecting.length === 0 || shadows === undefined || shadows.atlas === null
+          ? batch.lighting
+          : {
+              kind: "q2-model-shadow",
+              worldPositions: this.worldArraysFor(surface.geometry).worldPositions,
+              lights: affecting,
+              shadeScale,
+              atlas: shadows.atlas,
+            };
+      const corrected: DrawBatch =
+        alias.kind !== "q2-model-shadow"
+          ? { ...batch, state }
+          : batch.texturing === "single"
+            ? { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) }
+            : { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) };
       if (!receivesCone) return corrected;
       const arrays = this.worldArraysFor(surface.geometry);
-      const lighting = { kind: "q2-world", pass: "model", shadeScale: corrected.lighting.kind === "q2-model-shadow" ? shadeScale : null,
-        worldPositions: arrays.worldPositions, normals: arrays.normals, atlas: shadows.atlas,
-        lights: shadows.lights.map(light => ({ ...light, color: light.cone === null ? { x: 0, y: 0, z: 0 } : light.color,
+      const lighting = {
+        kind: "q2-world",
+        pass: "model",
+        shadeScale: corrected.lighting.kind === "q2-model-shadow" ? shadeScale : null,
+        worldPositions: arrays.worldPositions,
+        normals: arrays.normals,
+        atlas: shadows.atlas,
+        lights: shadows.lights.map(light => ({
+          ...light,
+          color: light.cone === null ? { x: 0, y: 0, z: 0 } : light.color,
           scale: light.cone === null ? 0 : light.scale,
-          fraction: affecting.find(point => point.origin === light.origin)?.fraction ?? { x: 0, y: 0, z: 0 } })) } satisfies DrawBatch["lighting"];
+          fraction: affecting.find(point => point.origin === light.origin)?.fraction ?? { x: 0, y: 0, z: 0 },
+        })),
+      } satisfies DrawBatch["lighting"];
       return { ...corrected, lighting };
     });
-    if (options.planarShadow === true && options.viewModel !== true && this.provider.family === "q1"
-      && (surface.entity.model.kind === "q1-mdl" || surface.entity.model.kind === "md5")) {
+    if (
+      options.planarShadow === true &&
+      options.viewModel !== true &&
+      this.provider.family === "q1" &&
+      (surface.entity.model.kind === "q1-mdl" || surface.entity.model.kind === "md5")
+    ) {
       const floor = this.lighting.sample(surface.transform.origin, input, false).floor;
       if (floor !== null) {
         const yaw = Math.atan2(surface.transform.axis[0].y, surface.transform.axis[0].x);
         const direction = q1AliasShadowDirection(yaw);
         const shadowTransform = { ...surface.transform, scale: { x: 1, y: 1, z: 1 } };
-        preparedBatches.push({ primitive: "triangles", texturing: "single", indices: surface.localGeometry.indices,
-          texture: { kind: "bind-image", image: this.provider.textures.white.image }, lighting: { kind: "vertex" },
-          state: { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "less-equal", depthWrite: true,
-            alphaTest: "none", cull: surface.cull, depthRange: surface.depthRange, polygonOffset: null },
+        preparedBatches.push({
+          primitive: "triangles",
+          texturing: "single",
+          indices: surface.localGeometry.indices,
+          texture: { kind: "bind-image", image: this.provider.textures.white.image },
+          lighting: { kind: "vertex" },
+          state: {
+            blend: { source: "src-alpha", destination: "one-minus-src-alpha" },
+            depthTest: "less-equal",
+            depthWrite: true,
+            alphaTest: "none",
+            cull: surface.cull,
+            depthRange: surface.depthRange,
+            polygonOffset: null,
+          },
           vertices: surface.localGeometry.vertices.map(vertex => ({
-            position: project(modelWorldPoint(shadowTransform, q1AliasShadowPoint({
-              x: Math.fround(vertex.position.x * surface.transform.scale.x), y: Math.fround(vertex.position.y * surface.transform.scale.y),
-              z: Math.fround(vertex.position.z * surface.transform.scale.z) }, direction, surface.transform.origin.z, floor.point.z))),
-            texCoord: { x: 0, y: 0 }, color: { x: 0, y: 0, z: 0, w: 0.5 * alpha } })) });
+            position: project(
+              modelWorldPoint(
+                shadowTransform,
+                q1AliasShadowPoint(
+                  {
+                    x: Math.fround(vertex.position.x * surface.transform.scale.x),
+                    y: Math.fround(vertex.position.y * surface.transform.scale.y),
+                    z: Math.fround(vertex.position.z * surface.transform.scale.z),
+                  },
+                  direction,
+                  surface.transform.origin.z,
+                  floor.point.z,
+                ),
+              ),
+            ),
+            texCoord: { x: 0, y: 0 },
+            color: { x: 0, y: 0, z: 0, w: 0.5 * alpha },
+          })),
+        });
       }
     }
     return [sequenceDrawGroup(alpha < 1 ? "translucent" : "opaque", preparedBatches)];

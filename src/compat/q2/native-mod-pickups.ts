@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, ProviderId } from "../../contracts/identity.ts";
 import type { ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
@@ -15,7 +16,8 @@ interface Operations {
 }
 
 export function validateNativeModPickups(declaration: NativeModDeclaration): void {
-  const ids = new Set<string>(), offered = new Set<string>();
+  const ids = new Set<string>(),
+    offered = new Set<string>();
   for (const rule of declaration.pickups ?? []) {
     if (declaration.clients === undefined || ids.has(rule.id) || rule.id.length === 0 || rule.offered.length === 0)
       throw new Error("Native pickups require unique rules and source client admission");
@@ -27,16 +29,26 @@ export function validateNativeModPickups(declaration: NativeModDeclaration): voi
     for (const resource of rule.writes) {
       if (resource.kind === "protection") {
         if (!declaration.protection?.some(protection => protection.channel === resource.channel)) throw new Error("Native pickup has no protection owner");
-      } else if (resource.fields !== "capacity" && !declaration.items?.definitions.some(item => item.item === resource.item) && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item)))
+      } else if (
+        resource.fields !== "capacity" &&
+        !declaration.items?.definitions.some(item => item.item === resource.item) &&
+        !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item))
+      )
         throw new Error("Native pickup has no declared inventory storage");
-      if (resource.kind === "inventory" && resource.fields !== "count"
-        && !declaration.items?.storage.some(storage => storage.kind === "counter" && storage.item === resource.item && storage.capacity.kind === "field")
-        && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory-capacity" && field.item === resource.item)))
+      if (
+        resource.kind === "inventory" &&
+        resource.fields !== "count" &&
+        !declaration.items?.storage.some(storage => storage.kind === "counter" && storage.item === resource.item && storage.capacity.kind === "field") &&
+        !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory-capacity" && field.item === resource.item))
+      )
         throw new Error("Native pickup has no declared inventory capacity storage");
     }
-    if (rule.operation.kind === "boolean-grant" && rule.operation.grant.returns === "void"
-      || rule.operation.kind === "gate-then-grant" && (rule.operation.gate.returns === "void"
-        || rule.operation.grantAccepts === "nonzero" && rule.operation.grant.returns === "void")) throw new Error("Native pickup requires its declared source decision");
+    if (
+      (rule.operation.kind === "boolean-grant" && rule.operation.grant.returns === "void") ||
+      (rule.operation.kind === "gate-then-grant" &&
+        (rule.operation.gate.returns === "void" || (rule.operation.grantAccepts === "nonzero" && rule.operation.grant.returns === "void")))
+    )
+      throw new Error("Native pickup requires its declared source decision");
   }
 }
 
@@ -46,21 +58,29 @@ export class NativeModPickups {
   private readonly rules = new Map<ActorId, readonly OriginalPickupRule[]>();
   private depth = 0;
   private readonly delegates = new Map<ActorId, readonly (() => undefined)[]>();
-  constructor(private readonly definitions: readonly NativeModPickup[], private readonly services: ModHostServices,
-    private readonly owner: ProviderId, private readonly operations: Operations) {}
+  constructor(
+    private readonly definitions: readonly NativeModPickup[],
+    private readonly services: ModHostServices,
+    private readonly owner: ProviderId,
+    private readonly operations: Operations,
+  ) {}
   protection(actor: ActorId, channel: ProtectionChannel): readonly OriginalPickupRule[] {
     return this.actorRules(actor).filter(rule => rule.writes.some(write => write.kind === "protection" && write.channel === channel));
   }
   private actorRules(actor: ActorId): readonly OriginalPickupRule[] {
     let rules = this.rules.get(actor);
-    if (rules === undefined) { rules = this.definitions.map(definition => this.rule(actor, definition)); this.rules.set(actor, rules); }
+    if (rules === undefined) {
+      rules = this.definitions.map(definition => this.rule(actor, definition));
+      this.rules.set(actor, rules);
+    }
     return rules;
   }
   private rule(actor: ActorId, definition: NativeModPickup): OriginalPickupRule {
     return { id: definition.id, offered: definition.offered, writes: definition.writes, take: (offer, stores) => this.take(actor, definition, offer, stores) };
   }
   activate(): void {
-    this.operations.current(); this.active = true;
+    this.operations.current();
+    this.active = true;
     for (const identity of this.services.clients?.clients() ?? []) this.bindActor(identity.actor);
   }
   bindActor(actor: ActorId): void {
@@ -72,15 +92,20 @@ export class NativeModPickups {
     try {
       if (rules.length !== 0) removers.push(this.services.inventory.bindPickup(owned, { owner: this.owner, rules }));
       this.delegates.set(actor, removers);
-    } catch (error) { for (const remove of removers.reverse()) remove(); throw error; }
+    } catch (error) {
+      for (const remove of removers.reverse()) remove();
+      throw error;
+    }
   }
   private take(actor: ActorId, definition: NativeModPickup, offer: OriginalPickupOffer, observer: OriginalPickupExecution): OriginalPickupDecision {
     this.operations.current();
-    const current = (): boolean => observer.current() && this.active && this.services.actors.isLive(actor) && this.operations.eligible(actor)
-      && this.services.actors.isLive(offer.pickup);
+    const current = (): boolean =>
+      observer.current() && this.active && this.services.actors.isLive(actor) && this.operations.eligible(actor) && this.services.actors.isLive(offer.pickup);
     if (!offer.recipient.equals(actor) || !definition.offered.includes(offer.item) || !current()) throw new Error("Native pickup rule is no longer current");
     const inputs = new Map<ModCallbackInput, ModRuntimeValue>([
-      ["self", { kind: "actor", value: actor }], ["other", { kind: "actor", value: offer.pickup }], ["item", { kind: "string", value: offer.item }],
+      ["self", { kind: "actor", value: actor }],
+      ["other", { kind: "actor", value: offer.pickup }],
+      ["item", { kind: "string", value: offer.item }],
       ["time", { kind: "float", value: offer.time.kind === "seconds" ? offer.time.value : offer.time.value / 1000 }],
       ["pickup-count", { kind: "float", value: offer.count.kind === "override" ? offer.count.amount : 0 }],
       ["pickup-has-count", { kind: "float", value: offer.count.kind === "override" ? 1 : 0 }],
@@ -88,27 +113,48 @@ export class NativeModPickups {
     ]);
     this.depth++;
     try {
-      return this.operations.context(definition, offer, inputs, () => this.operations.observe(actor, observer, () => {
-        const operation = definition.operation;
-        if (operation.kind === "gate-then-grant") {
-          const gate = this.operations.invoke(operation.gate, inputs); if (gate === null || gate === 0 || !current()) return "refused";
-        }
-        const result = this.operations.invoke(operation.grant, inputs);
-        if (result === null || !current()) return "refused";
-        return operation.kind === "gate-then-grant" && operation.grantAccepts === "always" || result !== 0 ? "accepted" : "refused";
-      }));
-    } finally { this.depth--; }
+      return this.operations.context(definition, offer, inputs, () =>
+        this.operations.observe(actor, observer, () => {
+          const operation = definition.operation;
+          if (operation.kind === "gate-then-grant") {
+            const gate = this.operations.invoke(operation.gate, inputs);
+            if (gate === null || gate === 0 || !current()) return "refused";
+          }
+          const result = this.operations.invoke(operation.grant, inputs);
+          if (result === null || !current()) return "refused";
+          return (operation.kind === "gate-then-grant" && operation.grantAccepts === "always") || result !== 0 ? "accepted" : "refused";
+        }),
+      );
+    } finally {
+      this.depth--;
+    }
   }
-  assertIdle(): void { if (this.depth !== 0) throw new Error("Cannot save or restore during Native original pickup execution"); }
+  assertIdle(): void {
+    if (this.depth !== 0) throw new Error("Cannot save or restore during Native original pickup execution");
+  }
   release(actor: ActorId): void {
-    const removers = this.delegates.get(actor); this.delegates.delete(actor); this.rules.delete(actor);
+    const removers = this.delegates.get(actor);
+    this.delegates.delete(actor);
+    this.rules.delete(actor);
     const errors: unknown[] = [];
-    for (const remove of removers ?? []) try { remove(); } catch (error) { errors.push(error); }
+    for (const remove of removers ?? [])
+      try {
+        remove();
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "Native pickup delegate cleanup failed");
   }
   close(): void {
-    this.active = false; this.rules.clear(); const errors: unknown[] = [];
-    for (const actor of [...this.delegates.keys()]) try { this.release(actor); } catch (error) { errors.push(error); }
+    this.active = false;
+    this.rules.clear();
+    const errors: unknown[] = [];
+    for (const actor of [...this.delegates.keys()])
+      try {
+        this.release(actor);
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "Native pickup cleanup failed");
   }
 }

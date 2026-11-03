@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CollisionBoxStorage } from "./map-resource.ts";
 import { SaveReader } from "../../../persistence/value.ts";
 import { readBounds } from "../../../persistence/shared.ts";
@@ -15,8 +16,7 @@ import type { CollisionWorld, SourceTraceResult } from "./world.ts";
 export const SOURCE_BOX_MODEL_HANDLE = 255;
 export const SOURCE_CAPSULE_MODEL_HANDLE = 254;
 
-type ClipModel = { readonly kind: "inline"; readonly index: number }
-  | { readonly kind: "box"; readonly model: TemporaryCollisionModel };
+type ClipModel = { readonly kind: "inline"; readonly index: number } | { readonly kind: "box"; readonly model: TemporaryCollisionModel };
 
 /** One map's actual inline indexes and the source's single reusable box hull. */
 export class SourceClipModels {
@@ -24,7 +24,10 @@ export class SourceClipModels {
   #box: TemporaryCollisionModel;
   private readonly boxStorage: CollisionBoxStorage | null;
 
-  constructor(readonly world: CollisionWorld, temporaryStorage: "world" | "private" = "world") {
+  constructor(
+    readonly world: CollisionWorld,
+    temporaryStorage: "world" | "private" = "world",
+  ) {
     this.boxStorage = temporaryStorage === "world" ? world.boxStorage : null;
     this.#box = createBoxModel(this.#bounds, world.counters, this.boxStorage);
   }
@@ -34,11 +37,16 @@ export class SourceClipModels {
     return { bounds: { min: { ...bounds.min }, max: { ...bounds.max } }, box: this.#box.bounds };
   }
   restoreTemporaryCheckpoint(value: unknown): void {
-    const r = new SaveReader(value, "cgame-temporary-collision"), box = readBounds(r.field("box")), bounds = readBounds(r.field("bounds"));
-    this.tempBoxModel(box.min, box.max, false); this.tempBoxModel(bounds.min, bounds.max, true);
+    const r = new SaveReader(value, "cgame-temporary-collision"),
+      box = readBounds(r.field("box")),
+      bounds = readBounds(r.field("bounds"));
+    this.tempBoxModel(box.min, box.max, false);
+    this.tempBoxModel(bounds.min, bounds.max, true);
   }
 
-  get modelCount(): number { return this.world.modelCount; }
+  get modelCount(): number {
+    return this.world.modelCount;
+  }
 
   inlineModel(index: number): number {
     if (!Number.isInteger(index)) throw new RangeError("CM_InlineModel: bad number");
@@ -94,7 +102,8 @@ export class SourceClipModels {
       this.world.advanceCheckCount();
       const capsule = this.#capsule(query, handle, false);
       return query.shape.kind !== "capsule" && this.modelCount > SOURCE_BOX_MODEL_HANDLE
-        ? capsule.traceCapsuleReplacementSource(query, this.world, null) : capsule.traceSource(query);
+        ? capsule.traceCapsuleReplacementSource(query, this.world, null)
+        : capsule.traceSource(query);
     }
     if (model.kind === "inline") return this.world.traceSource({ ...query, modelIndex: model.index });
     this.world.advanceCheckCount();
@@ -138,10 +147,12 @@ export class SourceClipModels {
       const mins = query.shape.kind === "point" ? vec3(0, 0, 0) : query.shape.mins;
       const maxs = query.shape.kind === "point" ? vec3(0, 0, 0) : query.shape.maxs;
       const center = scale3(add3(mins, maxs), 0.5);
-      let sizeMin = sub3(mins, center), sizeMax = sub3(maxs, center);
+      let sizeMin = sub3(mins, center),
+        sizeMax = sub3(maxs, center);
       if (transformed) {
         const traceCenter = scale3(add3(sizeMin, sizeMax), 0.5);
-        sizeMin = sub3(sizeMin, traceCenter); sizeMax = sub3(sizeMax, traceCenter);
+        sizeMin = sub3(sizeMin, traceCenter);
+        sizeMax = sub3(sizeMax, traceCenter);
       }
       this.tempBoxModel(sizeMin, sizeMax, false);
     }

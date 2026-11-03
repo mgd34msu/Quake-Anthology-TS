@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Shared call bodies yield lazy waits only when an asynchronous owner is reached. */
 export type CallSteps<T = undefined> = Generator<() => Promise<undefined>, T, undefined>;
 
@@ -12,8 +13,11 @@ async function continueCalls<T>(steps: CallSteps<T>, call: () => Promise<undefin
   let pending = call;
   while (true) {
     let failure: { readonly error: unknown } | null = null;
-    try { await pending(); }
-    catch (error) { failure = { error }; }
+    try {
+      await pending();
+    } catch (error) {
+      failure = { error };
+    }
     // Only the wait's failure enters throw. A resumed body can throw independently.
     const step = failure === null ? steps.next() : steps.throw(failure.error);
     if (step.done) return step.value;
@@ -30,7 +34,9 @@ export function runCalls<T>(steps: CallSteps<T>): T | Promise<T> {
 /** Carry an awaited result back into the same body without starting it eagerly. */
 export function* waitForCall<T>(call: () => Promise<T>): CallSteps<T> {
   const completion: { result: { readonly value: T } | null } = { result: null };
-  yield async () => { completion.result = { value: await call() }; };
+  yield async () => {
+    completion.result = { value: await call() };
+  };
   const result = completion.result;
   if (result === null) throw new Error("Call resumed before its wait completed");
   return result.value;

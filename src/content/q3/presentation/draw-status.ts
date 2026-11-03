@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/cgame/cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { CvarSnapshot } from "../../../core/cvars/index.ts";
@@ -18,9 +19,7 @@ const RED = { x: 1, y: 0, z: 0, w: 1 };
 const ZERO_UV = { s: 0, t: 0, s2: 0, t2: 0 };
 const f = Math.fround;
 
-export type ClientDrawStatusVariant =
-  | { readonly kind: "baseq3" }
-  | { readonly kind: "missionpack"; readonly fonts: FontSet };
+export type ClientDrawStatusVariant = { readonly kind: "baseq3" } | { readonly kind: "missionpack"; readonly fonts: FontSet };
 
 export type ClientDrawStatusCvar = "cg_centertime" | "cg_lagometer" | "cg_nopredict" | "g_synchronousClients";
 
@@ -35,7 +34,8 @@ export interface LagometerSnapshotSample {
 }
 
 function sourceText(input: string): string {
-  const nul = input.indexOf("\0"), text = nul < 0 ? input : input.slice(0, nul);
+  const nul = input.indexOf("\0"),
+    text = nul < 0 ? input : input.slice(0, nul);
   for (let index = 0; index < text.length; index++) {
     if (text.charCodeAt(index) > 255) throw new RangeError("Center print requires source byte characters");
   }
@@ -100,15 +100,23 @@ export class ClientDrawStatus {
         const width = textWidth(this.variant.fonts, line, 0.5, 0);
         const height = textHeight(this.variant.fonts, line, 0.5, 0);
         const x = Math.trunc((640 - width) / 2);
-        textPaint(this.tools.draw, this.variant.fonts, { x, y: (y + height) | 0, scale: 0.5, color,
-          text: line, adjust: 0, limit: 0, style: 6 });
+        textPaint(this.tools.draw, this.variant.fonts, { x, y: (y + height) | 0, scale: 0.5, color, text: line, adjust: 0, limit: 0, style: 6 });
         y = (y + height + 6) | 0;
       } else {
         const width = Math.imul(state.centerPrintCharWidth, drawStrlen(line));
         const x = Math.trunc((640 - width) / 2);
         const height = Math.trunc(f(f(state.centerPrintCharWidth) * f(1.5)));
-        this.tools.drawStringExt({ x, y, text: line, color, forceColor: false, shadow: true,
-          charWidth: state.centerPrintCharWidth, charHeight: height, maxChars: 0 });
+        this.tools.drawStringExt({
+          x,
+          y,
+          text: line,
+          color,
+          forceColor: false,
+          shadow: true,
+          charWidth: state.centerPrintCharWidth,
+          charHeight: height,
+          maxChars: 0,
+        });
         y = Math.trunc(f(f(y) + f(f(state.centerPrintCharWidth) * f(1.5))));
       }
       if (end === state.centerPrint.length) break;
@@ -152,23 +160,32 @@ export class ClientDrawStatus {
       await this.drawDisconnect();
       return;
     }
-    const x = 640 - 48, y = this.state.product === "missionpack" ? 480 - 144 : 480 - 48;
+    const x = 640 - 48,
+      y = this.state.product === "missionpack" ? 480 - 144 : 480 - 48;
     this.tools.draw.setColor(null);
     this.tools.drawPic({ x, y, width: 48, height: 48 }, this.tools.media.graphics.lagometerShader);
     const adjusted = this.tools.adjustFrom640({ x, y, width: 48, height: 48 });
     const picture = this.tools.media.resources.picture(this.tools.media.graphics.whiteShader);
     let color = -1;
-    let range = f(adjusted.height / 3), mid = f(adjusted.y + range), scale = f(range / MAX_LAGOMETER_RANGE);
+    let range = f(adjusted.height / 3),
+      mid = f(adjusted.y + range),
+      scale = f(range / MAX_LAGOMETER_RANGE);
     for (let a = 0; a < adjusted.width; a++) {
       const index = (this.frameCount - 1 - a) & (LAG_SAMPLES - 1);
       let value = f(sampleAt(this.frameSamples, index));
       value = f(value * scale);
       if (value > 0) {
-        if (color !== 1) { color = 1; this.tools.draw.setColor(YELLOW); }
+        if (color !== 1) {
+          color = 1;
+          this.tools.draw.setColor(YELLOW);
+        }
         if (value > range) value = range;
         this.tools.draw.stretchPixels({ x: f(f(adjusted.x + adjusted.width) - f(a)), y: f(mid - value), width: 1, height: value }, ZERO_UV, picture);
       } else if (value < 0) {
-        if (color !== 2) { color = 2; this.tools.draw.setColor(BLUE); }
+        if (color !== 2) {
+          color = 2;
+          this.tools.draw.setColor(BLUE);
+        }
         value = f(-value);
         if (value > range) value = range;
         this.tools.draw.stretchPixels({ x: f(f(adjusted.x + adjusted.width) - f(a)), y: mid, width: 1, height: value }, ZERO_UV, picture);
@@ -181,19 +198,35 @@ export class ClientDrawStatus {
       let value = f(sampleAt(this.snapshotSamples, index));
       if (value > 0) {
         if ((sampleAt(this.snapshotFlags, index) & 1) !== 0) {
-          if (color !== 5) { color = 5; this.tools.draw.setColor(YELLOW); }
-        } else if (color !== 3) { color = 3; this.tools.draw.setColor(GREEN); }
+          if (color !== 5) {
+            color = 5;
+            this.tools.draw.setColor(YELLOW);
+          }
+        } else if (color !== 3) {
+          color = 3;
+          this.tools.draw.setColor(GREEN);
+        }
         value = f(value * scale);
         if (value > range) value = range;
-        this.tools.draw.stretchPixels({ x: f(f(adjusted.x + adjusted.width) - f(a)), y: f(f(adjusted.y + adjusted.height) - value), width: 1, height: value }, ZERO_UV, picture);
+        this.tools.draw.stretchPixels(
+          { x: f(f(adjusted.x + adjusted.width) - f(a)), y: f(f(adjusted.y + adjusted.height) - value), width: 1, height: value },
+          ZERO_UV,
+          picture,
+        );
       } else if (value < 0) {
-        if (color !== 4) { color = 4; this.tools.draw.setColor(RED); }
-        this.tools.draw.stretchPixels({ x: f(f(adjusted.x + adjusted.width) - f(a)), y: f(f(adjusted.y + adjusted.height) - range), width: 1, height: range }, ZERO_UV, picture);
+        if (color !== 4) {
+          color = 4;
+          this.tools.draw.setColor(RED);
+        }
+        this.tools.draw.stretchPixels(
+          { x: f(f(adjusted.x + adjusted.width) - f(a)), y: f(f(adjusted.y + adjusted.height) - range), width: 1, height: range },
+          ZERO_UV,
+          picture,
+        );
       }
     }
     this.tools.draw.setColor(null);
-    if (this.host.readVmCvar("cg_nopredict").integerValue !== 0
-      || this.host.readVmCvar("g_synchronousClients").integerValue !== 0) {
+    if (this.host.readVmCvar("cg_nopredict").integerValue !== 0 || this.host.readVmCvar("g_synchronousClients").integerValue !== 0) {
       this.tools.drawBigString(Math.trunc(adjusted.x), Math.trunc(adjusted.y), "snc", 1);
     }
     await this.drawDisconnect();

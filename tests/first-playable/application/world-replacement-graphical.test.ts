@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,12 +13,30 @@ const test = corpusTest("q1/id1/pak0.pak");
 
 test("six map changes with a local seat on the hidden CPU renderer carry presentation, assets and input over and release the old world", async () => {
   const root = await mkdtemp(join(tmpdir(), "graphical-travel-"));
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1", "--map", "e1m1", "--mode", "singleplayer",
-    "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q1-classic-id1",
+    "--map",
+    "e1m1",
+    "--mode",
+    "singleplayer",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+    "--user-content-root",
+    root,
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
   try {
-    const seat = app.localPlayers[0]?.seat.id, window = app.window;
+    const seat = app.localPlayers[0]?.seat.id,
+      window = app.window;
     if (seat === undefined) throw new Error("Missing local player");
     if (window === null) throw new Error("Missing hidden window");
     const renderer = readObject(readObject(app, "graphical"), "renderer");
@@ -31,31 +50,51 @@ test("six map changes with a local seat on the hidden CPU renderer carry present
     const released: { readonly name: string; readonly ref: WeakRef<object> }[] = [];
     const remember = (): void => {
       const graphical = readObject(app, "graphical");
-      released.push({ name: "simulation", ref: new WeakRef(app.simulation) }, { name: "assets", ref: new WeakRef(readObject(graphical, "assets")) },
-        { name: "input", ref: new WeakRef(readObject(graphical, "input")) }, { name: "presentation", ref: new WeakRef(app.localPlayers[0]?.seat.presentation ?? graphical) });
+      released.push(
+        { name: "simulation", ref: new WeakRef(app.simulation) },
+        { name: "assets", ref: new WeakRef(readObject(graphical, "assets")) },
+        { name: "input", ref: new WeakRef(readObject(graphical, "input")) },
+        { name: "presentation", ref: new WeakRef(app.localPlayers[0]?.seat.presentation ?? graphical) },
+      );
     };
     // Only booleans leave this helper, so the test itself never keeps a previous world reachable.
-    const travel = async (map: string): Promise<{ assets: boolean; input: boolean; renderer: boolean; window: boolean; seat: boolean; map: boolean; drawn: boolean }> => {
+    const travel = async (
+      map: string,
+    ): Promise<{ assets: boolean; input: boolean; renderer: boolean; window: boolean; seat: boolean; map: boolean; drawn: boolean }> => {
       remember();
-      const previous = readObject(app, "graphical"), previousAssets = readObject(previous, "assets"), previousInput = readObject(previous, "input");
+      const previous = readObject(app, "graphical"),
+        previousAssets = readObject(previous, "assets"),
+        previousInput = readObject(previous, "input");
       app.queueCommand("map", [map], null);
       for (let frame = 0; frame < 5; frame++) await app.step(50);
       const current = readObject(app, "graphical");
-      const captured = app.captureNextFrame(); await app.step(1);
-      return { assets: readObject(current, "assets") !== previousAssets, input: readObject(current, "input") !== previousInput,
-        renderer: readObject(current, "renderer") === renderer, window: app.window === window,
+      const captured = app.captureNextFrame();
+      await app.step(1);
+      return {
+        assets: readObject(current, "assets") !== previousAssets,
+        input: readObject(current, "input") !== previousInput,
+        renderer: readObject(current, "renderer") === renderer,
+        window: app.window === window,
         seat: app.localPlayers.length === 1 && app.localPlayers[0]?.seat.id.equals(seat) === true,
-        map: app.simulation.recipe.map.geometry.requestedPath.includes(map), drawn: (await captured).some(byte => byte !== 0) };
+        map: app.simulation.recipe.map.geometry.requestedPath.includes(map),
+        drawn: (await captured).some(byte => byte !== 0),
+      };
     };
     for (const map of ["e1m2", "e1m1", "e1m2", "e1m1", "e1m2", "e1m1"]) {
       expect(await travel(map)).toEqual({ assets: true, input: true, renderer: true, window: true, seat: true, map: true, drawn: true });
       expect(preferences()).toBe(preferencesBefore);
     }
-    for (let round = 0; round < 8; round++) { await Bun.sleep(25); Bun.gc(true); }
+    for (let round = 0; round < 8; round++) {
+      await Bun.sleep(25);
+      Bun.gc(true);
+    }
     // Every tracked world is a previous one: none may survive a full collection.
     for (const name of ["simulation", "assets", "input", "presentation"]) {
       const alive = released.filter(entry => entry.name === name && entry.ref.deref() !== undefined).length;
       expect(`${name}:${alive}`).toBe(`${name}:0`);
     }
-  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
 }, 240000);

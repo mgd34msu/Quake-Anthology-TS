@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { FogVolume } from "../../../materials/fog.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 // Cgame submissions translated into the shared scene model. GPL-2.0-or-later.
@@ -15,8 +16,12 @@ import type { DynamicLight } from "./scene-host.ts";
 
 class SceneAdmissionIdentity {
   readonly #token = Symbol("q3-scene-admission");
-  constructor(readonly origin: "native" | "mixed") { Object.freeze(this); }
-  equals(other: SceneAdmissionIdentity): boolean { return this.#token === other.#token; }
+  constructor(readonly origin: "native" | "mixed") {
+    Object.freeze(this);
+  }
+  equals(other: SceneAdmissionIdentity): boolean {
+    return this.#token === other.#token;
+  }
 }
 export type Q3SceneAdmissionId = SceneAdmissionIdentity;
 export interface Q3SceneAdmission {
@@ -24,28 +29,54 @@ export interface Q3SceneAdmission {
   readonly entities: readonly Q3AdmittedRefEntity[];
   readonly polygons: readonly Q3AdmittedPoly[];
 }
-export function snapshotQ3SceneAdmission(origin: Q3SceneAdmissionId["origin"], entities: readonly Q3AdmittedRefEntity[], polygons: readonly Q3AdmittedPoly[]): Q3SceneAdmission {
+export function snapshotQ3SceneAdmission(
+  origin: Q3SceneAdmissionId["origin"],
+  entities: readonly Q3AdmittedRefEntity[],
+  polygons: readonly Q3AdmittedPoly[],
+): Q3SceneAdmission {
   return Object.freeze({ id: new SceneAdmissionIdentity(origin), entities: Object.freeze([...entities]), polygons: Object.freeze([...polygons]) });
 }
-export interface Q3FogSelection { readonly index: number; readonly volume: FogVolume; }
-export interface Q3AdmittedPoly extends RefPoly { readonly fog: Q3FogSelection | null; }
+export interface Q3FogSelection {
+  readonly index: number;
+  readonly volume: FogVolume;
+}
+export interface Q3AdmittedPoly extends RefPoly {
+  readonly fog: Q3FogSelection | null;
+}
 export function admitQ3Poly(poly: RefPoly, fogs: readonly Q3FogSelection[]): Q3AdmittedPoly {
-  const copied = copyRefPoly(poly), first = copied.vertices[0];
+  const copied = copyRefPoly(poly),
+    first = copied.vertices[0];
   if (fogs.length === 0) return { ...copied, fog: null };
   if (first === undefined) throw new RangeError("Source polygon fog requires its first admitted vertex");
-  const min = { ...first.position }, max = { ...first.position };
+  const min = { ...first.position },
+    max = { ...first.position };
   for (const { position } of copied.vertices) {
-    min.x = Math.min(min.x, position.x); min.y = Math.min(min.y, position.y); min.z = Math.min(min.z, position.z);
-    max.x = Math.max(max.x, position.x); max.y = Math.max(max.y, position.y); max.z = Math.max(max.z, position.z);
+    min.x = Math.min(min.x, position.x);
+    min.y = Math.min(min.y, position.y);
+    min.z = Math.min(min.z, position.z);
+    max.x = Math.max(max.x, position.x);
+    max.y = Math.max(max.y, position.y);
+    max.z = Math.max(max.z, position.z);
   }
-  const fog = fogs.find(({ volume: { bounds } }) => max.x >= bounds.min.x && max.y >= bounds.min.y && max.z >= bounds.min.z
-    && min.x <= bounds.max.x && min.y <= bounds.max.y && min.z <= bounds.max.z) ?? null;
+  const fog =
+    fogs.find(
+      ({ volume: { bounds } }) =>
+        max.x >= bounds.min.x && max.y >= bounds.min.y && max.z >= bounds.min.z && min.x <= bounds.max.x && min.y <= bounds.max.y && min.z <= bounds.max.z,
+    ) ?? null;
   return { ...copied, fog };
 }
 export function q3ProceduralFog(origin: Vec3, radius: number, fogs: readonly Q3FogSelection[]): Q3FogSelection | null {
-  return fogs.find(({ volume: { bounds } }) => origin.x - radius < bounds.max.x && origin.x + radius > bounds.min.x
-    && origin.y - radius < bounds.max.y && origin.y + radius > bounds.min.y
-    && origin.z - radius < bounds.max.z && origin.z + radius > bounds.min.z) ?? null;
+  return (
+    fogs.find(
+      ({ volume: { bounds } }) =>
+        origin.x - radius < bounds.max.x &&
+        origin.x + radius > bounds.min.x &&
+        origin.y - radius < bounds.max.y &&
+        origin.y + radius > bounds.min.y &&
+        origin.z - radius < bounds.max.z &&
+        origin.z + radius > bounds.min.z,
+    ) ?? null
+  );
 }
 
 export type Q3GeometryAdmission = { readonly kind: "refentity"; readonly index: number } | { readonly kind: "polygon"; readonly index: number };
@@ -69,14 +100,26 @@ export interface PresentedModel {
 export function prepareQ3Model(entity: RefModelEntity, actor: ActorId | null, entityIndex = 0): PresentedModel | null {
   const model = entity.model;
   if (model.kind === "default") return null;
-  return { entityIndex, entity: {
-          actor: actor, resource: model.resource, model: model.kind === "inline" ? { kind: "brush-model", world: model.geometry, model: model.index } : model.model,
-          transform: { origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, previousOrigin: entity.oldOrigin,
-          pose: { kind: "frame", frame: entity.frame, previousFrame: entity.oldFrame, backLerp: entity.backLerp }, skin: entity.skinNum,
-          color: { x: entity.shaderRGBA.x / 255, y: entity.shaderRGBA.y / 255, z: entity.shaderRGBA.z / 255, w: entity.shaderRGBA.w / 255 },
-          shaderTime: { kind: "seconds", value: entity.shaderTime }, flags: { kind: "q3", bits: entity.renderFlags },
-          lightingOrigin: entity.lightingOrigin, shadowPlane: entity.shadowPlane, attachments: [],
-        }, source: entity, options: { customShader: entity.customShader?.name ?? null, customSkin: entity.customSkin?.surfaces ?? null, nonNormalizedAxes: entity.nonNormalizedAxes } };
+  return {
+    entityIndex,
+    entity: {
+      actor: actor,
+      resource: model.resource,
+      model: model.kind === "inline" ? { kind: "brush-model", world: model.geometry, model: model.index } : model.model,
+      transform: { origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } },
+      previousOrigin: entity.oldOrigin,
+      pose: { kind: "frame", frame: entity.frame, previousFrame: entity.oldFrame, backLerp: entity.backLerp },
+      skin: entity.skinNum,
+      color: { x: entity.shaderRGBA.x / 255, y: entity.shaderRGBA.y / 255, z: entity.shaderRGBA.z / 255, w: entity.shaderRGBA.w / 255 },
+      shaderTime: { kind: "seconds", value: entity.shaderTime },
+      flags: { kind: "q3", bits: entity.renderFlags },
+      lightingOrigin: entity.lightingOrigin,
+      shadowPlane: entity.shadowPlane,
+      attachments: [],
+    },
+    source: entity,
+    options: { customShader: entity.customShader?.name ?? null, customSkin: entity.customSkin?.surfaces ?? null, nonNormalizedAxes: entity.nonNormalizedAxes },
+  };
 }
 
 export interface PresentedGeometry {
@@ -117,7 +160,11 @@ export class Q3SceneRecorder {
   private readonly polygons: Q3AdmittedPoly[] = [];
   private readonly lights: SceneLight[] = [];
   constructor(readonly target: Q3SceneTarget) {}
-  clearScene(): void { this.entities.length = 0; this.polygons.length = 0; this.lights.length = 0; }
+  clearScene(): void {
+    this.entities.length = 0;
+    this.polygons.length = 0;
+    this.lights.length = 0;
+  }
   private rejected = false;
   /** A server controls these values through entity state, and one bad record must not end the frame. */
   private reject(what: string): void {
@@ -126,28 +173,52 @@ export class Q3SceneRecorder {
     this.target.print(`^3WARNING: ${what}: non-finite or out-of-range coordinates, dropped\n`);
   }
   addRefEntity(entity: Q3AdmittedRefEntity): void {
-    if (!refEntityIsAdmissible(entity)) { this.reject("RE_AddRefEntityToScene"); return; }
+    if (!refEntityIsAdmissible(entity)) {
+      this.reject("RE_AddRefEntityToScene");
+      return;
+    }
     this.entities.push(copyRefEntity(entity));
   }
   addPoly(poly: RefPoly): void {
-    if (poly.shader === null) { this.target.print("^3WARNING: RE_AddPolyToScene: NULL poly shader\n"); return; }
-    if (!refPolyIsAdmissible(poly)) { this.reject("RE_AddPolyToScene"); return; }
+    if (poly.shader === null) {
+      this.target.print("^3WARNING: RE_AddPolyToScene: NULL poly shader\n");
+      return;
+    }
+    if (!refPolyIsAdmissible(poly)) {
+      this.reject("RE_AddPolyToScene");
+      return;
+    }
     this.polygons.push(admitQ3Poly(poly, this.target.fogSelections()));
   }
   addLight(light: DynamicLight): void {
-    if (!Number.isFinite(light.origin.x + light.origin.y + light.origin.z + light.radius + light.color.x + light.color.y + light.color.z)) { this.reject("RE_AddLightToScene"); return; }
-    this.lights.push({ ...light, origin: { ...light.origin }, color: { ...light.color }, additive: light.additive ?? false, profile: { kind: "q3" } }); }
+    if (!Number.isFinite(light.origin.x + light.origin.y + light.origin.z + light.radius + light.color.x + light.color.y + light.color.z)) {
+      this.reject("RE_AddLightToScene");
+      return;
+    }
+    this.lights.push({ ...light, origin: { ...light.origin }, color: { ...light.color }, additive: light.additive ?? false, profile: { kind: "q3" } });
+  }
   capture(): Q3SceneContent {
     const admission = snapshotQ3SceneAdmission("native", this.entities, this.polygons);
-    const models: PresentedModel[] = [], effects: PresentedGeometry[] = [], portals: PresentedPortal[] = [];
+    const models: PresentedModel[] = [],
+      effects: PresentedGeometry[] = [],
+      portals: PresentedPortal[] = [];
     const specialEntities: PresentedSpecialEntity[] = [];
     for (const [entityIndex, entity] of admission.entities.entries()) {
       if (entity.kind === "poly") continue;
-      if (entity.kind === "portal-surface") { portals.push({ entityIndex, source: entity }); continue; }
-      if (entity.kind === "beam") { specialEntities.push({ entityIndex, source: entity }); continue; }
+      if (entity.kind === "portal-surface") {
+        portals.push({ entityIndex, source: entity });
+        continue;
+      }
+      if (entity.kind === "beam") {
+        specialEntities.push({ entityIndex, source: entity });
+        continue;
+      }
       if (entity.kind === "model") {
         const model = entity.model;
-        if (model.kind === "default") { specialEntities.push({ entityIndex, source: entity }); continue; }
+        if (model.kind === "default") {
+          specialEntities.push({ entityIndex, source: entity });
+          continue;
+        }
         const prepared = prepareQ3Model(entity, this.target.actor(entity), entityIndex);
         if (prepared !== null) models.push(prepared);
         continue;
@@ -158,10 +229,21 @@ export class Q3SceneRecorder {
     return { admission, models, effects, portals, specialEntities, lights: this.lights.slice() };
   }
   renderScene(input: Refdef): void {
-    const source = copyRefdef(input), content = this.capture();
-    const camera: SceneCamera = { viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y, width: source.width, height: source.height }, origin: source.viewOrigin, axis: source.viewAxis,
-      projection: perspectiveProjection(source.fovX, source.fovY, this.target.farClip, this.target.nearClip), clip: { kind: "none" } };
-    this.target.publish({ ...content, seat: this.target.seat, viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y,
-      width: source.width, height: source.height }, camera, source });
+    const source = copyRefdef(input),
+      content = this.capture();
+    const camera: SceneCamera = {
+      viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y, width: source.width, height: source.height },
+      origin: source.viewOrigin,
+      axis: source.viewAxis,
+      projection: perspectiveProjection(source.fovX, source.fovY, this.target.farClip, this.target.nearClip),
+      clip: { kind: "none" },
+    };
+    this.target.publish({
+      ...content,
+      seat: this.target.seat,
+      viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y, width: source.width, height: source.height },
+      camera,
+      source,
+    });
   }
 }

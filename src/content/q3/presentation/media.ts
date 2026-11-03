@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Registration from id Software's code/cgame/cg_main.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -151,8 +152,26 @@ export class ClientMediaGraphics {
   charsetProp: SceneShader | null = null;
   charsetPropGlow: SceneShader | null = null;
   charsetPropB: SceneShader | null = null;
-  readonly numberShaders: [SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null] = [null, null, null, null, null, null, null, null, null, null, null];
-  readonly botSkillShaders: [SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null] = [null, null, null, null, null];
+  readonly numberShaders: [
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+  ] = [null, null, null, null, null, null, null, null, null, null, null];
+  readonly botSkillShaders: [SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null] = [
+    null,
+    null,
+    null,
+    null,
+    null,
+  ];
   viewBloodShader: SceneShader | null = null;
   deferShader: SceneShader | null = null;
   scoreboardName: SceneShader | null = null;
@@ -171,7 +190,18 @@ export class ClientMediaGraphics {
   waterBubbleShader: SceneShader | null = null;
   tracerShader: SceneShader | null = null;
   selectShader: SceneShader | null = null;
-  readonly crosshairShader: [SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null, SceneShader | null] = [null, null, null, null, null, null, null, null, null, null];
+  readonly crosshairShader: [
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+    SceneShader | null,
+  ] = [null, null, null, null, null, null, null, null, null, null];
   backTileShader: SceneShader | null = null;
   noammoShader: SceneShader | null = null;
   quadShader: SceneShader | null = null;
@@ -274,7 +304,9 @@ export class ClientMediaGraphics {
   selectCursor: SceneShader | null = null;
   readonly flagShaders: [SceneShader | null, SceneShader | null, SceneShader | null] = [null, null, null];
 }
-export interface ClientMediaSettings { readonly buildScript: boolean }
+export interface ClientMediaSettings {
+  readonly buildScript: boolean;
+}
 export interface ClientMediaHost {
   readonly state: ClientGameState;
   readonly staticState: ClientGameStaticState;
@@ -289,7 +321,10 @@ export interface ClientMediaHost {
   loadingClient(index: number): Promise<void>;
   clearScene(): void;
 }
-export interface RegisteredClientGraphics { readonly world: WorldScene; readonly particleAnimations: ParticleAnimations }
+export interface RegisteredClientGraphics {
+  readonly world: WorldScene;
+  readonly particleAnimations: ParticleAnimations;
+}
 type Footsteps = "normal" | "boot" | "flesh" | "mech" | "energy" | "splash" | "metal";
 type FootstepSounds = [PcmSound | null, PcmSound | null, PcmSound | null, PcmSound | null];
 
@@ -299,11 +334,21 @@ export class ClientMedia {
   readonly graphics = new ClientMediaGraphics();
   readonly weaponRegistry: ClientWeaponMediaRegistry;
   readonly footsteps: Record<Footsteps, FootstepSounds> = {
-    normal: [null, null, null, null], boot: [null, null, null, null], flesh: [null, null, null, null], mech: [null, null, null, null],
-    energy: [null, null, null, null], splash: [null, null, null, null], metal: [null, null, null, null],
+    normal: [null, null, null, null],
+    boot: [null, null, null, null],
+    flesh: [null, null, null, null],
+    mech: [null, null, null, null],
+    energy: [null, null, null, null],
+    splash: [null, null, null, null],
+    metal: [null, null, null, null],
   };
   readonly inlineModels: { readonly model: SceneModel; readonly midpoint: Vec3 }[] = [{ model: DEFAULT_MODEL, midpoint: vec3(0, 0, 0) }];
-  constructor(readonly product: Product, readonly staticState: ClientGameStaticState, readonly resources: RendererResources, readonly soundBank: ClientSoundBank) {
+  constructor(
+    readonly product: Product,
+    readonly staticState: ClientGameStaticState,
+    readonly resources: RendererResources,
+    readonly soundBank: ClientSoundBank,
+  ) {
     if (product !== staticState.product) throw new Error("Client media product differs from cgs");
     this.weaponRegistry = new ClientWeaponMediaRegistry(product, resources, soundBank);
   }
@@ -311,79 +356,146 @@ export class ClientMedia {
   get events(): ClientEventMedia {
     return { sounds: this.sounds, footsteps: this.footsteps, gameSounds: this.staticState.gameSounds, smokePuffShader: this.graphics.smokePuffShader };
   }
-  get players(): PlayerMedia { return { ...this.graphics, flightSound: this.sounds.flightSound }; }
+  get players(): PlayerMedia {
+    return { ...this.graphics, flightSound: this.sounds.flightSound };
+  }
   get missionPlayers(): MissionPlayerMedia {
     if (this.product !== "missionpack") throw new Error("Mission player media requested in baseq3");
     return this.graphics;
   }
   get packet(): PacketEntityMedia {
-    const g = this.graphics, s = this.sounds;
+    const g = this.graphics,
+      s = this.sounds;
     return {
-      gameModels: this.staticState.gameModels, gameSounds: this.staticState.gameSounds, inlineModels: this.inlineModels,
-      items: this.weaponRegistry.items, weapons: this.weaponRegistry.weapons, plasmaBallShader: g.plasmaBallShader,
-      redFlagBaseModel: g.redFlagBaseModel, blueFlagBaseModel: g.blueFlagBaseModel, neutralFlagBaseModel: g.neutralFlagBaseModel,
-      variant: this.product === "baseq3" ? { product: "baseq3" } : {
-        product: "missionpack", media: {
-          ...g, weaponHoverSound: s.weaponHoverSound, obeliskRespawnSound: s.obeliskRespawnSound,
-        }
-      },
+      gameModels: this.staticState.gameModels,
+      gameSounds: this.staticState.gameSounds,
+      inlineModels: this.inlineModels,
+      items: this.weaponRegistry.items,
+      weapons: this.weaponRegistry.weapons,
+      plasmaBallShader: g.plasmaBallShader,
+      redFlagBaseModel: g.redFlagBaseModel,
+      blueFlagBaseModel: g.blueFlagBaseModel,
+      neutralFlagBaseModel: g.neutralFlagBaseModel,
+      variant:
+        this.product === "baseq3"
+          ? { product: "baseq3" }
+          : {
+              product: "missionpack",
+              media: {
+                ...g,
+                weaponHoverSound: s.weaponHoverSound,
+                obeliskRespawnSound: s.obeliskRespawnSound,
+              },
+            },
     };
   }
   get effects(): EffectMedia {
-    const g = this.graphics, s = this.sounds, weaponEffects = this.weaponRegistry.effects;
+    const g = this.graphics,
+      s = this.sounds,
+      weaponEffects = this.weaponRegistry.effects;
     return {
-      ...g, variant: this.product === "baseq3" ? { product: "baseq3", teleportEffectShader: g.teleportEffectShader }
-        : {
-          product: "missionpack", media: {
-            ...g,
-            get lightningShader() { return weaponEffects.lightningShader; },
-            get rocketExplosionShader() { return weaponEffects.rocketExplosionShader; },
-            obeliskHitSounds: [s.obeliskHitSound1, s.obeliskHitSound2, s.obeliskHitSound3],
-            invulnerabilityImpactSounds: [s.invulnerabilityImpactSound1, s.invulnerabilityImpactSound2, s.invulnerabilityImpactSound3],
-            invulnerabilityJuicedSound: s.invulnerabilityJuicedSound,
-          }
-        },
+      ...g,
+      variant:
+        this.product === "baseq3"
+          ? { product: "baseq3", teleportEffectShader: g.teleportEffectShader }
+          : {
+              product: "missionpack",
+              media: {
+                ...g,
+                get lightningShader() {
+                  return weaponEffects.lightningShader;
+                },
+                get rocketExplosionShader() {
+                  return weaponEffects.rocketExplosionShader;
+                },
+                obeliskHitSounds: [s.obeliskHitSound1, s.obeliskHitSound2, s.obeliskHitSound3],
+                invulnerabilityImpactSounds: [s.invulnerabilityImpactSound1, s.invulnerabilityImpactSound2, s.invulnerabilityImpactSound3],
+                invulnerabilityJuicedSound: s.invulnerabilityJuicedSound,
+              },
+            },
     };
   }
   get particles(): ParticleMedia {
     return {
-      tracerShader: this.graphics.tracerShader, smokePuffShader: this.graphics.smokePuffShader,
-      waterBubbleShader: this.graphics.waterBubbleShader
+      tracerShader: this.graphics.tracerShader,
+      smokePuffShader: this.graphics.smokePuffShader,
+      waterBubbleShader: this.graphics.waterBubbleShader,
     };
   }
-  get localEntities(): { readonly product: "baseq3"; readonly media: LocalEntityMedia } | { readonly product: "missionpack"; readonly media: MissionLocalEntityMedia } {
-    const g = this.graphics, s = this.sounds, n = g.numberShaders;
+  get localEntities():
+    | { readonly product: "baseq3"; readonly media: LocalEntityMedia }
+    | { readonly product: "missionpack"; readonly media: MissionLocalEntityMedia } {
+    const g = this.graphics,
+      s = this.sounds,
+      n = g.numberShaders;
     const media: LocalEntityMedia = {
-      bloodTrailShader: g.bloodTrailShader, bloodMarkShader: g.bloodMarkShader, burnMarkShader: g.burnMarkShader,
+      bloodTrailShader: g.bloodTrailShader,
+      bloodMarkShader: g.bloodMarkShader,
+      burnMarkShader: g.burnMarkShader,
       numberShaders: n,
       gibBounceSounds: [s.gibBounce1Sound, s.gibBounce2Sound, s.gibBounce3Sound],
     };
-    return this.product === "baseq3" ? { product: "baseq3", media } : {
-      product: "missionpack", media: {
-        ...media, kamikazeShockWave: g.kamikazeShockWave, kamikazeExplodeSound: s.kamikazeExplodeSound, kamikazeImplodeSound: s.kamikazeImplodeSound,
-      }
-    };
+    return this.product === "baseq3"
+      ? { product: "baseq3", media }
+      : {
+          product: "missionpack",
+          media: {
+            ...media,
+            kamikazeShockWave: g.kamikazeShockWave,
+            kamikazeExplodeSound: s.kamikazeExplodeSound,
+            kamikazeImplodeSound: s.kamikazeImplodeSound,
+          },
+        };
   }
   get weapons(): WeaponPresentationMedia {
-    const g = this.graphics, s = this.sounds;
+    const g = this.graphics,
+      s = this.sounds;
     return {
-      models: { machinegunBrass: g.machinegunBrassModel, shotgunBrass: g.shotgunBrassModel, dishFlash: g.dishFlashModel, ringFlash: g.ringFlashModel, bulletFlash: g.bulletFlashModel },
+      models: {
+        machinegunBrass: g.machinegunBrassModel,
+        shotgunBrass: g.shotgunBrassModel,
+        dishFlash: g.dishFlashModel,
+        ringFlash: g.ringFlashModel,
+        bulletFlash: g.bulletFlashModel,
+      },
       shaders: {
-        smokePuff: g.smokePuffShader, nailPuff: g.nailPuffShader, shotgunSmokePuff: g.shotgunSmokePuffShader, invis: g.invisShader,
-        battleWeapon: g.battleWeaponShader, quadWeapon: g.quadWeaponShader, select: g.selectShader, noammo: g.noammoShader,
-        holeMark: g.holeMarkShader, burnMark: g.burnMarkShader, energyMark: g.energyMarkShader, bulletMark: g.bulletMarkShader, tracer: g.tracerShader
+        smokePuff: g.smokePuffShader,
+        nailPuff: g.nailPuffShader,
+        shotgunSmokePuff: g.shotgunSmokePuffShader,
+        invis: g.invisShader,
+        battleWeapon: g.battleWeaponShader,
+        quadWeapon: g.quadWeaponShader,
+        select: g.selectShader,
+        noammo: g.noammoShader,
+        holeMark: g.holeMarkShader,
+        burnMark: g.burnMarkShader,
+        energyMark: g.energyMarkShader,
+        bulletMark: g.bulletMarkShader,
+        tracer: g.tracerShader,
       },
       sounds: {
-        quad: s.quadSound, nailHitFlesh: s.sfx_nghitflesh, nailHitMetal: s.sfx_nghitmetal, nailHit: s.sfx_nghit, proxExplosion: s.sfx_proxexp,
-        rocketExplosion: s.sfx_rockexp, plasmaExplosion: s.sfx_plasmaexp, chaingunHitFlesh: s.sfx_chghitflesh, chaingunHitMetal: s.sfx_chghitmetal,
-        chaingunHit: s.sfx_chghit, ricochet1: s.sfx_ric1, ricochet2: s.sfx_ric2, ricochet3: s.sfx_ric3, tracer: s.tracerSound
+        quad: s.quadSound,
+        nailHitFlesh: s.sfx_nghitflesh,
+        nailHitMetal: s.sfx_nghitmetal,
+        nailHit: s.sfx_nghit,
+        proxExplosion: s.sfx_proxexp,
+        rocketExplosion: s.sfx_rockexp,
+        plasmaExplosion: s.sfx_plasmaexp,
+        chaingunHitFlesh: s.sfx_chghitflesh,
+        chaingunHitMetal: s.sfx_chghitmetal,
+        chaingunHit: s.sfx_chghit,
+        ricochet1: s.sfx_ric1,
+        ricochet2: s.sfx_ric2,
+        ricochet3: s.sfx_ric3,
+        tracer: s.tracerSound,
       },
     };
   }
 }
 
 function validate(media: ClientMedia, host: ClientMediaHost): void {
-  if (media.staticState !== host.staticState || media.product !== host.state.product) throw new Error("Client media registration requires its canonical cgame state");
+  if (media.staticState !== host.staticState || media.product !== host.state.product)
+    throw new Error("Client media registration requires its canonical cgame state");
 }
 
 function itemBits(host: ClientMediaHost): string {
@@ -418,7 +530,8 @@ export async function registerClientLoadingGraphics(media: ClientMedia): Promise
 
 export async function registerClientSounds(media: ClientMedia, host: ClientMediaHost): Promise<void> {
   validate(media, host);
-  const mission = media.product === "missionpack", gameType = media.staticState.gameType;
+  const mission = media.product === "missionpack",
+    gameType = media.staticState.gameType;
   if (mission) {
     await host.commands.loadVoiceChats();
   }
@@ -535,9 +648,10 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
   media.sounds.watrUnSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.watrUnSound, false);
   media.sounds.jumpPadSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.jumpPadSound, false);
 
-  for (let i = 0; i < 4; i++) for (const [footstep, name] of Q3_FOOTSTEP_PATHS) {
-    media.footsteps[footstep][i] = await media.soundBank.registerSound(`sound/player/footsteps/${name}${i + 1}.wav`, false);
-  }
+  for (let i = 0; i < 4; i++)
+    for (const [footstep, name] of Q3_FOOTSTEP_PATHS) {
+      media.footsteps[footstep][i] = await media.soundBank.registerSound(`sound/player/footsteps/${name}${i + 1}.wav`, false);
+    }
 
   // Source copies CS_ITEMS, but its sound filtering condition is commented out.
   itemBits(host);
@@ -549,7 +663,7 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
     if (soundName.length === 0) {
       break;
     }
-    if (soundName[0] === '*') {
+    if (soundName[0] === "*") {
       continue;
     }
     media.staticState.gameSounds[i] = await media.soundBank.registerSound(soundName, false);
@@ -617,11 +731,11 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
   }
 }
 
-
 /** CG_Init calls this once on its fresh media/weapon/item storage, not on map_restart. */
 export async function registerClientGraphics(media: ClientMedia, host: ClientMediaHost): Promise<RegisteredClientGraphics> {
   validate(media, host);
-  const mission = media.product === "missionpack", gameType = media.staticState.gameType;
+  const mission = media.product === "missionpack",
+    gameType = media.staticState.gameType;
   const resources = media.resources;
   host.state.refdef = createRefdef();
   host.clearScene();
@@ -669,13 +783,13 @@ export async function registerClientGraphics(media: ClientMedia, host: ClientMed
   media.graphics.invisShader = await resources.registerShader("powerups/invisibility");
   media.graphics.regenShader = await resources.registerShader("powerups/regen");
   media.graphics.hastePuffShader = await resources.registerShader("hasteSmokePuff");
-  if (gameType === GameType.GT_CTF || mission && (gameType === GameType.GT_1FCTF || gameType === GameType.GT_HARVESTER) || host.settings().buildScript) {
+  if (gameType === GameType.GT_CTF || (mission && (gameType === GameType.GT_1FCTF || gameType === GameType.GT_HARVESTER)) || host.settings().buildScript) {
     media.graphics.redCubeModel = await resources.registerModel("models/powerups/orb/r_orb.md3");
     media.graphics.blueCubeModel = await resources.registerModel("models/powerups/orb/b_orb.md3");
     media.graphics.redCubeIcon = await resources.registerShader("icons/skull_red");
     media.graphics.blueCubeIcon = await resources.registerShader("icons/skull_blue");
   }
-  if (gameType === GameType.GT_CTF || mission && (gameType === GameType.GT_1FCTF || gameType === GameType.GT_HARVESTER) || host.settings().buildScript) {
+  if (gameType === GameType.GT_CTF || (mission && (gameType === GameType.GT_1FCTF || gameType === GameType.GT_HARVESTER)) || host.settings().buildScript) {
     media.graphics.redFlagModel = await resources.registerModel("models/flags/r_flag.md3");
     media.graphics.blueFlagModel = await resources.registerModel("models/flags/b_flag.md3");
     media.graphics.redFlagShader[0] = await resources.registerShaderNoMip("icons/iconf_red1");
@@ -774,11 +888,9 @@ export async function registerClientGraphics(media: ClientMedia, host: ClientMed
   media.graphics.medalAssist = await resources.registerShaderNoMip("medal_assist");
   media.graphics.medalCapture = await resources.registerShaderNoMip("medal_capture");
 
-
-
   const items = itemBits(host);
   for (let i = 1; i < itemList(media.product).length; i++) {
-    if (items[i] === '1' || host.settings().buildScript) {
+    if (items[i] === "1" || host.settings().buildScript) {
       await host.loadingItem(i);
       await media.weaponRegistry.registerItemVisuals(i);
     }
@@ -797,7 +909,10 @@ export async function registerClientGraphics(media: ClientMedia, host: ClientMed
     const bounds = modelBounds(model);
     const f = Math.fround;
     const midpoint = (min: number, max: number): number => f(min + f(f(0.5) * f(max - min)));
-    media.inlineModels.push({ model, midpoint: vec3(midpoint(bounds.min.x, bounds.max.x), midpoint(bounds.min.y, bounds.max.y), midpoint(bounds.min.z, bounds.max.z)) });
+    media.inlineModels.push({
+      model,
+      midpoint: vec3(midpoint(bounds.min.x, bounds.max.x), midpoint(bounds.min.y, bounds.max.y), midpoint(bounds.min.z, bounds.max.z)),
+    });
   }
 
   for (let i = 1; i < 256; i++) {

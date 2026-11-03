@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from the reference port GPL-2.0-or-later. */
 
 export class BinaryError extends Error {
@@ -23,16 +24,21 @@ export class BinaryReader {
   /** Float reads are the only DataView users; section readers that only
    * slice or read integers never pay for constructing one. */
   private floatView(): DataView {
-    return this.view ??= new DataView(this.data.buffer, this.data.byteOffset, this.data.byteLength);
+    return (this.view ??= new DataView(this.data.buffer, this.data.byteOffset, this.data.byteLength));
   }
 
-  get offset(): number { return this.cursor; }
-  get length(): number { return this.data.byteLength; }
-  get remaining(): number { return this.length - this.cursor; }
+  get offset(): number {
+    return this.cursor;
+  }
+  get length(): number {
+    return this.data.byteLength;
+  }
+  get remaining(): number {
+    return this.length - this.cursor;
+  }
 
   private check(offset: number, length: number): void {
-    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)
-      || offset < 0 || length < 0 || offset > this.length - length) {
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset > this.length - length) {
       throw new BinaryError(this.source, offset, `range of ${length} bytes exceeds ${this.length}-byte input`);
     }
   }
@@ -49,15 +55,36 @@ export class BinaryReader {
     this.cursor = offset;
   }
 
-  skip(length: number): void { this.take(length); }
-  u8(): number { return this.data[this.take(1)] ?? 0; }
-  i8(): number { return (this.data[this.take(1)] ?? 0) << 24 >> 24; }
-  u16(): number { const o = this.take(2); return (this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8; }
-  i16(): number { return this.u16() << 16 >> 16; }
-  u32(): number { const o = this.take(4); return ((this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8 | (this.data[o + 2] ?? 0) << 16 | (this.data[o + 3] ?? 0) << 24) >>> 0; }
-  i32(): number { const o = this.take(4); return (this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8 | (this.data[o + 2] ?? 0) << 16 | (this.data[o + 3] ?? 0) << 24; }
-  f32(): number { return this.floatView().getFloat32(this.take(4), true); }
-  f64(): number { return this.floatView().getFloat64(this.take(8), true); }
+  skip(length: number): void {
+    this.take(length);
+  }
+  u8(): number {
+    return this.data[this.take(1)] ?? 0;
+  }
+  i8(): number {
+    return ((this.data[this.take(1)] ?? 0) << 24) >> 24;
+  }
+  u16(): number {
+    const o = this.take(2);
+    return (this.data[o] ?? 0) | ((this.data[o + 1] ?? 0) << 8);
+  }
+  i16(): number {
+    return (this.u16() << 16) >> 16;
+  }
+  u32(): number {
+    const o = this.take(4);
+    return ((this.data[o] ?? 0) | ((this.data[o + 1] ?? 0) << 8) | ((this.data[o + 2] ?? 0) << 16) | ((this.data[o + 3] ?? 0) << 24)) >>> 0;
+  }
+  i32(): number {
+    const o = this.take(4);
+    return (this.data[o] ?? 0) | ((this.data[o + 1] ?? 0) << 8) | ((this.data[o + 2] ?? 0) << 16) | ((this.data[o + 3] ?? 0) << 24);
+  }
+  f32(): number {
+    return this.floatView().getFloat32(this.take(4), true);
+  }
+  f64(): number {
+    return this.floatView().getFloat64(this.take(8), true);
+  }
 
   finiteF32(): number {
     const offset = this.cursor;
@@ -124,7 +151,9 @@ export class BinaryWriter {
     this.view = new DataView(this.data.buffer);
   }
 
-  get offset(): number { return this.cursor; }
+  get offset(): number {
+    return this.cursor;
+  }
 
   private take(length: number): number {
     if (!Number.isSafeInteger(length) || length < 0 || this.cursor > this.data.length - length) {
@@ -141,14 +170,40 @@ export class BinaryWriter {
     }
   }
 
-  u8(value: number): void { this.integer(value, 0, 255); this.view.setUint8(this.take(1), value); }
-  i8(value: number): void { this.integer(value, -128, 127); this.view.setInt8(this.take(1), value); }
-  u16(value: number): void { this.integer(value, 0, 65535); this.view.setUint16(this.take(2), value, true); }
-  i16(value: number): void { this.integer(value, -32768, 32767); this.view.setInt16(this.take(2), value, true); }
-  u32(value: number): void { this.integer(value, 0, 0xffffffff); this.view.setUint32(this.take(4), value, true); }
-  i32(value: number): void { this.integer(value, -0x80000000, 0x7fffffff); this.view.setInt32(this.take(4), value, true); }
-  f32(value: number): void { this.view.setFloat32(this.take(4), value, true); }
-  f64(value: number): void { this.view.setFloat64(this.take(8), value, true); }
-  bytes(value: Uint8Array): void { this.data.set(value, this.take(value.byteLength)); }
-  finish(): Uint8Array { return this.data.slice(0, this.cursor); }
+  u8(value: number): void {
+    this.integer(value, 0, 255);
+    this.view.setUint8(this.take(1), value);
+  }
+  i8(value: number): void {
+    this.integer(value, -128, 127);
+    this.view.setInt8(this.take(1), value);
+  }
+  u16(value: number): void {
+    this.integer(value, 0, 65535);
+    this.view.setUint16(this.take(2), value, true);
+  }
+  i16(value: number): void {
+    this.integer(value, -32768, 32767);
+    this.view.setInt16(this.take(2), value, true);
+  }
+  u32(value: number): void {
+    this.integer(value, 0, 0xffffffff);
+    this.view.setUint32(this.take(4), value, true);
+  }
+  i32(value: number): void {
+    this.integer(value, -0x80000000, 0x7fffffff);
+    this.view.setInt32(this.take(4), value, true);
+  }
+  f32(value: number): void {
+    this.view.setFloat32(this.take(4), value, true);
+  }
+  f64(value: number): void {
+    this.view.setFloat64(this.take(8), value, true);
+  }
+  bytes(value: Uint8Array): void {
+    this.data.set(value, this.take(value.byteLength));
+  }
+  finish(): Uint8Array {
+    return this.data.slice(0, this.cursor);
+  }
 }

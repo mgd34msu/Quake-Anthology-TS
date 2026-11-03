@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
-import { MovementBudget } from '../../../src/network/common/movement-budget.ts';
+// SPDX-License-Identifier: GPL-2.0-or-later
+import { expect, test } from "bun:test";
+import { MovementBudget } from "../../../src/network/common/movement-budget.ts";
 
-test('a burst of commands is limited to the time allowance and refills with wall time', () => {
+test("a burst of commands is limited to the time allowance and refills with wall time", () => {
   const budget = new MovementBudget();
   let admitted = 0;
   for (let index = 0; index < 23000; index++) if (budget.admit(255, 0)) admitted++;

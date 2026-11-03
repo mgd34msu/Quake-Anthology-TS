@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q2FogState, Q2RereleaseOptions, Q2RereleasePlayerState } from "./types.ts";
@@ -26,7 +27,12 @@ export interface Q2RereleaseModuleCheckpoint {
   readonly poi: { readonly actor: SavedActorId; readonly origin: Vec3; readonly image: string; readonly dynamic: SavedActorId | null } | null;
   readonly poiStage: number;
   readonly lastAutoSave: number;
-  readonly campaign: { readonly crossUnitFlags: number; readonly visitedMaps: readonly string[]; readonly levels: readonly Readonly<Q2RereleaseLevelEntry>[]; readonly mission: Readonly<Q2RereleaseCampaignState["mission"]> };
+  readonly campaign: {
+    readonly crossUnitFlags: number;
+    readonly visitedMaps: readonly string[];
+    readonly levels: readonly Readonly<Q2RereleaseLevelEntry>[];
+    readonly mission: Readonly<Q2RereleaseCampaignState["mission"]>;
+  };
   readonly healthBars: readonly ({ readonly controller: SavedActorId; readonly target: SavedActorId; readonly deadUntil: number | null } | null)[];
   readonly healthTargets: readonly { readonly controller: SavedActorId; readonly target: SavedActorId }[];
   readonly pickedUpBy: readonly { readonly actor: SavedActorId; readonly slots: readonly number[] }[];

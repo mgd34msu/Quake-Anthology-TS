@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -11,8 +12,7 @@ const fixtures = [
   { archive: "baseq2/pak0.pak", member: "maps/base1.bsp", format: "ibsp38", faces: 7905, leaves: 5238, extendedLighting: false },
   { archive: "rerelease/baseq2/pak0.pak", member: "maps/base1.bsp", format: "ibsp38", faces: 16787, leaves: 10336, extendedLighting: true },
   { archive: "rerelease/baseq2/pak0.pak", member: "maps/mgu1m1.bsp", format: "qbsp", faces: 48898, leaves: 28622, extendedLighting: true },
-] satisfies readonly { archive: string; member: string; format: "ibsp38" | "qbsp";
-  faces: number; leaves: number; extendedLighting: boolean }[];
+] satisfies readonly { archive: string; member: string; format: "ibsp38" | "qbsp"; faces: number; leaves: number; extendedLighting: boolean }[];
 
 for (const fixture of fixtures) {
   const path = resolve(root, fixture.archive);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expansionSupply } from "../../../../src/content/composition/expansion-supply.ts";
 import { expansionSourceSupply } from "../../../../src/content/composition/expansion-source-supply.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../../src/content/composition/q1-q3-supply.ts";
@@ -18,18 +19,41 @@ import { SharedInventoryTable } from "../../../../src/world/gameplay/inventory.t
 
 test("selected Q3 arsenal consumes shared inventory for a Q1 actor and restores its exact cooldown", () => {
   const actors = new SessionActorRegistry(createIdentityOwner("selected-q3-arsenal"));
-  const actor = actors.allocate("q1:character", "q1:player"), inventory = new SharedInventoryTable(actors);
+  const actor = actors.allocate("q1:character", "q1:player"),
+    inventory = new SharedInventoryTable(actors);
   inventory.create(actor, [{ item: "q1:ammo/shells", count: 25, capacity: 100 }]);
   const shots: number[] = [];
-  const authority = new Q3SelectedArsenal({ provider: "q3:official", product: "baseq3", inventory,
-    fire: (owner, weapon) => { expect(owner).toBe(actor); shots.push(weapon); return undefined; },
-    useHoldable: () => { throw new Error("No holdable was admitted"); } });
-  const input: WeaponStepInput = { actor, arsenal: authority.admit(actor, 100),
-    command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: { x: 0, y: 0, z: 0 },
-      forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 },
+  const authority = new Q3SelectedArsenal({
+    provider: "q3:official",
+    product: "baseq3",
+    inventory,
+    fire: (owner, weapon) => {
+      expect(owner).toBe(actor);
+      shots.push(weapon);
+      return undefined;
+    },
+    useHoldable: () => {
+      throw new Error("No holdable was admitted");
+    },
+  });
+  const input: WeaponStepInput = {
+    actor,
+    arsenal: authority.admit(actor, 100),
+    command: {
+      kind: "q1-netquake",
+      acknowledgedServerTimeSeconds: 0,
+      viewAngles: { x: 0, y: 0, z: 0 },
+      forwardMove: 0,
+      sideMove: 0,
+      upMove: 0,
+      buttons: 0,
+      impulse: 0,
+    },
     frame: { frame: 1, time: { kind: "seconds", value: 0.016 }, elapsed: { kind: "seconds", value: 0.016 }, phase: "client-command" },
     animation: { provider: "q3:character", state: q3SpawnAnimation() },
-    environment: { health: 100, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 }, gauntletHit: false };
+    environment: { health: 100, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
+    gauntletHit: false,
+  };
   authority.step(input, undefined);
   const attack = { ...input, command: { ...input.command, buttons: 1 } };
   authority.step(attack, undefined);
@@ -54,10 +78,20 @@ test("selected Q3 arsenal consumes shared inventory for a Q1 actor and restores 
 });
 
 test("weapon status distinguishes source ammo thresholds, unmetered weapons and owned Q3 aggregate", () => {
-  const amounts = new Map<ItemId, number>([["q3:weapon/machinegun", 1], ["q3:ammo/machinegun", 0], ["q3:ammo/rocketlauncher", 100]]);
+  const amounts = new Map<ItemId, number>([
+    ["q3:weapon/machinegun", 1],
+    ["q3:ammo/machinegun", 0],
+    ["q3:ammo/rocketlauncher", 100],
+  ]);
   const count = (item: ItemId) => amounts.get(item) ?? 0;
   const source: ProviderReference = { provider: "q3:official", content: "q3:classic:baseq3:fixture" };
-  expect(q3WeaponStatus("q3:weapon/machinegun", "baseq3", count, source)?.ammo).toEqual({ kind: "finite", item: "q3:ammo/machinegun", count: 0, hasAmmoToStart: false, low: false });
+  expect(q3WeaponStatus("q3:weapon/machinegun", "baseq3", count, source)?.ammo).toEqual({
+    kind: "finite",
+    item: "q3:ammo/machinegun",
+    count: 0,
+    hasAmmoToStart: false,
+    low: false,
+  });
   expect(q3ArsenalWarning("baseq3", count)).toBe("empty");
   amounts.set("q3:ammo/machinegun", 24);
   expect(q3ArsenalWarning("baseq3", count)).toBe("low");
@@ -75,22 +109,33 @@ test("weapon status distinguishes source ammo thresholds, unmetered weapons and 
   expect(q2WeaponStatus(blaster, count, q2Source)?.ammo).toEqual({ kind: "unmetered" });
 });
 
-
 test("Team Arena supply admits its actual extra inventory and retains source pickup quantities", () => {
-  const actors = new SessionActorRegistry(createIdentityOwner("team-arena-supply")), actor = actors.allocate("q1:game", "q1:player");
-  const inventory = new SharedInventoryTable(actors), loadout = q1Q3SupplyLoadout("q3:weapons/classic/missionpack", "missionpack");
+  const actors = new SessionActorRegistry(createIdentityOwner("team-arena-supply")),
+    actor = actors.allocate("q1:game", "q1:player");
+  const inventory = new SharedInventoryTable(actors),
+    loadout = q1Q3SupplyLoadout("q3:weapons/classic/missionpack", "missionpack");
   inventory.create(actor, loadout.ammo);
-  const supply = new SharedPickupAdmission({ inventory, profile: expansionSupply(Q1_Q3_SUPPLY_PROFILE, ["q3-missionpack"]),
-    ammoGranted: () => undefined, weaponGranted: () => undefined });
+  const supply = new SharedPickupAdmission({
+    inventory,
+    profile: expansionSupply(Q1_Q3_SUPPLY_PROFILE, ["q3-missionpack"]),
+    ammoGranted: () => undefined,
+    weaponGranted: () => undefined,
+  });
   expect(supply.weapon(actor, { item: "q1:weapon/nailgun", ammo: [{ item: "q1:ammo/nails", amount: 30 }] }, "better")).toBe(true);
   for (const name of ["machinegun", "nailgun", "chaingun"]) {
-    expect(inventory.count(actor.id, `q3:weapon/${name}`)).toBe(1); expect(inventory.count(actor.id, `q3:ammo/${name}`)).toBe(30);
+    expect(inventory.count(actor.id, `q3:weapon/${name}`)).toBe(1);
+    expect(inventory.count(actor.id, `q3:ammo/${name}`)).toBe(30);
   }
   expect(supply.weapon(actor, { item: "q1:weapon/grenadelauncher", ammo: [{ item: "q1:ammo/rockets", amount: 5 }] }, "better")).toBe(true);
-  expect(inventory.count(actor.id, "q3:weapon/proxlauncher")).toBe(1); expect(inventory.count(actor.id, "q3:ammo/proxlauncher")).toBe(5);
+  expect(inventory.count(actor.id, "q3:weapon/proxlauncher")).toBe(1);
+  expect(inventory.count(actor.id, "q3:ammo/proxlauncher")).toBe(5);
   inventory.configure(actor, { item: "q2:ammo_bullets", count: 0, capacity: 200 });
-  const destination = new SharedPickupAdmission({ inventory, profile: expansionSourceSupply(Q3_Q2_SUPPLY_PROFILE),
-    ammoGranted: () => undefined, weaponGranted: () => undefined });
+  const destination = new SharedPickupAdmission({
+    inventory,
+    profile: expansionSourceSupply(Q3_Q2_SUPPLY_PROFILE),
+    ammoGranted: () => undefined,
+    weaponGranted: () => undefined,
+  });
   expect(destination.ammo(actor, { item: "q3:ammo/nailgun", amount: 37 })).toBe(true);
   expect(inventory.count(actor.id, "q2:ammo_bullets")).toBe(37);
 });

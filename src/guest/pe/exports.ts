@@ -4,7 +4,10 @@ import type { GuestSymbolName } from "../core/contracts.ts";
 import { PeError } from "./format.ts";
 import type { PeImage } from "./image.ts";
 
-export interface PeResolvedExport { readonly image: PeImage; readonly address: GuestAddress; }
+export interface PeResolvedExport {
+  readonly image: PeImage;
+  readonly address: GuestAddress;
+}
 export type PeLibraryLookup = (library: string, requesting: PeImage) => PeImage | null;
 
 /** Library policy and guest dependency loading belong to the caller; forwarders never load native code. */
@@ -16,12 +19,17 @@ export function resolvePeExport(image: PeImage, symbol: GuestSymbolName, lookup:
     const key = name.kind === "ordinal" ? `ordinal:${name.ordinal}` : `name:${name.name}:${name.version ?? ""}`;
     let names = seen.get(current);
     if (names?.has(key)) throw new PeError("exports", "cyclic export forwarder");
-    if (names === undefined) { names = new Set(); seen.set(current, names); }
+    if (names === undefined) {
+      names = new Set();
+      seen.set(current, names);
+    }
     names.add(key);
     const requested = name;
-    const exported = current.exports.find(entry => entry.symbol.kind === "ordinal"
-      ? requested.kind === "ordinal" && entry.symbol.ordinal === requested.ordinal
-      : requested.kind === "name" && entry.symbol.name === requested.name && entry.symbol.version === requested.version);
+    const exported = current.exports.find(entry =>
+      entry.symbol.kind === "ordinal"
+        ? requested.kind === "ordinal" && entry.symbol.ordinal === requested.ordinal
+        : requested.kind === "name" && entry.symbol.name === requested.name && entry.symbol.version === requested.version,
+    );
     if (exported === undefined) throw new PeError("exports", `unresolved ${current.module.id} ${key}`);
     if (exported.target.kind === "address") return { image: current, address: exported.target.address };
     const dependency = lookup(exported.target.library, current);

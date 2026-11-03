@@ -1,12 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/client/cl_cin.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 
 export type RoqCodebookMode = "normal" | "half" | "smoothed-double";
-export type RoqCodebookFormat =
-  | { readonly samplesPerPixel: 1; readonly gray: Uint8Array }
-  | { readonly samplesPerPixel: 2 | 4 };
+export type RoqCodebookFormat = { readonly samplesPerPixel: 1; readonly gray: Uint8Array } | { readonly samplesPerPixel: 2 | 4 };
 
 function chroma(coefficient: number, value: number, bias: number): number {
   const factor = Math.fround(Math.fround(Math.fround(coefficient) / 2) * 64 + 0.5);
@@ -14,8 +13,8 @@ function chroma(coefficient: number, value: number, bias: number): number {
 }
 
 function validateYuv(y: number, u: number, v: number): void {
-  if (!Number.isInteger(y) || y < 0 || y > 255 || !Number.isInteger(u) || u < 0 || u > 255
-    || !Number.isInteger(v) || v < 0 || v > 255) throw new RangeError("RoQ YUV values must be bytes");
+  if (!Number.isInteger(y) || y < 0 || y > 255 || !Number.isInteger(u) || u < 0 || u > 255 || !Number.isInteger(v) || v < 0 || v > 255)
+    throw new RangeError("RoQ YUV values must be bytes");
 }
 
 /** ROQ_GenYUVTables and yuv_to_rgb, retaining the separate 5/6/5-bit shifts. */
@@ -52,23 +51,25 @@ export class SourceRoqCodebooks {
   readonly book8 = new Uint8Array(this.vq8.buffer);
   private readonly pixels = new DataView(this.vq2.buffer);
 
-  clear(): void { this.vq2.fill(0); this.vq4.fill(0); this.vq8.fill(0); }
+  clear(): void {
+    this.vq2.fill(0);
+    this.vq4.fill(0);
+    this.vq8.fill(0);
+  }
 
-  decode(reader: BinaryReader, flags: number, mode: RoqCodebookMode, format: RoqCodebookFormat,
-    profile: "source" | "diagnostic-2x2" = "source"): void {
+  decode(reader: BinaryReader, flags: number, mode: RoqCodebookMode, format: RoqCodebookFormat, profile: "source" | "diagnostic-2x2" = "source"): void {
     if (!Number.isInteger(flags) || flags < 0 || flags > 65535) {
       throw new BinaryError(reader.source, reader.offset, "invalid RoQ codebook flags");
     }
     if (format.samplesPerPixel === 1 && format.gray.length < 256) {
       throw new BinaryError(reader.source, reader.offset, "RoQ gray lookup requires at least 256 bytes");
     }
-    const count2 = (flags >>> 8) === 0 ? 256 : flags >>> 8;
+    const count2 = flags >>> 8 === 0 ? 256 : flags >>> 8;
     let count4 = flags === 0 ? 256 : flags & 255;
     const width = format.samplesPerPixel;
     const cellPixels = mode === "half" ? 2 : mode === "normal" ? 4 : 8;
     let cursor = 0;
-    const gray = format.samplesPerPixel === 1
-      ? new DataView(format.gray.buffer, format.gray.byteOffset, format.gray.byteLength) : null;
+    const gray = format.samplesPerPixel === 1 ? new DataView(format.gray.buffer, format.gray.byteOffset, format.gray.byteLength) : null;
     const write = (y: number, u: number, v: number): void => {
       if (gray !== null) this.pixels.setUint8(cursor, gray.getUint8(y));
       else if (width === 2) this.pixels.setUint16(cursor, yuvToRgb565(y, u, v), true);
@@ -108,7 +109,10 @@ export class SourceRoqCodebooks {
       let u = 0;
       let v = 0;
       if (gray !== null) reader.skip(2);
-      else { u = reader.u8(); v = reader.u8(); }
+      else {
+        u = reader.u8();
+        v = reader.u8();
+      }
       write(y0, u, v);
       write(y1, u, v);
       if (mode === "smoothed-double") {

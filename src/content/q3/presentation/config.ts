@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/cgame/cg_main.c CG_RegisterCvars,
 // CG_ForceModelChange and CG_UpdateCvars, with vmCvar_t copying from cvar.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -210,20 +211,21 @@ export function cvarTable(product: Product): readonly CvarDefinition[] {
     cv(ClientVmCvarSymbol.cg_blood, "com_blood", "1", A),
     cv(ClientVmCvarSymbol.cg_synchronousClients, "g_synchronousClients", "0"),
   ];
-  if (product === "missionpack") table.push(
-    cv(ClientVmCvarSymbol.cg_redTeamName, "g_redteam", "Stroggs", A | S | U),
-    cv(ClientVmCvarSymbol.cg_blueTeamName, "g_blueteam", "Pagans", A | S | U),
-    cv(ClientVmCvarSymbol.cg_currentSelectedPlayer, "cg_currentSelectedPlayer", "0", A),
-    cv(ClientVmCvarSymbol.cg_currentSelectedPlayerName, "cg_currentSelectedPlayerName", "", A),
-    cv(ClientVmCvarSymbol.cg_singlePlayer, "ui_singlePlayerActive", "0", U),
-    cv(ClientVmCvarSymbol.cg_enableDust, "g_enableDust", "0", S),
-    cv(ClientVmCvarSymbol.cg_enableBreath, "g_enableBreath", "0", S),
-    cv(ClientVmCvarSymbol.cg_singlePlayerActive, "ui_singlePlayerActive", "0", U),
-    cv(ClientVmCvarSymbol.cg_recordSPDemo, "ui_recordSPDemo", "0", A),
-    cv(ClientVmCvarSymbol.cg_recordSPDemoName, "ui_recordSPDemoName", "", A),
-    cv(ClientVmCvarSymbol.cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", S),
-    cv(ClientVmCvarSymbol.cg_hudFiles, "cg_hudFiles", "ui/hud.txt", A),
-  );
+  if (product === "missionpack")
+    table.push(
+      cv(ClientVmCvarSymbol.cg_redTeamName, "g_redteam", "Stroggs", A | S | U),
+      cv(ClientVmCvarSymbol.cg_blueTeamName, "g_blueteam", "Pagans", A | S | U),
+      cv(ClientVmCvarSymbol.cg_currentSelectedPlayer, "cg_currentSelectedPlayer", "0", A),
+      cv(ClientVmCvarSymbol.cg_currentSelectedPlayerName, "cg_currentSelectedPlayerName", "", A),
+      cv(ClientVmCvarSymbol.cg_singlePlayer, "ui_singlePlayerActive", "0", U),
+      cv(ClientVmCvarSymbol.cg_enableDust, "g_enableDust", "0", S),
+      cv(ClientVmCvarSymbol.cg_enableBreath, "g_enableBreath", "0", S),
+      cv(ClientVmCvarSymbol.cg_singlePlayerActive, "ui_singlePlayerActive", "0", U),
+      cv(ClientVmCvarSymbol.cg_recordSPDemo, "ui_recordSPDemo", "0", A),
+      cv(ClientVmCvarSymbol.cg_recordSPDemoName, "ui_recordSPDemoName", "", A),
+      cv(ClientVmCvarSymbol.cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", S),
+      cv(ClientVmCvarSymbol.cg_hudFiles, "cg_hudFiles", "ui/hud.txt", A),
+    );
   table.push(
     cv(ClientVmCvarSymbol.cg_cameraOrbit, "cg_cameraOrbit", "0", C),
     cv(ClientVmCvarSymbol.cg_cameraOrbitDelay, "cg_cameraOrbitDelay", "50", A),
@@ -262,7 +264,10 @@ function sourceString(value: string, capacity: number): string {
   let end = value.length;
   for (let index = 0; index < value.length; index++) {
     const byte = value.charCodeAt(index);
-    if (byte === 0) { end = index; break; }
+    if (byte === 0) {
+      end = index;
+      break;
+    }
     if (byte > 255) throw new RangeError("Cvar VM strings require source byte characters");
   }
   return value.slice(0, Math.min(end, capacity - 1));
@@ -273,8 +278,13 @@ function changedSnapshot(engine: CvarSnapshot): CvarSnapshot {
   if (value.length !== engine.value.length) {
     throw new RangeError(`Cvar_Update: src ${engine.value} length ${engine.value.length} exceeds MAX_CVAR_VALUE_STRING`);
   }
-  return Object.freeze({ ...engine, value, numericValue: Math.fround(engine.numericValue), integerValue: engine.integerValue,
-    modificationCount: engine.modificationCount });
+  return Object.freeze({
+    ...engine,
+    value,
+    numericValue: Math.fround(engine.numericValue),
+    integerValue: engine.integerValue,
+    modificationCount: engine.modificationCount,
+  });
 }
 
 /** Instance-owned cvarTable and vmCvar_t cache for one cgame lifecycle. */
@@ -287,15 +297,30 @@ export class ClientConfiguration {
   private registered = false;
   private updating = false;
 
-  constructor(readonly product: Product, readonly host: ClientConfigurationHost) {
+  constructor(
+    readonly product: Product,
+    readonly host: ClientConfigurationHost,
+  ) {
     if (host.state.product !== product || host.staticState.product !== product) {
       throw new Error("Client configuration services must share one product");
     }
     this.table = cvarTable(product);
     for (const definition of this.table) {
       this.names.set(definition.name.toLowerCase(), definition.symbol);
-      this.cache.set(definition.symbol, Object.freeze({ name: definition.name, value: "", resetValue: "",
-        latchedValue: undefined, flags: 0, modified: false, modificationCount: 0, numericValue: 0, integerValue: 0 }));
+      this.cache.set(
+        definition.symbol,
+        Object.freeze({
+          name: definition.name,
+          value: "",
+          resetValue: "",
+          latchedValue: undefined,
+          flags: 0,
+          modified: false,
+          modificationCount: 0,
+          numericValue: 0,
+          integerValue: 0,
+        }),
+      );
     }
   }
 
@@ -323,8 +348,7 @@ export class ClientConfiguration {
   readVmSymbol(symbol: ClientVmCvarSymbol): CvarSnapshot {
     const value = this.cache.get(symbol);
     if (value === undefined) throw new Error(`VM cvar ${symbol} is not registered for ${this.product}`);
-    if (symbol === ClientVmCvarSymbol.cg_drawStatus && this.host.statusVisible?.() === false)
-      return { ...value, value: "0", numericValue: 0, integerValue: 0 };
+    if (symbol === ClientVmCvarSymbol.cg_drawStatus && this.host.statusVisible?.() === false) return { ...value, value: "0", numericValue: 0, integerValue: 0 };
     return value;
   }
 
@@ -349,7 +373,11 @@ export class ClientConfiguration {
     if (!this.registered) throw new Error("Client cvars must be registered before forcing models");
     if (this.updating) throw new Error("Client configuration update is already active");
     this.updating = true;
-    try { await this.reloadClientInfo(); } finally { this.updating = false; }
+    try {
+      await this.reloadClientInfo();
+    } finally {
+      this.updating = false;
+    }
   }
 
   async updateCvars(): Promise<void> {
@@ -372,15 +400,22 @@ export class ClientConfiguration {
         this.forceModelModificationCount = forceModel.modificationCount;
         await this.reloadClientInfo();
       }
-    } finally { this.updating = false; }
+    } finally {
+      this.updating = false;
+    }
   }
 
   private copyDefinition(definition: CvarDefinition, engine: CvarSnapshot, forced: boolean): void {
     const previous = this.cache.get(definition.symbol);
     if (!forced && previous !== undefined && previous.modificationCount === engine.modificationCount) return;
     const retained = previous ?? { ...engine, value: "", numericValue: 0, integerValue: 0 };
-    const pending = Object.freeze({ ...engine, value: retained.value, numericValue: retained.numericValue,
-      integerValue: retained.integerValue, modificationCount: engine.modificationCount });
+    const pending = Object.freeze({
+      ...engine,
+      value: retained.value,
+      numericValue: retained.numericValue,
+      integerValue: retained.integerValue,
+      modificationCount: engine.modificationCount,
+    });
     this.cache.set(definition.symbol, pending);
     this.cache.set(definition.symbol, changedSnapshot(engine));
   }

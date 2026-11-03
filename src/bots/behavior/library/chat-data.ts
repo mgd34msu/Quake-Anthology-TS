@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Chat configuration readers translated from id Software's botlib/be_ai_chat.c.
@@ -29,27 +30,61 @@ export function chatTextEquals(expected: string, input: ChatTextSource | null, c
   }
   return false;
 }
-export interface ChatMessage { readonly text: string; time: number }
-export interface ChatType { readonly name: string; readonly messages: readonly ChatMessage[] }
-export interface InitialChat { readonly types: readonly ChatType[] }
-export interface RandomChatList { readonly name: string; readonly messages: readonly string[] }
-export interface StoredRandomChatList extends RandomChatList { readonly numMessages: number; message(index: number): string | undefined }
-export interface Synonym { readonly text: string; readonly weight: number }
-export interface SynonymGroup { readonly context: number; readonly entries: readonly [Synonym, Synonym, ...Synonym[]]; readonly totalWeight: number }
-export type MatchPiece =
-  | { readonly kind: "variable"; readonly index: number }
-  | { readonly kind: "string"; readonly alternatives: readonly string[] };
-export interface MatchTemplate { readonly context: number; readonly type: number; readonly subtype: number; readonly pieces: readonly MatchPiece[] }
+export interface ChatMessage {
+  readonly text: string;
+  time: number;
+}
+export interface ChatType {
+  readonly name: string;
+  readonly messages: readonly ChatMessage[];
+}
+export interface InitialChat {
+  readonly types: readonly ChatType[];
+}
+export interface RandomChatList {
+  readonly name: string;
+  readonly messages: readonly string[];
+}
+export interface StoredRandomChatList extends RandomChatList {
+  readonly numMessages: number;
+  message(index: number): string | undefined;
+}
+export interface Synonym {
+  readonly text: string;
+  readonly weight: number;
+}
+export interface SynonymGroup {
+  readonly context: number;
+  readonly entries: readonly [Synonym, Synonym, ...Synonym[]];
+  readonly totalWeight: number;
+}
+export type MatchPiece = { readonly kind: "variable"; readonly index: number } | { readonly kind: "string"; readonly alternatives: readonly string[] };
+export interface MatchTemplate {
+  readonly context: number;
+  readonly type: number;
+  readonly subtype: number;
+  readonly pieces: readonly MatchPiece[];
+}
 export type ReplyTest =
   | { readonly kind: "name" }
   | { readonly kind: "gender"; readonly gender: number }
   | { readonly kind: "botnames"; readonly names: string }
   | { readonly kind: "string"; readonly text: string }
   | { readonly kind: "match"; readonly pieces: readonly MatchPiece[] };
-export interface ReplyKey { readonly mode: "any" | "and" | "not"; readonly test: ReplyTest }
-export interface ReplyChat { readonly keys: readonly ReplyKey[]; readonly priority: number; readonly messages: readonly ChatMessage[] }
+export interface ReplyKey {
+  readonly mode: "any" | "and" | "not";
+  readonly test: ReplyTest;
+}
+export interface ReplyChat {
+  readonly keys: readonly ReplyKey[];
+  readonly priority: number;
+  readonly messages: readonly ChatMessage[];
+}
 
-function stringValue(value: string): string { const nul = value.indexOf("\0"); return nul < 0 ? value : value.slice(0, nul); }
+function stringValue(value: string): string {
+  const nul = value.indexOf("\0");
+  return nul < 0 ? value : value.slice(0, nul);
+}
 function containsChatText(text: string, part: string): boolean {
   const upper = (value: string): string => value.replace(/[a-z]/g, character => String.fromCharCode(character.charCodeAt(0) - 32));
   return upper(text).includes(upper(part));
@@ -60,29 +95,41 @@ function containsChatText(text: string, part: string): boolean {
 export class ChatInitial {
   private readonly types = new Map<number, ChatInitialType>();
   private readonly messages = new Map<number, ChatInitialMessage>();
-  constructor(readonly allocation: BotMemoryAllocation, readonly pointer: number) {}
+  constructor(
+    readonly allocation: BotMemoryAllocation,
+    readonly pointer: number,
+  ) {}
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
     return { allocation: memory.reference(this.allocation), pointer: this.pointer, types: [...this.types.keys()], messages: [...this.messages.keys()] };
   }
   static restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): ChatInitial {
-    const reader = new SaveReader(value, "bot.chat.initial"), image = { allocation: reader.field("allocation").integer(0), pointer: reader.field("pointer").integer(1),
-      types: reader.field("types").list(entry => entry.integer(1)), messages: reader.field("messages").list(entry => entry.integer(1)) };
+    const reader = new SaveReader(value, "bot.chat.initial"),
+      image = {
+        allocation: reader.field("allocation").integer(0),
+        pointer: reader.field("pointer").integer(1),
+        types: reader.field("types").list(entry => entry.integer(1)),
+        messages: reader.field("messages").list(entry => entry.integer(1)),
+      };
     const chat = new ChatInitial(memory.allocation(image.allocation), image.pointer);
     for (const pointer of image.types) {
       if (!Number.isSafeInteger(pointer) || pointer < 1 || chat.types.has(pointer)) throw new Error("Invalid saved initial chat type pointer");
-      chat.view(pointer - 1, 44); chat.types.set(pointer, new ChatInitialType(chat, pointer - 1));
+      chat.view(pointer - 1, 44);
+      chat.types.set(pointer, new ChatInitialType(chat, pointer - 1));
     }
     for (const pointer of image.messages) {
       if (!Number.isSafeInteger(pointer) || pointer < 1 || chat.messages.has(pointer)) throw new Error("Invalid saved initial chat message pointer");
-      chat.view(pointer - 1, 12); chat.messages.set(pointer, new ChatInitialMessage(chat, pointer - 1));
+      chat.view(pointer - 1, 12);
+      chat.messages.set(pointer, new ChatInitialMessage(chat, pointer - 1));
     }
     const types = new Set<number>();
     for (let type = chat.firstType; type !== null; type = type.next) {
       if (types.has(type.pointer)) throw new Error("Saved initial chat type list cycles");
-      types.add(type.pointer); const messages = new Set<number>();
+      types.add(type.pointer);
+      const messages = new Set<number>();
       for (const message of type.messages()) {
         if (messages.has(message.pointer)) throw new Error("Saved initial chat message list cycles");
-        messages.add(message.pointer); void message.text;
+        messages.add(message.pointer);
+        void message.text;
       }
       if (messages.size !== type.numMessages) throw new Error("Saved initial chat message count mismatch");
     }
@@ -106,7 +153,8 @@ export class ChatInitial {
     throw new RangeError("initial chat string has no terminator before allocation end");
   }
   private copyText(offset: number, text: string, size: number): void {
-    const view = this.view(offset, size), copied = Math.min(text.length, size);
+    const view = this.view(offset, size),
+      copied = Math.min(text.length, size);
     for (let index = 0; index < copied; index++) {
       const byte = text.charCodeAt(index);
       if (byte > 255) throw new RangeError("bot chat strings must contain byte-valued code units");
@@ -126,7 +174,9 @@ export class ChatInitial {
     if (message === undefined) throw new RangeError("initial chat pointer does not identify an allocated message");
     return message;
   }
-  get firstType(): ChatInitialType | null { return this.typeAt(this.view(0, 4).getUint32(0, true)); }
+  get firstType(): ChatInitialType | null {
+    return this.typeAt(this.view(0, 4).getUint32(0, true));
+  }
   addType(offset: number, name: string): ChatInitialType {
     const type = new ChatInitialType(this, offset);
     this.types.set(type.pointer, type);
@@ -165,27 +215,67 @@ export class ChatInitial {
 
 class ChatInitialType {
   readonly pointer: number;
-  constructor(private readonly owner: ChatInitial, private readonly offset: number) { this.pointer = offset + 1; }
-  private view(): DataView { return this.owner.view(this.offset, 44); }
-  get name(): string { return this.owner.text(this.offset); }
-  get numMessages(): number { return this.view().getInt32(32, true); }
-  set numMessages(value: number) { this.view().setInt32(32, value, true); }
-  get firstMessage(): ChatInitialMessage | null { return this.owner.messageAt(this.view().getUint32(36, true)); }
-  set firstMessage(value: ChatInitialMessage | null) { this.view().setUint32(36, value?.pointer ?? 0, true); }
-  get next(): ChatInitialType | null { return this.owner.typeAt(this.view().getUint32(40, true)); }
-  set next(value: ChatInitialType | null) { this.view().setUint32(40, value?.pointer ?? 0, true); }
-  *messages(): Generator<ChatInitialMessage, undefined, undefined> { for (let message = this.firstMessage; message !== null; message = message.next) yield message; }
+  constructor(
+    private readonly owner: ChatInitial,
+    private readonly offset: number,
+  ) {
+    this.pointer = offset + 1;
+  }
+  private view(): DataView {
+    return this.owner.view(this.offset, 44);
+  }
+  get name(): string {
+    return this.owner.text(this.offset);
+  }
+  get numMessages(): number {
+    return this.view().getInt32(32, true);
+  }
+  set numMessages(value: number) {
+    this.view().setInt32(32, value, true);
+  }
+  get firstMessage(): ChatInitialMessage | null {
+    return this.owner.messageAt(this.view().getUint32(36, true));
+  }
+  set firstMessage(value: ChatInitialMessage | null) {
+    this.view().setUint32(36, value?.pointer ?? 0, true);
+  }
+  get next(): ChatInitialType | null {
+    return this.owner.typeAt(this.view().getUint32(40, true));
+  }
+  set next(value: ChatInitialType | null) {
+    this.view().setUint32(40, value?.pointer ?? 0, true);
+  }
+  *messages(): Generator<ChatInitialMessage, undefined, undefined> {
+    for (let message = this.firstMessage; message !== null; message = message.next) yield message;
+  }
 }
 
 class ChatInitialMessage implements ChatMessage {
   readonly pointer: number;
-  constructor(private readonly owner: ChatInitial, private readonly offset: number) { this.pointer = offset + 1; }
-  private view(): DataView { return this.owner.view(this.offset, 12); }
-  get text(): string { return this.owner.text(this.view().getUint32(0, true) - 1); }
-  get time(): number { return this.view().getFloat32(4, true); }
-  set time(value: number) { this.view().setFloat32(4, value, true); }
-  get next(): ChatInitialMessage | null { return this.owner.messageAt(this.view().getUint32(8, true)); }
-  set next(value: ChatInitialMessage | null) { this.view().setUint32(8, value?.pointer ?? 0, true); }
+  constructor(
+    private readonly owner: ChatInitial,
+    private readonly offset: number,
+  ) {
+    this.pointer = offset + 1;
+  }
+  private view(): DataView {
+    return this.owner.view(this.offset, 12);
+  }
+  get text(): string {
+    return this.owner.text(this.view().getUint32(0, true) - 1);
+  }
+  get time(): number {
+    return this.view().getFloat32(4, true);
+  }
+  set time(value: number) {
+    this.view().setFloat32(4, value, true);
+  }
+  get next(): ChatInitialMessage | null {
+    return this.owner.messageAt(this.view().getUint32(8, true));
+  }
+  set next(value: ChatInitialMessage | null) {
+    this.view().setUint32(8, value?.pointer ?? 0, true);
+  }
 }
 
 type ChatGraphPointer = ChatGraphString | ChatMatchString | ChatMatchPiece | ChatMatchTemplate | ChatReplyKey | ChatReplyMessage | ChatReply;
@@ -195,49 +285,102 @@ class ChatGraphMemory {
   private readonly pointers = new Map<number, ChatGraphPointer>();
   constructor(private readonly memory: BotMemory) {}
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return [...this.pointers.values()].map(cell => ({ pointer: cell.pointer, allocation: memory.reference(cell.allocation),
-      kind: cell instanceof ChatGraphString ? "string" : cell instanceof ChatMatchString ? "match-string"
-        : cell instanceof ChatMatchPiece ? "piece" : cell instanceof ChatMatchTemplate ? "template"
-          : cell instanceof ChatReplyKey ? "key" : cell instanceof ChatReplyMessage ? "message" : "reply",
-      offset: cell instanceof ChatGraphString ? cell.offset : 0 }));
+    return [...this.pointers.values()].map(cell => ({
+      pointer: cell.pointer,
+      allocation: memory.reference(cell.allocation),
+      kind:
+        cell instanceof ChatGraphString
+          ? "string"
+          : cell instanceof ChatMatchString
+            ? "match-string"
+            : cell instanceof ChatMatchPiece
+              ? "piece"
+              : cell instanceof ChatMatchTemplate
+                ? "template"
+                : cell instanceof ChatReplyKey
+                  ? "key"
+                  : cell instanceof ChatReplyMessage
+                    ? "message"
+                    : "reply",
+      offset: cell instanceof ChatGraphString ? cell.offset : 0,
+    }));
   }
   static restore(value: unknown, memory: BotMemory, references: import("./memory.ts").BotMemoryRestore): ChatGraphMemory {
-    const image = new SaveReader(value, "bot.chat.graph").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0),
-      kind: entry.field("kind").choice("string", "match-string", "piece", "template", "key", "message", "reply"), offset: entry.field("offset").integer(0) }));
+    const image = new SaveReader(value, "bot.chat.graph").list(entry => ({
+      pointer: entry.field("pointer").integer(1),
+      allocation: entry.field("allocation").integer(0),
+      kind: entry.field("kind").choice("string", "match-string", "piece", "template", "key", "message", "reply"),
+      offset: entry.field("offset").integer(0),
+    }));
     const graph = new ChatGraphMemory(memory);
     for (const entry of image) {
       if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || graph.pointers.has(entry.pointer)) throw new Error("Invalid saved chat graph pointer");
       const allocation = references.allocation(entry.allocation);
       switch (entry.kind) {
         case "string": {
-          if (!Number.isSafeInteger(entry.offset) || entry.offset < 0 || entry.offset >= allocation.bytes.length) throw new Error("Invalid saved chat string offset");
-          const cell = new ChatGraphString(graph, allocation, entry.pointer, entry.offset); void cell.text; graph.register(cell); break;
+          if (!Number.isSafeInteger(entry.offset) || entry.offset < 0 || entry.offset >= allocation.bytes.length)
+            throw new Error("Invalid saved chat string offset");
+          const cell = new ChatGraphString(graph, allocation, entry.pointer, entry.offset);
+          void cell.text;
+          graph.register(cell);
+          break;
         }
-        case "match-string": graph.register(new ChatMatchString(graph, allocation, entry.pointer)); break;
-        case "piece": graph.register(new ChatMatchPiece(graph, allocation, entry.pointer)); break;
-        case "template": graph.register(new ChatMatchTemplate(graph, allocation, entry.pointer)); break;
-        case "key": graph.register(new ChatReplyKey(graph, allocation, entry.pointer)); break;
-        case "message": graph.register(new ChatReplyMessage(graph, allocation, entry.pointer)); break;
-        case "reply": graph.register(new ChatReply(graph, allocation, entry.pointer)); break;
-        default: throw new Error("Invalid saved chat graph kind");
+        case "match-string":
+          graph.register(new ChatMatchString(graph, allocation, entry.pointer));
+          break;
+        case "piece":
+          graph.register(new ChatMatchPiece(graph, allocation, entry.pointer));
+          break;
+        case "template":
+          graph.register(new ChatMatchTemplate(graph, allocation, entry.pointer));
+          break;
+        case "key":
+          graph.register(new ChatReplyKey(graph, allocation, entry.pointer));
+          break;
+        case "message":
+          graph.register(new ChatReplyMessage(graph, allocation, entry.pointer));
+          break;
+        case "reply":
+          graph.register(new ChatReply(graph, allocation, entry.pointer));
+          break;
+        default:
+          throw new Error("Invalid saved chat graph kind");
       }
     }
-    const visited = new Set<number>(), pending = new Set<number>();
+    const visited = new Set<number>(),
+      pending = new Set<number>();
     const visit = (cell: ChatGraphPointer | null): void => {
       if (cell === null || visited.has(cell.pointer)) return;
       if (pending.has(cell.pointer)) throw new Error("Saved chat graph contains a cycle");
       pending.add(cell.pointer);
-      if (cell instanceof ChatMatchString || cell instanceof ChatReplyMessage) { visit(cell.string); visit(cell.next); }
-      else if (cell instanceof ChatMatchPiece) { visit(cell.firstString); visit(cell.next); }
-      else if (cell instanceof ChatMatchTemplate) { visit(cell.first); visit(cell.next); }
-      else if (cell instanceof ChatReplyKey) { visit(cell.string); visit(cell.match); visit(cell.next); }
-      else if (cell instanceof ChatReply) { visit(cell.keys); visit(cell.firstMessage); visit(cell.next); }
-      pending.delete(cell.pointer); visited.add(cell.pointer);
+      if (cell instanceof ChatMatchString || cell instanceof ChatReplyMessage) {
+        visit(cell.string);
+        visit(cell.next);
+      } else if (cell instanceof ChatMatchPiece) {
+        visit(cell.firstString);
+        visit(cell.next);
+      } else if (cell instanceof ChatMatchTemplate) {
+        visit(cell.first);
+        visit(cell.next);
+      } else if (cell instanceof ChatReplyKey) {
+        visit(cell.string);
+        visit(cell.match);
+        visit(cell.next);
+      } else if (cell instanceof ChatReply) {
+        visit(cell.keys);
+        visit(cell.firstMessage);
+        visit(cell.next);
+      }
+      pending.delete(cell.pointer);
+      visited.add(cell.pointer);
     };
     for (const cell of graph.pointers.values()) visit(cell);
     return graph;
   }
-  private register<T extends ChatGraphPointer>(cell: T): T { this.pointers.set(cell.pointer, cell); return cell; }
+  private register<T extends ChatGraphPointer>(cell: T): T {
+    this.pointers.set(cell.pointer, cell);
+    return cell;
+  }
   private allocate<T extends ChatGraphPointer>(size: number, create: (allocation: BotMemoryAllocation, pointer: number) => T): T {
     const allocation = this.memory.allocate(size, "hunk", true);
     return this.register(create(allocation, this.pointers.size + 1));
@@ -301,29 +444,61 @@ class ChatGraphMemory {
     cell.string = this.writeString(cell.allocation, 8, text);
     return cell;
   }
-  newPiece(): ChatMatchPiece { return this.allocate(16, (allocation, pointer) => new ChatMatchPiece(this, allocation, pointer)); }
-  newTemplate(): ChatMatchTemplate { return this.allocate(20, (allocation, pointer) => new ChatMatchTemplate(this, allocation, pointer)); }
-  newKey(): ChatReplyKey { return this.allocate(16, (allocation, pointer) => new ChatReplyKey(this, allocation, pointer)); }
+  newPiece(): ChatMatchPiece {
+    return this.allocate(16, (allocation, pointer) => new ChatMatchPiece(this, allocation, pointer));
+  }
+  newTemplate(): ChatMatchTemplate {
+    return this.allocate(20, (allocation, pointer) => new ChatMatchTemplate(this, allocation, pointer));
+  }
+  newKey(): ChatReplyKey {
+    return this.allocate(16, (allocation, pointer) => new ChatReplyKey(this, allocation, pointer));
+  }
   newMessage(text: string): ChatReplyMessage {
     const cell = this.allocate(12 + text.length + 1, (allocation, pointer) => new ChatReplyMessage(this, allocation, pointer));
     cell.string = this.writeString(cell.allocation, 12, text);
     return cell;
   }
-  newReply(): ChatReply { return this.allocate(20, (allocation, pointer) => new ChatReply(this, allocation, pointer)); }
-  free(allocation: BotMemoryAllocation): void { this.memory.free(allocation); }
+  newReply(): ChatReply {
+    return this.allocate(20, (allocation, pointer) => new ChatReply(this, allocation, pointer));
+  }
+  free(allocation: BotMemoryAllocation): void {
+    this.memory.free(allocation);
+  }
 }
 
 class ChatGraphBlock {
-  constructor(protected readonly owner: ChatGraphMemory, readonly allocation: BotMemoryAllocation, readonly pointer: number) {}
-  protected view(): DataView { const bytes = this.allocation.bytes; return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
-  protected readPointer(offset: number): number { return this.view().getUint32(offset, true); }
-  protected writePointer(offset: number, value: ChatGraphPointer | null): void { this.view().setUint32(offset, value?.pointer ?? 0, true); }
-  freeBlock(): void { this.owner.free(this.allocation); }
-  checkpointGraph(memory: import("./memory.ts").BotMemoryCapture) { return { root: this.pointer, pointers: this.owner.checkpoint(memory) }; }
+  constructor(
+    protected readonly owner: ChatGraphMemory,
+    readonly allocation: BotMemoryAllocation,
+    readonly pointer: number,
+  ) {}
+  protected view(): DataView {
+    const bytes = this.allocation.bytes;
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+  protected readPointer(offset: number): number {
+    return this.view().getUint32(offset, true);
+  }
+  protected writePointer(offset: number, value: ChatGraphPointer | null): void {
+    this.view().setUint32(offset, value?.pointer ?? 0, true);
+  }
+  freeBlock(): void {
+    this.owner.free(this.allocation);
+  }
+  checkpointGraph(memory: import("./memory.ts").BotMemoryCapture) {
+    return { root: this.pointer, pointers: this.owner.checkpoint(memory) };
+  }
 }
 
 class ChatGraphString extends ChatGraphBlock {
-  constructor(owner: ChatGraphMemory, allocation: BotMemoryAllocation, pointer: number, readonly offset: number) { super(owner, allocation, pointer); }
+  constructor(
+    owner: ChatGraphMemory,
+    allocation: BotMemoryAllocation,
+    pointer: number,
+    readonly offset: number,
+  ) {
+    super(owner, allocation, pointer);
+  }
   get text(): string {
     const bytes = this.allocation.bytes;
     let result = "";
@@ -338,22 +513,50 @@ class ChatGraphString extends ChatGraphBlock {
 }
 
 class ChatMatchString extends ChatGraphBlock {
-  get string(): ChatGraphString | null { return this.owner.stringAt(this.readPointer(0)); }
-  set string(value: ChatGraphString | null) { this.writePointer(0, value); }
-  get text(): string { const value = this.string; if (value === null) throw new RangeError("match string has a null string pointer"); return value.text; }
-  get next(): ChatMatchString | null { return this.owner.matchStringAt(this.readPointer(4)); }
-  set next(value: ChatMatchString | null) { this.writePointer(4, value); }
+  get string(): ChatGraphString | null {
+    return this.owner.stringAt(this.readPointer(0));
+  }
+  set string(value: ChatGraphString | null) {
+    this.writePointer(0, value);
+  }
+  get text(): string {
+    const value = this.string;
+    if (value === null) throw new RangeError("match string has a null string pointer");
+    return value.text;
+  }
+  get next(): ChatMatchString | null {
+    return this.owner.matchStringAt(this.readPointer(4));
+  }
+  set next(value: ChatMatchString | null) {
+    this.writePointer(4, value);
+  }
 }
 
 export class ChatMatchPiece extends ChatGraphBlock {
-  get type(): number { return this.view().getInt32(0, true); }
-  set type(value: number) { this.view().setInt32(0, value, true); }
-  get firstString(): ChatMatchString | null { return this.owner.matchStringAt(this.readPointer(4)); }
-  set firstString(value: ChatMatchString | null) { this.writePointer(4, value); }
-  get variable(): number { return this.view().getInt32(8, true); }
-  set variable(value: number) { this.view().setInt32(8, value, true); }
-  get next(): ChatMatchPiece | null { return this.owner.pieceAt(this.readPointer(12)); }
-  set next(value: ChatMatchPiece | null) { this.writePointer(12, value); }
+  get type(): number {
+    return this.view().getInt32(0, true);
+  }
+  set type(value: number) {
+    this.view().setInt32(0, value, true);
+  }
+  get firstString(): ChatMatchString | null {
+    return this.owner.matchStringAt(this.readPointer(4));
+  }
+  set firstString(value: ChatMatchString | null) {
+    this.writePointer(4, value);
+  }
+  get variable(): number {
+    return this.view().getInt32(8, true);
+  }
+  set variable(value: number) {
+    this.view().setInt32(8, value, true);
+  }
+  get next(): ChatMatchPiece | null {
+    return this.owner.pieceAt(this.readPointer(12));
+  }
+  set next(value: ChatMatchPiece | null) {
+    this.writePointer(12, value);
+  }
   snapshot(): MatchPiece {
     if (this.type === 1) return { kind: "variable", index: this.variable };
     if (this.type !== 2) throw new RangeError("unknown source match piece type");
@@ -362,12 +565,16 @@ export class ChatMatchPiece extends ChatGraphBlock {
     return { kind: "string", alternatives };
   }
   free(): void {
-    for (let piece: ChatMatchPiece | null = this; piece !== null;) {
+    for (let piece: ChatMatchPiece | null = this; piece !== null; ) {
       const next: ChatMatchPiece | null = piece.next;
-      if (piece.type === 2) for (let value = piece.firstString; value !== null;) {
-        const nextString = value.next; value.freeBlock(); value = nextString;
-      }
-      piece.freeBlock(); piece = next;
+      if (piece.type === 2)
+        for (let value = piece.firstString; value !== null; ) {
+          const nextString = value.next;
+          value.freeBlock();
+          value = nextString;
+        }
+      piece.freeBlock();
+      piece = next;
     }
   }
 }
@@ -379,40 +586,84 @@ export class ChatMatchTemplate extends ChatGraphBlock {
     if (root === null) throw new Error("Saved chat match graph has no root");
     return root;
   }
-  get context(): number { return this.view().getUint32(0, true); }
-  set context(value: number) { this.view().setUint32(0, value, true); }
-  get type(): number { return this.view().getInt32(4, true); }
-  set type(value: number) { this.view().setInt32(4, value, true); }
-  get subtype(): number { return this.view().getInt32(8, true); }
-  set subtype(value: number) { this.view().setInt32(8, value, true); }
-  get first(): ChatMatchPiece | null { return this.owner.pieceAt(this.readPointer(12)); }
-  set first(value: ChatMatchPiece | null) { this.writePointer(12, value); }
-  get next(): ChatMatchTemplate | null { return this.owner.templateAt(this.readPointer(16)); }
-  set next(value: ChatMatchTemplate | null) { this.writePointer(16, value); }
+  get context(): number {
+    return this.view().getUint32(0, true);
+  }
+  set context(value: number) {
+    this.view().setUint32(0, value, true);
+  }
+  get type(): number {
+    return this.view().getInt32(4, true);
+  }
+  set type(value: number) {
+    this.view().setInt32(4, value, true);
+  }
+  get subtype(): number {
+    return this.view().getInt32(8, true);
+  }
+  set subtype(value: number) {
+    this.view().setInt32(8, value, true);
+  }
+  get first(): ChatMatchPiece | null {
+    return this.owner.pieceAt(this.readPointer(12));
+  }
+  set first(value: ChatMatchPiece | null) {
+    this.writePointer(12, value);
+  }
+  get next(): ChatMatchTemplate | null {
+    return this.owner.templateAt(this.readPointer(16));
+  }
+  set next(value: ChatMatchTemplate | null) {
+    this.writePointer(16, value);
+  }
   snapshot(): MatchTemplate {
     const pieces: MatchPiece[] = [];
     for (let piece = this.first; piece !== null; piece = piece.next) pieces.push(piece.snapshot());
     return { context: this.context, type: this.type, subtype: this.subtype, pieces };
   }
   free(): void {
-    for (let template: ChatMatchTemplate | null = this; template !== null;) {
-      const next: ChatMatchTemplate | null = template.next; template.first?.free(); template.freeBlock(); template = next;
+    for (let template: ChatMatchTemplate | null = this; template !== null; ) {
+      const next: ChatMatchTemplate | null = template.next;
+      template.first?.free();
+      template.freeBlock();
+      template = next;
     }
   }
 }
 
 export class ChatReplyKey extends ChatGraphBlock {
-  get flags(): number { return this.view().getInt32(0, true); }
-  set flags(value: number) { this.view().setInt32(0, value, true); }
-  get string(): ChatGraphString | null { return this.owner.stringAt(this.readPointer(4)); }
-  set string(value: ChatGraphString | null) { this.writePointer(4, value); }
-  get text(): string { const value = this.string; if (value === null) throw new RangeError("reply key has a null string pointer"); return value.text; }
-  get match(): ChatMatchPiece | null { return this.owner.pieceAt(this.readPointer(8)); }
-  set match(value: ChatMatchPiece | null) { this.writePointer(8, value); }
-  get next(): ChatReplyKey | null { return this.owner.keyAt(this.readPointer(12)); }
-  set next(value: ChatReplyKey | null) { this.writePointer(12, value); }
+  get flags(): number {
+    return this.view().getInt32(0, true);
+  }
+  set flags(value: number) {
+    this.view().setInt32(0, value, true);
+  }
+  get string(): ChatGraphString | null {
+    return this.owner.stringAt(this.readPointer(4));
+  }
+  set string(value: ChatGraphString | null) {
+    this.writePointer(4, value);
+  }
+  get text(): string {
+    const value = this.string;
+    if (value === null) throw new RangeError("reply key has a null string pointer");
+    return value.text;
+  }
+  get match(): ChatMatchPiece | null {
+    return this.owner.pieceAt(this.readPointer(8));
+  }
+  set match(value: ChatMatchPiece | null) {
+    this.writePointer(8, value);
+  }
+  get next(): ChatReplyKey | null {
+    return this.owner.keyAt(this.readPointer(12));
+  }
+  set next(value: ChatReplyKey | null) {
+    this.writePointer(12, value);
+  }
   snapshot(): ReplyKey {
-    const flags = this.flags, mode = (flags & 1) !== 0 ? "and" : (flags & 2) !== 0 ? "not" : "any";
+    const flags = this.flags,
+      mode = (flags & 1) !== 0 ? "and" : (flags & 2) !== 0 ? "not" : "any";
     let test: ReplyTest;
     if ((flags & 4) !== 0) test = { kind: "name" };
     else if ((flags & 32) !== 0) test = { kind: "botnames", names: this.text };
@@ -430,13 +681,29 @@ export class ChatReplyKey extends ChatGraphBlock {
 }
 
 class ChatReplyMessage extends ChatGraphBlock implements ChatMessage {
-  get string(): ChatGraphString | null { return this.owner.stringAt(this.readPointer(0)); }
-  set string(value: ChatGraphString | null) { this.writePointer(0, value); }
-  get text(): string { const value = this.string; if (value === null) throw new RangeError("reply message has a null string pointer"); return value.text; }
-  get time(): number { return this.view().getFloat32(4, true); }
-  set time(value: number) { this.view().setFloat32(4, value, true); }
-  get next(): ChatReplyMessage | null { return this.owner.messageAt(this.readPointer(8)); }
-  set next(value: ChatReplyMessage | null) { this.writePointer(8, value); }
+  get string(): ChatGraphString | null {
+    return this.owner.stringAt(this.readPointer(0));
+  }
+  set string(value: ChatGraphString | null) {
+    this.writePointer(0, value);
+  }
+  get text(): string {
+    const value = this.string;
+    if (value === null) throw new RangeError("reply message has a null string pointer");
+    return value.text;
+  }
+  get time(): number {
+    return this.view().getFloat32(4, true);
+  }
+  set time(value: number) {
+    this.view().setFloat32(4, value, true);
+  }
+  get next(): ChatReplyMessage | null {
+    return this.owner.messageAt(this.readPointer(8));
+  }
+  set next(value: ChatReplyMessage | null) {
+    this.writePointer(8, value);
+  }
 }
 
 export class ChatReply extends ChatGraphBlock {
@@ -446,33 +713,63 @@ export class ChatReply extends ChatGraphBlock {
     if (root === null) throw new Error("Saved chat reply graph has no root");
     return root;
   }
-  get keys(): ChatReplyKey | null { return this.owner.keyAt(this.readPointer(0)); }
-  set keys(value: ChatReplyKey | null) { this.writePointer(0, value); }
-  get priority(): number { return this.view().getFloat32(4, true); }
-  set priority(value: number) { this.view().setFloat32(4, value, true); }
-  get numMessages(): number { return this.view().getInt32(8, true); }
-  set numMessages(value: number) { this.view().setInt32(8, value, true); }
-  get firstMessage(): ChatReplyMessage | null { return this.owner.messageAt(this.readPointer(12)); }
-  set firstMessage(value: ChatReplyMessage | null) { this.writePointer(12, value); }
-  get next(): ChatReply | null { return this.owner.replyAt(this.readPointer(16)); }
-  set next(value: ChatReply | null) { this.writePointer(16, value); }
-  *messages(): Generator<ChatReplyMessage, undefined, undefined> { for (let value = this.firstMessage; value !== null; value = value.next) yield value; }
+  get keys(): ChatReplyKey | null {
+    return this.owner.keyAt(this.readPointer(0));
+  }
+  set keys(value: ChatReplyKey | null) {
+    this.writePointer(0, value);
+  }
+  get priority(): number {
+    return this.view().getFloat32(4, true);
+  }
+  set priority(value: number) {
+    this.view().setFloat32(4, value, true);
+  }
+  get numMessages(): number {
+    return this.view().getInt32(8, true);
+  }
+  set numMessages(value: number) {
+    this.view().setInt32(8, value, true);
+  }
+  get firstMessage(): ChatReplyMessage | null {
+    return this.owner.messageAt(this.readPointer(12));
+  }
+  set firstMessage(value: ChatReplyMessage | null) {
+    this.writePointer(12, value);
+  }
+  get next(): ChatReply | null {
+    return this.owner.replyAt(this.readPointer(16));
+  }
+  set next(value: ChatReply | null) {
+    this.writePointer(16, value);
+  }
+  *messages(): Generator<ChatReplyMessage, undefined, undefined> {
+    for (let value = this.firstMessage; value !== null; value = value.next) yield value;
+  }
   snapshot(): ReplyChat {
-    const keys: ReplyKey[] = [], messages: ChatMessage[] = [];
+    const keys: ReplyKey[] = [],
+      messages: ChatMessage[] = [];
     for (let key = this.keys; key !== null; key = key.next) keys.push(key.snapshot());
     for (const message of this.messages()) messages.push({ text: message.text, time: message.time });
     return { keys, priority: this.priority, messages };
   }
   free(): void {
-    for (let reply: ChatReply | null = this; reply !== null;) {
+    for (let reply: ChatReply | null = this; reply !== null; ) {
       const next: ChatReply | null = reply.next;
-      for (let key = reply.keys; key !== null;) {
-        const nextKey = key.next; key.match?.free(); key.string?.freeBlock(); key.freeBlock(); key = nextKey;
+      for (let key = reply.keys; key !== null; ) {
+        const nextKey = key.next;
+        key.match?.free();
+        key.string?.freeBlock();
+        key.freeBlock();
+        key = nextKey;
       }
-      for (let message = reply.firstMessage; message !== null;) {
-        const nextMessage = message.next; message.freeBlock(); message = nextMessage;
+      for (let message = reply.firstMessage; message !== null; ) {
+        const nextMessage = message.next;
+        message.freeBlock();
+        message = nextMessage;
       }
-      reply.freeBlock(); reply = next;
+      reply.freeBlock();
+      reply = next;
     }
   }
 }
@@ -481,7 +778,9 @@ export class ChatReply extends ChatGraphBlock {
 export class ChatDataMemory {
   private cursor = 0;
   constructor(private readonly allocation: BotMemoryAllocation | null = null) {}
-  get byteLength(): number { return this.cursor; }
+  get byteLength(): number {
+    return this.cursor;
+  }
   reserve(size: number): number {
     const offset = this.cursor;
     this.cursor += size;
@@ -530,7 +829,9 @@ export class ChatDataMemory {
 
 /** Arrays retain the original linked-list order, including each head insertion. */
 export class InitialChatNotFoundError extends Error {
-  constructor(readonly chatName: string) { super(`couldn't find chat ${chatName}`); }
+  constructor(readonly chatName: string) {
+    super(`couldn't find chat ${chatName}`);
+  }
 }
 
 export class ChatDataParser {
@@ -544,16 +845,27 @@ export class ChatDataParser {
   private failure: Error | null = null;
   private errorCleanup: "outer" | "pieces" | "graphs" = "outer";
 
-  constructor(private readonly source: ScriptSourceReader, path: string, readonly memory = new ChatDataMemory(), botMemory = new BotMemory(),
-    private readonly report?: (issue: ScriptDiagnostic) => undefined) {
+  constructor(
+    private readonly source: ScriptSourceReader,
+    path: string,
+    readonly memory = new ChatDataMemory(),
+    botMemory = new BotMemory(),
+    private readonly report?: (issue: ScriptDiagnostic) => undefined,
+  ) {
     this.issues = [];
     this.location = { path, line: 1, column: 1 };
     this.graph = new ChatGraphMemory(botMemory);
   }
 
-  get diagnostics(): readonly ScriptDiagnostic[] { return [...this.source.diagnostics, ...this.issues]; }
-  failedWith(error: unknown): boolean { return this.failure !== null && error === this.failure; }
-  dispose(): void { this.source.dispose(); }
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return [...this.source.diagnostics, ...this.issues];
+  }
+  failedWith(error: unknown): boolean {
+    return this.failure !== null && error === this.failure;
+  }
+  dispose(): void {
+    this.source.dispose();
+  }
 
   private next(): ScriptToken | undefined {
     this.lastRecord = undefined;
@@ -564,8 +876,7 @@ export class ChatDataParser {
       // PC_ReadToken returns false for this read; a later check may read again.
     }
     const token = this.lastRecord?.token;
-    this.location = { path: this.source.currentScriptFilename, line: this.source.position.line,
-      column: token?.location.column ?? this.location.column };
+    this.location = { path: this.source.currentScriptFilename, line: this.source.position.line, column: token?.location.column ?? this.location.column };
     return token;
   }
 
@@ -689,13 +1000,28 @@ export class ChatDataParser {
             totalWeight = Math.fround(totalWeight + weight);
             const storedWeight = this.memory.float(entryRecord + 4, weight);
             storedTotalWeight = this.memory.float(record + 4, totalWeight);
-            entries.push({ get text() { return storedText(); }, get weight() { return storedWeight(); } });
+            entries.push({
+              get text() {
+                return storedText();
+              },
+              get weight() {
+                return storedWeight();
+              },
+            });
             if (this.check("]")) break;
             this.expect(",");
           } while (true);
           const [first, second, ...rest] = entries;
           if (first === undefined || second === undefined) this.fail("synonym must have at least two entries\n");
-          groups.push({ get context() { return storedContext(); }, entries: [first, second, ...rest], get totalWeight() { return storedTotalWeight(); } });
+          groups.push({
+            get context() {
+              return storedContext();
+            },
+            entries: [first, second, ...rest],
+            get totalWeight() {
+              return storedTotalWeight();
+            },
+          });
         } else this.fail(`unexpected ${token.text}`);
       }
     }
@@ -713,7 +1039,8 @@ export class ChatDataParser {
       const record = this.memory.reserve(16);
       const storedName = this.memory.string(token.value);
       let count = this.memory.integer(record + 4, 0);
-      this.expect("="); this.expect("{");
+      this.expect("=");
+      this.expect("{");
       const messages: (() => string)[] = [];
       while (!this.check("}")) {
         const message = this.message();
@@ -721,8 +1048,20 @@ export class ChatDataParser {
         messages.unshift(this.memory.string(message));
         count = this.memory.integer(record + 4, messages.length);
       }
-      lists.push({ get name() { return storedName(); }, get numMessages() { return count(); },
-        get messages() { return messages.map(read => read()); }, message(index) { return messages[index]?.(); } });
+      lists.push({
+        get name() {
+          return storedName();
+        },
+        get numMessages() {
+          return count();
+        },
+        get messages() {
+          return messages.map(read => read());
+        },
+        message(index) {
+          return messages[index]?.();
+        },
+      });
     }
     return lists;
   }
@@ -739,7 +1078,8 @@ export class ChatDataParser {
         if (lastWasVariable) this.fail("not allowed to have adjacent variables\n");
         lastWasVariable = true;
         const piece = this.graph.newPiece();
-        piece.type = 1; piece.variable = token.integerValue;
+        piece.type = 1;
+        piece.variable = token.integerValue;
         if (lastPiece === null) this.unfinishedPieces = piece;
         else lastPiece.next = piece;
         lastPiece = piece;
@@ -749,7 +1089,8 @@ export class ChatDataParser {
         if (lastPiece === null) this.unfinishedPieces = piece;
         else lastPiece.next = piece;
         lastPiece = piece;
-        let lastString: ChatMatchString | null = null, empty = false;
+        let lastString: ChatMatchString | null = null,
+          empty = false;
         do {
           const text = lastString === null ? stringValue(token.value) : this.string();
           const value = this.graph.newMatchString(text);
@@ -800,9 +1141,12 @@ export class ChatDataParser {
         lastMatch = match;
         match.first = this.pieces("=");
         if (match.first === null) this.emptyPieces("empty match template");
-        this.expect("("); match.type = this.number(true);
-        this.expect(","); match.subtype = this.number(true);
-        this.expect(")"); this.expect(";");
+        this.expect("(");
+        match.type = this.number(true);
+        this.expect(",");
+        match.subtype = this.number(true);
+        this.expect(")");
+        this.expect(";");
       }
     }
   }
@@ -825,10 +1169,12 @@ export class ChatDataParser {
       if (first === undefined) return this.replyHead;
       if (first.text !== "[") this.fail(`expected [, found ${first.text}`);
       const reply = this.graph.newReply();
-      reply.next = this.replyHead; this.replyHead = reply;
+      reply.next = this.replyHead;
+      this.replyHead = reply;
       do {
         const key = this.graph.newKey();
-        key.next = reply.keys; reply.keys = key;
+        key.next = reply.keys;
+        reply.keys = key;
         if (this.check("&")) key.flags |= 1;
         else if (this.check("!")) key.flags |= 2;
         if (this.check("name")) key.flags |= 4;
@@ -836,18 +1182,21 @@ export class ChatDataParser {
         else if (this.check("male")) key.flags |= 128;
         else if (this.check("it")) key.flags |= 256;
         else if (this.check("(")) {
-          key.flags |= 16; key.match = this.pieces(")");
+          key.flags |= 16;
+          key.match = this.pieces(")");
           if (key.match === null) this.emptyPieces("empty reply match template");
-        }
-        else if (this.check("<")) {
+        } else if (this.check("<")) {
           key.flags |= 32;
           const names = [this.string()];
           while (this.check(",")) names.push(this.string());
           this.expect(">");
-          const joined = names.reduce((result, name) => result.length === 0 ? name : `${result}\\${name}`, "");
+          const joined = names.reduce((result, name) => (result.length === 0 ? name : `${result}\\${name}`), "");
           if (joined.length >= CHAT_MESSAGE_SIZE) throw new RangeError("bot name key exceeds the source 256-byte buffer");
           key.string = this.graph.newString(joined);
-        } else { key.flags |= 8; key.string = this.graph.newString(this.string()); }
+        } else {
+          key.flags |= 8;
+          key.string = this.graph.newString(this.string());
+        }
         this.check(",");
       } while (!this.check("]"));
       this.replyWarnings(reply.keys);
@@ -867,9 +1216,12 @@ export class ChatDataParser {
 
   /** Error paths free unfinished pieces before their still-null parent field. */
   freeGraphs(): void {
-    this.unfinishedPieces?.free(); this.unfinishedPieces = null;
-    this.matchHead?.free(); this.matchHead = null;
-    this.replyHead?.free(); this.replyHead = null;
+    this.unfinishedPieces?.free();
+    this.unfinishedPieces = null;
+    this.matchHead?.free();
+    this.matchHead = null;
+    this.replyHead?.free();
+    this.replyHead = null;
   }
 
   freeAfterError(): void {
@@ -881,7 +1233,9 @@ export class ChatDataParser {
   }
 
   private replyWarnings(keys: ChatReplyKey | null): void {
-    let allPrefixed = true, hasVariables = false, hasString = false;
+    let allPrefixed = true,
+      hasVariables = false,
+      hasString = false;
     for (let key = keys; key !== null; key = key.next) {
       if ((key.flags & 3) === 0) {
         allPrefixed = false;
@@ -895,10 +1249,16 @@ export class ChatDataParser {
           for (let piece = other.match; piece !== null; piece = piece.next) {
             if (piece.type === 2) {
               for (let value = piece.firstString; value !== null; value = value.next) {
-                if (containsChatText(value.text, key.text)) { space = true; break; }
+                if (containsChatText(value.text, key.text)) {
+                  space = true;
+                  break;
+                }
               }
               if (space) break;
-            } else if (piece.type === 1) { space = true; break; }
+            } else if (piece.type === 1) {
+              space = true;
+              break;
+            }
           }
           if (!space) this.warn(`one of the match templates does not leave space for the key ${key.text} with the & prefix`);
         }
@@ -951,10 +1311,12 @@ export class ChatDataParser {
         if (typeToken.text !== "type") this.fail(`expected type found ${typeToken.text}\n`);
         const typeName = this.string();
         this.expect("{");
-        const typeOffset = this.memory.reserve(44), type = stored?.addType(typeOffset, typeName) ?? null;
+        const typeOffset = this.memory.reserve(44),
+          type = stored?.addType(typeOffset, typeName) ?? null;
         const messages: ChatMessage[] = [];
         while (!this.check("}")) {
-          const text = this.message(), messageOffset = this.memory.reserve(12);
+          const text = this.message(),
+            messageOffset = this.memory.reserve(12);
           if (stored !== null && type !== null) stored.addMessage(type, messageOffset);
           const textOffset = this.memory.reserve(text.length + 1);
           if (stored !== null && type !== null) stored.writeMessage(type, textOffset, text);

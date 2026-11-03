@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Buffered and powerup audio from id Software's code/cgame/cg_view.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -10,8 +11,11 @@ export interface ClientFrameAudioHost {
 }
 
 export class ClientFrameAudio {
-  constructor(private readonly state: ClientGameState, private readonly media: { readonly wearOffSound: PcmSound | null },
-    private readonly host: ClientFrameAudioHost) {}
+  constructor(
+    private readonly state: ClientGameState,
+    private readonly media: { readonly wearOffSound: PcmSound | null },
+    private readonly host: ClientFrameAudioHost,
+  ) {}
 
   addBufferedSound(sound: PcmSound | null): void {
     if (sound === null) return;
@@ -34,7 +38,8 @@ export class ClientFrameAudio {
   }
 
   powerupTimerSounds(): void {
-    const state = this.state, snapshot = state.snap;
+    const state = this.state,
+      snapshot = state.snap;
     if (snapshot === null) throw new Error("CG_PowerupTimerSounds requires an active snapshot");
     for (let slot = 0; slot < 16; slot++) {
       const expiry = snapshot.playerState.powerups.get(slot);

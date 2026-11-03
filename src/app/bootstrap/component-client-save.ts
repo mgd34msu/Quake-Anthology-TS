@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SaveImage } from "../../contracts/session.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../persistence/value.ts";
 import { saveProviderContract, validateSaveProviderOwner } from "../../persistence/provider-ownership.ts";
@@ -15,7 +16,10 @@ export function readComponentClients(image: SaveImage): unknown | null {
 }
 export function saveComponentClients(image: SaveImage, value: unknown): SaveImage {
   if (image.providers.some(row => row.schema === schema)) throw new Error("Component client checkpoint is already attached");
-  return { ...image, providers: [...image.providers, { ...saveProviderContract(schema, image.recipe.map.entities.provider), bytes: encodeCheckpointValue(value) }] };
+  return {
+    ...image,
+    providers: [...image.providers, { ...saveProviderContract(schema, image.recipe.map.entities.provider), bytes: encodeCheckpointValue(value) }],
+  };
 }
 
 export function requireComponentClientPresentation(image: SaveImage): void {

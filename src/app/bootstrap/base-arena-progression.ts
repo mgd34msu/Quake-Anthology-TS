@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Base UI progression semantics from id Software ui_gameinfo.c and ui_sppostgame.c.
  * Copyright (C) 1999-2005 Id Software. GPL-2.0-or-later. */
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
@@ -23,7 +24,10 @@ export interface ArenaResult {
   readonly frags: number;
   readonly perfect: boolean;
 }
-export interface ArenaAward { readonly medal: number; readonly amount: number }
+export interface ArenaAward {
+  readonly medal: number;
+  readonly amount: number;
+}
 export interface ArenaProgressionResult {
   readonly rank: number;
   readonly completedTier: number;
@@ -33,31 +37,55 @@ export interface ArenaProgressionResult {
 }
 
 export class BaseArenaProgression {
-  constructor(private readonly cvars: CvarRegistry, readonly catalog: ArenaProgressionCatalog) {
-    if (!Number.isInteger(catalog.regularLevels) || catalog.regularLevels < 0 || catalog.regularLevels % 4 !== 0
-      || !Number.isInteger(catalog.totalLevels) || catalog.totalLevels < catalog.regularLevels) throw new Error("Invalid arena progression catalog");
+  constructor(
+    private readonly cvars: CvarRegistry,
+    readonly catalog: ArenaProgressionCatalog,
+  ) {
+    if (
+      !Number.isInteger(catalog.regularLevels) ||
+      catalog.regularLevels < 0 ||
+      catalog.regularLevels % 4 !== 0 ||
+      !Number.isInteger(catalog.totalLevels) ||
+      catalog.totalLevels < catalog.regularLevels
+    )
+      throw new Error("Invalid arena progression catalog");
     for (let skill = 1; skill <= 5; skill++) cvars.register(`g_spScores${skill}`, "", CvarFlag.Archive);
     cvars.register("g_spAwards", "", CvarFlag.Archive);
     cvars.register("g_spVideos", "", CvarFlag.Archive);
   }
-  private read(name: string, key: string): number { return gameAtoi(infoValueForKey(this.cvars.get(name)?.value ?? "", key)); }
+  private read(name: string, key: string): number {
+    return gameAtoi(infoValueForKey(this.cvars.get(name)?.value ?? "", key));
+  }
   private write(name: string, key: string, value: number): void {
     const text = setInfoValue(this.cvars.get(name)?.value ?? "", key, String(value), {
-      dialect: "q3", maximumLength: 1024, target: "client-userinfo", serverHighCharacters: true,
-      print: message => { throw new Error(message); },
+      dialect: "q3",
+      maximumLength: 1024,
+      target: "client-userinfo",
+      serverHighCharacters: true,
+      print: message => {
+        throw new Error(message);
+      },
     });
     this.cvars.set(name, text, true);
   }
   best(level: number): { readonly rank: number; readonly skill: number } {
-    let rank = 0, skill = 0;
+    let rank = 0,
+      skill = 0;
     for (let n = 1; n <= 5; n++) {
       const current = this.read(`g_spScores${n}`, `l${level}`);
-      if (current >= 1 && current <= 8 && (rank === 0 || current <= rank)) { rank = current; skill = n; }
+      if (current >= 1 && current <= 8 && (rank === 0 || current <= rank)) {
+        rank = current;
+        skill = n;
+      }
     }
     return { rank, skill };
   }
-  award(medal: number): number { return this.read("g_spAwards", `a${medal}`); }
-  movieUnlocked(tier: number): boolean { return tier > 0 && this.read("g_spVideos", `tier${tier}`) !== 0; }
+  award(medal: number): number {
+    return this.read("g_spAwards", `a${medal}`);
+  }
+  movieUnlocked(tier: number): boolean {
+    return tier > 0 && this.read("g_spVideos", `tier${tier}`) !== 0;
+  }
   currentLevel(): number {
     if (this.catalog.training !== null && this.best(this.catalog.training).rank !== 1) return this.catalog.training;
     for (let level = 0; level < this.catalog.regularLevels; level++) if (this.best(level).rank !== 1) return level;
@@ -82,9 +110,18 @@ export class BaseArenaProgression {
     return tier + 1;
   }
   record(result: ArenaResult): ArenaProgressionResult {
-    if (!Number.isInteger(result.level) || result.level < 0 || result.level >= this.catalog.totalLevels
-      || !Number.isInteger(result.rank) || result.rank < 1 || result.rank > 8) throw new Error("Invalid arena result");
-    const name = `g_spScores${result.skill}`, key = `l${result.level}`, old = this.read(name, key);
+    if (
+      !Number.isInteger(result.level) ||
+      result.level < 0 ||
+      result.level >= this.catalog.totalLevels ||
+      !Number.isInteger(result.rank) ||
+      result.rank < 1 ||
+      result.rank > 8
+    )
+      throw new Error("Invalid arena result");
+    const name = `g_spScores${result.skill}`,
+      key = `l${result.level}`,
+      old = this.read(name, key);
     if (old === 0 || old > result.rank) this.write(name, key, result.rank);
     const awards: ArenaAward[] = [];
     const grant = (medal: number, count: number, display: number): void => {
@@ -93,7 +130,9 @@ export class BaseArenaProgression {
       if (display !== 0) awards.push({ medal, amount: display });
     };
     if (result.accuracy >= 50) grant(0, 1, result.accuracy);
-    grant(1, result.impressive, result.impressive); grant(2, result.excellent, result.excellent); grant(3, result.gauntlet, result.gauntlet);
+    grant(1, result.impressive, result.impressive);
+    grant(2, result.excellent, result.excellent);
+    grant(3, result.gauntlet, result.gauntlet);
     const oldHundreds = Math.trunc(this.award(4) / 100);
     grant(4, result.frags, 0);
     const hundreds = Math.trunc(this.award(4) / 100);
@@ -106,11 +145,14 @@ export class BaseArenaProgression {
   }
   reset(): void {
     for (let skill = 1; skill <= 5; skill++) this.cvars.set(`g_spScores${skill}`, "", true);
-    this.cvars.set("g_spAwards", "", true); this.cvars.set("g_spVideos", "", true);
+    this.cvars.set("g_spAwards", "", true);
+    this.cvars.set("g_spVideos", "", true);
   }
   unlockLevels(): void {
     for (let level = 0; level < this.catalog.totalLevels; level++) this.write("g_spScores1", `l${level}`, 1);
     for (let tier = 1; tier <= 8; tier++) this.write("g_spVideos", `tier${tier}`, 1);
   }
-  unlockMedals(): void { for (let medal = 0; medal < 6; medal++) this.write("g_spAwards", `a${medal}`, 100); }
+  unlockMedals(): void {
+    for (let medal = 0; medal < 6; medal++) this.write("g_spAwards", `a${medal}`, 100);
+  }
 }

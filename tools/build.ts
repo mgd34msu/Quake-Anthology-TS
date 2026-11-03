@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import ts from "typescript";
@@ -50,7 +51,9 @@ export interface BuildEvidence {
 const usage = "Usage: bun tools/build.ts [--tools] [--keep-snapshot] [--keep-builds=N]";
 
 export function parseBuildOptions(args: readonly string[]): { readonly kind: BuildKind; readonly options: BuildOptions } {
-  let kind: BuildKind = "runtime", keepSnapshot = false, keepBuilds = defaultKeepBuilds;
+  let kind: BuildKind = "runtime",
+    keepSnapshot = false,
+    keepBuilds = defaultKeepBuilds;
   const seen = new Set<string>();
   for (const arg of args) {
     const flag = arg.split("=")[0] ?? arg;
@@ -70,7 +73,9 @@ export function parseBuildKind(args: readonly string[]): BuildKind {
 
 async function directoriesByAge(parent: string, pattern: RegExp): Promise<string[]> {
   const names = await readdir(parent).catch(() => []);
-  const dated = await Promise.all(names.filter(name => pattern.test(name)).map(async name => ({ path: join(parent, name), time: (await stat(join(parent, name))).mtimeMs })));
+  const dated = await Promise.all(
+    names.filter(name => pattern.test(name)).map(async name => ({ path: join(parent, name), time: (await stat(join(parent, name))).mtimeMs })),
+  );
   return dated.sort((left, right) => right.time - left.time).map(entry => entry.path);
 }
 
@@ -78,7 +83,10 @@ async function pruneDirectories(parent: string, pattern: RegExp, keep: number, p
   const ordered = await directoriesByAge(parent, pattern);
   let kept = 0;
   for (const path of ordered) {
-    if (path === protectedPath || kept < keep) { kept += 1; continue; }
+    if (path === protectedPath || kept < keep) {
+      kept += 1;
+      continue;
+    }
     await rm(path, { recursive: true, force: true });
   }
 }
@@ -92,12 +100,16 @@ async function runGate(snapshotPath: string, name: string): Promise<void> {
 export async function buildWorkspace(directory: string, kind: BuildKind, options: BuildOptions = {}): Promise<BuildEvidence> {
   if (process.platform !== "linux") throw new Error("The first build target is Linux. Run this build on Linux.");
   const workspace = resolve(directory);
-  const entries: readonly BuildEntry[] = kind === "runtime"
-    ? [{ source: "src/main.ts", executable: "quake-typescript" }]
-    : [{ source: "tools/check-policy.ts", executable: "check-policy" },
-      { source: "tools/source-camera.ts", executable: "source-camera" }, { source: "tools/navigation/aas.ts", executable: "aas" }];
+  const entries: readonly BuildEntry[] =
+    kind === "runtime"
+      ? [{ source: "src/main.ts", executable: "quake-typescript" }]
+      : [
+          { source: "tools/check-policy.ts", executable: "check-policy" },
+          { source: "tools/source-camera.ts", executable: "source-camera" },
+          { source: "tools/navigation/aas.ts", executable: "aas" },
+        ];
   for (const entry of entries) {
-    if (!await Bun.file(join(workspace, entry.source)).exists()) {
+    if (!(await Bun.file(join(workspace, entry.source)).exists())) {
       throw new Error(`Build entry is missing: ${entry.source}`);
     }
   }
@@ -116,7 +128,16 @@ export async function buildWorkspace(directory: string, kind: BuildKind, options
     const builtEntries: BuiltEntry[] = [];
     for (const entry of entries) {
       const result = await Bun.build({
-        entrypoints: [join(snapshotPath, entry.source), ...(kind === "runtime" ? [join(snapshotPath, "src/render/worker-entry.ts"), join(snapshotPath, "src/render/cpu/row-worker.ts"), join(snapshotPath, "src/llm/auth-worker.ts")] : [])],
+        entrypoints: [
+          join(snapshotPath, entry.source),
+          ...(kind === "runtime"
+            ? [
+                join(snapshotPath, "src/render/worker-entry.ts"),
+                join(snapshotPath, "src/render/cpu/row-worker.ts"),
+                join(snapshotPath, "src/llm/auth-worker.ts"),
+              ]
+            : []),
+        ],
         naming: { entry: "[name].ts" },
         target: "bun",
         loader: { ".png": "file" },
@@ -151,10 +172,23 @@ export async function buildWorkspace(directory: string, kind: BuildKind, options
     const metadata = `${JSON.stringify(evidence, null, 2)}\n`;
     await Bun.write(join(candidate, "build.json"), metadata);
     for (const entry of builtEntries) {
-      await Bun.write(join(candidate, `${entry.executable}.build.json`), `${JSON.stringify({
-        schemaVersion: 2, sourceSha256: evidence.sourceSha256, commit: evidence.commit, dirty: evidence.dirty, executableSha256: entry.sha256,
-        source: entry.source, bun: evidence.bun, typescript: evidence.typescript,
-      }, null, 2)}\n`);
+      await Bun.write(
+        join(candidate, `${entry.executable}.build.json`),
+        `${JSON.stringify(
+          {
+            schemaVersion: 2,
+            sourceSha256: evidence.sourceSha256,
+            commit: evidence.commit,
+            dirty: evidence.dirty,
+            executableSha256: entry.sha256,
+            source: entry.source,
+            bun: evidence.bun,
+            typescript: evidence.typescript,
+          },
+          null,
+          2,
+        )}\n`,
+      );
     }
     await rename(candidate, finalDirectory);
     published = true;

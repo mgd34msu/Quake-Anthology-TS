@@ -14,8 +14,12 @@ export function loadGlCompiledVertexArrays(window: Pick<SdlRenderContext, "getGl
 
 function ownProcedureTable<T>(window: Pick<SdlRenderContext, "retainProcedures">, table: { readonly symbols: T; close(): void }) {
   let release: () => void;
-  try { release = window.retainProcedures(); }
-  catch (error) { table.close(); throw error; }
+  try {
+    release = window.retainProcedures();
+  } catch (error) {
+    table.close();
+    throw error;
+  }
   let closed = false;
   return {
     symbols: table.symbols,
@@ -106,7 +110,11 @@ export function loadGl(window: Pick<SdlRenderContext, "getGlProcAddress" | "reta
     glTexEnvf: { args: ["u32", "u32", "f32"], returns: "void", ptr: window.getGlProcAddress("glTexEnvf") },
     glTexImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "buffer"], returns: "void", ptr: window.getGlProcAddress("glTexImage2D") },
     glCopyTexImage2D: { args: ["u32", "i32", "u32", "i32", "i32", "i32", "i32", "i32"], returns: "void", ptr: window.getGlProcAddress("glCopyTexImage2D") },
-    glTexSubImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "buffer"], returns: "void", ptr: window.getGlProcAddress("glTexSubImage2D") },
+    glTexSubImage2D: {
+      args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "buffer"],
+      returns: "void",
+      ptr: window.getGlProcAddress("glTexSubImage2D"),
+    },
     glFinish: { args: [], returns: "void", ptr: window.getGlProcAddress("glFinish") },
     glPixelStorei: { args: ["u32", "i32"], returns: "void", ptr: window.getGlProcAddress("glPixelStorei") },
     glReadPixels: { args: ["i32", "i32", "i32", "i32", "u32", "u32", "buffer"], returns: "void", ptr: window.getGlProcAddress("glReadPixels") },

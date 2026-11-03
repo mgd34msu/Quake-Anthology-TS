@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -34,11 +35,13 @@ test.skipIf(!existsSync(q3Archive))("retail MD3 player preserves animated tags, 
     expect(lerpTag(model, "tag_torso", 0, 1, 0.5)?.origin.x).toBeFinite();
     expect(toSceneMd3(model).sourceModel).toBe(model);
     const calls: string[] = [];
-    const lods = await loadMd3Lods(path, { async read(filename) {
-      calls.push(filename);
-      const entry = archive.findEntries(filename)[0];
-      return entry === undefined ? null : archive.readEntry(entry);
-    } });
+    const lods = await loadMd3Lods(path, {
+      async read(filename) {
+        calls.push(filename);
+        const entry = archive.findEntries(filename)[0];
+        return entry === undefined ? null : archive.readEntry(entry);
+      },
+    });
     expect(calls).toEqual(["models/players/sarge/lower_2.md3", "models/players/sarge/lower_1.md3", path]);
     if (lods === null) throw new Error("Retail LODs missing");
     expect(lods.slots.map(slot => slot.kind)).toEqual(["loaded", "loaded", "loaded"]);
@@ -48,7 +51,9 @@ test.skipIf(!existsSync(q3Archive))("retail MD3 player preserves animated tags, 
     expect(config.animations[13]?.firstFrame).toBe(90);
     expect(config.animations[32]?.reversed).toBe(true);
     expect(parseSkin(new TextDecoder().decode(await read(archive, "models/players/sarge/lower_default.skin")))).toHaveLength(1);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test.skipIf(!existsSync(q2Archive))("retail Q2 flag scale_positions and scalar vertex match the donor", async () => {
@@ -56,7 +61,10 @@ test.skipIf(!existsSync(q2Archive))("retail Q2 flag scale_positions and scalar v
   try {
     const prefix = "players/male/md5/flag1";
     const text = async (extension: string): Promise<string> => new TextDecoder().decode(await read(archive, prefix + extension));
-    const model = createMd5Model(parseMd5Mesh(await text(".md5mesh")), parseMd5Anim(await text(".md5anim"), prefix, { source: prefix + ".md5scale", text: await text(".md5scale") }));
+    const model = createMd5Model(
+      parseMd5Mesh(await text(".md5mesh")),
+      parseMd5Anim(await text(".md5anim"), prefix, { source: prefix + ".md5scale", text: await text(".md5scale") }),
+    );
     expect(model.joints).toHaveLength(8);
     expect(model.joints.every(joint => joint.scalePositions)).toBe(true);
     expect(model.animation.diagnostics).toEqual([]);
@@ -69,7 +77,9 @@ test.skipIf(!existsSync(q2Archive))("retail Q2 flag scale_positions and scalar v
     expect(vertices[0]?.position.x).toBeCloseTo(-0.6274441480636597, 4);
     expect(vertices[0]?.position.y).toBeCloseTo(13.115943908691406, 4);
     expect(vertices[0]?.position.z).toBeCloseTo(46.33980178833008, 4);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test.skipIf(!existsSync(q1Archive))("retail Q1 armor MD5 retains its two animation frames", async () => {
@@ -83,12 +93,32 @@ test.skipIf(!existsSync(q1Archive))("retail Q1 armor MD5 retains its two animati
     const surface = model.meshes[0];
     if (surface === undefined) throw new Error("Retail mesh missing");
     expect(skinMd5Mesh(surface, sampleMd5Pose(model, 0)).every(vertex => Number.isFinite(vertex.position.x))).toBe(true);
-    const selection = q1ReplacementSkinSelection(model, { skins: [{ kind: "group", frames: [{ intervalSeconds: 0.1, frame: new Uint8Array() }, { intervalSeconds: 0.3, frame: new Uint8Array() }] }], flags: 8, frames: [] });
+    const selection = q1ReplacementSkinSelection(model, {
+      skins: [
+        {
+          kind: "group",
+          frames: [
+            { intervalSeconds: 0.1, frame: new Uint8Array() },
+            { intervalSeconds: 0.3, frame: new Uint8Array() },
+          ],
+        },
+      ],
+      flags: 8,
+      frames: [],
+    });
     if (selection.kind !== "q1-mdl-replacement") throw new Error("Wrong skin selection");
-    expect(selection.meshSkinGroups[0]?.[0]).toEqual({ kind: "group", frames: [{ intervalSeconds: 0.1, frame: `progs/${surface.shader}_00_00` }, { intervalSeconds: 0.3, frame: `progs/${surface.shader}_00_01` }] });
+    expect(selection.meshSkinGroups[0]?.[0]).toEqual({
+      kind: "group",
+      frames: [
+        { intervalSeconds: 0.1, frame: `progs/${surface.shader}_00_00` },
+        { intervalSeconds: 0.3, frame: `progs/${surface.shader}_00_01` },
+      ],
+    });
     expect(selection.flags).toBe(8);
     expect(selection.timing).toEqual({ kind: "elapsed-time", frameRate: 2 });
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test.skip("real MD4 fixture remains unavailable in the supplied corpus; synthetic layout is tested separately", () => {});

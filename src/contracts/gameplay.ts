@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor, ProviderId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
 import type { SourceTime } from "./time.ts";
@@ -88,14 +89,20 @@ export interface ArmorDamageFlags {
   readonly energy: boolean;
   readonly regularProtectionScale?: number;
 }
-export interface ArmorResult { readonly armor: ArmorState; readonly powerSaved: number; readonly regularSaved: number; }
+export interface ArmorResult {
+  readonly armor: ArmorState;
+  readonly powerSaved: number;
+  readonly regularSaved: number;
+}
 export interface ArmorStageInput {
   readonly request: DamageRequest;
   readonly geometry: Pick<DamageRequest, "direction" | "point" | "normal">;
   readonly amount: number;
   readonly flags: ArmorDamageFlags;
 }
-export interface ArmorStageResult { readonly saved: number; }
+export interface ArmorStageResult {
+  readonly saved: number;
+}
 type ProtectionChange<K extends ProtectionChannel> = { readonly before: ArmorState[K]; readonly after: ArmorState[K] };
 export type ProtectionStore =
   | { readonly regular: ProtectionChange<"regular">; readonly powered?: ProtectionChange<"powered"> }
@@ -134,15 +141,22 @@ export interface DamageDecision {
     | { readonly kind: "q3"; readonly knockback: number; readonly battlesuit: boolean };
 }
 
-export interface CurrentCombatState { target(): CombatState | null; attacker(): CombatState | null; }
+export interface CurrentCombatState {
+  target(): CombatState | null;
+  attacker(): CombatState | null;
+}
 
 export type CombatResult = Pick<DamageDecision, "appliedDamage" | "reaction" | "feedback">;
 /** Synchronous execution only. Completed decisions contain no continuations. */
 export type CombatProgress = { readonly request: DamageRequest; readonly mutations: readonly DamageMutation[] } & (
   | { readonly kind: "complete"; readonly result: CombatResult }
-  | { readonly kind: "armor-stage"; readonly channel: ProtectionChannel; readonly input: ArmorStageInput;
+  | {
+      readonly kind: "armor-stage";
+      readonly channel: ProtectionChannel;
+      readonly input: ArmorStageInput;
       readonly fallback: (current: ArmorState) => ArmorResult;
-      readonly resume: (result: ArmorStageResult, current: CurrentCombatState) => CombatProgress }
+      readonly resume: (result: ArmorStageResult, current: CurrentCombatState) => CombatProgress;
+    }
   | { readonly kind: "source-continuation"; readonly resume: (current: CurrentCombatState) => CombatProgress }
 );
 
@@ -187,7 +201,14 @@ export interface MissionGate {
 }
 
 export type TransitionIntent =
-  | { readonly kind: "campaign-level"; readonly campaign: ProviderId; readonly map: `${string}:${string}`; readonly spawnPoint: string; readonly gates: readonly MissionGate[]; readonly cause: ActorId | null }
+  | {
+      readonly kind: "campaign-level";
+      readonly campaign: ProviderId;
+      readonly map: `${string}:${string}`;
+      readonly spawnPoint: string;
+      readonly gates: readonly MissionGate[];
+      readonly cause: ActorId | null;
+    }
   | { readonly kind: "campaign-complete"; readonly campaign: ProviderId; readonly gates: readonly MissionGate[] }
   | { readonly kind: "round-complete"; readonly match: ProviderId; readonly winner: string | null }
   | { readonly kind: "match-rotation"; readonly match: ProviderId; readonly map: `${string}:${string}` };
@@ -198,7 +219,13 @@ export type MatchTransitionIntent = Extract<TransitionIntent, { readonly kind: "
 export type TransitionMode =
   | { readonly kind: "campaign"; readonly campaign: ProviderId; readonly allowRoundRestart: boolean }
   | { readonly kind: "competitive"; readonly match: ProviderId }
-  | { readonly kind: "combined"; readonly campaign: ProviderId; readonly match: ProviderId; readonly levelAuthority: "campaign-gates"; readonly simultaneous: "campaign-first" | "round-first" };
+  | {
+      readonly kind: "combined";
+      readonly campaign: ProviderId;
+      readonly match: ProviderId;
+      readonly levelAuthority: "campaign-gates";
+      readonly simultaneous: "campaign-first" | "round-first";
+    };
 
 export type TransitionDecision =
   | { readonly kind: "stay"; readonly blocked: readonly ObjectiveId[] }

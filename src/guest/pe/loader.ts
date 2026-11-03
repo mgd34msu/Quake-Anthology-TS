@@ -18,14 +18,16 @@ function relocate(image: ImageReader): void {
   const reader = image.forStage("relocation");
   const table = directory(reader.pe, 5);
   const delta = reader.base - reader.pe.preferredBase;
-  if (delta !== 0n && ((reader.pe.characteristics & 1) !== 0 || table.rva === 0)) throw new PeError("relocation", "image cannot be relocated away from its preferred base");
+  if (delta !== 0n && ((reader.pe.characteristics & 1) !== 0 || table.rva === 0))
+    throw new PeError("relocation", "image cannot be relocated away from its preferred base");
   if (table.rva === 0) return;
   const source = new PeReader(reader.copy(table.rva, table.byteLength), "relocation");
   const patches: { readonly rva: number; readonly width: 2 | 4 | 8; readonly value: bigint }[] = [];
   for (let block = 0; block < table.byteLength; ) {
     const page = source.u32(block);
     const size = source.u32(block + 4);
-    if (page % 4096 !== 0 || size < 8 || size % 2 !== 0 || size > table.byteLength - block) throw new PeError("relocation", "invalid relocation block size/page");
+    if (page % 4096 !== 0 || size < 8 || size % 2 !== 0 || size > table.byteLength - block)
+      throw new PeError("relocation", "invalid relocation block size/page");
     for (let at = block + 8; at < block + size; at += 2) {
       const entry = source.u16(at);
       const type = entry >>> 12;
@@ -54,9 +56,15 @@ function relocate(image: ImageReader): void {
     end = patch.rva + patch.width;
     const value = BigInt.asUintN(patch.width * 8, patch.value);
     switch (patch.width) {
-      case 2: reader.reader.view.setUint16(patch.rva, Number(value), true); break;
-      case 4: reader.reader.view.setUint32(patch.rva, Number(value), true); break;
-      case 8: reader.reader.view.setBigUint64(patch.rva, value, true); break;
+      case 2:
+        reader.reader.view.setUint16(patch.rva, Number(value), true);
+        break;
+      case 4:
+        reader.reader.view.setUint32(patch.rva, Number(value), true);
+        break;
+      case 8:
+        reader.reader.view.setBigUint64(patch.rva, value, true);
+        break;
     }
   }
 }
@@ -69,8 +77,14 @@ export function mapPeImage(options: MapPeImageOptions): PeImage {
   const base = options.base ?? pe.preferredBase;
   const maximum = options.maximumImageBytes ?? 256 * 1024 * 1024;
   if (!Number.isSafeInteger(maximum) || maximum <= 0 || pe.imageSize > maximum) throw new PeError("mapping", "image exceeds the explicit allocation limit");
-  if (memory.pointerBytes !== pe.abi.pointerBytes || base === 0n || base % 65536n !== 0n || base < 0n ||
-      base + BigInt(pe.imageSize) > (1n << BigInt(pe.abi.pointerBytes * 8))) throw new PeError("mapping", "incompatible guest pointer width or image base");
+  if (
+    memory.pointerBytes !== pe.abi.pointerBytes ||
+    base === 0n ||
+    base % 65536n !== 0n ||
+    base < 0n ||
+    base + BigInt(pe.imageSize) > 1n << BigInt(pe.abi.pointerBytes * 8)
+  )
+    throw new PeError("mapping", "incompatible guest pointer width or image base");
   if (directory(pe, 14).rva !== 0) throw new PeError("mapping", "managed CLR images require an unsupported runtime");
   const bytes = new Uint8Array(pe.imageSize);
   bytes.set(options.bytes.subarray(0, pe.headerSize));
@@ -91,8 +105,13 @@ export function mapPeImage(options: MapPeImageOptions): PeImage {
   const headerMappedSize = Math.ceil(pe.headerSize / pe.sectionAlignment) * pe.sectionAlignment;
   const imageMappings: GuestMapping[] = [{ base, byteLength: headerMappedSize, permissions: "read", label: `${module.id}:PE headers` }];
   for (const section of pe.sections) {
-    if (section.mappedSize > 0) imageMappings.push({ base: base + BigInt(section.rva), byteLength: section.mappedSize,
-      permissions: section.permissions, label: `${module.id}:${section.name}` });
+    if (section.mappedSize > 0)
+      imageMappings.push({
+        base: base + BigInt(section.rva),
+        byteLength: section.mappedSize,
+        permissions: section.permissions,
+        label: `${module.id}:${section.name}`,
+      });
   }
   memory.map({ base, byteLength: pe.imageSize, permissions: "read-write", bytes, label: `${module.id}:PE image` });
   try {
@@ -102,25 +121,51 @@ export function mapPeImage(options: MapPeImageOptions): PeImage {
     memory.unmap(address, pe.imageSize);
     throw error;
   }
-  return { module, abi: pe.abi, base: address, preferredBase: pe.preferredBase, byteLength: BigInt(pe.imageSize), entryPoint,
-    mappings: memory.mappings().filter(mapping => mapping.base >= base && mapping.base < base + BigInt(pe.imageSize)), imports, exports,
-    tls: tls.tls, tlsIndexAddress: tls.index, loadConfiguration, pe, unwindRecords,
+  return {
+    module,
+    abi: pe.abi,
+    base: address,
+    preferredBase: pe.preferredBase,
+    byteLength: BigInt(pe.imageSize),
+    entryPoint,
+    mappings: memory.mappings().filter(mapping => mapping.base >= base && mapping.base < base + BigInt(pe.imageSize)),
+    imports,
+    exports,
+    tls: tls.tls,
+    tlsIndexAddress: tls.index,
+    loadConfiguration,
+    pe,
+    unwindRecords,
     // Windows owns DllMain and TLS notifications. CRT constructors execute through DllMain, not a second list.
-    initializers: [], finalizers: [],
-    unwind: unwindRecords.map(record => ({ start: reader.address(record.beginRva), end: reader.address(record.endRva, 0), format: "pe-x64-unwind", metadata: record.metadata })) };
+    initializers: [],
+    finalizers: [],
+    unwind: unwindRecords.map(record => ({
+      start: reader.address(record.beginRva),
+      end: reader.address(record.endRva, 0),
+      format: "pe-x64-unwind",
+      metadata: record.metadata,
+    })),
+  };
 }
 
 /** Resolver failures leave all IAT bytes untouched. Guest/host targets must belong to the same guest address space. */
 export function bindPeImports(image: PeImage, memory: MappedGuestMemory, resolver: GuestImportResolver): readonly GuestImportResolution[] {
-  if (memory.addressSpace !== image.base.addressSpace || memory.pointerBytes !== image.abi.pointerBytes) throw new PeError("imports", "image belongs to another guest address space");
+  if (memory.addressSpace !== image.base.addressSpace || memory.pointerBytes !== image.abi.pointerBytes)
+    throw new PeError("imports", "image belongs to another guest address space");
   const resolutions: GuestImportResolution[] = [];
   const writes: { readonly slot: GuestAddress; readonly bytes: Uint8Array; readonly previous: Uint8Array }[] = [];
   for (const import_ of image.imports) {
     const resolution = resolver.resolve(import_, image);
     if (resolution.kind === "unresolved") throw new PeError("imports", `${import_.library}: ${resolution.detail}`);
     const address = resolution.address;
-    if (address.addressSpace !== memory.addressSpace || address.byteOffset <= 0n || address.byteOffset >= (1n << BigInt(memory.pointerBytes * 8)) ||
-        !memory.mappings().some(mapping => address.byteOffset >= mapping.base && address.byteOffset < mapping.base + BigInt(mapping.byteLength) && mapping.permissions !== "none")) {
+    if (
+      address.addressSpace !== memory.addressSpace ||
+      address.byteOffset <= 0n ||
+      address.byteOffset >= 1n << BigInt(memory.pointerBytes * 8) ||
+      !memory
+        .mappings()
+        .some(mapping => address.byteOffset >= mapping.base && address.byteOffset < mapping.base + BigInt(mapping.byteLength) && mapping.permissions !== "none")
+    ) {
       throw new PeError("imports", "resolved symbol is not a mapped address in this guest space");
     }
     const bytes = new Uint8Array(memory.pointerBytes);
@@ -130,8 +175,13 @@ export function bindPeImports(image: PeImage, memory: MappedGuestMemory, resolve
     writes.push({ slot: import_.slot, bytes, previous: memory.copy(import_.slot, memory.pointerBytes) });
     resolutions.push(resolution);
   }
-  const regions = memory.mappings().filter(mapping => writes.some(write => write.slot.byteOffset < mapping.base + BigInt(mapping.byteLength) &&
-    write.slot.byteOffset + BigInt(memory.pointerBytes) > mapping.base));
+  const regions = memory
+    .mappings()
+    .filter(mapping =>
+      writes.some(
+        write => write.slot.byteOffset < mapping.base + BigInt(mapping.byteLength) && write.slot.byteOffset + BigInt(memory.pointerBytes) > mapping.base,
+      ),
+    );
   const protectedRegions: GuestMapping[] = [];
   try {
     for (const region of regions) {
@@ -140,8 +190,12 @@ export function bindPeImports(image: PeImage, memory: MappedGuestMemory, resolve
       memory.protect(address, region.byteLength, region.permissions.includes("execute") ? "read-write-execute" : "read-write");
       protectedRegions.push(region);
     }
-    try { for (const write of writes) memory.write(write.slot, write.bytes); }
-    catch (error) { for (const write of writes) memory.write(write.slot, write.previous); throw error; }
+    try {
+      for (const write of writes) memory.write(write.slot, write.bytes);
+    } catch (error) {
+      for (const write of writes) memory.write(write.slot, write.previous);
+      throw error;
+    }
   } finally {
     for (const region of protectedRegions) {
       const address = memory.pointer(region.base);

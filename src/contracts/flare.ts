@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "./math.ts";
 
 export interface SceneFlare {

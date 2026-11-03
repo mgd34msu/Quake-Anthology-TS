@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Wire shapes derived from id Software's Quake, Quake II, Quake II rerelease,
  * and Quake III public headers. GPL-2.0-or-later. */
 import type { Vec3, Vec4 } from "./math.ts";
@@ -18,7 +19,10 @@ export type Q2ProtocolIdentity =
   | { readonly kind: "q2-kex"; readonly version: 2023 }
   | { readonly kind: "q2-kex-demo"; readonly version: 2022 }
   | { readonly kind: "q2-private-classic"; readonly version: 4038 };
-export interface Q3ProtocolIdentity { readonly kind: "q3"; readonly version: 68; }
+export interface Q3ProtocolIdentity {
+  readonly kind: "q3";
+  readonly version: 68;
+}
 
 /** Wire versions select codecs. They do not select game APIs or frame cadence. */
 export type ProtocolIdentity = Q1ProtocolIdentity | QwProtocolIdentity | Q2ProtocolIdentity | Q3ProtocolIdentity;
@@ -284,8 +288,20 @@ export interface Q3PlayerState {
 }
 
 export type Q1Snapshot =
-  | { readonly kind: "q1-netquake"; readonly protocol: Extract<Q1ProtocolIdentity, { readonly version: 15 }>; readonly serverTimeSeconds: number; readonly client: Q1ClientData; readonly entities: readonly Q1EntityState[] }
-  | { readonly kind: "q1-enhanced"; readonly protocol: Exclude<Q1ProtocolIdentity, { readonly version: 15 }>; readonly serverTimeSeconds: number; readonly client: Q1ClientData; readonly entities: readonly Q1ExtendedEntityState[] };
+  | {
+      readonly kind: "q1-netquake";
+      readonly protocol: Extract<Q1ProtocolIdentity, { readonly version: 15 }>;
+      readonly serverTimeSeconds: number;
+      readonly client: Q1ClientData;
+      readonly entities: readonly Q1EntityState[];
+    }
+  | {
+      readonly kind: "q1-enhanced";
+      readonly protocol: Exclude<Q1ProtocolIdentity, { readonly version: 15 }>;
+      readonly serverTimeSeconds: number;
+      readonly client: Q1ClientData;
+      readonly entities: readonly Q1ExtendedEntityState[];
+    };
 export interface QwSnapshot {
   readonly kind: "q1-quakeworld";
   readonly protocol: QwProtocolIdentity;
@@ -332,7 +348,16 @@ export type NetworkEvent =
   | { readonly kind: "center-print"; readonly text: string }
   | { readonly kind: "command-text"; readonly text: string }
   | { readonly kind: "config-string"; readonly index: number; readonly value: string }
-  | { readonly kind: "sound"; readonly entityNumber: number; readonly channel: number; readonly soundIndex: number; readonly origin: Vec3 | null; readonly volume: number; readonly attenuation: number; readonly delaySeconds: number }
+  | {
+      readonly kind: "sound";
+      readonly entityNumber: number;
+      readonly channel: number;
+      readonly soundIndex: number;
+      readonly origin: Vec3 | null;
+      readonly volume: number;
+      readonly attenuation: number;
+      readonly delaySeconds: number;
+    }
   | { readonly kind: "q1-damage"; readonly armor: number; readonly blood: number; readonly source: Vec3 }
   | { readonly kind: "q1-particle"; readonly origin: Vec3; readonly direction: Vec3; readonly count: number; readonly color: number }
   | { readonly kind: "q2-layout"; readonly program: string }

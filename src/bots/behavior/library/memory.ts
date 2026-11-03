@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // botlib/l_memory.c release32 allocation IDs and heap/hunk lifetime.
@@ -14,7 +15,11 @@ export function allocationView(allocation: BotMemoryAllocation): DataView {
   const bytes = allocation.bytes;
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
-export interface BotMemoryProvenance { readonly file: string; readonly line: number; readonly label: string }
+export interface BotMemoryProvenance {
+  readonly file: string;
+  readonly line: number;
+  readonly label: string;
+}
 export interface BotMemoryDebugProfile {
   readonly kind: "manager" | "debug";
   print(severity: "message" | "fatal", text: string): void;
@@ -25,7 +30,10 @@ export interface BotMemoryHost {
   release(allocation: BotMemoryAllocation, kind: "heap" | "hunk"): void;
   availableMemory(): number;
 }
-export interface BotMemoryOptions { readonly host?: BotMemoryHost; readonly debug?: BotMemoryDebugProfile }
+export interface BotMemoryOptions {
+  readonly host?: BotMemoryHost;
+  readonly debug?: BotMemoryDebugProfile;
+}
 export interface BotMemoryCheckpoint {
   readonly version: 1;
   readonly allocations: readonly { readonly kind: "heap" | "hunk"; readonly bytes: Uint8Array; readonly provenance: BotMemoryProvenance | null }[];
@@ -34,7 +42,9 @@ export interface BotMemoryCapture {
   readonly image: BotMemoryCheckpoint;
   reference(allocation: BotMemoryAllocation): number;
 }
-export interface BotMemoryRestore { allocation(reference: number): BotMemoryAllocation }
+export interface BotMemoryRestore {
+  allocation(reference: number): BotMemoryAllocation;
+}
 interface AllocationRecord {
   readonly backing: BotMemoryAllocation;
   readonly kind: "heap" | "hunk";
@@ -42,7 +52,9 @@ interface AllocationRecord {
   readonly provenance: BotMemoryProvenance | null;
   live: boolean;
 }
-const prefixBytes = 4, heapId = 0x12345678, hunkId = 0x87654321;
+const prefixBytes = 4,
+  heapId = 0x12345678,
+  hunkId = 0x87654321;
 
 /** Owns parser/state bytes only. Optional arenas and their capacity belong to the host. */
 export class BotMemory {
@@ -58,18 +70,30 @@ export class BotMemory {
       references.set(allocation, index);
       return { kind: record.kind, bytes: allocation.bytes.slice(), provenance: record.provenance === null ? null : { ...record.provenance } };
     });
-    return { image: { version: 1, allocations }, reference: allocation => {
-      const reference = references.get(allocation);
-      if (reference === undefined) throw new Error("Bot checkpoint references an unowned or freed allocation");
-      return reference;
-    } };
+    return {
+      image: { version: 1, allocations },
+      reference: allocation => {
+        const reference = references.get(allocation);
+        if (reference === undefined) throw new Error("Bot checkpoint references an unowned or freed allocation");
+        return reference;
+      },
+    };
   }
 
   restore(value: unknown): BotMemoryRestore {
-    const reader = new SaveReader(value, "bot.memory"), image = { version: reader.field("version").literal(1),
-      allocations: reader.field("allocations").list(entry => ({ kind: entry.field("kind").choice("heap", "hunk"),
-        bytes: entry.field("bytes").bytes(), provenance: entry.field("provenance").nullable(source => ({
-          file: source.field("file").string(), line: source.field("line").integer(0), label: source.field("label").string() })) })) };
+    const reader = new SaveReader(value, "bot.memory"),
+      image = {
+        version: reader.field("version").literal(1),
+        allocations: reader.field("allocations").list(entry => ({
+          kind: entry.field("kind").choice("heap", "hunk"),
+          bytes: entry.field("bytes").bytes(),
+          provenance: entry.field("provenance").nullable(source => ({
+            file: source.field("file").string(),
+            line: source.field("line").integer(0),
+            label: source.field("label").string(),
+          })),
+        })),
+      };
     if (this.disposed || this.live.size !== 0 || image.version !== 1) throw new Error("Bot memory restore requires a fresh owner and supported image");
     for (const entry of image.allocations) {
       if ((entry.kind !== "heap" && entry.kind !== "hunk") || entry.bytes.length > 0x7fffffff - prefixBytes) throw new Error("Invalid saved bot allocation");
@@ -79,11 +103,13 @@ export class BotMemory {
       allocation.bytes.set(entry.bytes);
       return allocation;
     });
-    return { allocation: reference => {
-      const allocation = Number.isSafeInteger(reference) && reference >= 0 ? allocations[reference] : undefined;
-      if (allocation === undefined) throw new Error("Saved bot allocation reference is invalid");
-      return allocation;
-    } };
+    return {
+      allocation: reference => {
+        const allocation = Number.isSafeInteger(reference) && reference >= 0 ? allocations[reference] : undefined;
+        if (allocation === undefined) throw new Error("Saved bot allocation reference is invalid");
+        return allocation;
+      },
+    };
   }
 
   allocate(size: number, kind: "heap" | "hunk", clear: boolean, provenance: BotMemoryProvenance | null = null): BotMemoryAllocation {
@@ -96,7 +122,8 @@ export class BotMemory {
     new DataView(bytes.buffer, bytes.byteOffset, prefixBytes).setUint32(0, kind === "heap" ? heapId : hunkId, true);
     if (clear) bytes.fill(0, prefixBytes);
     const record: AllocationRecord = { backing, kind, size, provenance, live: true };
-    let cachedSource: Uint8Array | null = null, cachedView: DataView | null = null;
+    let cachedSource: Uint8Array | null = null,
+      cachedView: DataView | null = null;
     const allocation: BotMemoryAllocation = {
       get bytes(): Uint8Array {
         if (!record.live) throw new Error("Bot memory allocation has been freed");
@@ -112,14 +139,18 @@ export class BotMemory {
         return cachedView;
       },
     };
-    this.records.set(allocation, record); this.live.set(allocation, record);
+    this.records.set(allocation, record);
+    this.live.set(allocation, record);
     return allocation;
   }
 
   free(allocation: BotMemoryAllocation | null): void {
     const record = allocation === null ? undefined : this.records.get(allocation);
     if (record === undefined || !record.live) {
-      if (this.options.debug !== undefined) { this.options.debug.print("fatal", "FreeMemory: invalid memory block\n"); return; }
+      if (this.options.debug !== undefined) {
+        this.options.debug.print("fatal", "FreeMemory: invalid memory block\n");
+        return;
+      }
       throw new Error("Bot memory allocation belongs to another owner or has been freed");
     }
     const bytes = record.backing.bytes;
@@ -133,7 +164,8 @@ export class BotMemory {
   private release(allocation: BotMemoryAllocation, record: AllocationRecord): void {
     this.options.host?.release(record.backing, record.kind);
     if (this.options.host === undefined) record.backing.bytes.fill(0xaa);
-    record.live = false; this.live.delete(allocation);
+    record.live = false;
+    this.live.delete(allocation);
   }
   resetHunk(): void {
     for (const [allocation, record] of this.live) if (record.kind === "hunk") this.release(allocation, record);
@@ -147,8 +179,14 @@ export class BotMemory {
     if (this.options.host === undefined) throw new Error("Bot AvailableMemory requires a host arena with capacity accounting");
     return this.options.host.availableMemory();
   }
-  get liveAllocations(): number { return this.live.size; }
-  get allocatedBytes(): number { let size = 0; for (const record of this.live.values()) size += record.size; return size; }
+  get liveAllocations(): number {
+    return this.live.size;
+  }
+  get allocatedBytes(): number {
+    let size = 0;
+    for (const record of this.live.values()) size += record.size;
+    return size;
+  }
   printUsedMemorySize(): void {
     const debug = this.options.debug;
     if (debug === undefined) return;

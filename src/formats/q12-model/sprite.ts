@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* SPR/SP2 adapted from the reference port,
  * the reference port and original spritegn.h/qfiles.h.
  * Copyright (C) 1996-2001 Id Software, Inc. GPL-2.0-or-later. */
@@ -9,8 +10,14 @@ import { count, fail, readTimed, syncType, unionBounds, version } from "./common
 function orientation(reader: BinaryReader): Q1SpriteModel["orientation"] {
   const value = reader.i32();
   switch (value) {
-    case 0: case 1: case 2: case 3: case 4: return value;
-    default: return fail(reader, `invalid sprite orientation ${value}`);
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+      return value;
+    default:
+      return fail(reader, `invalid sprite orientation ${value}`);
   }
 }
 
@@ -38,7 +45,14 @@ export function parseSpr(data: Uint8Array, source = "<spr>"): Q1SpriteModel {
   const frames: TimedFrames<SpriteFrame>[] = [];
   for (let i = 0; i < frameCount; i++) frames.push(readTimed(reader, () => spriteFrame(reader)));
   return {
-    kind: "q1-spr", orientation: type, boundingRadius, maxWidth, maxHeight, beamLength, sync, frames,
+    kind: "q1-spr",
+    orientation: type,
+    boundingRadius,
+    maxWidth,
+    maxHeight,
+    beamLength,
+    sync,
+    frames,
     bounds: { min: { x: -maxWidth / 2, y: -maxWidth / 2, z: -maxHeight / 2 }, max: { x: maxWidth / 2, y: maxWidth / 2, z: maxHeight / 2 } },
   };
 }

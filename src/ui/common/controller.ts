@@ -1,11 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { accessibleColors } from "./accessibility.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Navigation, wrapping, menu stack and fields follow Q3 ui_qmenu.c/ui_field.c.
 // Every mutable cursor, field, list and held controller direction belongs to a seat.
 import type { SeatId } from "../../contracts/identity.ts";
 import type { Vec2, Vec4 } from "../../contracts/math.ts";
-import type { CenterPrintState, InputBinding, LegacyUiScript, PhysicalInput, SeatInputEvent, SeatInputFocus,
-  SeatUiController, SeatUiState, UiControl, UiControlId, UiDrawCommand, UiDrawContext, UiMenu, UiMenuId, UiNotification } from "../../contracts/ui.ts";
+import type {
+  CenterPrintState,
+  InputBinding,
+  LegacyUiScript,
+  PhysicalInput,
+  SeatInputEvent,
+  SeatInputFocus,
+  SeatUiController,
+  SeatUiState,
+  UiControl,
+  UiControlId,
+  UiDrawCommand,
+  UiDrawContext,
+  UiMenu,
+  UiMenuId,
+  UiNotification,
+} from "../../contracts/ui.ts";
 import { KeyCode } from "../../core/key-codes.ts";
 import { contains, fitUi, intersect, transformUi, uiPoint } from "./layout.ts";
 import type { UiTransform } from "./layout.ts";
@@ -23,14 +39,33 @@ export interface NativeUiOptions {
   readonly sound: (sound: UiSound, seat: SeatId) => void;
   readonly executeScript: (script: LegacyUiScript, seat: SeatId) => void;
   readonly localize?: (text: string) => string;
-  readonly appearance?: () => { readonly menuScale: number; readonly textScale: number; readonly highContrast: boolean; readonly colorMode?: "standard" | "blue-yellow" | "monochrome" };
+  readonly appearance?: () => {
+    readonly menuScale: number;
+    readonly textScale: number;
+    readonly highContrast: boolean;
+    readonly colorMode?: "standard" | "blue-yellow" | "monochrome";
+  };
   readonly clipboard?: () => string | null;
   readonly measureText?: (text: string, scale: number) => number;
 }
-interface MenuCursor { readonly id: UiMenuId; focus: UiControlId | null; scroll: number; }
-interface FieldCursor { cursor: number; start: number; overstrike: boolean; }
-interface HeldDirection { readonly code: number; next: number; }
-interface BindingCapture { readonly accept: (input: PhysicalInput) => void; readonly cancel: () => void; }
+interface MenuCursor {
+  readonly id: UiMenuId;
+  focus: UiControlId | null;
+  scroll: number;
+}
+interface FieldCursor {
+  cursor: number;
+  start: number;
+  overstrike: boolean;
+}
+interface HeldDirection {
+  readonly code: number;
+  next: number;
+}
+interface BindingCapture {
+  readonly accept: (input: PhysicalInput) => void;
+  readonly cancel: () => void;
+}
 const white: Vec4 = { x: 1, y: 1, z: 1, w: 1 };
 const enabled = (control: UiControl): boolean => control.enabled && control.visible;
 const quantize = (control: Extract<UiControl, { readonly kind: "slider" }>, value: number): number =>
@@ -38,11 +73,22 @@ const quantize = (control: Extract<UiControl, { readonly kind: "slider" }>, valu
 
 /** Factories reread live settings and feeders before each input event and draw. */
 /** Face and d-pad buttons as menu keys; the d-pad repeats while held, like the stick. */
-const PAD_BUTTON_KEYS: ReadonlyMap<number, number> = new Map([[0, KeyCode.Enter], [1, KeyCode.Escape], [6, KeyCode.Escape], [11, KeyCode.Up], [12, KeyCode.Down], [13, KeyCode.Left], [14, KeyCode.Right]]);
+const PAD_BUTTON_KEYS: ReadonlyMap<number, number> = new Map([
+  [0, KeyCode.Enter],
+  [1, KeyCode.Escape],
+  [6, KeyCode.Escape],
+  [11, KeyCode.Up],
+  [12, KeyCode.Down],
+  [13, KeyCode.Left],
+  [14, KeyCode.Right],
+]);
 
 /** Pad text entry: X inserts a character, the shoulders cycle the one before the cursor, Y deletes it. */
 const PAD_TEXT_CHARACTERS = Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.,:;/!?+=*'\"()[]@#$%&");
-const PAD_TEXT_INSERT = 2, PAD_TEXT_DELETE = 3, PAD_TEXT_PREVIOUS = 9, PAD_TEXT_NEXT = 10;
+const PAD_TEXT_INSERT = 2,
+  PAD_TEXT_DELETE = 3,
+  PAD_TEXT_PREVIOUS = 9,
+  PAD_TEXT_NEXT = 10;
 /** Back and B together abandon a binding capture; either alone still binds on release. */
 const PAD_CAPTURE_CHORD: readonly number[] = [1, 6];
 
@@ -67,7 +113,9 @@ export class NativeUiController implements SeatUiController {
   private notifications: readonly UiNotification[] = [];
   private centerPrint: CenterPrintState | null = null;
   private scores = false;
-  constructor(private readonly options: NativeUiOptions) { this.seat = options.seat; }
+  constructor(private readonly options: NativeUiOptions) {
+    this.seat = options.seat;
+  }
   register(id: UiMenuId, factory: UiMenuFactory): () => void {
     if (this.menus.has(id)) throw new Error(`Menu already registered: ${id}`);
     this.menus.set(id, factory);
@@ -77,10 +125,16 @@ export class NativeUiController implements SeatUiController {
       this.menus.delete(id);
     };
   }
-  get activeMenu(): UiMenuId | null { return this.stack.at(-1)?.id ?? null; }
-  get bindingCapture(): boolean { return this.capture !== null; }
+  get activeMenu(): UiMenuId | null {
+    return this.stack.at(-1)?.id ?? null;
+  }
+  get bindingCapture(): boolean {
+    return this.capture !== null;
+  }
   captureBinding(accept: (input: PhysicalInput) => void, cancel: () => void): void {
-    this.capture?.cancel(); this.chordHeld.clear(); this.capture = { accept, cancel };
+    this.capture?.cancel();
+    this.chordHeld.clear();
+    this.capture = { accept, cancel };
   }
   private active(): { readonly menu: UiMenu; readonly cursor: MenuCursor } | null {
     const cursor = this.stack.at(-1);
@@ -93,8 +147,15 @@ export class NativeUiController implements SeatUiController {
     const scroll = menu.scroll;
     if (scroll === undefined) return { menu, cursor };
     cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), cursor.scroll));
-    return { menu: { ...menu, controls: menu.controls.map(control => scroll.controls.includes(control.id)
-      ? { ...control, rect: { ...control.rect, y: control.rect.y - cursor.scroll } } : control) }, cursor };
+    return {
+      menu: {
+        ...menu,
+        controls: menu.controls.map(control =>
+          scroll.controls.includes(control.id) ? { ...control, rect: { ...control.rect, y: control.rect.y - cursor.scroll } } : control,
+        ),
+      },
+      cursor,
+    };
   }
   private focusChanged(): void {
     const top = this.stack.at(-1);
@@ -102,11 +163,24 @@ export class NativeUiController implements SeatUiController {
   }
   state(): SeatUiState {
     const top = this.stack.at(-1);
-    return { seat: this.seat, focus: top === undefined ? { kind: "game" } : { kind: "menu", menu: top.id, control: top.focus },
-      cursor: this.cursor, bindings: this.options.bindings(), notifications: this.notifications, centerPrint: this.centerPrint, showScores: this.scores };
+    return {
+      seat: this.seat,
+      focus: top === undefined ? { kind: "game" } : { kind: "menu", menu: top.id, control: top.focus },
+      cursor: this.cursor,
+      bindings: this.options.bindings(),
+      notifications: this.notifications,
+      centerPrint: this.centerPrint,
+      showScores: this.scores,
+    };
   }
-  presentation(state: { readonly notifications: readonly UiNotification[]; readonly centerPrint: CenterPrintState | null; readonly showScores: boolean }): void {
-    this.notifications = state.notifications; this.centerPrint = state.centerPrint; this.scores = state.showScores;
+  presentation(state: {
+    readonly notifications: readonly UiNotification[];
+    readonly centerPrint: CenterPrintState | null;
+    readonly showScores: boolean;
+  }): void {
+    this.notifications = state.notifications;
+    this.centerPrint = state.centerPrint;
+    this.scores = state.showScores;
   }
   openMenu(id: UiMenuId): undefined {
     const factory = this.menus.get(id);
@@ -114,28 +188,50 @@ export class NativeUiController implements SeatUiController {
     const existing = this.stack.findIndex(menu => menu.id === id);
     if (existing >= 0) {
       while (this.stack.length > existing + 1) this.closeMenu();
-      this.focusChanged(); return undefined;
+      this.focusChanged();
+      return undefined;
     }
     const menu = factory();
     this.stack.push({ id, focus: menu.controls.find(enabled)?.id ?? null, scroll: 0 });
-    this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear(); menu.open(this.seat); this.focusChanged(); this.options.sound("open", this.seat);
+    this.dragging = null;
+    this.menuDragOffset = null;
+    this.heldAxes.clear();
+    menu.open(this.seat);
+    this.focusChanged();
+    this.options.sound("open", this.seat);
     return undefined;
   }
   closeMenu(): undefined {
     const current = this.stack.pop();
     if (current === undefined) return undefined;
-    this.capture?.cancel(); this.capture = null; this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear();
+    this.capture?.cancel();
+    this.capture = null;
+    this.dragging = null;
+    this.menuDragOffset = null;
+    this.heldAxes.clear();
     this.menus.get(current.id)?.().close(this.seat);
-    this.focusChanged(); this.options.sound("close", this.seat); return undefined;
+    this.focusChanged();
+    this.options.sound("close", this.seat);
+    return undefined;
   }
-  closeAll(): void { while (this.stack.length > 0) this.closeMenu(); }
-  executeScript(script: LegacyUiScript): undefined { this.options.executeScript(script, this.seat); return undefined; }
+  closeAll(): void {
+    while (this.stack.length > 0) this.closeMenu();
+  }
+  executeScript(script: LegacyUiScript): undefined {
+    this.options.executeScript(script, this.seat);
+    return undefined;
+  }
   private moveFocus(direction: number): void {
-    const active = this.active(); if (active === null) return;
-    const controls = active.menu.controls.filter(enabled), index = controls.findIndex(control => control.id === active.cursor.focus);
+    const active = this.active();
+    if (active === null) return;
+    const controls = active.menu.controls.filter(enabled),
+      index = controls.findIndex(control => control.id === active.cursor.focus);
     const next = controls[(index + direction + controls.length) % controls.length];
     if (next !== undefined && next.id !== active.cursor.focus) {
-      active.cursor.focus = next.id; this.reveal(active.menu, active.cursor, next); this.focusChanged(); this.options.sound("move", this.seat);
+      active.cursor.focus = next.id;
+      this.reveal(active.menu, active.cursor, next);
+      this.focusChanged();
+      this.options.sound("move", this.seat);
     }
   }
   private reveal(menu: UiMenu, cursor: MenuCursor, control: UiControl): void {
@@ -147,18 +243,22 @@ export class NativeUiController implements SeatUiController {
     cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), cursor.scroll));
   }
   private hit(menu: UiMenu, control: UiControl): boolean {
-    return enabled(control) && contains(control.rect, this.cursor)
-      && (menu.scroll === undefined || !menu.scroll.controls.includes(control.id) || contains(menu.scroll.rect, this.cursor));
+    return (
+      enabled(control) &&
+      contains(control.rect, this.cursor) &&
+      (menu.scroll === undefined || !menu.scroll.controls.includes(control.id) || contains(menu.scroll.rect, this.cursor))
+    );
   }
   private menuThumb(menu: UiMenu): number {
     const scroll = menu.scroll;
-    return scroll === undefined ? 0 : Math.min(scroll.rect.height, Math.max(24, scroll.rect.height * scroll.rect.height / Math.max(1, scroll.contentHeight)));
+    return scroll === undefined ? 0 : Math.min(scroll.rect.height, Math.max(24, (scroll.rect.height * scroll.rect.height) / Math.max(1, scroll.contentHeight)));
   }
   private menuPointer(menu: UiMenu, cursor: MenuCursor): void {
     const scroll = menu.scroll;
     if (scroll === undefined || this.menuDragOffset === null) return;
-    const travel = scroll.rect.height - this.menuThumb(menu), maximum = Math.max(0, scroll.contentHeight - scroll.rect.height);
-    cursor.scroll = travel <= 0 ? 0 : Math.max(0, Math.min(maximum, (this.cursor.y - scroll.rect.y - this.menuDragOffset) / travel * maximum));
+    const travel = scroll.rect.height - this.menuThumb(menu),
+      maximum = Math.max(0, scroll.contentHeight - scroll.rect.height);
+    cursor.scroll = travel <= 0 ? 0 : Math.max(0, Math.min(maximum, ((this.cursor.y - scroll.rect.y - this.menuDragOffset) / travel) * maximum));
   }
   private change(control: UiControl, direction: number): void {
     if (!enabled(control)) return;
@@ -174,74 +274,124 @@ export class NativeUiController implements SeatUiController {
     this.options.sound("change", this.seat);
   }
   private activate(control: UiControl): void {
-    if (!enabled(control)) { this.options.sound("reject", this.seat); return; }
+    if (!enabled(control)) {
+      this.options.sound("reject", this.seat);
+      return;
+    }
     switch (control.kind) {
-      case "button": control.activate(this.seat); this.options.sound("change", this.seat); break;
-      case "toggle": case "slider": case "choice": this.change(control, 1); break;
-      case "text-entry": control.submit(this.seat, control.text); break;
-      case "list": if (control.selected !== null) (control.activate ?? control.select)(this.seat, control.selected); break;
-      case "owner-draw": control.key(this.seat, KeyCode.Enter, true); break;
+      case "button":
+        control.activate(this.seat);
+        this.options.sound("change", this.seat);
+        break;
+      case "toggle":
+      case "slider":
+      case "choice":
+        this.change(control, 1);
+        break;
+      case "text-entry":
+        control.submit(this.seat, control.text);
+        break;
+      case "list":
+        if (control.selected !== null) (control.activate ?? control.select)(this.seat, control.selected);
+        break;
+      case "owner-draw":
+        control.key(this.seat, KeyCode.Enter, true);
+        break;
     }
   }
   private field(control: Extract<UiControl, { readonly kind: "text-entry" }>): FieldCursor {
     let field = this.fields.get(control.id);
     const length = Array.from(control.text).length;
-    if (field === undefined) { field = { cursor: length, start: 0, overstrike: false }; this.fields.set(control.id, field); }
-    field.cursor = Math.min(field.cursor, length); return field;
+    if (field === undefined) {
+      field = { cursor: length, start: 0, overstrike: false };
+      this.fields.set(control.id, field);
+    }
+    field.cursor = Math.min(field.cursor, length);
+    return field;
   }
   private text(control: Extract<UiControl, { readonly kind: "text-entry" }>, text: string): void {
-    const field = this.field(control), characters = Array.from(control.text);
+    const field = this.field(control),
+      characters = Array.from(control.text);
     const incoming = Array.from(text).filter(character => !/[\u0000-\u001f\u007f]/u.test(character));
     const room = Math.max(0, control.maximumLength - characters.length + (field.overstrike ? characters.length - field.cursor : 0));
     const accepted = incoming.slice(0, room);
-    characters.splice(field.cursor, field.overstrike ? accepted.length : 0, ...accepted); field.cursor += accepted.length;
+    characters.splice(field.cursor, field.overstrike ? accepted.length : 0, ...accepted);
+    field.cursor += accepted.length;
     control.change(this.seat, characters.join(""));
   }
   private padText(control: Extract<UiControl, { readonly kind: "text-entry" }>, button: number): boolean {
     if (button !== PAD_TEXT_INSERT && button !== PAD_TEXT_DELETE && button !== PAD_TEXT_PREVIOUS && button !== PAD_TEXT_NEXT) return false;
-    const field = this.field(control), characters = Array.from(control.text);
+    const field = this.field(control),
+      characters = Array.from(control.text);
     if (button === PAD_TEXT_INSERT) this.text(control, "a");
-    else if (button === PAD_TEXT_DELETE) { if (field.cursor > 0) { characters.splice(--field.cursor, 1); control.change(this.seat, characters.join("")); } }
-    else if (field.cursor > 0) {
-      const current = PAD_TEXT_CHARACTERS.indexOf(characters[field.cursor - 1] ?? ""), step = button === PAD_TEXT_NEXT ? 1 : -1;
+    else if (button === PAD_TEXT_DELETE) {
+      if (field.cursor > 0) {
+        characters.splice(--field.cursor, 1);
+        control.change(this.seat, characters.join(""));
+      }
+    } else if (field.cursor > 0) {
+      const current = PAD_TEXT_CHARACTERS.indexOf(characters[field.cursor - 1] ?? ""),
+        step = button === PAD_TEXT_NEXT ? 1 : -1;
       characters[field.cursor - 1] = PAD_TEXT_CHARACTERS[(Math.max(0, current) + step + PAD_TEXT_CHARACTERS.length) % PAD_TEXT_CHARACTERS.length] ?? "a";
       control.change(this.seat, characters.join(""));
     }
     return true;
   }
   private fieldKey(control: Extract<UiControl, { readonly kind: "text-entry" }>, key: number): boolean {
-    const field = this.field(control), characters = Array.from(control.text);
+    const field = this.field(control),
+      characters = Array.from(control.text);
     if (key === KeyCode.Left) field.cursor = Math.max(0, field.cursor - 1);
     else if (key === KeyCode.Right) field.cursor = Math.min(characters.length, field.cursor + 1);
-    else if (key === KeyCode.Home || this.control && key === 97) field.cursor = 0;
-    else if (key === KeyCode.End || this.control && key === 101) field.cursor = characters.length;
+    else if (key === KeyCode.Home || (this.control && key === 97)) field.cursor = 0;
+    else if (key === KeyCode.End || (this.control && key === 101)) field.cursor = characters.length;
     else if (key === KeyCode.Insert) field.overstrike = !field.overstrike;
-    else if (key === KeyCode.Backspace || this.control && key === 104) {
-      if (field.cursor > 0) { characters.splice(--field.cursor, 1); control.change(this.seat, characters.join("")); }
-    } else if (key === KeyCode.Delete) { characters.splice(field.cursor, 1); control.change(this.seat, characters.join("")); }
-    else if (this.control && key === 117) { field.cursor = 0; control.change(this.seat, ""); }
-    else if (this.control && key === 118) { const text = this.options.clipboard?.(); if (text !== undefined && text !== null) this.text(control, text); }
-    else return false;
+    else if (key === KeyCode.Backspace || (this.control && key === 104)) {
+      if (field.cursor > 0) {
+        characters.splice(--field.cursor, 1);
+        control.change(this.seat, characters.join(""));
+      }
+    } else if (key === KeyCode.Delete) {
+      characters.splice(field.cursor, 1);
+      control.change(this.seat, characters.join(""));
+    } else if (this.control && key === 117) {
+      field.cursor = 0;
+      control.change(this.seat, "");
+    } else if (this.control && key === 118) {
+      const text = this.options.clipboard?.();
+      if (text !== undefined && text !== null) this.text(control, text);
+    } else return false;
     return true;
   }
-  private listLayout(control: Extract<UiControl, { readonly kind: "list" }>): { readonly top: number; readonly page: number; readonly height: number; readonly maximum: number; readonly thumb: number } {
+  private listLayout(control: Extract<UiControl, { readonly kind: "list" }>): {
+    readonly top: number;
+    readonly page: number;
+    readonly height: number;
+    readonly maximum: number;
+    readonly thumb: number;
+  } {
     const height = Math.max(1, control.rowHeight ?? this.options.skin().lineHeight);
     const page = Math.max(1, Math.floor(control.rect.height / height));
     const maximum = Math.max(0, control.rows.length - page);
     const previous = this.listRows.get(control.id);
     const changed = previous === undefined || previous.length !== control.rows.length || previous.some((id, index) => id !== control.rows[index]?.id);
     if (changed) {
-      this.listRows.set(control.id, control.rows.map(row => row.id));
+      this.listRows.set(
+        control.id,
+        control.rows.map(row => row.id),
+      );
       this.listTops.set(control.id, Math.max(0, control.rows.findIndex(row => row.id === control.selected) - page + 1));
     }
     const top = Math.max(0, Math.min(maximum, this.listTops.get(control.id) ?? 0));
     this.listTops.set(control.id, top);
-    return { top, page, height, maximum, thumb: Math.min(control.rect.height, Math.max(24, control.rect.height * page / Math.max(1, control.rows.length))) };
+    return { top, page, height, maximum, thumb: Math.min(control.rect.height, Math.max(24, (control.rect.height * page) / Math.max(1, control.rows.length))) };
   }
   private listPointer(control: Extract<UiControl, { readonly kind: "list" }>): void {
-    const layout = this.listLayout(control), travel = control.rect.height - layout.thumb;
-    this.listTops.set(control.id, travel <= 0 ? 0 : Math.max(0, Math.min(layout.maximum,
-      Math.round((this.cursor.y - control.rect.y - this.listDragOffset) / travel * layout.maximum))));
+    const layout = this.listLayout(control),
+      travel = control.rect.height - layout.thumb;
+    this.listTops.set(
+      control.id,
+      travel <= 0 ? 0 : Math.max(0, Math.min(layout.maximum, Math.round(((this.cursor.y - control.rect.y - this.listDragOffset) / travel) * layout.maximum))),
+    );
   }
   private listKey(control: Extract<UiControl, { readonly kind: "list" }>, key: number): boolean {
     if (key === KeyCode.Delete) {
@@ -249,28 +399,44 @@ export class NativeUiController implements SeatUiController {
       if (row?.enabled) row.action?.activate(this.seat);
       return true;
     }
-    const rows = control.rows.filter(row => row.enabled), current = rows.findIndex(row => row.id === control.selected);
+    const rows = control.rows.filter(row => row.enabled),
+      current = rows.findIndex(row => row.id === control.selected);
     const { page } = this.listLayout(control);
     let index = current;
-    if (key === KeyCode.Up) index--; else if (key === KeyCode.Down) index++;
-    else if (key === KeyCode.PageUp) index -= page; else if (key === KeyCode.PageDown) index += page;
-    else if (key === KeyCode.Home) index = 0; else if (key === KeyCode.End) index = rows.length - 1; else return false;
+    if (key === KeyCode.Up) index--;
+    else if (key === KeyCode.Down) index++;
+    else if (key === KeyCode.PageUp) index -= page;
+    else if (key === KeyCode.PageDown) index += page;
+    else if (key === KeyCode.Home) index = 0;
+    else if (key === KeyCode.End) index = rows.length - 1;
+    else return false;
     const row = rows[Math.max(0, Math.min(rows.length - 1, index))];
     if (row !== undefined) {
       control.select(this.seat, row.id);
-      const source = control.rows.findIndex(candidate => candidate.id === row.id), top = this.listTops.get(control.id) ?? 0;
+      const source = control.rows.findIndex(candidate => candidate.id === row.id),
+        top = this.listTops.get(control.id) ?? 0;
       this.listTops.set(control.id, source < top ? source : source >= top + page ? source - page + 1 : top);
     }
     return true;
   }
   private key(code: number, down: boolean): boolean {
-    if (code === KeyCode.Shift) { this.shift = down; return true; }
-    if (code === KeyCode.Control) { this.control = down; return true; }
-    const active = this.active(); if (active === null) return false;
+    if (code === KeyCode.Shift) {
+      this.shift = down;
+      return true;
+    }
+    if (code === KeyCode.Control) {
+      this.control = down;
+      return true;
+    }
+    const active = this.active();
+    if (active === null) return false;
     const control = active.menu.controls.find(control => control.id === active.cursor.focus);
     if (control?.kind === "owner-draw" && control.key(this.seat, code, down)) return true;
     if (!down) return true;
-    if (code === KeyCode.Escape) { this.closeMenu(); return true; }
+    if (code === KeyCode.Escape) {
+      this.closeMenu();
+      return true;
+    }
     if (control !== undefined) this.reveal(active.menu, active.cursor, control);
     if (control?.kind === "text-entry" && this.fieldKey(control, code)) return true;
     if (control?.kind === "list" && this.listKey(control, code)) return true;
@@ -279,93 +445,161 @@ export class NativeUiController implements SeatUiController {
     else if (code === KeyCode.Down || code === KeyCode.KeypadDown) this.moveFocus(1);
     else if (control !== undefined && (code === KeyCode.Left || code === KeyCode.KeypadLeft)) this.change(control, -1);
     else if (control !== undefined && (code === KeyCode.Right || code === KeyCode.KeypadRight)) this.change(control, 1);
-    else if (control !== undefined && (code === KeyCode.Enter || code === KeyCode.KeypadEnter || code === KeyCode.Space && control.kind !== "text-entry")) this.activate(control);
+    else if (control !== undefined && (code === KeyCode.Enter || code === KeyCode.KeypadEnter || (code === KeyCode.Space && control.kind !== "text-entry")))
+      this.activate(control);
     return true;
   }
   private pointer(position: Vec2): void {
     this.pointerPosition = position;
     this.cursor = uiPoint(position, this.transform);
-    const active = this.active(); if (active === null) return;
-    if (this.menuDragOffset !== null) { this.menuPointer(active.menu, active.cursor); return; }
+    const active = this.active();
+    if (active === null) return;
+    if (this.menuDragOffset !== null) {
+      this.menuPointer(active.menu, active.cursor);
+      return;
+    }
     const drag = active.menu.controls.find(control => control.id === this.dragging);
-    if (drag?.kind === "slider") { this.sliderPointer(drag); return; }
-    if (drag?.kind === "list") { this.listPointer(drag); return; }
+    if (drag?.kind === "slider") {
+      this.sliderPointer(drag);
+      return;
+    }
+    if (drag?.kind === "list") {
+      this.listPointer(drag);
+      return;
+    }
     const hovered = [...active.menu.controls].reverse().find(control => this.hit(active.menu, control));
     if (hovered !== undefined && hovered.id !== active.cursor.focus) {
-      active.cursor.focus = hovered.id; this.focusChanged(); this.options.sound("move", this.seat);
+      active.cursor.focus = hovered.id;
+      this.focusChanged();
+      this.options.sound("move", this.seat);
     }
   }
   private sliderPointer(control: Extract<UiControl, { readonly kind: "slider" }>): void {
-    const left = control.rect.x + control.rect.width * 0.6, width = control.rect.width * 0.32;
-    control.change(this.seat, quantize(control, control.minimum + (control.maximum - control.minimum) * (this.cursor.x - left) / width));
+    const left = control.rect.x + control.rect.width * 0.6,
+      width = control.rect.width * 0.32;
+    control.change(this.seat, quantize(control, control.minimum + ((control.maximum - control.minimum) * (this.cursor.x - left)) / width));
   }
   private captureEvent(event: SeatInputEvent): boolean {
-    const capture = this.capture; if (capture === null) return false;
-    if (event.kind === "key" && event.down && event.code === KeyCode.Escape) { this.capture = null; capture.cancel(); return true; }
+    const capture = this.capture;
+    if (capture === null) return false;
+    if (event.kind === "key" && event.down && event.code === KeyCode.Escape) {
+      this.capture = null;
+      capture.cancel();
+      return true;
+    }
     if (event.kind === "controller-button" && PAD_CAPTURE_CHORD.includes(event.button)) {
       if (event.down) {
         this.chordHeld.add(event.button);
-        if (PAD_CAPTURE_CHORD.every(button => this.chordHeld.has(button))) { this.chordHeld.clear(); this.capture = null; capture.cancel(); }
-      } else if (this.chordHeld.delete(event.button)) { this.capture = null; capture.accept({ kind: "controller-button", device: event.device, button: event.button }); }
+        if (PAD_CAPTURE_CHORD.every(button => this.chordHeld.has(button))) {
+          this.chordHeld.clear();
+          this.capture = null;
+          capture.cancel();
+        }
+      } else if (this.chordHeld.delete(event.button)) {
+        this.capture = null;
+        capture.accept({ kind: "controller-button", device: event.device, button: event.button });
+      }
       return true;
     }
     let input: PhysicalInput | null = null;
     if (event.kind === "key" && event.down && !event.repeat) input = { kind: "key", code: event.code };
     else if (event.kind === "mouse-button" && event.down) input = { kind: "mouse-button", button: event.button };
-    else if (event.kind === "mouse-wheel" && event.delta.y !== 0) input = { kind: "key", code: event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown };
+    else if (event.kind === "mouse-wheel" && event.delta.y !== 0)
+      input = { kind: "key", code: event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown };
     else if (event.kind === "controller-button" && event.down) input = { kind: "controller-button", device: event.device, button: event.button };
-    else if (event.kind === "controller-axis" && Math.abs(event.value) > 0.65) input = { kind: "controller-axis", device: event.device, axis: event.axis, direction: event.value < 0 ? "negative" : "positive" };
-    if (input !== null) { this.capture = null; capture.accept(input); }
+    else if (event.kind === "controller-axis" && Math.abs(event.value) > 0.65)
+      input = { kind: "controller-axis", device: event.device, axis: event.axis, direction: event.value < 0 ? "negative" : "positive" };
+    if (input !== null) {
+      this.capture = null;
+      capture.accept(input);
+    }
     return true;
   }
   input(event: SeatInputEvent): boolean {
     if (!event.seat.equals(this.seat)) throw new Error("UI input delivered to another seat");
     if (event.kind === "focus" && !event.focused) {
-      this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear(); this.shift = false; this.control = false;
-      this.capture?.cancel(); this.capture = null;
+      this.dragging = null;
+      this.menuDragOffset = null;
+      this.heldAxes.clear();
+      this.shift = false;
+      this.control = false;
+      this.capture?.cancel();
+      this.capture = null;
     }
     // Modifier state must follow key-ups that arrive with no menu open, or it sticks across the next menu.
-    if (event.kind === "key") { if (event.code === KeyCode.Shift) this.shift = event.down; else if (event.code === KeyCode.Control) this.control = event.down; }
+    if (event.kind === "key") {
+      if (event.code === KeyCode.Shift) this.shift = event.down;
+      else if (event.code === KeyCode.Control) this.control = event.down;
+    }
     if (this.captureEvent(event)) return true;
-    const active = this.active(); if (active === null) return false;
+    const active = this.active();
+    if (active === null) return false;
     switch (event.kind) {
-      case "key": return this.key(event.code, event.down);
-      case "text": { const control = active.menu.controls.find(control => control.id === active.cursor.focus);
-        if (control?.kind === "text-entry") { this.reveal(active.menu, active.cursor, control); this.text(control, event.text); } break; }
-      case "mouse-motion": this.pointer(event.position); break;
+      case "key":
+        return this.key(event.code, event.down);
+      case "text": {
+        const control = active.menu.controls.find(control => control.id === active.cursor.focus);
+        if (control?.kind === "text-entry") {
+          this.reveal(active.menu, active.cursor, control);
+          this.text(control, event.text);
+        }
+        break;
+      }
+      case "mouse-motion":
+        this.pointer(event.position);
+        break;
       case "mouse-button": {
-        if (!event.down) { this.dragging = null; this.menuDragOffset = null; break; }
-        if (event.button === 3) { this.closeMenu(); break; }
+        if (!event.down) {
+          this.dragging = null;
+          this.menuDragOffset = null;
+          break;
+        }
+        if (event.button === 3) {
+          this.closeMenu();
+          break;
+        }
         if (event.button !== 1) break;
         const scroll = active.menu.scroll;
-        if (scroll !== undefined && scroll.contentHeight > scroll.rect.height && contains(scroll.rect, this.cursor)
-          && this.cursor.x >= scroll.rect.x + scroll.rect.width - 16) {
-          const thumb = this.menuThumb(active.menu), y = scroll.rect.y + (scroll.rect.height - thumb) * active.cursor.scroll / (scroll.contentHeight - scroll.rect.height);
+        if (
+          scroll !== undefined &&
+          scroll.contentHeight > scroll.rect.height &&
+          contains(scroll.rect, this.cursor) &&
+          this.cursor.x >= scroll.rect.x + scroll.rect.width - 16
+        ) {
+          const thumb = this.menuThumb(active.menu),
+            y = scroll.rect.y + ((scroll.rect.height - thumb) * active.cursor.scroll) / (scroll.contentHeight - scroll.rect.height);
           this.menuDragOffset = this.cursor.y >= y && this.cursor.y < y + thumb ? this.cursor.y - y : thumb / 2;
-          this.menuPointer(active.menu, active.cursor); break;
+          this.menuPointer(active.menu, active.cursor);
+          break;
         }
         const control = [...active.menu.controls].reverse().find(control => this.hit(active.menu, control));
         if (control === undefined) break;
-        active.cursor.focus = control.id; this.focusChanged();
-        if (control.kind === "slider") { this.dragging = control.id; this.sliderPointer(control); }
-        else if (control.kind === "text-entry") {
-          const field = this.field(control), text = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text), x = this.cursor.x - control.rect.x - control.rect.width * 0.5;
+        active.cursor.focus = control.id;
+        this.focusChanged();
+        if (control.kind === "slider") {
+          this.dragging = control.id;
+          this.sliderPointer(control);
+        } else if (control.kind === "text-entry") {
+          const field = this.field(control),
+            text = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text),
+            x = this.cursor.x - control.rect.x - control.rect.width * 0.5;
           const scale = this.options.skin().fontScale * (this.options.appearance?.().textScale ?? 1);
           const measure = (value: string): number => this.options.measureText?.(value, scale) ?? Array.from(value).length * 8 * scale;
           field.cursor = field.start;
           while (field.cursor < text.length && measure(text.slice(field.start, field.cursor + 1).join("")) < x) field.cursor++;
-        }
-        else if (control.kind === "list") {
+        } else if (control.kind === "list") {
           const layout = this.listLayout(control);
           if (layout.maximum > 0 && this.cursor.x >= control.rect.x + control.rect.width - 16) {
-            const thumbY = control.rect.y + (control.rect.height - layout.thumb) * layout.top / layout.maximum;
+            const thumbY = control.rect.y + ((control.rect.height - layout.thumb) * layout.top) / layout.maximum;
             this.listDragOffset = this.cursor.y >= thumbY && this.cursor.y < thumbY + layout.thumb ? this.cursor.y - thumbY : layout.thumb / 2;
-            this.dragging = control.id; this.listPointer(control);
+            this.dragging = control.id;
+            this.listPointer(control);
           } else {
             const row = control.rows[layout.top + Math.floor((this.cursor.y - control.rect.y) / layout.height)];
             if (row?.enabled) {
               control.select(this.seat, row.id);
-              if (row.action !== undefined && this.cursor.x >= control.rect.x + control.rect.width - (layout.maximum > 0 ? 16 : 0) - 28) row.action.activate(this.seat);
+              if (row.action !== undefined && this.cursor.x >= control.rect.x + control.rect.width - (layout.maximum > 0 ? 16 : 0) - 28)
+                row.action.activate(this.seat);
               else control.activate?.(this.seat, row.id);
             }
           }
@@ -375,7 +609,10 @@ export class NativeUiController implements SeatUiController {
       case "mouse-wheel": {
         const scroll = active.menu.scroll;
         if (scroll !== undefined && contains(scroll.rect, this.cursor)) {
-          active.cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), active.cursor.scroll - Math.sign(event.delta.y) * 84));
+          active.cursor.scroll = Math.max(
+            0,
+            Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), active.cursor.scroll - Math.sign(event.delta.y) * 84),
+          );
           break;
         }
         const hovered = active.menu.controls.find(control => enabled(control) && control.kind === "list" && contains(control.rect, this.cursor));
@@ -389,22 +626,32 @@ export class NativeUiController implements SeatUiController {
       case "controller-button": {
         const focused = active.menu.controls.find(control => control.id === active.cursor.focus);
         if (event.down && focused?.kind === "text-entry" && this.padText(focused, event.button)) break;
-        const code = PAD_BUTTON_KEYS.get(event.button); if (code === undefined) break;
-        const id = `${event.device}:button:${event.button}`, navigation = event.button >= 11 && event.button <= 14;
+        const code = PAD_BUTTON_KEYS.get(event.button);
+        if (code === undefined) break;
+        const id = `${event.device}:button:${event.button}`,
+          navigation = event.button >= 11 && event.button <= 14;
         if (!event.down) this.heldAxes.delete(id);
         else if (navigation) this.heldAxes.set(id, { code, next: event.timeMilliseconds + 300 });
-        this.key(code, event.down); break;
+        this.key(code, event.down);
+        break;
       }
       case "controller-axis": {
         if (event.axis !== "left-x" && event.axis !== "left-y") break;
         const id = `${event.device}:${event.axis}`;
-        if (Math.abs(event.value) < 0.35) { this.heldAxes.delete(id); break; }
+        if (Math.abs(event.value) < 0.35) {
+          this.heldAxes.delete(id);
+          break;
+        }
         if (Math.abs(event.value) < 0.6) break;
-        const code = event.axis === "left-x" ? event.value < 0 ? KeyCode.Left : KeyCode.Right : event.value < 0 ? KeyCode.Up : KeyCode.Down;
-        if (this.heldAxes.get(id)?.code !== code) { this.key(code, true); this.heldAxes.set(id, { code, next: event.timeMilliseconds + 300 }); }
+        const code = event.axis === "left-x" ? (event.value < 0 ? KeyCode.Left : KeyCode.Right) : event.value < 0 ? KeyCode.Up : KeyCode.Down;
+        if (this.heldAxes.get(id)?.code !== code) {
+          this.key(code, true);
+          this.heldAxes.set(id, { code, next: event.timeMilliseconds + 300 });
+        }
         break;
       }
-      case "focus": break;
+      case "focus":
+        break;
     }
     return true;
   }
@@ -415,57 +662,108 @@ export class NativeUiController implements SeatUiController {
     if (area.width <= 0 || area.height <= 0) return [];
     this.transform = fitUi(area, appearance.menuScale);
     if (this.pointerPosition !== null) this.cursor = uiPoint(this.pointerPosition, this.transform);
-    for (const held of this.heldAxes.values()) if (context.timeMilliseconds >= held.next) {
-      this.key(held.code, true); held.next = context.timeMilliseconds + 80;
-    }
-    const active = this.active(); if (active === null) return [];
+    for (const held of this.heldAxes.values())
+      if (context.timeMilliseconds >= held.next) {
+        this.key(held.code, true);
+        held.next = context.timeMilliseconds + 80;
+      }
+    const active = this.active();
+    if (active === null) return [];
     const originalSkin = this.options.skin();
     // Text never drops below 8 physical pixels (the HUD enforces the same floor); rows still cap it to their height.
-    const skin = { ...originalSkin, fontScale: Math.max(originalSkin.fontScale * appearance.textScale, 1 / this.transform.scale),
-      colors: accessibleColors(originalSkin.colors, appearance) };
+    const skin = {
+      ...originalSkin,
+      fontScale: Math.max(originalSkin.fontScale * appearance.textScale, 1 / this.transform.scale),
+      colors: accessibleColors(originalSkin.colors, appearance),
+    };
     const commands: UiDrawCommand[] = [];
     const text = (value: string, x: number, y: number, color: Vec4, align: "left" | "center" | "right" = "left", scale = skin.fontScale): void => {
-      commands.push({ kind: "text", origin: { x, y }, text: this.options.localize?.(value) ?? value, font: skin.font,
-        scale, color, align, shadow: true });
+      commands.push({ kind: "text", origin: { x, y }, text: this.options.localize?.(value) ?? value, font: skin.font, scale, color, align, shadow: true });
     };
     // Shrink (then ellipsize) so control text never leaves its rect.
-    const measure = (value: string, scale: number): number => this.options.measureText?.(this.options.localize?.(value) ?? value, scale) ?? Array.from(value).length * 8 * scale;
+    const measure = (value: string, scale: number): number =>
+      this.options.measureText?.(this.options.localize?.(value) ?? value, scale) ?? Array.from(value).length * 8 * scale;
     const fitText = (raw: string, maxWidth: number, base = skin.fontScale): { readonly text: string; readonly scale: number } => {
       // Fit the localized string, so a truncated source string never misses its catalog entry.
-      const value = this.options.localize?.(raw) ?? raw, width = measure(value, base);
+      const value = this.options.localize?.(raw) ?? raw,
+        width = measure(value, base);
       if (width <= maxWidth) return { text: value, scale: base };
-      const shrunk = base * Math.max(0, maxWidth) / Math.max(1, width);
+      const shrunk = (base * Math.max(0, maxWidth)) / Math.max(1, width);
       if (shrunk >= base * 0.7) return { text: value, scale: shrunk };
-      const scale = base * 0.7, glyphs = Array.from(value);
-      let low = 0, high = glyphs.length;
+      const scale = base * 0.7,
+        glyphs = Array.from(value);
+      let low = 0,
+        high = glyphs.length;
       while (low < high) {
         const middle = Math.ceil((low + high) / 2);
-        if (measure(`${glyphs.slice(0, middle).join("")}…`, scale) <= maxWidth) low = middle; else high = middle - 1;
+        if (measure(`${glyphs.slice(0, middle).join("")}…`, scale) <= maxWidth) low = middle;
+        else high = middle - 1;
       }
       return { text: measure("…", scale) <= maxWidth ? `${glyphs.slice(0, low).join("")}…` : "", scale };
     };
     // With a row height the text is also limited vertically, so a large Text size shrinks to its row instead of overlapping the next one.
-    const textFit = (value: string, x: number, y: number, maxWidth: number, color: Vec4, align: "left" | "center" | "right" = "left", rowHeight?: number): number => {
+    const textFit = (
+      value: string,
+      x: number,
+      y: number,
+      maxWidth: number,
+      color: Vec4,
+      align: "left" | "center" | "right" = "left",
+      rowHeight?: number,
+    ): number => {
       const fit = fitText(value, maxWidth, rowHeight === undefined ? skin.fontScale : Math.min(skin.fontScale, Math.max(0.1, (rowHeight - 4) / 8)));
       const top = rowHeight === undefined ? y + (8 * skin.fontScale - 8 * fit.scale) / 2 : y + Math.min(6, (rowHeight - 8 * fit.scale) / 2);
-      commands.push({ kind: "text", origin: { x, y: top }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
-        scale: fit.scale, color, align, shadow: true });
+      commands.push({
+        kind: "text",
+        origin: { x, y: top },
+        text: this.options.localize?.(fit.text) ?? fit.text,
+        font: skin.font,
+        scale: fit.scale,
+        color,
+        align,
+        shadow: true,
+      });
       return measure(fit.text, fit.scale);
     };
-    if (active.menu.fullScreen && skin.background !== null) commands.push({ kind: "image", resource: skin.background,
-      rect: { x: 0, y: 0, width: 640, height: 480 }, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: white });
+    if (active.menu.fullScreen && skin.background !== null)
+      commands.push({
+        kind: "image",
+        resource: skin.background,
+        rect: { x: 0, y: 0, width: 640, height: 480 },
+        texCoords: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+        color: white,
+      });
     const panel = { x: 32, y: 24, width: 576, height: 432 };
     commands.push({ kind: "fill", rect: panel, color: skin.colors.panel });
     if (skin.panel !== null) commands.push(...nineSlice(skin.panel, panel, white));
     if (skin.titleFont === undefined) {
       const fit = fitText(active.menu.title, 512);
-      commands.push({ kind: "text", origin: { x: 320, y: 48 }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
-        scale: fit.scale, color: skin.colors.accent, align: "center", shadow: true });
+      commands.push({
+        kind: "text",
+        origin: { x: 320, y: 48 },
+        text: this.options.localize?.(fit.text) ?? fit.text,
+        font: skin.font,
+        scale: fit.scale,
+        color: skin.colors.accent,
+        align: "center",
+        shadow: true,
+      });
     } else {
       const titleScale = skin.titleScale ?? skin.fontScale;
       const fit = fitText(active.menu.title, 512, titleScale);
-      commands.push({ kind: "text", origin: { x: 64, y: 44 }, text: this.options.localize?.(fit.text) ?? fit.text,
-        font: skin.titleFont, scale: fit.scale, color: skin.colors.accent, align: "left", shadow: true });
+      commands.push({
+        kind: "text",
+        origin: { x: 64, y: 44 },
+        text: this.options.localize?.(fit.text) ?? fit.text,
+        font: skin.titleFont,
+        scale: fit.scale,
+        color: skin.colors.accent,
+        align: "left",
+        shadow: true,
+      });
     }
     for (const control of active.menu.controls) {
       if (!control.visible) continue;
@@ -475,21 +773,41 @@ export class NativeUiController implements SeatUiController {
       commands.push({ kind: "clip", rect: scrolled ? region.rect : null });
       const focused = control.id === active.cursor.focus;
       const color = !control.enabled ? skin.colors.disabled : focused ? skin.colors.accent : skin.colors.text;
-      if (control.kind === "owner-draw") { commands.push(...control.draw({ ...context, binding: { ...context.binding,
-        viewport: { x: 0, y: 0, width: 640, height: 480 }, safeArea: { x: 0, y: 0, width: 640, height: 480 } } })); continue; }
+      if (control.kind === "owner-draw") {
+        commands.push(
+          ...control.draw({
+            ...context,
+            binding: { ...context.binding, viewport: { x: 0, y: 0, width: 640, height: 480 }, safeArea: { x: 0, y: 0, width: 640, height: 480 } },
+          }),
+        );
+        continue;
+      }
       const focusedControl = focused && control.kind !== "list";
-      const decoration = focusedControl ? skin.focus ?? skin.button : skin.button;
-      commands.push({ kind: "fill", rect: { ...control.rect, height: control.rect.height - 2 }, color: focusedControl ? skin.colors.focused : skin.colors.control });
+      const decoration = focusedControl ? (skin.focus ?? skin.button) : skin.button;
+      commands.push({
+        kind: "fill",
+        rect: { ...control.rect, height: control.rect.height - 2 },
+        color: focusedControl ? skin.colors.focused : skin.colors.control,
+      });
       if (decoration !== null) commands.push(...nineSlice(decoration, control.rect, white));
       if (control.kind === "list") {
-        const layout = this.listLayout(control), contentWidth = control.rect.width - (layout.maximum > 0 ? 16 : 0);
+        const layout = this.listLayout(control),
+          contentWidth = control.rect.width - (layout.maximum > 0 ? 16 : 0);
         const clip = { ...control.rect, width: contentWidth };
         commands.push({ kind: "clip", rect: clip });
         for (const [index, row] of control.rows.slice(layout.top, layout.top + layout.page).entries()) {
           const y = control.rect.y + index * layout.height;
-          if (row.id === control.selected) commands.push({ kind: "fill", rect: { x: control.rect.x, y, width: contentWidth, height: layout.height }, color: skin.colors.focused });
+          if (row.id === control.selected)
+            commands.push({ kind: "fill", rect: { x: control.rect.x, y, width: contentWidth, height: layout.height }, color: skin.colors.focused });
           const rowColor = !row.enabled ? skin.colors.disabled : row.id === control.selected ? skin.colors.accent : skin.colors.text;
-          if (control.columnWidths === undefined) textFit(row.cells.join("  "), control.rect.x + 8, y + (layout.height - 8 * skin.fontScale) / 2, contentWidth - 16 - (row.action === undefined ? 0 : 28), rowColor);
+          if (control.columnWidths === undefined)
+            textFit(
+              row.cells.join("  "),
+              control.rect.x + 8,
+              y + (layout.height - 8 * skin.fontScale) / 2,
+              contentWidth - 16 - (row.action === undefined ? 0 : 28),
+              rowColor,
+            );
           else {
             let x = control.rect.x;
             for (const [column, value] of row.cells.entries()) {
@@ -498,65 +816,109 @@ export class NativeUiController implements SeatUiController {
               const available = Math.max(0, width - 16);
               const scale = skin.fontScale * Math.max(0.75, Math.min(1, available / Math.max(1, measured)));
               let label = value;
-              if (measured * scale / skin.fontScale > available) {
-                const glyphs = Array.from(value), measure = (text: string): number => this.options.measureText?.(text, scale) ?? Array.from(text).length * 8 * scale;
-                let low = 0, high = glyphs.length;
+              if ((measured * scale) / skin.fontScale > available) {
+                const glyphs = Array.from(value),
+                  measure = (text: string): number => this.options.measureText?.(text, scale) ?? Array.from(text).length * 8 * scale;
+                let low = 0,
+                  high = glyphs.length;
                 while (low < high) {
                   const middle = Math.ceil((low + high) / 2);
-                  if (measure(`${glyphs.slice(0, middle).join("")}…`) <= available) low = middle; else high = middle - 1;
+                  if (measure(`${glyphs.slice(0, middle).join("")}…`) <= available) low = middle;
+                  else high = middle - 1;
                 }
                 label = measure("…") <= available ? `${glyphs.slice(0, low).join("")}…` : "";
               }
-              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: this.options.localize?.(label) ?? label,
-                font: skin.font, scale, color: rowColor, align: "left", shadow: true });
+              commands.push({
+                kind: "text",
+                origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 },
+                text: this.options.localize?.(label) ?? label,
+                font: skin.font,
+                scale,
+                color: rowColor,
+                align: "left",
+                shadow: true,
+              });
               x += width;
             }
           }
-          if (row.action !== undefined) text(row.action.label, control.rect.x + contentWidth - 14, y + (layout.height - 8 * skin.fontScale) / 2, rowColor, "center");
+          if (row.action !== undefined)
+            text(row.action.label, control.rect.x + contentWidth - 14, y + (layout.height - 8 * skin.fontScale) / 2, rowColor, "center");
         }
         commands.push({ kind: "clip", rect: null });
         if (layout.maximum > 0) {
           const x = control.rect.x + control.rect.width - 14;
           commands.push({ kind: "fill", rect: { x, y: control.rect.y, width: 12, height: control.rect.height }, color: skin.colors.control });
-          commands.push({ kind: "fill", rect: { x, y: control.rect.y + (control.rect.height - layout.thumb) * layout.top / layout.maximum, width: 12, height: layout.thumb }, color: focused ? skin.colors.accent : skin.colors.disabled });
+          commands.push({
+            kind: "fill",
+            rect: { x, y: control.rect.y + ((control.rect.height - layout.thumb) * layout.top) / layout.maximum, width: 12, height: layout.thumb },
+            color: focused ? skin.colors.accent : skin.colors.disabled,
+          });
         }
         continue;
       }
-      const rowTop = control.rect.y, rowHeight = control.rect.height, base = Math.min(skin.fontScale, Math.max(0.1, (rowHeight - 4) / 8));
-      const right = control.rect.x + control.rect.width - 10, y = rowTop + Math.min(6, (rowHeight - 8 * base) / 2);
+      const rowTop = control.rect.y,
+        rowHeight = control.rect.height,
+        base = Math.min(skin.fontScale, Math.max(0.1, (rowHeight - 4) / 8));
+      const right = control.rect.x + control.rect.width - 10,
+        y = rowTop + Math.min(6, (rowHeight - 8 * base) / 2);
       if (control.kind !== "slider") {
-        const value = control.kind === "toggle" ? (control.checked ? "On" : "Off")
-          : control.kind === "choice" ? (control.choices.find(choice => choice.id === control.selected)?.label ?? "") : "";
+        const value =
+          control.kind === "toggle"
+            ? control.checked
+              ? "On"
+              : "Off"
+            : control.kind === "choice"
+              ? (control.choices.find(choice => choice.id === control.selected)?.label ?? "")
+              : "";
         const valueWidth = value === "" ? 0 : textFit(value, right, rowTop, control.rect.width * 0.45, color, "right", rowHeight);
         textFit(control.label, control.rect.x + 10, rowTop, control.rect.width - 20 - (valueWidth === 0 ? 0 : valueWidth + 10), color, "left", rowHeight);
       }
       switch (control.kind) {
-        case "button": case "toggle": case "choice": break;
+        case "button":
+        case "toggle":
+        case "choice":
+          break;
         case "slider": {
-          const x = control.rect.x + control.rect.width * 0.6, width = control.rect.width * 0.32;
+          const x = control.rect.x + control.rect.width * 0.6,
+            width = control.rect.width * 0.32;
           const value = control.valueLabel ?? String(Number(control.value.toFixed(6)));
           const valueRight = x - 12;
           const measure = (content: string): number => this.options.measureText?.(content, base) ?? Array.from(content).length * 8 * base;
-          const valueScale = base * Math.min(1, control.rect.width * 0.16 / Math.max(1, measure(value)));
-          const labelWidth = valueRight - measure(value) * valueScale / base - 12 - (control.rect.x + 10);
+          const valueScale = base * Math.min(1, (control.rect.width * 0.16) / Math.max(1, measure(value)));
+          const labelWidth = valueRight - (measure(value) * valueScale) / base - 12 - (control.rect.x + 10);
           const labelScale = base * Math.min(1, Math.max(1, labelWidth) / Math.max(1, measure(control.label)));
-          commands.push({ kind: "text", origin: { x: control.rect.x + 10, y }, text: this.options.localize?.(control.label) ?? control.label, font: skin.font, scale: labelScale, color, align: "left", shadow: true });
+          commands.push({
+            kind: "text",
+            origin: { x: control.rect.x + 10, y },
+            text: this.options.localize?.(control.label) ?? control.label,
+            font: skin.font,
+            scale: labelScale,
+            color,
+            align: "left",
+            shadow: true,
+          });
           commands.push({ kind: "text", origin: { x: valueRight, y }, text: value, font: skin.font, scale: valueScale, color, align: "right", shadow: true });
-          const ratio = control.maximum === control.minimum ? 0 : Math.max(0, Math.min(1, (control.value - control.minimum) / (control.maximum - control.minimum)));
+          const ratio =
+            control.maximum === control.minimum ? 0 : Math.max(0, Math.min(1, (control.value - control.minimum) / (control.maximum - control.minimum)));
           commands.push({ kind: "fill", rect: { x, y: y + 7, width, height: 2 }, color: skin.colors.disabled });
-          commands.push({ kind: "fill", rect: { x: x + width * ratio - 3, y: y + 2, width: 6, height: 12 }, color }); break;
+          commands.push({ kind: "fill", rect: { x: x + width * ratio - 3, y: y + 2, width: 6, height: 12 }, color });
+          break;
         }
         case "text-entry": {
-          const field = this.field(control), all = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text), available = control.rect.width * 0.5 - 12;
+          const field = this.field(control),
+            all = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text),
+            available = control.rect.width * 0.5 - 12;
           const measure = (value: string): number => this.options.measureText?.(value, base) ?? Array.from(value).length * 8 * base;
-          let start = Math.min(field.start, field.cursor), end = field.cursor;
+          let start = Math.min(field.start, field.cursor),
+            end = field.cursor;
           while (start < field.cursor && measure(all.slice(start, field.cursor).join("")) > available) start++;
           while (end < all.length && measure(all.slice(start, end + 1).join("")) <= available) end++;
           field.start = start;
           const shown = all.slice(start, end).join("");
           const x = control.rect.x + control.rect.width * 0.5;
           text(shown, x, y, color, "left", base);
-          if (focused && Math.floor(context.timeMilliseconds / 256) % 2 === 0) text(field.overstrike ? "_" : "|", x + measure(all.slice(start, field.cursor).join("")), y, color, "left", base);
+          if (focused && Math.floor(context.timeMilliseconds / 256) % 2 === 0)
+            text(field.overstrike ? "_" : "|", x + measure(all.slice(start, field.cursor).join("")), y, color, "left", base);
           break;
         }
       }
@@ -564,16 +926,31 @@ export class NativeUiController implements SeatUiController {
     commands.push({ kind: "clip", rect: null });
     const region = active.menu.scroll;
     if (region !== undefined && region.contentHeight > region.rect.height) {
-      const thumb = this.menuThumb(active.menu), x = region.rect.x + region.rect.width - 14;
+      const thumb = this.menuThumb(active.menu),
+        x = region.rect.x + region.rect.width - 14;
       commands.push({ kind: "fill", rect: { x, y: region.rect.y, width: 12, height: region.rect.height }, color: skin.colors.control });
-      commands.push({ kind: "fill", rect: { x, y: region.rect.y + (region.rect.height - thumb) * active.cursor.scroll / (region.contentHeight - region.rect.height), width: 12, height: thumb }, color: skin.colors.accent });
+      commands.push({
+        kind: "fill",
+        rect: {
+          x,
+          y: region.rect.y + ((region.rect.height - thumb) * active.cursor.scroll) / (region.contentHeight - region.rect.height),
+          width: 12,
+          height: thumb,
+        },
+        color: skin.colors.accent,
+      });
     }
     if (this.capture !== null) text("Press key/button. Esc cancels.", 380, 432, skin.colors.accent, "center");
     const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];
     for (const command of commands) {
       const transformed = transformUi(command, this.transform);
-      result.push(transformed.kind === "clip" ? { kind: "clip", rect: transformed.rect === null ? context.binding.safeArea : intersect(context.binding.safeArea, transformed.rect) } : transformed);
+      result.push(
+        transformed.kind === "clip"
+          ? { kind: "clip", rect: transformed.rect === null ? context.binding.safeArea : intersect(context.binding.safeArea, transformed.rect) }
+          : transformed,
+      );
     }
-    result.push({ kind: "clip", rect: null }); return result;
+    result.push({ kind: "clip", rect: null });
+    return result;
   }
 }

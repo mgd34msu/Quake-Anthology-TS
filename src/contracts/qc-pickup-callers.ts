@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "./gameplay.ts";
 import type { PickupResource } from "./original-pickups.ts";
 
@@ -9,7 +10,8 @@ interface QcPickupItem {
 }
 export interface QcPickupCallerDeclaration {
   readonly function: string;
-  readonly descriptor: ({ readonly kind: "constant" } & QcPickupItem)
+  readonly descriptor:
+    | ({ readonly kind: "constant" } & QcPickupItem)
     | { readonly kind: "string"; readonly field: string; readonly values: readonly (QcPickupItem & { readonly value: string })[] }
     | { readonly kind: "float"; readonly field: string; readonly values: readonly (QcPickupItem & { readonly value: number })[] };
   readonly dropped?: QcPickupScalar;
@@ -17,7 +19,6 @@ export interface QcPickupCallerDeclaration {
     readonly entry: number;
     readonly exit: number;
     readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[];
-    readonly operation: { readonly kind: "decision"; readonly word: number; readonly accepted: number }
-      | { readonly kind: "admission" | "grant" | "consume" };
+    readonly operation: { readonly kind: "decision"; readonly word: number; readonly accepted: number } | { readonly kind: "admission" | "grant" | "consume" };
   }[];
 }

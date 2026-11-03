@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { modSelectionKey, type ModDescription, type ModSelection } from "../../contracts/mods.ts";
 
 /** A successful edit publishes one complete, dependency-ordered selection. */
@@ -10,8 +11,12 @@ export class ModSelectionSet {
     this.restore(initial);
   }
 
-  entries(): readonly ModDescription[] { return [...this.descriptions.values()]; }
-  enabled(): readonly ModSelection[] { return this.selected; }
+  entries(): readonly ModDescription[] {
+    return [...this.descriptions.values()];
+  }
+  enabled(): readonly ModSelection[] {
+    return this.selected;
+  }
   has(selection: ModSelection): boolean {
     const key = modSelectionKey(selection);
     return this.selected.some(value => modSelectionKey(value) === key);
@@ -26,9 +31,10 @@ export class ModSelectionSet {
     }
     // Missing enabled packages stay visible so users can disable them.
     for (const selection of this.selected) {
-      const key = modSelectionKey(selection), previous = this.descriptions.get(key);
-      if (!next.has(key) && previous !== undefined) next.set(key, { ...previous,
-        availability: { kind: "unavailable", reason: "This enabled mod is no longer installed" } });
+      const key = modSelectionKey(selection),
+        previous = this.descriptions.get(key);
+      if (!next.has(key) && previous !== undefined)
+        next.set(key, { ...previous, availability: { kind: "unavailable", reason: "This enabled mod is no longer installed" } });
     }
     this.descriptions = next;
   }
@@ -47,19 +53,24 @@ export class ModSelectionSet {
     while (changed) {
       changed = false;
       for (const active of this.selected) {
-        const key = modSelectionKey(active), description = this.descriptions.get(key);
+        const key = modSelectionKey(active),
+          description = this.descriptions.get(key);
         if (!removed.has(key) && description?.requires.some(dependency => removed.has(modSelectionKey(dependency)))) {
-          removed.add(key); changed = true;
+          removed.add(key);
+          changed = true;
         }
       }
     }
     this.selected = this.selected.filter(active => !removed.has(modSelectionKey(active)));
   }
 
-  validate(): void { this.resolve(this.selected); }
+  validate(): void {
+    this.resolve(this.selected);
+  }
 
   private resolve(selections: readonly ModSelection[]): readonly ModSelection[] {
-    const active = new Map<string, ModDescription>(), visiting = new Set<string>();
+    const active = new Map<string, ModDescription>(),
+      visiting = new Set<string>();
     const visit = (selection: ModSelection): void => {
       const key = modSelectionKey(selection);
       if (active.has(key)) return;

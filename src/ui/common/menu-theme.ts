@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ResourceId } from "../../contracts/content.ts";
 import { mainMenuBackground } from "./art-manifest.ts";
 import type { UiDrawCommand, UiDrawContext } from "../../contracts/ui.ts";
@@ -11,8 +12,15 @@ export const menuTitleFont: ResourceId = "resource:engine-menu:title";
  * control text render at the same size. Dense label/value pages (the custom
  * game builder) use the single field size for labels and values alike.
  */
-export const menuText: { readonly mainTitle: number; readonly title: number; readonly section: number;
-  readonly label: number; readonly body: number; readonly field: number; readonly small: number } = {
+export const menuText: {
+  readonly mainTitle: number;
+  readonly title: number;
+  readonly section: number;
+  readonly label: number;
+  readonly body: number;
+  readonly field: number;
+  readonly small: number;
+} = {
   mainTitle: 5.4,
   title: 3.6,
   section: 1.55,
@@ -22,23 +30,55 @@ export const menuText: { readonly mainTitle: number; readonly title: number; rea
   small: 1.35,
 };
 export function menuSkin(font: ResourceId): UiSkin {
-  return { font, titleFont: menuTitleFont, titleScale: menuText.title, fontScale: menuText.body, lineHeight: 24,
-    background: null, panel: null, focus: null, button: null,
-    colors: { text: { x: 0.9, y: 0.92, z: 0.94, w: 1 }, disabled: { x: 0.48, y: 0.5, z: 0.53, w: 1 },
-      accent: { x: 1, y: 0.73, z: 0.35, w: 1 }, panel: { x: 0, y: 0, z: 0, w: 0 },
-      control: { x: 0.06, y: 0.08, z: 0.1, w: 0.83 }, focused: { x: 0.23, y: 0.16, z: 0.09, w: 0.97 } } };
+  return {
+    font,
+    titleFont: menuTitleFont,
+    titleScale: menuText.title,
+    fontScale: menuText.body,
+    lineHeight: 24,
+    background: null,
+    panel: null,
+    focus: null,
+    button: null,
+    colors: {
+      text: { x: 0.9, y: 0.92, z: 0.94, w: 1 },
+      disabled: { x: 0.48, y: 0.5, z: 0.53, w: 1 },
+      accent: { x: 1, y: 0.73, z: 0.35, w: 1 },
+      panel: { x: 0, y: 0, z: 0, w: 0 },
+      control: { x: 0.06, y: 0.08, z: 0.1, w: 0.83 },
+      focused: { x: 0.23, y: 0.16, z: 0.09, w: 0.97 },
+    },
+  };
 }
 export function menuBackdrop(context: UiDrawContext): UiDrawCommand {
-  const viewport = context.binding.viewport, ratio = viewport.width / viewport.height, artRatio = mainMenuBackground.width / mainMenuBackground.height;
-  const cropX = ratio < artRatio ? (1 - ratio / artRatio) / 2 : 0, cropY = ratio > artRatio ? (1 - artRatio / ratio) / 2 : 0;
-  return { kind: "image", resource: "resource:engine-menu:main-background", rect: viewport,
-    texCoords: [{ x: cropX, y: cropY }, { x: 1 - cropX, y: 1 - cropY }], color: { x: 1, y: 1, z: 1, w: 1 } };
+  const viewport = context.binding.viewport,
+    ratio = viewport.width / viewport.height,
+    artRatio = mainMenuBackground.width / mainMenuBackground.height;
+  const cropX = ratio < artRatio ? (1 - ratio / artRatio) / 2 : 0,
+    cropY = ratio > artRatio ? (1 - artRatio / ratio) / 2 : 0;
+  return {
+    kind: "image",
+    resource: "resource:engine-menu:main-background",
+    rect: viewport,
+    texCoords: [
+      { x: cropX, y: cropY },
+      { x: 1 - cropX, y: 1 - cropY },
+    ],
+    color: { x: 1, y: 1, z: 1, w: 1 },
+  };
 }
 /** The one menu box in 640x480 UI space; the controller draws its panel on the same rect. */
-export const menuPanelRect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } = { x: 32, y: 24, width: 576, height: 432 };
+export const menuPanelRect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } = {
+  x: 32,
+  y: 24,
+  width: 576,
+  height: 432,
+};
 export function menuPanel(context: UiDrawContext, narrow = false, menuScale = 1): UiDrawCommand {
   const area = context.binding.safeArea;
   if (area.width <= 0 || area.height <= 0) return { kind: "fill", rect: { x: area.x, y: area.y, width: 0, height: 0 }, color: { x: 0, y: 0, z: 0, w: 0 } };
-  return transformUi({ kind: "fill", rect: { x: 32, y: 24, width: narrow ? 272 : 576, height: 432 },
-    color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } }, fitUi(area, menuScale));
+  return transformUi(
+    { kind: "fill", rect: { x: 32, y: 24, width: narrow ? 272 : 576, height: 432 }, color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } },
+    fitUi(area, menuScale),
+  );
 }

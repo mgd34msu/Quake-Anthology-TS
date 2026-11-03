@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import { QvmGameImport } from "./abi.ts";
@@ -11,7 +12,9 @@ export interface QvmEntityTokenServices {
 export class QvmEntityTokens implements QvmEntityTokenServices {
   private readonly cursor: CommonParseCursor;
   private readonly parser = new CommonParseState();
-  constructor(source: string) { this.cursor = new CommonParseCursor(source); }
+  constructor(source: string) {
+    this.cursor = new CommonParseCursor(source);
+  }
 
   entityToken(): { readonly token: string; readonly ended: boolean } {
     return { token: this.parser.parse(this.cursor), ended: this.cursor.offset === null };

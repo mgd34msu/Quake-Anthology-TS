@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { CommandDialect } from "../../../src/contracts/common.ts";
 import { CvarFlag, CvarRegistry, Q2CvarFlag } from "../../../src/core/cvars/index.ts";
-import { minimumFrameMilliseconds, q3ServerPaused, readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "../../../src/app/bootstrap/frame-time.ts";
+import {
+  minimumFrameMilliseconds,
+  q3ServerPaused,
+  readFrameTimeControls,
+  registerFrameTimeCvars,
+  sourceFrameMilliseconds,
+} from "../../../src/app/bootstrap/frame-time.ts";
 
 test("Q3 requested pause permits one connected human and rejects a second", () => {
   const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("q3-pause").session, origin: { kind: "server-console" } } });
@@ -14,7 +21,8 @@ test("Q3 requested pause permits one connected human and rejects a second", () =
   expect(cvars.variableValue("sv_paused")).toBe(1);
   expect(q3ServerPaused(cvars, true, 2)).toBe(false);
   expect(cvars.variableValue("sv_paused")).toBe(0);
-  cvars.set("sv_paused", "1"); expect(cvars.variableValue("sv_paused")).toBe(0);
+  cvars.set("sv_paused", "1");
+  expect(cvars.variableValue("sv_paused")).toBe(0);
 });
 
 const defaults = { timescale: 1, fixedtime: 0, hostFramerate: 0, cameraMode: 0 };
@@ -22,11 +30,15 @@ const local = { dedicated: false, localServer: true };
 const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];
 
 test("default controls still apply native frame conversion and host limits", () => {
-  for (const dialect of dialects) for (const delta of [0, 0.25, 16.6666666667, 250, 1000, 6000]) {
-    const expected = dialect.startsWith("q1") ? Math.max(1, Math.min(100, delta))
-      : dialect.startsWith("q2") ? Math.max(1, Math.min(200, delta)) : Math.max(1, Math.min(200, Math.trunc(delta)));
-    expect(sourceFrameMilliseconds(dialect, delta, defaults, local)).toBe(expected);
-  }
+  for (const dialect of dialects)
+    for (const delta of [0, 0.25, 16.6666666667, 250, 1000, 6000]) {
+      const expected = dialect.startsWith("q1")
+        ? Math.max(1, Math.min(100, delta))
+        : dialect.startsWith("q2")
+          ? Math.max(1, Math.min(200, delta))
+          : Math.max(1, Math.min(200, Math.trunc(delta)));
+      expect(sourceFrameMilliseconds(dialect, delta, defaults, local)).toBe(expected);
+    }
   expect(sourceFrameMilliseconds("q3", 1000, defaults, local)).toBe(200);
   expect(sourceFrameMilliseconds("q3", 6000, defaults, { dedicated: true, localServer: true })).toBe(5000);
   expect(sourceFrameMilliseconds("q3", 6000, defaults, { dedicated: false, localServer: false })).toBe(5000);
@@ -34,9 +46,14 @@ test("default controls still apply native frame conversion and host limits", () 
 
 test("source time controls preserve registered values and native authority flags", () => {
   for (const dialect of dialects) {
-    const cvars = new CvarRegistry({ dialect, context: { session: createIdentityOwner(dialect).session, origin: { kind: "server-console" } }, cheatsAllowed: () => true });
+    const cvars = new CvarRegistry({
+      dialect,
+      context: { session: createIdentityOwner(dialect).session, origin: { kind: "server-console" } },
+      cheatsAllowed: () => true,
+    });
     registerFrameTimeCvars(cvars);
-    cvars.set("timescale", "0.5"); registerFrameTimeCvars(cvars);
+    cvars.set("timescale", "0.5");
+    registerFrameTimeCvars(cvars);
     expect(readFrameTimeControls(cvars).timescale).toBe(0.5);
     expect(cvars.find("timescale")?.flags).toBe(dialect === "q3" ? CvarFlag.Cheat | CvarFlag.SystemInfo : dialect.startsWith("q2") ? Q2CvarFlag.Cheat : 0);
     expect(sourceFrameMilliseconds(dialect, 40, readFrameTimeControls(cvars), local)).toBe(20);
@@ -79,14 +96,17 @@ test("Q2 frames are bounded so a long world load is not simulated on the next fr
 test("Q1 hosts pace at 72 Hz, dedicated Q1 at sys_ticrate, and other families keep the 4 ms floor", () => {
   const registry = (dialect: CommandDialect): CvarRegistry => {
     const cvars = new CvarRegistry({ dialect, context: { session: createIdentityOwner(`pacing-${dialect}`).session, origin: { kind: "server-console" } } });
-    registerFrameTimeCvars(cvars); return cvars;
+    registerFrameTimeCvars(cvars);
+    return cvars;
   };
   for (const dialect of ["q1-netquake", "q1-quakeworld"] satisfies readonly CommandDialect[]) {
     const cvars = registry(dialect);
     expect(minimumFrameMilliseconds(cvars, false)).toBeCloseTo(1000 / 72, 6);
     expect(minimumFrameMilliseconds(cvars, true)).toBeCloseTo(50, 3);
-    cvars.set("sys_ticrate", "0.1", true); expect(minimumFrameMilliseconds(cvars, true)).toBeCloseTo(100, 3);
-    cvars.set("sys_ticrate", "0", true); expect(minimumFrameMilliseconds(cvars, true)).toBeCloseTo(1000 / 72, 6);
+    cvars.set("sys_ticrate", "0.1", true);
+    expect(minimumFrameMilliseconds(cvars, true)).toBeCloseTo(100, 3);
+    cvars.set("sys_ticrate", "0", true);
+    expect(minimumFrameMilliseconds(cvars, true)).toBeCloseTo(1000 / 72, 6);
   }
   for (const dialect of ["q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
     expect(minimumFrameMilliseconds(registry(dialect), false)).toBe(4);

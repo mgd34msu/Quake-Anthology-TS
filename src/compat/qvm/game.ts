@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake III Arena server/sv_game.c, sv_client.c and game/g_public.h. GPL-2.0-or-later. */
 import { QvmGameExport, QvmGameImport } from "./abi.ts";
 import { QvmGameData } from "./game-data.ts";
@@ -7,52 +8,102 @@ import type { QvmModuleOptions } from "./module.ts";
 export class QvmGame {
   readonly module: QvmModule;
   readonly data: QvmGameData;
-  get api(): Extract<QvmModule["profile"]["api"], { readonly kind: "q3-qagame" }> { return { kind: "q3-qagame", version: this.module.abiProfile === "q3-modern" ? 8 : 7 }; }
+  get api(): Extract<QvmModule["profile"]["api"], { readonly kind: "q3-qagame" }> {
+    return { kind: "q3-qagame", version: this.module.abiProfile === "q3-modern" ? 8 : 7 };
+  }
 
   constructor(options: QvmModuleOptions) {
     if (options.artifact.role !== "qagame") throw new Error("QvmGame requires a qagame artifact");
-    this.module = new QvmModule({ ...options, host: call => {
-      if (call.kind === "engine" && call.role === "qagame" && call.code === QvmGameImport.G_LOCATE_GAME_DATA) {
-        this.data.locate(call.words.getInt32(4, true), call.words.getInt32(8, true), call.words.getInt32(12, true), call.words.getInt32(16, true), call.words.getInt32(20, true));
-        return 0;
-      }
-      return options.host(call);
-    } });
+    this.module = new QvmModule({
+      ...options,
+      host: call => {
+        if (call.kind === "engine" && call.role === "qagame" && call.code === QvmGameImport.G_LOCATE_GAME_DATA) {
+          this.data.locate(
+            call.words.getInt32(4, true),
+            call.words.getInt32(8, true),
+            call.words.getInt32(12, true),
+            call.words.getInt32(16, true),
+            call.words.getInt32(20, true),
+          );
+          return 0;
+        }
+        return options.host(call);
+      },
+    });
     this.data = new QvmGameData(this.module.memory, this.module.abiProfile);
   }
 
   initialize(levelTime: number, randomSeed: number, restart = false): undefined {
     this.module.call([QvmGameExport.GAME_INIT, levelTime, randomSeed, Number(restart)]);
   }
-  shutdown(restart: boolean): undefined { this.module.call([QvmGameExport.GAME_SHUTDOWN, Number(restart)]); }
+  shutdown(restart: boolean): undefined {
+    this.module.call([QvmGameExport.GAME_SHUTDOWN, Number(restart)]);
+  }
   clientConnect(client: number, firstTime: boolean, isBot: boolean): string | null {
     const denied = this.module.call([QvmGameExport.GAME_CLIENT_CONNECT, client, Number(firstTime), Number(isBot)]);
     return denied === 0 ? null : this.module.memory.readString(denied);
   }
-  clientBegin(client: number): undefined { this.module.call([QvmGameExport.GAME_CLIENT_BEGIN, client]); }
-  clientUserinfoChanged(client: number): undefined { this.module.call([QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, client]); }
-  clientDisconnect(client: number): undefined { this.module.call([QvmGameExport.GAME_CLIENT_DISCONNECT, client]); }
-  clientCommand(client: number, arguments_: readonly string[]): undefined { this.module.command([QvmGameExport.GAME_CLIENT_COMMAND, client], arguments_); }
-  clientThink(client: number): undefined { this.module.call([QvmGameExport.GAME_CLIENT_THINK, client]); }
-  runFrame(time: number): undefined { this.module.call([QvmGameExport.GAME_RUN_FRAME, time]); }
-  consoleCommand(arguments_: readonly string[]): boolean { return this.module.command([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_) !== 0; }
-  botFrame(time: number): undefined { this.module.call([QvmGameExport.BOTAI_START_FRAME, time]); }
+  clientBegin(client: number): undefined {
+    this.module.call([QvmGameExport.GAME_CLIENT_BEGIN, client]);
+  }
+  clientUserinfoChanged(client: number): undefined {
+    this.module.call([QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, client]);
+  }
+  clientDisconnect(client: number): undefined {
+    this.module.call([QvmGameExport.GAME_CLIENT_DISCONNECT, client]);
+  }
+  clientCommand(client: number, arguments_: readonly string[]): undefined {
+    this.module.command([QvmGameExport.GAME_CLIENT_COMMAND, client], arguments_);
+  }
+  clientThink(client: number): undefined {
+    this.module.call([QvmGameExport.GAME_CLIENT_THINK, client]);
+  }
+  runFrame(time: number): undefined {
+    this.module.call([QvmGameExport.GAME_RUN_FRAME, time]);
+  }
+  consoleCommand(arguments_: readonly string[]): boolean {
+    return this.module.command([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_) !== 0;
+  }
+  botFrame(time: number): undefined {
+    this.module.call([QvmGameExport.BOTAI_START_FRAME, time]);
+  }
   async initializeAsync(levelTime: number, randomSeed: number, restart = false): Promise<void> {
     await this.module.callAsync([QvmGameExport.GAME_INIT, levelTime, randomSeed, Number(restart)]);
   }
-  async shutdownAsync(restart: boolean): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_SHUTDOWN, Number(restart)]); }
+  async shutdownAsync(restart: boolean): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_SHUTDOWN, Number(restart)]);
+  }
   async clientConnectAsync(client: number, firstTime: boolean, isBot: boolean): Promise<string | null> {
     const denied = await this.module.callAsync([QvmGameExport.GAME_CLIENT_CONNECT, client, Number(firstTime), Number(isBot)]);
     return denied === 0 ? null : this.module.memory.readString(denied);
   }
-  async clientBeginAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_BEGIN, client]); }
-  async clientUserinfoChangedAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, client]); }
-  async clientDisconnectAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_DISCONNECT, client]); }
-  async clientCommandAsync(client: number, arguments_: readonly string[]): Promise<void> { await this.module.commandAsync([QvmGameExport.GAME_CLIENT_COMMAND, client], arguments_); }
-  async clientThinkAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_THINK, client]); }
-  async runFrameAsync(time: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_RUN_FRAME, time]); }
-  async consoleCommandAsync(arguments_: readonly string[]): Promise<boolean> { return await this.module.commandAsync([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_) !== 0; }
+  async clientBeginAsync(client: number): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_CLIENT_BEGIN, client]);
+  }
+  async clientUserinfoChangedAsync(client: number): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, client]);
+  }
+  async clientDisconnectAsync(client: number): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_CLIENT_DISCONNECT, client]);
+  }
+  async clientCommandAsync(client: number, arguments_: readonly string[]): Promise<void> {
+    await this.module.commandAsync([QvmGameExport.GAME_CLIENT_COMMAND, client], arguments_);
+  }
+  async clientThinkAsync(client: number): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_CLIENT_THINK, client]);
+  }
+  async runFrameAsync(time: number): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_RUN_FRAME, time]);
+  }
+  async consoleCommandAsync(arguments_: readonly string[]): Promise<boolean> {
+    return (await this.module.commandAsync([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_)) !== 0;
+  }
   /** The caller performs GAME_SHUTDOWN first and GAME_INIT after source data reload. */
-  restart(bytes: Uint8Array): void { this.module.restart(bytes); this.data.clear(); }
-  retire(): void { this.module.retire(); }
+  restart(bytes: Uint8Array): void {
+    this.module.restart(bytes);
+    this.data.clear();
+  }
+  retire(): void {
+    this.module.retire();
+  }
 }

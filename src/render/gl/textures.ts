@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q3 tr_image.c texture lifetime and filtering; palette expansion is shared.
 import type { loadGl } from "../../platform/gl.ts";
-import type { DepthImageLevel, ImageLevel, ImageResourceOperation, RendererImage, RendererResourceOwner, RenderImage, TextureBinding, TextureFilter } from "../../contracts/render.ts";
+import type {
+  DepthImageLevel,
+  ImageLevel,
+  ImageResourceOperation,
+  RendererImage,
+  RendererResourceOwner,
+  RenderImage,
+  TextureBinding,
+  TextureFilter,
+} from "../../contracts/render.ts";
 import { expandIndexedImage } from "../../formats/images/palette.ts";
 
 type Gl = ReturnType<typeof loadGl>["symbols"];
@@ -17,16 +26,21 @@ interface Texture {
 /** After upload only the format, palette and translation are read again, so level pixels are not kept on the JS heap. */
 function withoutPixels(content: RenderImage): RenderImage {
   if (content.kind === "depth32f") {
-    const [first, ...rest] = content.levels, hollow = (level: DepthImageLevel): DepthImageLevel => ({ width: level.width, height: level.height, pixels: new Float32Array(0) });
+    const [first, ...rest] = content.levels,
+      hollow = (level: DepthImageLevel): DepthImageLevel => ({ width: level.width, height: level.height, pixels: new Float32Array(0) });
     return { ...content, levels: [hollow(first), ...rest.map(hollow)] };
   }
-  const [first, ...rest] = content.levels, hollow = (level: ImageLevel): ImageLevel => ({ width: level.width, height: level.height, pixels: new Uint8Array(0) });
+  const [first, ...rest] = content.levels,
+    hollow = (level: ImageLevel): ImageLevel => ({ width: level.width, height: level.height, pixels: new Uint8Array(0) });
   return { ...content, levels: [hollow(first), ...rest.map(hollow)] };
 }
 const filters: Record<TextureFilter, readonly [number, number]> = {
-  nearest: [0x2600, 0x2600], linear: [0x2601, 0x2601],
-  "nearest-mipmap-nearest": [0x2700, 0x2600], "linear-mipmap-nearest": [0x2701, 0x2601],
-  "nearest-mipmap-linear": [0x2702, 0x2600], "linear-mipmap-linear": [0x2703, 0x2601],
+  nearest: [0x2600, 0x2600],
+  linear: [0x2601, 0x2601],
+  "nearest-mipmap-nearest": [0x2700, 0x2600],
+  "linear-mipmap-nearest": [0x2701, 0x2601],
+  "nearest-mipmap-linear": [0x2702, 0x2600],
+  "linear-mipmap-linear": [0x2703, 0x2601],
 };
 
 /** Native read/write calls must see tightly packed client memory, never a PBO offset. */
@@ -52,7 +66,11 @@ export function withPixelStore(gl: Gl, direction: "pack" | "unpack", operation: 
 export class GlTextures {
   private readonly images = new Map<number, Texture>();
 
-  constructor(private readonly gl: Gl, private readonly owner: RendererResourceOwner, private readonly maximum: number) {}
+  constructor(
+    private readonly gl: Gl,
+    private readonly owner: RendererResourceOwner,
+    private readonly maximum: number,
+  ) {}
 
   private own(image: RendererImage): void {
     if (image.owner.identity !== this.owner.identity || image.owner.session !== this.owner.session || image.owner.generation !== this.owner.generation)
@@ -80,8 +98,15 @@ export class GlTextures {
   }
 
   private dimensions(level: ImageLevel | DepthImageLevel, channels: number): void {
-    if (!Number.isInteger(level.width) || !Number.isInteger(level.height) || level.width < 1 || level.height < 1
-      || level.width > this.maximum || level.height > this.maximum || level.pixels.length !== level.width * level.height * channels)
+    if (
+      !Number.isInteger(level.width) ||
+      !Number.isInteger(level.height) ||
+      level.width < 1 ||
+      level.height < 1 ||
+      level.width > this.maximum ||
+      level.height > this.maximum ||
+      level.pixels.length !== level.width * level.height * channels
+    )
       throw new RangeError("OpenGL image dimensions do not match its pixel allocation");
     if (level.pixels instanceof Float32Array && !level.pixels.every(value => Number.isFinite(value) && value >= 0 && value <= 1))
       throw new RangeError("OpenGL depth samples must be finite values in 0..1");
@@ -107,20 +132,27 @@ export class GlTextures {
       }
       case "create-image": {
         if (this.images.has(operation.image.ordinal)) throw new Error("OpenGL image is already registered");
-        const content: RenderImage = operation.content.kind !== "indexed8" ? operation.content : {
-          ...operation.content, palette: { ...operation.content.palette, colors: operation.content.palette.colors.slice() },
-          translation: operation.content.translation?.slice() ?? null,
-        };
+        const content: RenderImage =
+          operation.content.kind !== "indexed8"
+            ? operation.content
+            : {
+                ...operation.content,
+                palette: { ...operation.content.palette, colors: operation.content.palette.colors.slice() },
+                translation: operation.content.translation?.slice() ?? null,
+              };
         const first = content.levels[0];
         if (operation.image.width !== first.width || operation.image.height !== first.height)
           throw new RangeError("OpenGL image descriptor dimensions differ from its base mip level");
         for (const [index, level] of content.levels.entries()) {
           this.dimensions(level, content.kind === "rgba8" ? 4 : 1);
-          if (level.width !== Math.max(1, Math.floor(first.width / 2 ** index)) || level.height !== Math.max(1, Math.floor(first.height / 2 ** index))
-            || index > Math.floor(Math.log2(Math.max(first.width, first.height))))
+          if (
+            level.width !== Math.max(1, Math.floor(first.width / 2 ** index)) ||
+            level.height !== Math.max(1, Math.floor(first.height / 2 ** index)) ||
+            index > Math.floor(Math.log2(Math.max(first.width, first.height)))
+          )
             throw new RangeError("OpenGL mip levels must halve their preceding dimensions");
         }
-        const levels = content.levels.map((level, index) => content.kind === "indexed8" ? expandIndexedImage(content, index) : level);
+        const levels = content.levels.map((level, index) => (content.kind === "indexed8" ? expandIndexedImage(content, index) : level));
         const handle = new Uint32Array(1);
         gl.glGenTextures(1, handle);
         const name = handle[0];
@@ -129,8 +161,17 @@ export class GlTextures {
           gl.glBindTexture(0xde1, name);
           withPixelStore(gl, "unpack", () => {
             for (const [index, level] of levels.entries())
-              gl.glTexImage2D(0xde1, index, content.kind === "depth32f" ? 0x8cac : 0x8058, level.width, level.height, 0,
-                content.kind === "depth32f" ? 0x1902 : 0x1908, content.kind === "depth32f" ? 0x1406 : 0x1401, level.pixels);
+              gl.glTexImage2D(
+                0xde1,
+                index,
+                content.kind === "depth32f" ? 0x8cac : 0x8058,
+                level.width,
+                level.height,
+                0,
+                content.kind === "depth32f" ? 0x1902 : 0x1908,
+                content.kind === "depth32f" ? 0x1406 : 0x1401,
+                level.pixels,
+              );
           });
           gl.glTexParameteri(0xde1, 0x813d, levels.length - 1);
           this.filter(operation.sampling.filter);
@@ -143,10 +184,15 @@ export class GlTextures {
           }
           const error = gl.glGetError();
           if (error !== 0) throw new Error(`OpenGL texture upload failed: 0x${error.toString(16)}`);
-          this.images.set(operation.image.ordinal, { handle, name, content: withoutPixels(content),
-            width: first.width, height: first.height,
+          this.images.set(operation.image.ordinal, {
+            handle,
+            name,
+            content: withoutPixels(content),
+            width: first.width,
+            height: first.height,
             mipmap: operation.sampling.filter !== "nearest" && operation.sampling.filter !== "linear",
-            levels: levels.map(({ width, height }) => ({ width, height })) });
+            levels: levels.map(({ width, height }) => ({ width, height })),
+          });
         } catch (error) {
           gl.glDeleteTextures(1, handle);
           throw error;
@@ -156,8 +202,12 @@ export class GlTextures {
       case "update-image": {
         const texture = this.registered(operation.image);
         const descriptor = texture.levels[operation.level];
-        if (!Number.isInteger(operation.level) || descriptor === undefined
-          || descriptor.width !== operation.content.width || descriptor.height !== operation.content.height)
+        if (
+          !Number.isInteger(operation.level) ||
+          descriptor === undefined ||
+          descriptor.width !== operation.content.width ||
+          descriptor.height !== operation.content.height
+        )
           throw new RangeError("OpenGL update dimensions differ from the registered mip level");
         this.dimensions(operation.content, texture.content.kind === "rgba8" ? 4 : 1);
         let content: ImageLevel | DepthImageLevel;
@@ -171,8 +221,17 @@ export class GlTextures {
         }
         gl.glBindTexture(0xde1, texture.name);
         withPixelStore(gl, "unpack", () => {
-          gl.glTexSubImage2D(0xde1, operation.level, 0, 0, content.width, content.height,
-            texture.content.kind === "depth32f" ? 0x1902 : 0x1908, texture.content.kind === "depth32f" ? 0x1406 : 0x1401, content.pixels);
+          gl.glTexSubImage2D(
+            0xde1,
+            operation.level,
+            0,
+            0,
+            content.width,
+            content.height,
+            texture.content.kind === "depth32f" ? 0x1902 : 0x1908,
+            texture.content.kind === "depth32f" ? 0x1406 : 0x1401,
+            content.pixels,
+          );
         });
         const error = gl.glGetError();
         if (error !== 0) throw new Error(`OpenGL texture update failed: 0x${error.toString(16)}`);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,21 @@ import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 
 async function open(map: string, directory: string): Promise<Application> {
-  const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", map, "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated", "--user-content-root", directory]);
+  const parsed = parseApplicationCommand([
+    "--game",
+    "q3-baseq3",
+    "--map",
+    map,
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--mode",
+    "deathmatch",
+    "--dedicated",
+    "--user-content-root",
+    directory,
+  ]);
   if (parsed.kind !== "run") throw new Error("Expected native Q3 launch");
   return Application.open(parsed.options, { print: () => undefined, saveDirectory: join(directory, "saves") });
 }

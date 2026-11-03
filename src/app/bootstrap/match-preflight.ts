@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { sourceProgramProduct, selectedSourceProgram } from "../../content/catalog/source-program.ts";
 import { GameType } from "../../content/q3/base/shared/definitions.ts";
 import { adaptForeignQ3Objectives } from "../../content/q3/team-arena/foreign-objectives.ts";
@@ -7,17 +8,23 @@ import { matchMapUnavailable, type MatchRules } from "./match-modes.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 /** Validate the configured source rules before constructing a simulation or renderer. */
-export function preflightApplicationMatch(content: Pick<LoadedApplicationContent, "catalog" | "recipe"> & { readonly world: Pick<LoadedApplicationContent["world"], "kind" | "entities"> },
-  options: Pick<ApplicationOptions, "mode">, sourceValues: readonly { readonly name: string; readonly value: string }[]): void {
+export function preflightApplicationMatch(
+  content: Pick<LoadedApplicationContent, "catalog" | "recipe"> & { readonly world: Pick<LoadedApplicationContent["world"], "kind" | "entities"> },
+  options: Pick<ApplicationOptions, "mode">,
+  sourceValues: readonly { readonly name: string; readonly value: string }[],
+): void {
   const owner = content.recipe.map.entities;
-  const execution = content.recipe.execution.find(module => module.role === "server-game" && module.owner.content === owner.content && module.owner.provider === owner.provider);
+  const execution = content.recipe.execution.find(
+    module => module.role === "server-game" && module.owner.content === owner.content && module.owner.provider === owner.provider,
+  );
   // Guest modules own their mode definitions and admission; stock rules cannot validate them.
   if (execution?.kind !== "typescript") return;
   const source = sourceProgramProduct(content.catalog, owner.content).expectation;
   if (source.family === "q3") {
     let configured: string | undefined;
     for (const value of sourceValues) if (value.name === "g_gametype") configured = value.value;
-    const gameType = configured === undefined ? content.recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : options.mode === "singleplayer" ? 2 : 0 : Number(configured);
+    const gameType =
+      configured === undefined ? (content.recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : options.mode === "singleplayer" ? 2 : 0) : Number(configured);
     // G_RegisterCvars resets an out-of-range game type to 0 at load.
     const effective = Number.isInteger(gameType) && gameType >= 0 && gameType < GameType.GT_MAX_GAME_TYPE ? gameType : 0;
     const result = adaptForeignQ3Objectives(content.world, selectedSourceProgram(content.recipe) === "missionpack" ? "missionpack" : "baseq3", effective);
@@ -26,9 +33,21 @@ export function preflightApplicationMatch(content: Pick<LoadedApplicationContent
     return;
   }
   const provider = content.recipe.match.provider;
-  const rules: MatchRules = provider === "q1:ctf" || provider === "q2:ctf" ? "ctf" : provider === "q2:lmctf" ? "lmctf" : provider === "q2:tag" ? "tag"
-    : provider === "q2:deathball" ? "deathball" : provider.endsWith(":horde") ? "horde" : "standard";
-  const reason = matchMapUnavailable({ ...source, mode: options.mode, rules },
-    parseQ1Entities(content.world.entities).map(entity => q1EntityValue(entity, "classname") ?? ""));
+  const rules: MatchRules =
+    provider === "q1:ctf" || provider === "q2:ctf"
+      ? "ctf"
+      : provider === "q2:lmctf"
+        ? "lmctf"
+        : provider === "q2:tag"
+          ? "tag"
+          : provider === "q2:deathball"
+            ? "deathball"
+            : provider.endsWith(":horde")
+              ? "horde"
+              : "standard";
+  const reason = matchMapUnavailable(
+    { ...source, mode: options.mode, rules },
+    parseQ1Entities(content.world.entities).map(entity => q1EntityValue(entity, "classname") ?? ""),
+  );
   if (reason !== null) throw new Error(reason);
 }

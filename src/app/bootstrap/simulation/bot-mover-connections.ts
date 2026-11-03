@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { NavigationConnection, NavigationProfile } from "../../../bots/navigation/index.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { SharedSimulation } from "./runtime.ts";
@@ -15,8 +16,11 @@ export function applicationTrainConnections(simulation: SharedSimulation, profil
     const route = q2.movers.trainRoute(entity, q2.game);
     if (route === null) continue;
     const local = body.state.bounds;
-    const riding = (origin: Vec3): Vec3 => ({ x: origin.x + (local.min.x + local.max.x) / 2,
-      y: origin.y + (local.min.y + local.max.y) / 2, z: origin.z + local.max.z - profile.shape.bounds.min.z + 0.125 });
+    const riding = (origin: Vec3): Vec3 => ({
+      x: origin.x + (local.min.x + local.max.x) / 2,
+      y: origin.y + (local.min.y + local.max.y) / 2,
+      z: origin.z + local.max.z - profile.shape.bounds.min.z + 0.125,
+    });
     for (const stop of route.stops) {
       const nextId = stop.next;
       const next = nextId === null ? undefined : route.stops.find(candidate => candidate.actor.equals(nextId));
@@ -26,8 +30,20 @@ export function applicationTrainConnections(simulation: SharedSimulation, profil
       if (speed <= 0) continue;
       const travelSeconds = stop.wait + Math.hypot(next.origin.x - stop.origin.x, next.origin.y - stop.origin.y, next.origin.z - stop.origin.z) / speed;
       const atStop = (point: Vec3): Vec3 => ({ x: point.x + stop.origin.x, y: point.y + stop.origin.y, z: point.z + stop.origin.z });
-      connections.push({ id: stop.actor.slot, sourceTravelType: 7, travelSeconds, from: riding(stop.origin), to: riding(next.origin), mode: "mover", hint: null,
-        entity: { model: collision.shape.model, bounds: { min: atStop(local.min), max: atStop(local.max) }, raw: [entity.actor.id.slot, stop.actor.slot, next.actor.slot] } });
+      connections.push({
+        id: stop.actor.slot,
+        sourceTravelType: 7,
+        travelSeconds,
+        from: riding(stop.origin),
+        to: riding(next.origin),
+        mode: "mover",
+        hint: null,
+        entity: {
+          model: collision.shape.model,
+          bounds: { min: atStop(local.min), max: atStop(local.max) },
+          raw: [entity.actor.id.slot, stop.actor.slot, next.actor.slot],
+        },
+      });
     }
   }
   return connections;

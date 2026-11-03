@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -16,7 +17,14 @@ import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from ".
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
-import { registerQ1CampaignAddons, registerQ1Horde, mg1LastSigil, mg3RuneCount, handleQ1AddonImpulse, frameQ1AddonPlayer } from "../../../src/content/q1/addons/index.ts";
+import {
+  registerQ1CampaignAddons,
+  registerQ1Horde,
+  mg1LastSigil,
+  mg3RuneCount,
+  handleQ1AddonImpulse,
+  frameQ1AddonPlayer,
+} from "../../../src/content/q1/addons/index.ts";
 import type { Q1AddonEvent } from "../../../src/content/q1/addons/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
@@ -25,114 +33,261 @@ import { inertAuthority } from "../../support/authority.ts";
 import { q1TestHost } from "../../support/q1-host.ts";
 
 function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop = false) {
-  const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")), callbacks = new ActorCallbackTable(actors);
+  const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")),
+    callbacks = new ActorCallbackTable(actors);
   let runtime: Q1Foundation | null = null;
   const bounds = { min: { x: -1024, y: -1024, z: -1024 }, max: { x: 1024, y: 1024, z: 1024 } };
-  const scene = createSceneQueries({ kind: "q1-bsp", format: "bsp29", entities: "", planes: [], vertices: [], edges: [], surfaceEdges: [], nodes: [],
+  const scene = createSceneQueries({
+    kind: "q1-bsp",
+    format: "bsp29",
+    entities: "",
+    planes: [],
+    vertices: [],
+    edges: [],
+    surfaceEdges: [],
+    nodes: [],
     leaves: [-2, -1].map(contents => ({ contents, bounds, faces: { first: 0, count: 0 }, visibilityOffset: null, ambientSound: [0, 0, 0, 0] })),
-    leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: ZERO, headnodes: [-2, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
-    clipnodes: [], visibility: new Uint8Array(), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] });
-  const execution = (actor: OwnedActor) => { const entity = runtime?.entity(actor.id); return entity == null || runtime === null ? null :
-    { kind: "q1", entity, services: runtime, content: "q1:rerelease:mg3:test" } satisfies import("../../../src/app/bootstrap/simulation/actor-execution.ts").ActorExecution; };
-  const physics: SharedPhysics = new SharedPhysics({ actors, callbacks, scene, numeric: Q1_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
-    worldActor: () => runtime?.world?.actor.id ?? null, onBlocked: (actor, other) => runtime?.entity(actor.id)?.blocked?.(other),
-    getCollision: actor => { const entry = execution(actor); return entry === null ? null : actorCollision(entry); },
-    getMotion: actor => { const entry = execution(actor), body = physics.bodies.read(actor.id); return entry === null || body === null ? null : actorMotion(entry, body); },
-    getFlags: actor => { const entry = execution(actor); return entry === null ? { player: true } : actorFlags(entry); } });
+    leafFaces: [],
+    textures: [],
+    textureInfo: [],
+    faces: [],
+    models: [{ bounds, origin: ZERO, headnodes: [-2, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
+    clipnodes: [],
+    visibility: new Uint8Array(),
+    lighting: { kind: "luminance8", samples: new Uint8Array() },
+    decoupledLightmaps: null,
+    brushList: null,
+    extensions: [],
+  });
+  const execution = (actor: OwnedActor) => {
+    const entity = runtime?.entity(actor.id);
+    return entity == null || runtime === null
+      ? null
+      : ({
+          kind: "q1",
+          entity,
+          services: runtime,
+          content: "q1:rerelease:mg3:test",
+        } satisfies import("../../../src/app/bootstrap/simulation/actor-execution.ts").ActorExecution);
+  };
+  const physics: SharedPhysics = new SharedPhysics({
+    actors,
+    callbacks,
+    scene,
+    numeric: Q1_DONOR_PROFILE,
+    sourceOrder: (a, b) => a.slot - b.slot,
+    worldActor: () => runtime?.world?.actor.id ?? null,
+    onBlocked: (actor, other) => runtime?.entity(actor.id)?.blocked?.(other),
+    getCollision: actor => {
+      const entry = execution(actor);
+      return entry === null ? null : actorCollision(entry);
+    },
+    getMotion: actor => {
+      const entry = execution(actor),
+        body = physics.bodies.read(actor.id);
+      return entry === null || body === null ? null : actorMotion(entry, body);
+    },
+    getFlags: actor => {
+      const entry = execution(actor);
+      return entry === null ? { player: true } : actorFlags(entry);
+    },
+  });
   const bodies = physics.bodies;
 
   const combat = inertAuthority(actors, callbacks);
-  const inventory = new SharedInventoryTable(actors), addonEvents: Q1AddonEvent[] = [], players: ActorId[] = [];
+  const inventory = new SharedInventoryTable(actors),
+    addonEvents: Q1AddonEvent[] = [],
+    players: ActorId[] = [];
   const cvars = new Map<string, number>();
-  const { host, pending, events, transitions } = q1TestHost({ actors, callbacks, bodies, combat, inventory, entity: actor => runtime?.entity(actor), players: () => players }, {
-    originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), walkMove: () => walkable,
-    changeYaw: () => { throw new Error("This check does not drive monster turning"); }, pusherServices: game => createNativeQ1PusherServices(game, physics),
+  const { host, pending, events, transitions } = q1TestHost(
+    { actors, callbacks, bodies, combat, inventory, entity: actor => runtime?.entity(actor), players: () => players },
+    {
+      originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory),
+      walkMove: () => walkable,
+      changeYaw: () => {
+        throw new Error("This check does not drive monster turning");
+      },
+      pusherServices: game => createNativeQ1PusherServices(game, physics),
+    },
+  );
+  const game = new Q1Foundation(host, {
+    edition: "rerelease",
+    skill: 1,
+    deathmatch: 0,
+    coop,
+    gravity: 800,
+    maxClients: 4,
+    campaign: program === "mg1" ? "q1:mg1" : "q1:mg3",
+    combatProvider: "q1:combat",
+    inventoryProvider: "q1:inventory",
+    movementProvider: "q2:movement",
   });
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop, gravity: 800, maxClients: 4,
-    campaign: program === "mg1" ? "q1:mg1" : "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
-  combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
-  const base = registerQ1Base(game), context = registerQ1CampaignAddons(base, program, {
-    emit: event => { addonEvents.push(event); return undefined; }, isMonster: actor => game.entity(actor)?.monster !== null && game.entity(actor) !== null,
-    cvar: name => cvars.get(name) ?? 0, setCvar: (name, value) => { cvars.set(name, Number(value)); return undefined; },
-  });
-  const horde = withHorde ? registerQ1Horde(context, { deadFlag: player => game.health(player) > 0 ? 0 : 2, noTarget: () => false, isBot: () => false,
-    respawnTeammate: () => undefined, addScore: () => undefined, restartSession: () => undefined }) : null;
+  runtime = game;
+  combat.register(
+    createQ1CombatPolicy({
+      id: "q1:combat",
+      context: request => game.combatContext(request),
+      armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })),
+    }),
+  );
+  const base = registerQ1Base(game),
+    context = registerQ1CampaignAddons(base, program, {
+      emit: event => {
+        addonEvents.push(event);
+        return undefined;
+      },
+      isMonster: actor => game.entity(actor)?.monster !== null && game.entity(actor) !== null,
+      cvar: name => cvars.get(name) ?? 0,
+      setCvar: (name, value) => {
+        cvars.set(name, Number(value));
+        return undefined;
+      },
+    });
+  const horde = withHorde
+    ? registerQ1Horde(context, {
+        deadFlag: player => (game.health(player) > 0 ? 0 : 2),
+        noTarget: () => false,
+        isBot: () => false,
+        respawnTeammate: () => undefined,
+        addScore: () => undefined,
+        restartSession: () => undefined,
+      })
+    : null;
   const player = actors.allocateAtSource("q3:character", 1, "q3:sarge");
   bodies.create(player, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(player, []); players.push(player.id); game.attachPlayer(player);
+  combat.create(player, {
+    health: 100,
+    armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+    mass: 100,
+    canTakeDamage: true,
+    invulnerable: false,
+    team: null,
+  });
+  inventory.create(player, []);
+  players.push(player.id);
+  game.attachPlayer(player);
   const spawn = (classname: string, fields: Readonly<Record<string, string>> = {}) => {
     const source: Q1Entity = { properties: [{ key: "classname", value: classname }, ...Object.entries(fields).map(([key, value]) => ({ key, value }))] };
-    const entity = game.create(classname, source); game.spawnEntity(entity); return entity;
+    const entity = game.create(classname, source);
+    game.spawnEntity(entity);
+    return entity;
   };
   const think = (entity: import("../../../src/content/q1/foundation/entity.ts").Q1Actor, time: number): undefined => {
-    pending.delete(entity.actor); callbacks.think(entity.actor, { frame: 0, time: { kind: "seconds", value: time }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); return undefined;
+    pending.delete(entity.actor);
+    callbacks.think(entity.actor, { frame: 0, time: { kind: "seconds", value: time }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
+    return undefined;
   };
-  const touch = (entity: import("../../../src/content/q1/foundation/entity.ts").Q1Actor): undefined => { callbacks.touch({ self: entity.actor, other: player.id, plane: null, surface: null }); return undefined; };
+  const touch = (entity: import("../../../src/content/q1/foundation/entity.ts").Q1Actor): undefined => {
+    callbacks.touch({ self: entity.actor, other: player.id, plane: null, surface: null });
+    return undefined;
+  };
   return { actors, game, base, context, horde, combat, player, events, addonEvents, pending, cvars, transitions, spawn, think, touch };
 }
 
 test("MG1 fifth rune and MG3 fourth rune keep distinct flags with a foreign character", () => {
   for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
-    const state = world(program), { game, base, spawn, touch } = state;
+    const state = world(program),
+      { game, base, spawn, touch } = state;
     const rune = spawn("item_sigil", { spawnflags: program === "mg1" ? "16" : "136" });
-    expect(rune.model).toBe(program === "mg1" ? "progs/mg1_rune5.mdl" : "progs/end4.mdl"); touch(rune);
+    expect(rune.model).toBe(program === "mg1" ? "progs/mg1_rune5.mdl" : "progs/end4.mdl");
+    touch(rune);
     expect(base.campaign.readFlags()).toBe(program === "mg1" ? 1040 : 8);
     expect(mg1LastSigil(base.campaign.readFlags())).toBe(program === "mg1" ? 16 : 0);
     expect(mg3RuneCount(base.campaign.readFlags())).toBe(program === "mg1" ? 0 : 1);
-    expect(rune.solid).toBe("none"); expect(() => game.capture()).not.toThrow(); state.actors.close();
+    expect(rune.solid).toBe("none");
+    expect(() => game.capture()).not.toThrow();
+    state.actors.close();
   }
 });
 
 test("MG1 and MG3 doors and buttons follow the authored movedir, key buttons need a key, and crusher doors do not reverse", () => {
   for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
-    const state = world(program), { game, spawn, touch, player } = state;
+    const state = world(program),
+      { game, spawn, touch, player } = state;
     const door = spawn("func_door", { movedir: "0 0 256", speed2: "50", spawnflags: "64", wait: "2" });
     expect(door.pos2).toEqual({ x: door.pos1.x, y: door.pos1.y, z: door.pos1.z + 256 });
     const button = spawn("func_button", { movedir: "0 128 0" });
     expect(button.pos2).toEqual({ x: button.pos1.x, y: button.pos1.y + 128, z: button.pos1.z });
     const locked = spawn("func_button", { spawnflags: "16" });
-    touch(locked); expect(locked.state).not.toBe("up");
-    game.host.inventory.give(player, "q1:key/silver", 1); touch(locked); expect(locked.state).toBe("up");
+    touch(locked);
+    expect(locked.state).not.toBe("up");
+    game.host.inventory.give(player, "q1:key/silver", 1);
+    touch(locked);
+    expect(locked.state).toBe("up");
     expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(0);
-    door.state = "up"; door.blocked?.(player.id); expect(door.state).toBe("up");
+    door.state = "up";
+    door.blocked?.(player.id);
+    expect(door.state).toBe("up");
     state.actors.close();
   }
 });
 
 test("func_bob advances its sine in degrees", () => {
   for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
-    const state = world(program), { game, spawn } = state;
+    const state = world(program),
+      { game, spawn } = state;
     const bob = spawn("func_bob", { dest: "0 0 64", wait: "10", spawnflags: "2" });
     const velocity = game.body(bob).velocity;
-    expect(velocity.z).toBeCloseTo(64 * Math.sin(1.8 * Math.PI / 180) * 20, 3);
-    expect(bob.count).toBeCloseTo(1.8, 5); state.actors.close();
+    expect(velocity.z).toBeCloseTo(64 * Math.sin((1.8 * Math.PI) / 180) * 20, 3);
+    expect(bob.count).toBeCloseTo(1.8, 5);
+    state.actors.close();
   }
 });
 
 test("timed counters reset their count, and multitouch fires occupied then empty", () => {
-  const state = world("mg1"), { game, spawn, player, think, touch } = state;
+  const state = world("mg1"),
+    { game, spawn, player, think, touch } = state;
   let activations = 0;
-  game.named.register("test:target", { use: () => { activations++; return undefined; } });
-  const target = spawn("trigger_relay", { targetname: "counted" }); target.use = game.named.use(target, "test:target");
+  game.named.register("test:target", {
+    use: () => {
+      activations++;
+      return undefined;
+    },
+  });
+  const target = spawn("trigger_relay", { targetname: "counted" });
+  target.use = game.named.use(target, "test:target");
   const counter = spawn("trigger_counter_timed", { target: "counted", count: "2", delay: "2" });
-  counter.use?.(null, player.id); expect(counter.count).toBe(1); think(counter, 2); expect(counter.count).toBe(2);
-  counter.use?.(null, player.id); counter.use?.(null, player.id); expect(activations).toBe(1); expect(game.live(counter)).toBe(false);
-  const trigger = spawn("trigger_multitouch", { target: "counted" }); touch(trigger); touch(trigger); expect(activations).toBe(2);
-  think(trigger, 2.2); expect(activations).toBe(3); touch(trigger); expect(activations).toBe(4); state.actors.close();
+  counter.use?.(null, player.id);
+  expect(counter.count).toBe(1);
+  think(counter, 2);
+  expect(counter.count).toBe(2);
+  counter.use?.(null, player.id);
+  counter.use?.(null, player.id);
+  expect(activations).toBe(1);
+  expect(game.live(counter)).toBe(false);
+  const trigger = spawn("trigger_multitouch", { target: "counted" });
+  touch(trigger);
+  touch(trigger);
+  expect(activations).toBe(2);
+  think(trigger, 2.2);
+  expect(activations).toBe(3);
+  touch(trigger);
+  expect(activations).toBe(4);
+  state.actors.close();
 });
 
 test("MG3 breakable pain and light ramp use shared bodies and named saved callbacks", () => {
-  const state = world("mg3"), { game, context, spawn, think, player } = state;
-  const brush = spawn("func_breakable"); game.time = 10; brush.fields.set("ltime", "2"); game.damage(brush.actor.id, player.id, player.id, 10);
-  expect(game.health(brush.actor.id)).toBe(10000); expect(game.body(brush).velocity.z).toBe(-20);
+  const state = world("mg3"),
+    { game, context, spawn, think, player } = state;
+  const brush = spawn("func_breakable");
+  game.time = 10;
+  brush.fields.set("ltime", "2");
+  game.damage(brush.actor.id, player.id, player.id, 10);
+  expect(game.health(brush.actor.id)).toBe(10000);
+  expect(game.body(brush).velocity.z).toBe(-20);
   expect(brush.nextThink).toBe(3);
-  game.physicsEntity(brush.actor, 10.05, 0.05); expect(game.body(brush).origin.z).toBe(-1);
+  game.physicsEntity(brush.actor, 10.05, 0.05);
+  expect(game.body(brush).origin.z).toBe(-1);
   expect(brush.number("ltime")).toBe(Math.fround(2.05));
   spawn("light", { targetname: "ramp_light", style: "32", spawnflags: "1" });
-  const ramp = spawn("target_lightramp", { targetname: "ramp", target: "ramp_light", delay: "2" }); think(ramp, 0.1);
-  ramp.use?.(null, player.id); context.frame(1); expect(ramp.number("cnt")).toBe(0.5);
+  const ramp = spawn("target_lightramp", { targetname: "ramp", target: "ramp_light", delay: "2" });
+  think(ramp, 0.1);
+  ramp.use?.(null, player.id);
+  context.frame(1);
+  expect(ramp.number("cnt")).toBe(0.5);
   expect(state.events.some(event => event.kind === "lightstyle" && event.style === 32 && event.pattern === "g")).toBe(true);
-  expect(() => game.capture()).not.toThrow(); state.actors.close();
+  expect(() => game.capture()).not.toThrow();
+  state.actors.close();
 });
 
 test("actual MG1 hub and Horde map entities spawn through addon registration", async () => {
@@ -141,8 +296,10 @@ test("actual MG1 hub and Horde map entities spawn through addon registration", a
     for (const name of ["hub", "horde1"]) {
       const state = world("mg1", true);
       try {
-        const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing MG1 ${name}`);
-        const map = readQ1Bsp(await archive.readEntry(entry), { source: entry.path }); state.game.spawnMap(map);
+        const entry = archive.findEntries(`maps/${name}.bsp`)[0];
+        if (entry === undefined) throw new Error(`Missing MG1 ${name}`);
+        const map = readQ1Bsp(await archive.readEntry(entry), { source: entry.path });
+        state.game.spawnMap(map);
         const entities = [...state.game.entities.values()];
         expect(entities.some(entity => entity.classname === (name === "hub" ? "misc_rune_indicator" : "horde_manager"))).toBe(true);
         expect(entities.some(entity => entity.classname === (name === "hub" ? "func_door" : "info_monster_start"))).toBe(true);
@@ -152,148 +309,298 @@ test("actual MG1 hub and Horde map entities spawn through addon registration", a
         if (name === "hub") expect(statics.length).toBeGreaterThan(0);
         expect(entities.some(entity => entity.classname === "light_candle")).toBe(false);
         expect(() => state.game.capture()).not.toThrow();
-      } finally { state.actors.close(); }
+      } finally {
+        state.actors.close();
+      }
     }
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test("horde spawns source squads and excludes zombies from shared kill counts", () => {
-  const state = world("mg1", true), { game, horde, spawn, player, actors } = state;
+  const state = world("mg1", true),
+    { game, horde, spawn, player, actors } = state;
   if (horde === null) throw new Error("Horde was not registered");
-  const manager = spawn("horde_manager"); spawn("info_monster_start", { origin: "512 0 0", spawnflags: "2" });
-  game.time = 11; expect(horde.prepare(manager)).toBe(true); expect(manager.number("fodder")).toBe(3); expect(manager.number("army")).toBe(1);
-  horde.spawnWave(manager); expect(horde.livingMonsters()).toHaveLength(3); expect(game.totalMonsters).toBe(3); expect(manager.number("fodder")).toBe(2);
-  const zombie = horde.spawnMonster("zombie", { x: 1000, y: 0, z: 0 }, ZERO, manager); expect(game.totalMonsters).toBe(3);
-  game.damage(zombie.actor.id, player.id, player.id, 1000); expect(game.killedMonsters).toBe(0);
-  const grunt = horde.livingMonsters().find(entity => entity.classname === "monster_army"); if (grunt === undefined) throw new Error("Missing source grunt");
-  game.damage(grunt.actor.id, player.id, player.id, 1000); expect(game.killedMonsters).toBe(1);
-  horde.changeKeys("silver", 1); horde.changeKeys("silver", 1);
-  state.touch(spawn("func_door", { spawnflags: "16" })); expect(manager.number("keys_silver")).toBe(1); expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(1);
-  state.touch(spawn("func_door", { spawnflags: "16" })); expect(manager.number("keys_silver")).toBe(0); expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(0);
-  expect(() => game.capture()).not.toThrow(); actors.close();
+  const manager = spawn("horde_manager");
+  spawn("info_monster_start", { origin: "512 0 0", spawnflags: "2" });
+  game.time = 11;
+  expect(horde.prepare(manager)).toBe(true);
+  expect(manager.number("fodder")).toBe(3);
+  expect(manager.number("army")).toBe(1);
+  horde.spawnWave(manager);
+  expect(horde.livingMonsters()).toHaveLength(3);
+  expect(game.totalMonsters).toBe(3);
+  expect(manager.number("fodder")).toBe(2);
+  const zombie = horde.spawnMonster("zombie", { x: 1000, y: 0, z: 0 }, ZERO, manager);
+  expect(game.totalMonsters).toBe(3);
+  game.damage(zombie.actor.id, player.id, player.id, 1000);
+  expect(game.killedMonsters).toBe(0);
+  const grunt = horde.livingMonsters().find(entity => entity.classname === "monster_army");
+  if (grunt === undefined) throw new Error("Missing source grunt");
+  game.damage(grunt.actor.id, player.id, player.id, 1000);
+  expect(game.killedMonsters).toBe(1);
+  horde.changeKeys("silver", 1);
+  horde.changeKeys("silver", 1);
+  state.touch(spawn("func_door", { spawnflags: "16" }));
+  expect(manager.number("keys_silver")).toBe(1);
+  expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(1);
+  state.touch(spawn("func_door", { spawnflags: "16" }));
+  expect(manager.number("keys_silver")).toBe(0);
+  expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(0);
+  expect(() => game.capture()).not.toThrow();
+  actors.close();
 });
 
 test("MG3 trigger activation preserves rune inhibition and requires ground when authored", () => {
-  const state = world("mg3"), { game, spawn, player, touch } = state; let activations = 0;
-  game.named.register("test:trigger", { use: () => { activations++; return undefined; } });
-  const target = spawn("trigger_relay", { targetname: "goal" }); target.use = game.named.use(target, "test:trigger");
+  const state = world("mg3"),
+    { game, spawn, player, touch } = state;
+  let activations = 0;
+  game.named.register("test:trigger", {
+    use: () => {
+      activations++;
+      return undefined;
+    },
+  });
+  const target = spawn("trigger_relay", { targetname: "goal" });
+  target.use = game.named.use(target, "test:trigger");
   const trigger = spawn("trigger_multiple", { target: "goal", spawnflags: "66" });
-  expect(trigger.solid).toBe("none"); trigger.use?.(null, player.id); expect(trigger.solid).toBe("trigger"); touch(trigger); expect(activations).toBe(0);
-  const ground = spawn("worldspawn"), body = game.host.bodies.read(player.id); if (body === null) throw new Error("Missing player body");
-  game.host.bodies.write(player, { ...body, ground: ground.actor.id }); touch(trigger); expect(activations).toBe(1);
-  const hidden = spawn("trigger_secret", { spawnflags: "262144" }); expect(game.live(hidden)).toBe(false); expect(game.totalSecrets).toBe(0);
+  expect(trigger.solid).toBe("none");
+  trigger.use?.(null, player.id);
+  expect(trigger.solid).toBe("trigger");
+  touch(trigger);
+  expect(activations).toBe(0);
+  const ground = spawn("worldspawn"),
+    body = game.host.bodies.read(player.id);
+  if (body === null) throw new Error("Missing player body");
+  game.host.bodies.write(player, { ...body, ground: ground.actor.id });
+  touch(trigger);
+  expect(activations).toBe(1);
+  const hidden = spawn("trigger_secret", { spawnflags: "262144" });
+  expect(game.live(hidden)).toBe(false);
+  expect(game.totalSecrets).toBe(0);
   state.actors.close();
 });
 
 test("authored immediate end text advances the shared intermission before its normal input delay", () => {
-  const state = world("mg1"), { game, spawn, touch, think, base } = state;
-  game.mapName = "mge1m1"; spawn("worldspawn"); spawn("info_intermission");
-  const exit = spawn("trigger_changelevel", { map: "hub", endtext: "$authored_end_text", spawnflags: "1" }); touch(exit);
-  expect(state.transitions).toHaveLength(0); think(exit, 0.1);
+  const state = world("mg1"),
+    { game, spawn, touch, think, base } = state;
+  game.mapName = "mge1m1";
+  spawn("worldspawn");
+  spawn("info_intermission");
+  const exit = spawn("trigger_changelevel", { map: "hub", endtext: "$authored_end_text", spawnflags: "1" });
+  touch(exit);
+  expect(state.transitions).toHaveLength(0);
+  think(exit, 0.1);
   expect(state.events.some(event => event.kind === "finale" && event.text === "$authored_end_text")).toBe(true);
   // game.time is the binary32 donor clock, so the +1s deadline is fround(0.1)+1, not the double 1.1.
-  expect(base.levelRules.requestExit(0.5, true).kind).toBe("waiting"); expect(base.levelRules.requestExit(Math.fround(0.1) + 1, true).kind).toBe("travel");
-  expect(state.transitions).toHaveLength(1); expect(state.transitions[0]?.kind).toBe("campaign-level"); state.actors.close();
+  expect(base.levelRules.requestExit(0.5, true).kind).toBe("waiting");
+  expect(base.levelRules.requestExit(Math.fround(0.1) + 1, true).kind).toBe("travel");
+  expect(state.transitions).toHaveLength(1);
+  expect(state.transitions[0]?.kind).toBe("campaign-level");
+  state.actors.close();
 });
 
 test("MG3 demodog leap hits a foreign player then dies into three timed grenades", () => {
-  const state = world("mg3"), { game, spawn, think, player } = state;
+  const state = world("mg3"),
+    { game, spawn, think, player } = state;
   const initialHealth = game.health(player.id);
-  const dog = spawn("monster_demodog", { origin: "100 0 0" }); expect(dog.classname).toBe("monster_dog"); expect(dog.model).toBe("");
-  think(dog, 0.2); expect(dog.model).toBe("progs/dog_explosive.mdl"); expect(game.totalMonsters).toBe(1);
-  game.setBody(dog, { velocity: { x: 400, y: 0, z: 200 } }); dog.touch = game.named.touch(dog, "mg3:demodog:jump_touch"); state.touch(dog);
-  expect(game.health(player.id)).toBe(initialHealth - 14); expect(game.health(dog.actor.id)).toBe(-50); expect(game.killedMonsters).toBe(1); expect(dog.model).toBe("progs/h_dog.mdl");
-  const grenades = [...game.entities.values()].filter(entity => entity.classname === "grenade"); expect(grenades).toHaveLength(3);
-  for (const grenade of grenades) { expect(grenade.damage).toBe(60); expect(grenade.nextThink).toBeCloseTo(2.65); }
-  expect(() => game.cloneEntity(dog)).not.toThrow(); expect(() => game.capture()).not.toThrow(); state.actors.close();
+  const dog = spawn("monster_demodog", { origin: "100 0 0" });
+  expect(dog.classname).toBe("monster_dog");
+  expect(dog.model).toBe("");
+  think(dog, 0.2);
+  expect(dog.model).toBe("progs/dog_explosive.mdl");
+  expect(game.totalMonsters).toBe(1);
+  game.setBody(dog, { velocity: { x: 400, y: 0, z: 200 } });
+  dog.touch = game.named.touch(dog, "mg3:demodog:jump_touch");
+  state.touch(dog);
+  expect(game.health(player.id)).toBe(initialHealth - 14);
+  expect(game.health(dog.actor.id)).toBe(-50);
+  expect(game.killedMonsters).toBe(1);
+  expect(dog.model).toBe("progs/h_dog.mdl");
+  const grenades = [...game.entities.values()].filter(entity => entity.classname === "grenade");
+  expect(grenades).toHaveLength(3);
+  for (const grenade of grenades) {
+    expect(grenade.damage).toBe(60);
+    expect(grenade.nextThink).toBeCloseTo(2.65);
+  }
+  expect(() => game.cloneEntity(dog)).not.toThrow();
+  expect(() => game.capture()).not.toThrow();
+  state.actors.close();
 });
 
 test("MG3 infected actors transform in place and count only the final death", () => {
   for (const classname of ["monster_knight_infected", "monster_army_infected", "monster_enforcer_infected", "monster_hell_knight_infected"]) {
-    const state = world("mg3", false, true), { game, spawn, think, player } = state;
+    const state = world("mg3", false, true),
+      { game, spawn, think, player } = state;
     let targetUses = 0;
-    game.named.register("test:infected-target", { use: () => { targetUses++; return undefined; } });
-    const relay = spawn("trigger_relay", { targetname: "death_target" }); relay.use = game.named.use(relay, "test:infected-target");
-    const entity = spawn(classname, { target: "death_target", origin: "100 0 0" }), actor = entity.actor;
-    expect(entity.model).toBe(""); expect(entity.nextThink).toBeCloseTo(0.2); think(entity, 0.2); const bounds = game.body(entity).bounds;
+    game.named.register("test:infected-target", {
+      use: () => {
+        targetUses++;
+        return undefined;
+      },
+    });
+    const relay = spawn("trigger_relay", { targetname: "death_target" });
+    relay.use = game.named.use(relay, "test:infected-target");
+    const entity = spawn(classname, { target: "death_target", origin: "100 0 0" }),
+      actor = entity.actor;
+    expect(entity.model).toBe("");
+    expect(entity.nextThink).toBeCloseTo(0.2);
+    think(entity, 0.2);
+    const bounds = game.body(entity).bounds;
     const zombie = classname === "monster_knight_infected" || classname === "monster_army_infected";
     game.damage(actor.id, player.id, player.id, 1000);
-    expect(entity.actor).toBe(actor); expect(game.live(entity)).toBe(true); expect(game.health(actor.id)).toBe(zombie ? 60 : 300);
-    expect(entity.classname).toBe(zombie ? "monster_zombie" : "monster_demon1"); expect(entity.damageable).toBe(true);
-    expect(game.killedMonsters).toBe(0); expect(game.totalMonsters).toBe(1); expect(targetUses).toBe(1); expect(game.body(entity).bounds).toEqual(bounds);
-    expect(() => game.cloneEntity(entity)).not.toThrow(); expect(() => game.capture()).not.toThrow();
-    const extension = game.stateExtensions.get("mg3:infected"); if (extension === undefined) throw new Error("Missing infected save extension"); extension.restore(extension.capture());
-    game.damage(actor.id, player.id, player.id, 1000); expect(game.killedMonsters).toBe(1); expect(targetUses).toBe(2);
-    expect(entity.model).toBe(zombie ? "progs/h_zombie.mdl" : "progs/h_demon.mdl"); state.actors.close();
+    expect(entity.actor).toBe(actor);
+    expect(game.live(entity)).toBe(true);
+    expect(game.health(actor.id)).toBe(zombie ? 60 : 300);
+    expect(entity.classname).toBe(zombie ? "monster_zombie" : "monster_demon1");
+    expect(entity.damageable).toBe(true);
+    expect(game.killedMonsters).toBe(0);
+    expect(game.totalMonsters).toBe(1);
+    expect(targetUses).toBe(1);
+    expect(game.body(entity).bounds).toEqual(bounds);
+    expect(() => game.cloneEntity(entity)).not.toThrow();
+    expect(() => game.capture()).not.toThrow();
+    const extension = game.stateExtensions.get("mg3:infected");
+    if (extension === undefined) throw new Error("Missing infected save extension");
+    extension.restore(extension.capture());
+    game.damage(actor.id, player.id, player.id, 1000);
+    expect(game.killedMonsters).toBe(1);
+    expect(targetUses).toBe(2);
+    expect(entity.model).toBe(zombie ? "progs/h_zombie.mdl" : "progs/h_demon.mdl");
+    state.actors.close();
   }
 });
 
 test("infected blocked transformation gibs once and sleeping hell knights retain source rise delays", () => {
-  const state = world("mg3"), { game, spawn, think, player } = state;
-  const knight = spawn("monster_knight_infected"); think(knight, 0.2); game.damage(knight.actor.id, player.id, player.id, 1000);
-  expect(game.killedMonsters).toBe(1); expect(game.health(knight.actor.id)).toBe(-100); expect(knight.model).toBe("progs/h_zombie.mdl");
+  const state = world("mg3"),
+    { game, spawn, think, player } = state;
+  const knight = spawn("monster_knight_infected");
+  think(knight, 0.2);
+  game.damage(knight.actor.id, player.id, player.id, 1000);
+  expect(game.killedMonsters).toBe(1);
+  expect(game.health(knight.actor.id)).toBe(-100);
+  expect(knight.model).toBe("progs/h_zombie.mdl");
   for (const flags of [65536, 8388608]) {
-    const corpse = spawn("monster_hell_knight_infected", { spawnflags: String(flags) }); think(corpse, 1);
-    expect(corpse.solid).toBe("none"); expect(corpse.pain).not.toBeNull(); expect(corpse.frame).toBe(flags === 65536 ? 53 : 62);
-    think(corpse, 1.1); expect(corpse.nextThink).toBeCloseTo(10000.1);
-    corpse.use?.(null, player.id); think(corpse, 2); think(corpse, 2.1);
-    expect(corpse.solid).toBe("none"); expect(corpse.nextThink).toBeCloseTo(7.1);
+    const corpse = spawn("monster_hell_knight_infected", { spawnflags: String(flags) });
+    think(corpse, 1);
+    expect(corpse.solid).toBe("none");
+    expect(corpse.pain).not.toBeNull();
+    expect(corpse.frame).toBe(flags === 65536 ? 53 : 62);
+    think(corpse, 1.1);
+    expect(corpse.nextThink).toBeCloseTo(10000.1);
+    corpse.use?.(null, player.id);
+    think(corpse, 2);
+    think(corpse, 2.1);
+    expect(corpse.solid).toBe("none");
+    expect(corpse.nextThink).toBeCloseTo(7.1);
   }
-  expect(() => game.capture()).not.toThrow(); state.actors.close();
+  expect(() => game.capture()).not.toThrow();
+  state.actors.close();
 });
 
 test("both infected hell-knight corpse sequences restore ordinary callbacks when raised", () => {
   for (const flags of [65536, 8388608]) {
-    const state = world("mg3", false, true), { game, spawn, think, player } = state;
-    const corpse = spawn("monster_hell_knight_infected", { spawnflags: String(flags) }); think(corpse, 0.2); think(corpse, 0.3);
-    corpse.use?.(null, player.id); think(corpse, 0.4); think(corpse, 0.5); expect(corpse.solid).toBe("slidebox");
+    const state = world("mg3", false, true),
+      { game, spawn, think, player } = state;
+    const corpse = spawn("monster_hell_knight_infected", { spawnflags: String(flags) });
+    think(corpse, 0.2);
+    think(corpse, 0.3);
+    corpse.use?.(null, player.id);
+    think(corpse, 0.4);
+    think(corpse, 0.5);
+    expect(corpse.solid).toBe("slidebox");
     for (let frame = 0; frame < 15 && corpse.number("infected.risen") === 0; frame++) think(corpse, corpse.nextThink);
-    expect(corpse.number("infected.risen")).toBe(1); expect(corpse.pain).not.toBeNull(); expect(corpse.frame).toBe(1);
-    game.damage(corpse.actor.id, player.id, player.id, 1000); expect(corpse.classname).toBe("monster_demon1"); expect(game.killedMonsters).toBe(0);
+    expect(corpse.number("infected.risen")).toBe(1);
+    expect(corpse.pain).not.toBeNull();
+    expect(corpse.frame).toBe(1);
+    game.damage(corpse.actor.id, player.id, player.id, 1000);
+    expect(corpse.classname).toBe("monster_demon1");
+    expect(game.killedMonsters).toBe(0);
     state.actors.close();
   }
 });
 
 test("addon commands preserve no-key grants, delayed monster targets, and MG3 discovery markers", () => {
-  const classicAddons = world("mg1"), mg3 = world("mg3");
+  const classicAddons = world("mg1"),
+    mg3 = world("mg3");
   expect(handleQ1AddonImpulse(classicAddons.context, classicAddons.player.id, 99)).toBe(true);
   expect(classicAddons.game.host.inventory.count(classicAddons.player.id, "q1:key/silver")).toBe(0);
   expect(classicAddons.game.host.inventory.count(classicAddons.player.id, "q1:ammo/cells")).toBe(200);
   expect(classicAddons.game.player(classicAddons.player.id)?.weapon).toBe("rocketlauncher");
-  const { game, context, player, spawn } = mg3; let uses = 0;
-  game.named.register("test:omnicide", { use: () => { uses++; return undefined; } });
-  const relay = spawn("trigger_relay", { targetname: "death" }); relay.use = game.named.use(relay, "test:omnicide");
+  const { game, context, player, spawn } = mg3;
+  let uses = 0;
+  game.named.register("test:omnicide", {
+    use: () => {
+      uses++;
+      return undefined;
+    },
+  });
+  const relay = spawn("trigger_relay", { targetname: "death" });
+  relay.use = game.named.use(relay, "test:omnicide");
   const deferred = spawn("monster_knight_infected", { spawnflags: "4", target: "death" });
-  handleQ1AddonImpulse(context, player.id, 219); expect(uses).toBe(1); expect(game.live(deferred)).toBe(false); expect(game.killedMonsters).toBe(game.totalMonsters);
-  spawn("trigger_secret", { origin: "100 0 0" }); handleQ1AddonImpulse(context, player.id, 116); frameQ1AddonPlayer(context, player.id, { x: 0, y: 0, z: 22 });
+  handleQ1AddonImpulse(context, player.id, 219);
+  expect(uses).toBe(1);
+  expect(game.live(deferred)).toBe(false);
+  expect(game.killedMonsters).toBe(game.totalMonsters);
+  spawn("trigger_secret", { origin: "100 0 0" });
+  handleQ1AddonImpulse(context, player.id, 116);
+  frameQ1AddonPlayer(context, player.id, { x: 0, y: 0, z: 22 });
   expect([...game.entities.values()].filter(entity => entity.classname === "secret_marker")).toHaveLength(1);
-  handleQ1AddonImpulse(context, player.id, 116); expect([...game.entities.values()].some(entity => entity.classname === "secret_marker")).toBe(false);
-  handleQ1AddonImpulse(context, player.id, 105); handleQ1AddonImpulse(context, player.id, 223);
-  expect(mg3.base.campaign.readFlags()).toBe(15 | 64 | 128); expect(mg3.cvars.get("skill")).toBe(3);
-  mg3.base.campaign.writeFlags(64 | 128 | 8); handleQ1AddonImpulse(context, player.id, 11); expect(mg3.base.campaign.readFlags()).toBe(64 | 128 | 8 | 1);
-  expect(() => game.capture()).not.toThrow(); classicAddons.actors.close(); mg3.actors.close();
+  handleQ1AddonImpulse(context, player.id, 116);
+  expect([...game.entities.values()].some(entity => entity.classname === "secret_marker")).toBe(false);
+  handleQ1AddonImpulse(context, player.id, 105);
+  handleQ1AddonImpulse(context, player.id, 223);
+  expect(mg3.base.campaign.readFlags()).toBe(15 | 64 | 128);
+  expect(mg3.cvars.get("skill")).toBe(3);
+  mg3.base.campaign.writeFlags(64 | 128 | 8);
+  handleQ1AddonImpulse(context, player.id, 11);
+  expect(mg3.base.campaign.readFlags()).toBe(64 | 128 | 8 | 1);
+  expect(() => game.capture()).not.toThrow();
+  classicAddons.actors.close();
+  mg3.actors.close();
 });
 
 test("rerelease additive wind and shelter portals act on a foreign character body", () => {
-  const state = world("mg3"), { game, context, spawn, touch, player, think } = state;
-  context.frame(0.1); game.time = 1;
-  const push = spawn("trigger_push", { speed: "100", spawnflags: "2" }); touch(push); expect(game.host.bodies.read(player.id)?.velocity.x).toBe(100);
-  const shelter = spawn("trigger_shelter_portal"); touch(shelter); touch(push); expect(game.host.bodies.read(player.id)?.velocity.x).toBe(100);
-  const body = game.host.bodies.read(player.id); if (body === null) throw new Error("Missing player body");
-  game.host.bodies.write(player, { ...body, origin: { x: 0, y: 0, z: -1 } }); touch(shelter); touch(push); expect(game.host.bodies.read(player.id)?.velocity.x).toBe(200);
-  const hurt = spawn("trigger_hurt", { dmg: "7", wait: "0.2", spawnflags: "1" }), health = game.health(player.id);
-  touch(hurt); expect(game.health(player.id)).toBe(health); hurt.use?.(null, player.id); touch(hurt); expect(game.health(player.id)).toBe(health - 7); expect(hurt.solid).toBe("none");
-  think(hurt, 1.2); expect(hurt.solid).toBe("trigger"); state.actors.close();
+  const state = world("mg3"),
+    { game, context, spawn, touch, player, think } = state;
+  context.frame(0.1);
+  game.time = 1;
+  const push = spawn("trigger_push", { speed: "100", spawnflags: "2" });
+  touch(push);
+  expect(game.host.bodies.read(player.id)?.velocity.x).toBe(100);
+  const shelter = spawn("trigger_shelter_portal");
+  touch(shelter);
+  touch(push);
+  expect(game.host.bodies.read(player.id)?.velocity.x).toBe(100);
+  const body = game.host.bodies.read(player.id);
+  if (body === null) throw new Error("Missing player body");
+  game.host.bodies.write(player, { ...body, origin: { x: 0, y: 0, z: -1 } });
+  touch(shelter);
+  touch(push);
+  expect(game.host.bodies.read(player.id)?.velocity.x).toBe(200);
+  const hurt = spawn("trigger_hurt", { dmg: "7", wait: "0.2", spawnflags: "1" }),
+    health = game.health(player.id);
+  touch(hurt);
+  expect(game.health(player.id)).toBe(health);
+  hurt.use?.(null, player.id);
+  touch(hurt);
+  expect(game.health(player.id)).toBe(health - 7);
+  expect(hurt.solid).toBe("none");
+  think(hurt, 1.2);
+  expect(hurt.solid).toBe("trigger");
+  state.actors.close();
 });
 
-
 test("MG3 path visitation, pause cancellation and switching use saved actor bindings", () => {
-  const state = world("mg3"), { game, spawn } = state;
+  const state = world("mg3"),
+    { game, spawn } = state;
   const next = spawn("path_corner", { targetname: "next" });
   const alternate = spawn("path_corner", { targetname: "alternate", origin: "0 100 0" });
   const corner = spawn("path_corner", { targetname: "corner", target: "next", wait: "2" });
   const mover = spawn("monster_ogre", { targetname: "walker" });
-  mover.references.set("movetarget", corner.actor.id); mover.movementFlags |= 32;
+  mover.references.set("movetarget", corner.actor.id);
+  mover.movementFlags |= 32;
   corner.touch?.(mover.actor.id, null);
   expect(mover.references.get("movetarget")).toEqual(next.actor.id);
   expect(corner.owner).toEqual(mover.actor.id);
@@ -321,10 +628,20 @@ test("addon static overrides preserve raw pose, ambient ordering and dynamic gas
   for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
     const { game, spawn, events, actors } = world(program);
     try {
-      for (const classname of ["light_torch_small_walltorch", "light_flame_large_yellow", "light_flame_small_yellow", "light_flame_small_white", "light_candle"]) {
-        const first = events.length, entity = game.create(classname);
+      for (const classname of [
+        "light_torch_small_walltorch",
+        "light_flame_large_yellow",
+        "light_flame_small_yellow",
+        "light_flame_small_white",
+        "light_candle",
+      ]) {
+        const first = events.length,
+          entity = game.create(classname);
         game.setBody(entity, { origin: { x: 12.125, y: 24.25, z: 36.5 }, angles: { x: 0, y: 31.875, z: 0 } });
-        entity.spawnflags = 4; entity.skin = 2; entity.frame = 3; game.spawnEntity(entity);
+        entity.spawnflags = 4;
+        entity.skin = 2;
+        entity.frame = 3;
+        game.spawnEntity(entity);
         expect(game.live(entity)).toBe(false);
         const event = events.at(-1);
         if (event?.kind !== "static-model") throw new Error("Missing static light event");
@@ -340,25 +657,48 @@ test("addon static overrides preserve raw pose, ambient ordering and dynamic gas
           expect(event.angles).toEqual({ x: 180, y: 0, z: 0 });
         }
       }
-      for (const classname of ["ambient_suck_wind", "ambient_drone", "ambient_flouro_buzz", "ambient_drip", "ambient_comp_hum", "ambient_thunder", "ambient_light_buzz", "ambient_swamp1", "ambient_swamp2", "ambient_generic"]) {
-        const first = events.length, entity = spawn(classname, { origin: "7.125 8.25 9.5", noise: "ambience/wind2.wav", volume: "0.75", delay: "2" });
+      for (const classname of [
+        "ambient_suck_wind",
+        "ambient_drone",
+        "ambient_flouro_buzz",
+        "ambient_drip",
+        "ambient_comp_hum",
+        "ambient_thunder",
+        "ambient_light_buzz",
+        "ambient_swamp1",
+        "ambient_swamp2",
+        "ambient_generic",
+      ]) {
+        const first = events.length,
+          entity = spawn(classname, { origin: "7.125 8.25 9.5", noise: "ambience/wind2.wav", volume: "0.75", delay: "2" });
         expect(game.live(entity)).toBe(false);
-        const sound = events[first], model = events[first + 1];
+        const sound = events[first],
+          model = events[first + 1];
         if (sound?.kind !== "ambient" || model?.kind !== "static-model") throw new Error("Ambient must precede its static record");
-        expect(model.path).toBe(""); expect(model.origin).toEqual(sound.origin);
+        expect(model.path).toBe("");
+        expect(model.origin).toEqual(sound.origin);
         expect(game.precaches.sounds).toContain(sound.path);
-        if (classname === "ambient_generic") { expect(sound.volume).toBe(0.75); expect(sound.attenuation).toBe(2); }
+        if (classname === "ambient_generic") {
+          expect(sound.volume).toBe(0.75);
+          expect(sound.attenuation).toBe(2);
+        }
       }
       const beforeMissing = events.length;
-      expect(game.live(spawn("ambient_generic"))).toBe(false); expect(events.length).toBe(beforeMissing);
-      const first = events.length, gas = spawn("light_flame_gas");
+      expect(game.live(spawn("ambient_generic"))).toBe(false);
+      expect(events.length).toBe(beforeMissing);
+      const first = events.length,
+        gas = spawn("light_flame_gas");
       expect(game.live(gas)).toBe(true);
-      expect([...game.entities.values()].filter(entity => entity.model === "progs/flame3.mdl").map(entity => entity.number("alpha"))).toEqual([Math.fround(0.6), Math.fround(0.4)]);
+      expect([...game.entities.values()].filter(entity => entity.model === "progs/flame3.mdl").map(entity => entity.number("alpha"))).toEqual([
+        Math.fround(0.6),
+        Math.fround(0.4),
+      ]);
       expect(events.slice(first).some(event => event.kind === "static-model")).toBe(false);
-    } finally { actors.close(); }
+    } finally {
+      actors.close();
+    }
   }
 });
-
 
 test("Q1 foundation, horde and MG3 armor map callbacks retain original owner grants and refusal", () => {
   for (const route of ["foundation", "horde", "mg3"]) {
@@ -369,53 +709,114 @@ test("Q1 foundation, horde and MG3 armor map callbacks retain original owner gra
       let accepted = true;
       const offers: OriginalPickupOffer[] = [];
       const offered = route === "mg3" ? "q1:item_armor_shard" : "q1:item_armor1";
-      const remove = combat.bindProtection(player, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
-        read: () => armor, validateWrite: () => undefined, write: next => { armor = next; return undefined; }, absorb: () => ({ saved: 0 }),
-        pickups: [{ id: "original-armor", writes: [{ kind: "protection", channel: "regular" }], offered: [offered], take: (offer, stores) => {
-          offers.push(offer); if (!accepted) return "refused";
-          const before = armor; armor = { kind: "source", points: 347, item: "mod:original-upgrade" };
-          stores.stored({ regular: { before, after: armor } }); return "accepted";
-        } }] });
+      const remove = combat.bindProtection(player, {
+        channel: "regular",
+        owner: "mod:original-pickup",
+        rule: "armor",
+        admission: { kind: "replace-current-primary" },
+        inventoryItems: [],
+        read: () => armor,
+        validateWrite: () => undefined,
+        write: next => {
+          armor = next;
+          return undefined;
+        },
+        absorb: () => ({ saved: 0 }),
+        pickups: [
+          {
+            id: "original-armor",
+            writes: [{ kind: "protection", channel: "regular" }],
+            offered: [offered],
+            take: (offer, stores) => {
+              offers.push(offer);
+              if (!accepted) return "refused";
+              const before = armor;
+              armor = { kind: "source", points: 347, item: "mod:original-upgrade" };
+              stores.stored({ regular: { before, after: armor } });
+              return "accepted";
+            },
+          },
+        ],
+      });
       const pickup = () => {
         const entity = spawn(route === "mg3" ? "item_armor_shard" : "item_armor1");
         entity.solid = "trigger";
         if (route === "horde") entity.touch = game.named.touch(entity, "mg1:horde:armor_touch");
         return entity;
       };
-      const first = pickup(); game.time = 3; touch(first);
-      expect(offers).toHaveLength(1); expect(offers[0]).toMatchObject({ item: offered, source: first.actor.owner, count: { kind: "default" },
-        defaultResource: { kind: "protection", channel: "regular" }, time: { kind: "seconds", value: 3 } });
+      const first = pickup();
+      game.time = 3;
+      touch(first);
+      expect(offers).toHaveLength(1);
+      expect(offers[0]).toMatchObject({
+        item: offered,
+        source: first.actor.owner,
+        count: { kind: "default" },
+        defaultResource: { kind: "protection", channel: "regular" },
+        time: { kind: "seconds", value: 3 },
+      });
       expect(combat.read(player.id)?.armor.regular).toEqual({ kind: "source", points: 347, item: "mod:original-upgrade" });
       expect(game.live(first) && first.solid === "trigger").toBe(false);
       accepted = false;
-      const declined = pickup(); touch(declined);
-      expect(game.live(declined)).toBe(true); expect(declined.solid).toBe("trigger");
-      expect(offers).toHaveLength(2); expect(combat.read(player.id)?.armor.regular).toEqual(armor);
-      remove(); expect(combat.read(player.id)?.armor.regular).toEqual({ kind: "none" });
-    } finally { actors.close(); }
+      const declined = pickup();
+      touch(declined);
+      expect(game.live(declined)).toBe(true);
+      expect(declined.solid).toBe("trigger");
+      expect(offers).toHaveLength(2);
+      expect(combat.read(player.id)?.armor.regular).toEqual(armor);
+      remove();
+      expect(combat.read(player.id)?.armor.regular).toEqual({ kind: "none" });
+    } finally {
+      actors.close();
+    }
   }
 });
-
 
 test("Q1 substituted grants keep rerelease megahealth decay and cooperative key lifecycle", () => {
   const { game, player, combat, actors, spawn, touch } = world("mg3", false, false, true);
   try {
     const inventory = game.host.inventory;
-    let granted = 0, targets = 0;
-    const remove = inventory.bindPickup(player, { owner: "mod:original-pickup", rules: [
-      { id: "health-and-key", writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }], offered: ["q1:item_health", "q1:key/gold"], take: offer => {
-        granted++; if (offer.item === "q1:item_health") combat.setHealth(player, 150);
-        return "accepted";
-      } },
-    ] });
-    const health = spawn("item_health", { spawnflags: "2" }); health.solid = "trigger";
-    game.time = 7; touch(health);
-    expect(game.player(player.id)?.megaRotAt).toBe(12); expect(health).toMatchObject({ solid: "none" }); expect(combat.read(player.id)?.health).toBe(150);
-    const key = spawn("item_key2"); key.solid = "trigger"; key.target = "key-reentry";
-    const target = game.create("test_key_target"); target.targetname = key.target;
-    target.use = () => { targets++; touch(key); return undefined; };
+    let granted = 0,
+      targets = 0;
+    const remove = inventory.bindPickup(player, {
+      owner: "mod:original-pickup",
+      rules: [
+        {
+          id: "health-and-key",
+          writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }],
+          offered: ["q1:item_health", "q1:key/gold"],
+          take: offer => {
+            granted++;
+            if (offer.item === "q1:item_health") combat.setHealth(player, 150);
+            return "accepted";
+          },
+        },
+      ],
+    });
+    const health = spawn("item_health", { spawnflags: "2" });
+    health.solid = "trigger";
+    game.time = 7;
+    touch(health);
+    expect(game.player(player.id)?.megaRotAt).toBe(12);
+    expect(health).toMatchObject({ solid: "none" });
+    expect(combat.read(player.id)?.health).toBe(150);
+    const key = spawn("item_key2");
+    key.solid = "trigger";
+    key.target = "key-reentry";
+    const target = game.create("test_key_target");
+    target.targetname = key.target;
+    target.use = () => {
+      targets++;
+      touch(key);
+      return undefined;
+    };
     touch(key);
-    expect(granted).toBe(2); expect(targets).toBe(1); expect(key.solid).toBe("trigger"); expect(game.live(key)).toBe(true);
+    expect(granted).toBe(2);
+    expect(targets).toBe(1);
+    expect(key.solid).toBe("trigger");
+    expect(game.live(key)).toBe(true);
     remove();
-  } finally { actors.close(); }
+  } finally {
+    actors.close();
+  }
 });

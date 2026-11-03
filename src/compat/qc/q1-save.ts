@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QcMachine } from "./machine.ts";
 import { applyQcEntityPairs, applyQcGlobalPairs, saveQcEntityPairs, saveQcGlobalPairs } from "./save.ts";
 import type { QcTextPair } from "./save.ts";
@@ -21,13 +22,18 @@ export interface Q1UnknownSaveFields {
 export function captureQ1QuakeCSave(machine: QcMachine, header: Q1SaveHeader, isFree: (slot: number) => boolean): Q1SaveData {
   // The VM checks both interpreted and host-builtin reentry, which depth alone cannot do.
   machine.snapshot();
-  return { ...header, globals: saveQcGlobalPairs(machine), entities: Array.from({ length: machine.entities.count }, (_, slot) => saveQcEntityPairs(machine, slot, isFree(slot))) };
+  return {
+    ...header,
+    globals: saveQcGlobalPairs(machine),
+    entities: Array.from({ length: machine.entities.count }, (_, slot) => saveQcEntityPairs(machine, slot, isFree(slot))),
+  };
 }
 
 /** Apply after loading the matching progs and map baseline, as Host_Loadgame_f does. */
 export function restoreQ1QuakeCSave(machine: QcMachine, save: Q1SaveData, host: Q1QuakeCSaveHost): Q1UnknownSaveFields {
   machine.snapshot();
-  if (save.entities.length < 1 || save.entities.length > machine.entities.capacity) throw new SaveFormatError("q1.entities", "saved edict count exceeds the selected guest capacity");
+  if (save.entities.length < 1 || save.entities.length > machine.entities.capacity)
+    throw new SaveFormatError("q1.entities", "saved edict count exceeds the selected guest capacity");
   host.begin(save.entities.length);
   machine.entities.setCount(save.entities.length);
   // Saved entity references may point forward, so install the complete source count first.
@@ -41,7 +47,8 @@ export function restoreQ1QuakeCSave(machine: QcMachine, save: Q1SaveData, host: 
   }
   const { globals: savedGlobals, entities: savedEntities, ...header } = save;
   // Keep the header separate from source record arrays for host-owned restoration.
-  void savedGlobals; void savedEntities;
+  void savedGlobals;
+  void savedEntities;
   host.finish(header);
   return { globals, entities };
 }

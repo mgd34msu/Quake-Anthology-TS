@@ -1,7 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { normalizeResourcePath } from "../mounts/paths.ts";
 
-function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function list(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function list(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
 export interface WeaponBehaviorDocument {
   readonly version: 1;
   readonly artifactPath?: string;

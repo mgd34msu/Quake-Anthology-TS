@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q2 map conversion adapted from the reference port qcommon/cmodel.ts, ref_gl/gl_model.ts
  * and q2repro/src/common/bsp.c. GPL-2.0-or-later. */
 import type { BspFace, DecoupledLightmap, Q2Leaf, Q2TextureInfo, Q2WorldGeometry } from "../../contracts/scene.ts";
@@ -11,8 +12,15 @@ export { readQ2Bsp, decompressQ2Visibility } from "./reader.ts";
 export type { Q2Bsp, Q2Lump, Q2RawFace, Q2RawLeaf, Q2RawTextureInfo } from "./reader.ts";
 export { readQ2Bspx, readQ2DecoupledLightmaps, readQ2FaceNormals, readQ2Lightgrid, lookupQ2Lightgrid } from "./bspx.ts";
 export type {
-  Q2BspxDirectory, Q2BspxLump, Q2DecoupledLightmaps, Q2FaceNormals, Q2Lightgrid, Q2LightgridChild,
-  Q2LightgridNode, Q2LightgridLeaf, Q2LightgridSample,
+  Q2BspxDirectory,
+  Q2BspxLump,
+  Q2DecoupledLightmaps,
+  Q2FaceNormals,
+  Q2Lightgrid,
+  Q2LightgridChild,
+  Q2LightgridNode,
+  Q2LightgridLeaf,
+  Q2LightgridSample,
 } from "./bspx.ts";
 
 export interface Q2DecodedMap extends Q2WorldGeometry {
@@ -49,7 +57,7 @@ function textures(map: Q2Bsp, resources: Q2MapResources | undefined, diagnostics
 }
 
 export function toQ2WorldGeometry(map: Q2Bsp, resources?: Q2MapResources): Q2DecodedMap {
-  const diagnostics = [...map.diagnostics, ...map.bspx?.diagnostics ?? []];
+  const diagnostics = [...map.diagnostics, ...(map.bspx?.diagnostics ?? [])];
   let decoupledLightmaps: readonly DecoupledLightmap[] | null = null;
   let lightgrid: Q2Lightgrid | null = null;
   let faceNormals: Q2FaceNormals | null = null;
@@ -76,7 +84,10 @@ export function toQ2WorldGeometry(map: Q2Bsp, resources?: Q2MapResources): Q2Dec
   const normals = map.bspx?.lumps.get("FACENORMALS");
   if (normals !== undefined) {
     try {
-      faceNormals = readQ2FaceNormals(normals, map.faces.reduce((total, face) => total + face.edges.count, 0));
+      faceNormals = readQ2FaceNormals(
+        normals,
+        map.faces.reduce((total, face) => total + face.edges.count, 0),
+      );
     } catch (error) {
       if (!(error instanceof BinaryError)) throw error;
       diagnostics.push(error.message);
@@ -97,25 +108,47 @@ export function toQ2WorldGeometry(map: Q2Bsp, resources?: Q2MapResources): Q2Dec
   });
   const faces: BspFace[] = map.faces.map((face, index) => {
     const lightmap = decoupledLightmaps?.[index];
-    const lightingOffset = lightmap === undefined
-      ? face.lightingOffset === -1 || map.lighting.length === 0 ? null : face.lightingOffset
-      : lightmap.lightingOffset;
-    return { plane: face.plane, back: (face.drawFlags & 1) !== 0, edges: face.edges, textureInfo: face.textureInfo,
-      styles: face.styles, lightingOffset };
+    const lightingOffset =
+      lightmap === undefined ? (face.lightingOffset === -1 || map.lighting.length === 0 ? null : face.lightingOffset) : lightmap.lightingOffset;
+    return { plane: face.plane, back: (face.drawFlags & 1) !== 0, edges: face.edges, textureInfo: face.textureInfo, styles: face.styles, lightingOffset };
   });
   const textureInfo = textures(map, resources, diagnostics);
   // The loader expands submodel bounds by one unit, as both Q2 renderers and cmodel do.
-  const models = map.models.map(model => ({ ...model, bounds: {
-    min: { x: model.bounds.min.x - 1, y: model.bounds.min.y - 1, z: model.bounds.min.z - 1 },
-    max: { x: model.bounds.max.x + 1, y: model.bounds.max.y + 1, z: model.bounds.max.z + 1 },
-  } }));
-  return { kind: "q2-bsp", format: map.format, entities: map.entities, planes: map.planes, vertices: map.vertices,
-    edges: map.edges, surfaceEdges: map.surfaceEdges, nodes: map.nodes, leaves, leafFaces: map.leafFaces,
-    leafBrushes: map.leafBrushes, textureInfo, faces, brushes: map.brushes, brushSides: map.brushSides,
-    models, areas: map.areas, areaPortals: map.areaPortals, visibility: map.visibility,
-    lighting: { kind: "rgb8", samples: map.lighting, source: "bsp" }, decoupledLightmaps,
-    extensions: [...map.bspx?.lumps.values() ?? []].map(lump => ({ name: lump.name, bytes: lump.bytes })),
-    source: map, lightgrid, faceNormals, diagnostics };
+  const models = map.models.map(model => ({
+    ...model,
+    bounds: {
+      min: { x: model.bounds.min.x - 1, y: model.bounds.min.y - 1, z: model.bounds.min.z - 1 },
+      max: { x: model.bounds.max.x + 1, y: model.bounds.max.y + 1, z: model.bounds.max.z + 1 },
+    },
+  }));
+  return {
+    kind: "q2-bsp",
+    format: map.format,
+    entities: map.entities,
+    planes: map.planes,
+    vertices: map.vertices,
+    edges: map.edges,
+    surfaceEdges: map.surfaceEdges,
+    nodes: map.nodes,
+    leaves,
+    leafFaces: map.leafFaces,
+    leafBrushes: map.leafBrushes,
+    textureInfo,
+    faces,
+    brushes: map.brushes,
+    brushSides: map.brushSides,
+    models,
+    areas: map.areas,
+    areaPortals: map.areaPortals,
+    visibility: map.visibility,
+    lighting: { kind: "rgb8", samples: map.lighting, source: "bsp" },
+    decoupledLightmaps,
+    extensions: [...(map.bspx?.lumps.values() ?? [])].map(lump => ({ name: lump.name, bytes: lump.bytes })),
+    source: map,
+    lightgrid,
+    faceNormals,
+    diagnostics,
+  };
 }
 
 export function decodeQ2Map(bytes: Uint8Array, source = "<q2-map>", resources?: Q2MapResources): Q2DecodedMap {

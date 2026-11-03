@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../contracts/content.ts";
 import type { SourceItemIconDeclaration } from "../contracts/source-items.ts";
 import type { WeaponHudIcon } from "../contracts/ui.ts";

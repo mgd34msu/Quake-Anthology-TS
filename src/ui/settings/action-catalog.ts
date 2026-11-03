@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CommandDialect } from "../../contracts/common.ts";
 import type { BindingAction } from "./bindings.ts";
 import { canonicalWheelCommand } from "../../input/bindings.ts";
@@ -9,32 +10,63 @@ export interface BindingCapabilities {
   readonly offhandGrapple: boolean;
   readonly offhandGrenades: boolean;
 }
-export interface BindableItem { readonly id: string; readonly label: string; readonly kind: "weapon" | "powerup"; }
+export interface BindableItem {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "weapon" | "powerup";
+}
 
 /** Movement syntax follows movement; item selection follows the selected arsenal. */
 export function sharedBindingActions(dialect: CommandDialect, items: readonly BindableItem[], capabilities: BindingCapabilities): readonly BindingAction[] {
   const rows: readonly (readonly [string, string, string])[] = [
-    ["forward", "Move forward", "+forward"], ["back", "Move back", "+back"],
-    ["left", "Strafe left", "+moveleft"], ["right", "Strafe right", "+moveright"],
+    ["forward", "Move forward", "+forward"],
+    ["back", "Move back", "+back"],
+    ["left", "Strafe left", "+moveleft"],
+    ["right", "Strafe right", "+moveright"],
     ["jump", "Jump / swim up", dialect.startsWith("q1") ? "+jump" : "+moveup"],
-    ["down", "Crouch / swim down", "+movedown"], ["walk", "Walk / run modifier", "+speed"],
-    ["turn-left", "Turn left", "+left"], ["turn-right", "Turn right", "+right"],
-    ["look-up", "Look up", "+lookup"], ["look-down", "Look down", "+lookdown"],
-    ["attack", "Fire primary weapon", "+attack"], ["use", "Use / activate", "+use"],
-    ["next-weapon", "Next weapon", "weapnext"], ["previous-weapon", "Previous weapon", "weapprev"],
-    ["weapon-wheel", "Weapon wheel", "+weaponwheel"], ["powerup-wheel", "Powerup wheel", "+powerupwheel"],
+    ["down", "Crouch / swim down", "+movedown"],
+    ["walk", "Walk / run modifier", "+speed"],
+    ["turn-left", "Turn left", "+left"],
+    ["turn-right", "Turn right", "+right"],
+    ["look-up", "Look up", "+lookup"],
+    ["look-down", "Look down", "+lookdown"],
+    ["attack", "Fire primary weapon", "+attack"],
+    ["use", "Use / activate", "+use"],
+    ["next-weapon", "Next weapon", "weapnext"],
+    ["previous-weapon", "Previous weapon", "weapprev"],
+    ["weapon-wheel", "Weapon wheel", "+weaponwheel"],
+    ["powerup-wheel", "Powerup wheel", "+powerupwheel"],
     ["console", "Toggle console", "toggleconsole"],
   ];
-  const actions: BindingAction[] = rows.map(([id, label, text]) => ({ id, label, target: { kind: "command", text },
+  const actions: BindingAction[] = rows.map(([id, label, text]) => ({
+    id,
+    label,
+    target: { kind: "command", text },
     ...(id === "weapon-wheel" || id === "powerup-wheel"
-      ? { matches: (target: BindingAction["target"]) => target.kind === "command" && canonicalWheelCommand(target.text) === text } : {}) }));
-  const append = (id: string, label: string, text: string): void => { actions.push({ id, label, target: { kind: "command", text } }); };
-  actions.push({ id: "scores", label: "Show scores", target: { kind: "command", text: capabilities.scoreCommand ?? "+scores" },
-    matches: target => target.kind === "command" && (target.text === "+scores" || target.text === "+showscores") });
-  if (capabilities.chat) { append("chat", "Chat", "messagemode"); append("team-chat", "Team chat", "messagemode2"); }
+      ? { matches: (target: BindingAction["target"]) => target.kind === "command" && canonicalWheelCommand(target.text) === text }
+      : {}),
+  }));
+  const append = (id: string, label: string, text: string): void => {
+    actions.push({ id, label, target: { kind: "command", text } });
+  };
+  actions.push({
+    id: "scores",
+    label: "Show scores",
+    target: { kind: "command", text: capabilities.scoreCommand ?? "+scores" },
+    matches: target => target.kind === "command" && (target.text === "+scores" || target.text === "+showscores"),
+  });
+  if (capabilities.chat) {
+    append("chat", "Chat", "messagemode");
+    append("team-chat", "Team chat", "messagemode2");
+  }
   if (capabilities.offhandGrapple) append("grapple", "Offhand grapple (hold)", "+grapple");
   if (capabilities.offhandGrenades) append("grenade", "Cook / throw offhand grenade", "+grenade");
-  for (const item of items) actions.push({ id: `item:${item.id}`, label: `${item.kind === "weapon" ? "Select" : "Use"} ${item.label}`,
-    target: { kind: "command", text: `use ${item.id}` }, matches: target => target.kind === "command" && weaponBindingItem(target.text, items) === item.id });
+  for (const item of items)
+    actions.push({
+      id: `item:${item.id}`,
+      label: `${item.kind === "weapon" ? "Select" : "Use"} ${item.label}`,
+      target: { kind: "command", text: `use ${item.id}` },
+      matches: target => target.kind === "command" && weaponBindingItem(target.text, items) === item.id,
+    });
   return actions;
 }

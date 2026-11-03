@@ -10,9 +10,15 @@ import type { TextLayout } from "./layout.ts";
 export class UiTextRenderer {
   private readonly fonts = new Map<ResourceId, TextFontSelection>();
   constructor(readonly seat: SeatId) {}
-  bind(resource: ResourceId, font: TextFontSelection): void { this.fonts.set(resource, font); }
-  release(resource: ResourceId): void { this.fonts.delete(resource); }
-  clear(): void { this.fonts.clear(); }
+  bind(resource: ResourceId, font: TextFontSelection): void {
+    this.fonts.set(resource, font);
+  }
+  release(resource: ResourceId): void {
+    this.fonts.delete(resource);
+  }
+  clear(): void {
+    this.fonts.clear();
+  }
   draw(context: UiDrawContext, command: Extract<UiDrawCommand, { readonly kind: "text" }>, draw: Draw2D): TextLayout {
     if (!this.seat.equals(context.binding.seat) || !this.seat.equals(draw.commands.seat)) throw new Error("UI text belongs to a different seat");
     const font = this.fonts.get(command.font);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { writeGround } from "../base/game/ground.ts";
@@ -38,13 +39,17 @@ export interface ArenaHost {
 
 /** Each game's source podium pointers borrow entities from its own match pool. */
 export class ArenaRuntime {
-  captureSaveState() { return { podium1: this.podium1?.slot ?? null, podium2: this.podium2?.slot ?? null, podium3: this.podium3?.slot ?? null }; }
+  captureSaveState() {
+    return { podium1: this.podium1?.slot ?? null, podium2: this.podium2?.slot ?? null, podium3: this.podium3?.slot ?? null };
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.arenas");
     const first = reader.field("podium1").nullable(entry => readModuleEntity(entry, this.pool));
     const second = reader.field("podium2").nullable(entry => readModuleEntity(entry, this.pool));
     const third = reader.field("podium3").nullable(entry => readModuleEntity(entry, this.pool));
-    this.podium1 = first; this.podium2 = second; this.podium3 = third;
+    this.podium1 = first;
+    this.podium2 = second;
+    this.podium3 = third;
   }
 
   private podium1: GameEntity | null = null;
@@ -59,8 +64,12 @@ export class ArenaRuntime {
     this.podium1 = this.podium2 = this.podium3 = null;
   }
 
-  private get level() { return this.host.match.host.state; }
-  private get pool() { return this.host.match.host.pool; }
+  private get level() {
+    return this.host.match.host.state;
+  }
+  private get pool() {
+    return this.host.match.host.pool;
+  }
   private sorted(index: number): number {
     const number = this.level.sortedClients[index];
     if (number === undefined) throw new RangeError("Arena rank index has no source storage");
@@ -84,7 +93,10 @@ export class ArenaRuntime {
     let playerClientNum = 0;
     for (; playerClientNum < this.pool.maxClients; playerClientNum++) {
       const entity = this.pool.at(playerClientNum);
-      if (entity.inuse && (entity.r.svFlags & ServerEntityFlags.BOT) === 0) { player = entity; break; }
+      if (entity.inuse && (entity.r.svFlags & ServerEntityFlags.BOT) === 0) {
+        player = entity;
+        break;
+      }
     }
     if (player === null) return;
 
@@ -93,42 +105,75 @@ export class ArenaRuntime {
     const rankedClient = this.pool.clientAt(playerClientNum);
     let message: string;
     if (rankedClient.sess.sessionTeam === Team.TEAM_SPECTATOR) {
-      message = gameFormat(match.product === "missionpack"
-        ? "postgame %i %i 0 0 0 0 0 0 0 0 0 0 0" : "postgame %i %i 0 0 0 0 0 0",
-      [this.level.numNonSpectatorClients, playerClientNum], MAX_STRING_CHARS);
+      message = gameFormat(
+        match.product === "missionpack" ? "postgame %i %i 0 0 0 0 0 0 0 0 0 0 0" : "postgame %i %i 0 0 0 0 0 0",
+        [this.level.numNonSpectatorClients, playerClientNum],
+        MAX_STRING_CHARS,
+      );
     } else {
-      const client = this.client(player), persistant = client.ps.persistant;
+      const client = this.client(player),
+        persistant = client.ps.persistant;
       const accuracy = client.accuracyShots !== 0 ? Math.trunc(Math.imul(client.accuracyHits, 100) / client.accuracyShots) | 0 : 0;
       if (match.product === "missionpack") {
-        let won = false, score1: number, score2: number;
+        let won = false,
+          score1: number,
+          score2: number;
         if (match.settings().gameType >= GameType.GT_CTF) {
           score1 = match.teamScores.get(Team.TEAM_RED);
           score2 = match.teamScores.get(Team.TEAM_BLUE);
           won = rankedClient.sess.sessionTeam === Team.TEAM_RED ? score1 > score2 : score2 > score1;
         } else if (rankedClient === this.pool.clientAt(this.sorted(0))) {
           won = true;
-          score1 = this.score(this.sorted(0)); score2 = this.score(this.sorted(1));
+          score1 = this.score(this.sorted(0));
+          score2 = this.score(this.sorted(1));
         } else {
-          score2 = this.score(this.sorted(0)); score1 = this.score(this.sorted(1));
+          score2 = this.score(this.sorted(0));
+          score1 = this.score(this.sorted(1));
         }
         const perfect = won && persistant.get(PersistentIndex.PERS_KILLED) === 0 ? 1 : 0;
-        message = gameFormat("postgame %i %i %i %i %i %i %i %i %i %i %i %i %i %i",
-          [this.level.numNonSpectatorClients, playerClientNum, accuracy,
-            persistant.get(PersistentIndex.PERS_IMPRESSIVE_COUNT), persistant.get(PersistentIndex.PERS_EXCELLENT_COUNT),
-            persistant.get(PersistentIndex.PERS_DEFEND_COUNT), persistant.get(PersistentIndex.PERS_ASSIST_COUNT),
-            persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT), persistant.get(PersistentIndex.PERS_SCORE), perfect,
-            score1, score2, this.level.time, persistant.get(PersistentIndex.PERS_CAPTURES)], MAX_STRING_CHARS);
+        message = gameFormat(
+          "postgame %i %i %i %i %i %i %i %i %i %i %i %i %i %i",
+          [
+            this.level.numNonSpectatorClients,
+            playerClientNum,
+            accuracy,
+            persistant.get(PersistentIndex.PERS_IMPRESSIVE_COUNT),
+            persistant.get(PersistentIndex.PERS_EXCELLENT_COUNT),
+            persistant.get(PersistentIndex.PERS_DEFEND_COUNT),
+            persistant.get(PersistentIndex.PERS_ASSIST_COUNT),
+            persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT),
+            persistant.get(PersistentIndex.PERS_SCORE),
+            perfect,
+            score1,
+            score2,
+            this.level.time,
+            persistant.get(PersistentIndex.PERS_CAPTURES),
+          ],
+          MAX_STRING_CHARS,
+        );
       } else {
         const perfect = rankedClient.ps.persistant.get(PersistentIndex.PERS_RANK) === 0 && persistant.get(PersistentIndex.PERS_KILLED) === 0 ? 1 : 0;
-        message = gameFormat("postgame %i %i %i %i %i %i %i %i", [this.level.numNonSpectatorClients, playerClientNum, accuracy,
-          persistant.get(PersistentIndex.PERS_IMPRESSIVE_COUNT), persistant.get(PersistentIndex.PERS_EXCELLENT_COUNT),
-          persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT), persistant.get(PersistentIndex.PERS_SCORE), perfect], MAX_STRING_CHARS);
+        message = gameFormat(
+          "postgame %i %i %i %i %i %i %i %i",
+          [
+            this.level.numNonSpectatorClients,
+            playerClientNum,
+            accuracy,
+            persistant.get(PersistentIndex.PERS_IMPRESSIVE_COUNT),
+            persistant.get(PersistentIndex.PERS_EXCELLENT_COUNT),
+            persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT),
+            persistant.get(PersistentIndex.PERS_SCORE),
+            perfect,
+          ],
+          MAX_STRING_CHARS,
+        );
       }
     }
 
     const messageLength = message.length;
     for (let index = 0; index < this.level.numNonSpectatorClients; index++) {
-      const number = this.sorted(index), persistant = this.pool.clientAt(number).ps.persistant;
+      const number = this.sorted(index),
+        persistant = this.pool.clientAt(number).ps.persistant;
       const row = gameFormat(" %i %i %i", [number, persistant.get(PersistentIndex.PERS_RANK), persistant.get(PersistentIndex.PERS_SCORE)], 32);
       if (messageLength + row.length + 1 >= MAX_STRING_CHARS) break;
       // Source never increments msglen. A reached strcat overflow has no owned storage here.
@@ -149,7 +194,8 @@ export class ArenaRuntime {
   }
 
   private spawnModelOnVictoryPad(pad: GameEntity, offset: Vec3, entity: GameEntity, place: number): GameEntity {
-    const body = this.pool.spawn(), client = this.client(entity);
+    const body = this.pool.spawn(),
+      client = this.client(entity);
     body.bindClientName(client);
     body.client = client;
     body.s = entity.s.copy();
@@ -170,7 +216,8 @@ export class ArenaRuntime {
     body.r.svFlags = entity.r.svFlags;
     // SVF_CAPSULE is encoded in r.model; source leaves the separate bmodel zero.
     body.r.model = entity.r.model.kind === "capsule" ? { kind: "capsule" } : { kind: "box" };
-    body.r.mins = { ...entity.r.mins }; body.r.maxs = { ...entity.r.maxs };
+    body.r.mins = { ...entity.r.mins };
+    body.r.maxs = { ...entity.r.maxs };
     body.clipmask = CONTENTS_SOLID | CONTENTS_PLAYERCLIP;
     body.r.contents = CONTENTS_BODY;
     body.r.ownerNum = entity.r.ownerNum;
@@ -232,19 +279,31 @@ export class ArenaRuntime {
     this.resetPodiumPlayers();
     const podium = this.spawnPodium();
     let number = this.sorted(0);
-    let player = this.spawnModelOnVictoryPad(podium, offsetFirst, this.pool.at(number),
-      this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG);
+    let player = this.spawnModelOnVictoryPad(
+      podium,
+      offsetFirst,
+      this.pool.at(number),
+      this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG,
+    );
     player.nextthink = (this.level.time + 2000) | 0;
     player.think = this.pool.callbacks.think.resolve("q3.team-arena.arenas.spawnModelsOnVictoryPads.think");
     this.podium1 = player;
     number = this.sorted(1);
-    player = this.spawnModelOnVictoryPad(podium, offsetSecond, this.pool.at(number),
-      this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG);
+    player = this.spawnModelOnVictoryPad(
+      podium,
+      offsetSecond,
+      this.pool.at(number),
+      this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG,
+    );
     this.podium2 = player;
     if (this.level.numNonSpectatorClients > 2) {
       number = this.sorted(2);
-      player = this.spawnModelOnVictoryPad(podium, offsetThird, this.pool.at(number),
-        this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG);
+      player = this.spawnModelOnVictoryPad(
+        podium,
+        offsetThird,
+        this.pool.at(number),
+        this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG,
+      );
       this.podium3 = player;
     }
   }

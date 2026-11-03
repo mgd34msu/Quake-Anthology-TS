@@ -32,31 +32,45 @@ export function requiredPointer(args: readonly GuestCallValue[], index: number):
 export function readUnsigned(memory: GuestMemory, address: GuestAddress, width: number): bigint {
   if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
     switch (width) {
-      case 1: return BigInt(memory.readUint8(address));
-      case 2: return BigInt(memory.readUint16(address));
-      case 4: return BigInt(memory.readUint32(address));
-      case 8: return memory.readUint64(address);
+      case 1:
+        return BigInt(memory.readUint8(address));
+      case 2:
+        return BigInt(memory.readUint16(address));
+      case 4:
+        return BigInt(memory.readUint32(address));
+      case 8:
+        return memory.readUint64(address);
     }
   }
   const bytes = memory.copy(address, width);
   let value = 0n;
-  for (let i = bytes.length - 1; i >= 0; i--) value = value << 8n | BigInt(bytes[i] ?? 0);
+  for (let i = bytes.length - 1; i >= 0; i--) value = (value << 8n) | BigInt(bytes[i] ?? 0);
   return value;
 }
 export function writeUnsigned(memory: GuestMemory, address: GuestAddress, width: number, value: bigint): void {
   if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
     switch (width) {
-      case 1: memory.writeUint8(address, Number(BigInt.asUintN(8, value))); return;
-      case 2: memory.writeUint16(address, Number(BigInt.asUintN(16, value))); return;
-      case 4: memory.writeUint32(address, Number(BigInt.asUintN(32, value))); return;
-      case 8: memory.writeUint64(address, value); return;
+      case 1:
+        memory.writeUint8(address, Number(BigInt.asUintN(8, value)));
+        return;
+      case 2:
+        memory.writeUint16(address, Number(BigInt.asUintN(16, value)));
+        return;
+      case 4:
+        memory.writeUint32(address, Number(BigInt.asUintN(32, value)));
+        return;
+      case 8:
+        memory.writeUint64(address, value);
+        return;
     }
   }
   const bytes = new Uint8Array(width);
-  for (let i = 0; i < width; i++) bytes[i] = Number(value >> BigInt(i * 8) & 255n);
+  for (let i = 0; i < width; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 255n);
   memory.write(address, bytes);
 }
-export function readPointer(memory: GuestMemory, address: GuestAddress): GuestAddress | null { return memory.pointer(readUnsigned(memory, address, memory.pointerBytes)); }
+export function readPointer(memory: GuestMemory, address: GuestAddress): GuestAddress | null {
+  return memory.pointer(readUnsigned(memory, address, memory.pointerBytes));
+}
 export function writePointer(memory: GuestMemory, address: GuestAddress, value: GuestAddress | null): void {
   if (value !== null) memory.offset(value, 0n);
   writeUnsigned(memory, address, memory.pointerBytes, value?.byteOffset ?? 0n);
@@ -105,7 +119,8 @@ export function stringBytes(value: string, wide = false): Uint8Array {
 
 /** Native CRT routines probe page boundaries, not heap chunk boundaries, before vector reads. */
 export function nativeAllocationBytes(logicalBytes: number): number {
-  if (!Number.isSafeInteger(logicalBytes) || logicalBytes < 0 || logicalBytes > Number.MAX_SAFE_INTEGER - 4095) throw new RangeError("Invalid native allocation size");
+  if (!Number.isSafeInteger(logicalBytes) || logicalBytes < 0 || logicalBytes > Number.MAX_SAFE_INTEGER - 4095)
+    throw new RangeError("Invalid native allocation size");
   return Math.max(4096, Math.ceil(logicalBytes / 4096) * 4096);
 }
 

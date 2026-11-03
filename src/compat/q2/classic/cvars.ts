@@ -8,9 +8,14 @@ import { allocateClassicString } from "./records.ts";
 
 interface GuestCvar {
   readonly address: GuestAddress;
-  readonly string: GuestAddress; readonly latched: GuestAddress; readonly flags: GuestAddress;
-  readonly modified: GuestAddress; readonly value: GuestAddress; readonly next: GuestAddress;
-  readonly text: ReusableGuestString; readonly latchedText: ReusableGuestString;
+  readonly string: GuestAddress;
+  readonly latched: GuestAddress;
+  readonly flags: GuestAddress;
+  readonly modified: GuestAddress;
+  readonly value: GuestAddress;
+  readonly next: GuestAddress;
+  readonly text: ReusableGuestString;
+  readonly latchedText: ReusableGuestString;
 }
 
 /** Native cvar_t is a stable guest view of the engine's existing registry. */
@@ -19,7 +24,10 @@ export class ClassicQ2Cvars {
   readonly #strings = new Map<string, GuestAddress>();
   readonly #applied = new Map<string, CvarSnapshot>();
   readonly #chain: GuestCvar[] = [];
-  constructor(readonly memory: MappedGuestMemory, readonly registry: CvarRegistry) {}
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly registry: CvarRegistry,
+  ) {}
   string(value: string): GuestAddress {
     const previous = this.#strings.get(value);
     if (previous !== undefined) return previous;
@@ -37,10 +45,17 @@ export class ClassicQ2Cvars {
     let record = this.#records.get(state.name);
     if (record === undefined) {
       const address = this.memory.allocate({ byteLength: 28, label: `API 3 cvar ${state.name}` });
-      record = { address, string: this.memory.offset(address, 4n), latched: this.memory.offset(address, 8n),
-        flags: this.memory.offset(address, 12n), modified: this.memory.offset(address, 16n),
-        value: this.memory.offset(address, 20n), next: this.memory.offset(address, 24n),
-        text: new ReusableGuestString(this.memory, `API 3 cvar ${state.name} value`), latchedText: new ReusableGuestString(this.memory, `API 3 cvar ${state.name} latched`) };
+      record = {
+        address,
+        string: this.memory.offset(address, 4n),
+        latched: this.memory.offset(address, 8n),
+        flags: this.memory.offset(address, 12n),
+        modified: this.memory.offset(address, 16n),
+        value: this.memory.offset(address, 20n),
+        next: this.memory.offset(address, 24n),
+        text: new ReusableGuestString(this.memory, `API 3 cvar ${state.name} value`),
+        latchedText: new ReusableGuestString(this.memory, `API 3 cvar ${state.name} latched`),
+      };
       this.#records.set(state.name, record);
     }
     this.memory.writePointer(record.address, this.string(state.name));
@@ -59,8 +74,14 @@ export class ClassicQ2Cvars {
     let relink = states.length !== this.#chain.length;
     for (const [index, state] of states.entries()) {
       let record = this.#records.get(state.name);
-      if (record === undefined || this.#applied.get(state.name) !== state) { record = this.update(state); this.#applied.set(state.name, state); }
-      if (this.#chain[index] !== record) { this.#chain[index] = record; relink = true; }
+      if (record === undefined || this.#applied.get(state.name) !== state) {
+        record = this.update(state);
+        this.#applied.set(state.name, state);
+      }
+      if (this.#chain[index] !== record) {
+        this.#chain[index] = record;
+        relink = true;
+      }
     }
     this.#chain.length = states.length;
     if (relink) for (const [index, record] of this.#chain.entries()) this.memory.writePointer(record.next, this.#chain[index + 1]?.address ?? null);

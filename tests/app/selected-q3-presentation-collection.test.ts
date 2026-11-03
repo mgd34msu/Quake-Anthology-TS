@@ -1,5 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
-import { ApplicationSelectedQ3Presentations, type SelectedQ3Presentation, type SelectedQ3PresentationOptions } from "../../src/app/bootstrap/selected-q3-presentation.ts";
+import {
+  ApplicationSelectedQ3Presentations,
+  type SelectedQ3Presentation,
+  type SelectedQ3PresentationOptions,
+} from "../../src/app/bootstrap/selected-q3-presentation.ts";
 import { partialStub } from "../support/stub.ts";
 import type { WorldSeatPresentation } from "../../src/app/bootstrap/presentation.ts";
 

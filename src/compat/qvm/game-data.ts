@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // SV_LocateGameData, SV_GentityNum, SV_GameClientNum and SV_NumForGentity
 // from id Software's code/server/sv_game.c. GPL-2.0-or-later.
@@ -32,7 +33,10 @@ export class QvmGameData {
   private clientCount = 64;
   private readonly entityPointers = new Map<number, QvmSharedEntity>();
 
-  constructor(private readonly memory: Q3GameMemory, readonly abiProfile: QvmAbiProfile = "q3-modern") {}
+  constructor(
+    private readonly memory: Q3GameMemory,
+    readonly abiProfile: QvmAbiProfile = "q3-modern",
+  ) {}
 
   /** Native Q3 reserves at most MAX_CLIENTS player slots; the server may narrow it. */
   setClientCount(count: number): void {
@@ -40,34 +44,64 @@ export class QvmGameData {
     this.clientCount = count;
   }
 
-  get numClients(): number { return this.clientCount; }
-  get numEntities(): number { return this.count; }
-  get entityStrideBytes(): number { return this.entityStride; }
-  get clientStrideBytes(): number { return this.clientStride; }
+  get numClients(): number {
+    return this.clientCount;
+  }
+  get numEntities(): number {
+    return this.count;
+  }
+  get entityStrideBytes(): number {
+    return this.entityStride;
+  }
+  get clientStrideBytes(): number {
+    return this.clientStride;
+  }
 
-  entityBytes(number: number): DataView { return this.view(this.entityOffset(number), this.entityStride); }
-  clientBytes(number: number): DataView { return this.view(this.clientOffset(number), this.clientStride); }
-  publicEntityBytes(number: number): DataView { return this.view(this.entityOffset(number), qvmSharedEntityBytes(this.abiProfile)); }
-  publicPlayerBytes(number: number): DataView { return this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)); }
+  entityBytes(number: number): DataView {
+    return this.view(this.entityOffset(number), this.entityStride);
+  }
+  clientBytes(number: number): DataView {
+    return this.view(this.clientOffset(number), this.clientStride);
+  }
+  publicEntityBytes(number: number): DataView {
+    return this.view(this.entityOffset(number), qvmSharedEntityBytes(this.abiProfile));
+  }
+  publicPlayerBytes(number: number): DataView {
+    return this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile));
+  }
 
-  clear(): void { this.entities = null; this.clients = null; this.entityStride = 0; this.clientStride = 0; this.count = 0; }
+  clear(): void {
+    this.entities = null;
+    this.clients = null;
+    this.entityStride = 0;
+    this.clientStride = 0;
+    this.count = 0;
+  }
 
   checkpoint(): QvmGameDataState {
-    return { entitiesWord: this.memory.pointerWord(this.entities), numEntities: this.count, entityStride: this.entityStride,
-      clientsWord: this.memory.pointerWord(this.clients), clientStride: this.clientStride };
+    return {
+      entitiesWord: this.memory.pointerWord(this.entities),
+      numEntities: this.count,
+      entityStride: this.entityStride,
+      clientsWord: this.memory.pointerWord(this.clients),
+      clientStride: this.clientStride,
+    };
   }
 
   restore(state: QvmGameDataState): void {
     if (state.entitiesWord === 0 && state.clientsWord === 0 && state.numEntities === 0 && state.entityStride === 0 && state.clientStride === 0) {
-      this.clear(); return;
+      this.clear();
+      return;
     }
     this.locate(state.entitiesWord, state.numEntities, state.entityStride, state.clientsWord, state.clientStride);
   }
 
-  locate(entitiesWord: number, numEntities: number, entityStride: number,
-    clientsWord: number, clientStride: number): void {
-    const entities = this.offset(entitiesWord), clients = this.offset(clientsWord);
-    int32(numEntities); int32(entityStride); int32(clientStride);
+  locate(entitiesWord: number, numEntities: number, entityStride: number, clientsWord: number, clientStride: number): void {
+    const entities = this.offset(entitiesWord),
+      clients = this.offset(clientsWord);
+    int32(numEntities);
+    int32(entityStride);
+    int32(clientStride);
     if (numEntities < 0 || numEntities > 1024) throw new RangeError("Q3 wire entity capacity is 1024 slots");
     const stride = (value: number, minimum: number): void => {
       if (value < minimum || value % 4 !== 0) throw new RangeError("Game-data stride is undersized or unaligned");
@@ -86,7 +120,9 @@ export class QvmGameData {
     this.clientStride = clientStride;
   }
 
-  private offset(word: number): number | null { return this.memory.address(word); }
+  private offset(word: number): number | null {
+    return this.memory.address(word);
+  }
 
   private entityOffset(number: number): number {
     if (!Number.isInteger(number) || number < 0 || number >= this.count) throw new RangeError("Entity slot is outside located game data");
@@ -112,8 +148,11 @@ export class QvmGameData {
 
   private view(offset: number, size: number): DataView {
     if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("Game-data record exceeds the guest allocation");
-    try { return this.memory.viewAt(offset, size); }
-    catch (error) { throw new RangeError("Game-data record exceeds the guest allocation", { cause: error }); }
+    try {
+      return this.memory.viewAt(offset, size);
+    } catch (error) {
+      throw new RangeError("Game-data record exceeds the guest allocation", { cause: error });
+    }
   }
 
   private entityAt(offset: number): QvmSharedEntity {
@@ -133,7 +172,8 @@ export class QvmGameData {
   }
 
   numberFromPointer(word: number): number {
-    const offset = this.offset(word), base = this.entities;
+    const offset = this.offset(word),
+      base = this.entities;
     if (offset === null || base === null) throw new RangeError("Entity numbering requires nonnull source pointers");
     if (this.entityStride === 0) throw new RangeError("Entity numbering requires a nonzero source stride");
     const number = (offset - base) / this.entityStride;

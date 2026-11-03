@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ED_ClearEdict / ED_Free from Quake pr_edict.c. GPL-2.0-or-later. */
 import type { SourceSlotStorage, SourceActorSlots, SessionActorRegistry } from "../../world/actors/index.ts";
 import type { QcBuiltinServices, QcHostBuiltinName } from "./builtins.ts";
@@ -5,11 +6,15 @@ import type { QcBuiltin, QcMachine } from "./machine.ts";
 import type { QcEntityMemory } from "./memory.ts";
 import { QcProgramError } from "./program.ts";
 
-export interface QcEdictMetadataLayout { readonly freeOffsetBytes: number; readonly freeTimeOffsetBytes: number; }
+export interface QcEdictMetadataLayout {
+  readonly freeOffsetBytes: number;
+  readonly freeTimeOffsetBytes: number;
+}
 /** Metadata offsets are explicit because native host edict prefixes differ by ABI. */
 export function createQcSourceSlotStorage(machine: Pick<QcMachine, "program" | "entities">, metadata: QcEdictMetadataLayout): SourceSlotStorage {
   for (const offset of [metadata.freeOffsetBytes, metadata.freeTimeOffsetBytes]) {
-    if (!Number.isInteger(offset) || offset < 0 || offset + 4 > machine.entities.layout.variablesOffsetBytes || offset % 4 !== 0) throw new RangeError("QC edict metadata must reside in the source prefix");
+    if (!Number.isInteger(offset) || offset < 0 || offset + 4 > machine.entities.layout.variablesOffsetBytes || offset % 4 !== 0)
+      throw new RangeError("QC edict metadata must reside in the source prefix");
   }
   const bytes = machine.entities.bytes;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -21,12 +26,19 @@ export function createQcSourceSlotStorage(machine: Pick<QcMachine, "program" | "
     return field.offset;
   }
   const cleared = ["model", "takedamage", "modelindex", "colormap", "skin", "frame", "solid"].map(fieldOffset);
-  const origin = fieldOffset("origin"); const angles = fieldOffset("angles"); const nextthink = fieldOffset("nextthink");
+  const origin = fieldOffset("origin");
+  const angles = fieldOffset("angles");
+  const nextthink = fieldOffset("nextthink");
   return {
     count: () => machine.entities.count,
-    setCount: count => { machine.entities.setCount(count); },
+    setCount: count => {
+      machine.entities.setCount(count);
+    },
     read: slot => ({ free: view.getInt32(free(slot), true) !== 0, freedAt: { kind: "seconds", value: view.getFloat32(freeTime(slot), true) } }),
-    initialize: slot => { machine.entities.at(slot).bytes.fill(0); view.setInt32(free(slot), 0, true); },
+    initialize: slot => {
+      machine.entities.at(slot).bytes.fill(0);
+      view.setInt32(free(slot), 0, true);
+    },
     clearFreed: (slot, now) => {
       if (now.kind !== "seconds") throw new QcProgramError("QC source free time must use seconds");
       view.setInt32(free(slot), 1, true);
@@ -41,7 +53,11 @@ export function createQcSourceSlotStorage(machine: Pick<QcMachine, "program" | "
   };
 }
 /** Builtins share the registry's actor ownership, while QC continues to hold source slot offsets. */
-export function createQcActorBindings(entities: QcEntityMemory, actors: SessionActorRegistry, slots: SourceActorSlots): Pick<QcBuiltinServices, "host" | "isFreeEntity"> {
+export function createQcActorBindings(
+  entities: QcEntityMemory,
+  actors: SessionActorRegistry,
+  slots: SourceActorSlots,
+): Pick<QcBuiltinServices, "host" | "isFreeEntity"> {
   if (slots.options.capacity !== entities.capacity) throw new QcProgramError("actor slot capacity disagrees with QC storage");
   const host = new Map<QcHostBuiltinName, QcBuiltin>();
   host.set("spawn", called => {

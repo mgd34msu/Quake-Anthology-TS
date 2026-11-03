@@ -15,14 +15,18 @@ const spawns: readonly { readonly classname: string; readonly rva: number; reado
   { classname: "monster_soldier_lasergun", rva: 0xd0a50, healthConstant: 0x178950 },
 ];
 
-function le32(value: number): number[] { return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]; }
+function le32(value: number): number[] {
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+}
 function find(haystack: Uint8Array, needle: readonly number[], from: number, to: number): boolean {
   for (let i = from; i + needle.length <= to; i++) if (needle.every((byte, j) => haystack[i + j] === byte)) return true;
   return false;
 }
 
 corpusTest(path)("rerelease Xatrix soldiers are soldier-family variants with the DLL's skin, count and health", () => {
-  const bytes = new Uint8Array(readFileSync(corpusFile(path))), pe = parsePe(bytes), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const bytes = new Uint8Array(readFileSync(corpusFile(path))),
+    pe = parsePe(bytes),
+    view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const offset = (rva: number): number => {
     const section = pe.sections.find(value => rva >= value.rva && rva < value.rva + value.rawSize);
     if (section === undefined) throw new Error(`RVA ${rva.toString(16)} is outside every raw section`);
@@ -31,7 +35,8 @@ corpusTest(path)("rerelease Xatrix soldiers are soldier-family variants with the
   for (const entry of spawns) {
     const variant = q2SoldierVariants[entry.classname];
     if (variant === undefined) throw new Error(`${entry.classname} is not a soldier-family variant`);
-    const start = offset(entry.rva), end = start + 0x140;
+    const start = offset(entry.rva),
+      end = start + 0x140;
     expect([entry.classname, find(bytes, [0xc7, 0x43, 0x3c, ...le32(variant.skin)], start, end)]).toEqual([entry.classname, true]);
     expect([entry.classname, find(bytes, [0xc7, 0x83, 0xb8, 0x07, 0x00, 0x00, ...le32(variant.count)], start, end)]).toEqual([entry.classname, true]);
     expect([entry.classname, find(bytes, [0xc7, 0x83, 0x80, 0x07, 0x00, 0x00, ...le32(-30)], start, end)]).toEqual([entry.classname, true]);

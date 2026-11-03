@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { DamageRequest } from "../../../contracts/gameplay.ts";
 import type { Q1MonsterSpecies } from "./entity.ts";
 

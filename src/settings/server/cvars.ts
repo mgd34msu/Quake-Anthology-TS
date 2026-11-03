@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import type { ServerSettingsOwner, ServerSettingTarget } from "./types.ts";
 
@@ -24,10 +25,15 @@ export function cvarServerSettingsOwner(cvars: CvarRegistry, initializing = fals
       return { effective: projected(target, value.value), desired: projected(target, value.latchedValue ?? value.value) };
     },
     write(target, value, applyAt) {
-      const current = requireValue(target.name), desired = merged(target, current.latchedValue ?? current.value, value);
-      if (initializing) { cvars.set(target.name, desired, true); return; }
+      const current = requireValue(target.name),
+        desired = merged(target, current.latchedValue ?? current.value, value);
+      if (initializing) {
+        cvars.set(target.name, desired, true);
+        return;
+      }
       if (applyAt !== "live") {
-        cvars.stage(target.name, desired); return;
+        cvars.stage(target.name, desired);
+        return;
       }
       const effective = merged(target, current.value, value);
       cvars.set(target.name, effective, true);

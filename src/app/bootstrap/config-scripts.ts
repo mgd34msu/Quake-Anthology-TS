@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
@@ -21,14 +22,17 @@ export function sourceScriptReader(catalog: InstalledCatalog, mounts: MountedCon
     if (product.expectation.baseProduct === null) break;
     product = catalog.product(product.expectation.baseProduct);
   }
-  const allowed = new Set(owners), byMount = new Map(mounts.plan.mounts.map(mount => [mount.identity.id, mount]));
+  const allowed = new Set(owners),
+    byMount = new Map(mounts.plan.mounts.map(mount => [mount.identity.id, mount]));
   const primary = owners.flatMap(owner => mounts.plan.defaultOrder.filter(id => byMount.get(id)?.identity.content === owner));
   const ordered = new Set(primary);
-  const reader = mounts.borrowOrderedReader({ id: createMountPlanId("configuration", Buffer.from(`${mounts.plan.id}/${source}`).toString("hex")),
-    defaultOrder: [...primary, ...mounts.plan.defaultOrder.filter(id => !ordered.has(id))], prefixOrders: [] });
+  const reader = mounts.borrowOrderedReader({
+    id: createMountPlanId("configuration", Buffer.from(`${mounts.plan.id}/${source}`).toString("hex")),
+    defaultOrder: [...primary, ...mounts.plan.defaultOrder.filter(id => !ordered.has(id))],
+    prefixOrders: [],
+  });
   return async name => (await reader.open(name, mount => allowed.has(mount.identity.content)))?.bytes;
 }
-
 
 export function consoleConfigRoot(userContentRoot: string | undefined): string {
   return join(userContentRoot ?? defaultUserContentRoot(), "console");
@@ -56,7 +60,7 @@ async function configNames(root: string, prefix = ""): Promise<string[]> {
   const names: string[] = [];
   for (const entry of entries) {
     const name = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) names.push(...await configNames(root, name));
+    if (entry.isDirectory()) names.push(...(await configNames(root, name)));
     else if (entry.isFile() && name.toLowerCase().endsWith(".cfg")) names.push(name);
   }
   return names;
@@ -112,9 +116,13 @@ export class ConsoleScriptFiles {
   private retiring = false;
   private retirement: Promise<void> | null = null;
   private readsSettled: (() => void) | null = null;
-  constructor(private readonly options: Omit<Parameters<typeof readConsoleScript>[0], "name" | "source">,
-    private readonly retireMounted?: () => Promise<void>) {}
-  get root(): string { return this.options.settings.root; }
+  constructor(
+    private readonly options: Omit<Parameters<typeof readConsoleScript>[0], "name" | "source">,
+    private readonly retireMounted?: () => Promise<void>,
+  ) {}
+  get root(): string {
+    return this.options.settings.root;
+  }
   async list(source: CommandContext): Promise<readonly ConsoleScriptEntry[]> {
     this.acquireRead();
     try {
@@ -129,25 +137,35 @@ export class ConsoleScriptFiles {
           entries.set(name.toLowerCase(), { name, kind: "seat" });
         }
       }
-      return [...entries.values()].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    } finally { this.releaseRead(); }
+      return [...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    } finally {
+      this.releaseRead();
+    }
   }
   async read(name: string, source: CommandContext): Promise<string | undefined> {
     this.acquireRead();
     try {
       await this.writes;
       return await readConsoleScript({ ...this.options, name, source });
-    } finally { this.releaseRead(); }
+    } finally {
+      this.releaseRead();
+    }
   }
   async readMountedScript(name: string): Promise<Uint8Array | undefined> {
     this.acquireRead();
-    try { return await (this.options.mountedScript ?? this.options.mounted)?.(name); }
-    finally { this.releaseRead(); }
+    try {
+      return await (this.options.mountedScript ?? this.options.mounted)?.(name);
+    } finally {
+      this.releaseRead();
+    }
   }
   async readMounted(name: string): Promise<Uint8Array | undefined> {
     this.acquireRead();
-    try { return await this.options.mounted?.(name); }
-    finally { this.releaseRead(); }
+    try {
+      return await this.options.mounted?.(name);
+    } finally {
+      this.releaseRead();
+    }
   }
   async listMounted(directory: string, extension: string, source: CommandContext): Promise<readonly string[]> {
     this.acquireRead();
@@ -156,8 +174,10 @@ export class ConsoleScriptFiles {
       while (origin.kind === "script") origin = origin.caller;
       if (origin.kind === "remote-client") throw new Error("Remote clients cannot list local mounted files");
       await this.writes;
-      return await this.options.mountedFiles?.(directory, extension) ?? [];
-    } finally { this.releaseRead(); }
+      return (await this.options.mountedFiles?.(directory, extension)) ?? [];
+    } finally {
+      this.releaseRead();
+    }
   }
   async openMounted(path: string, source: CommandContext): Promise<OpenedResource | null> {
     this.acquireRead();
@@ -166,13 +186,20 @@ export class ConsoleScriptFiles {
       while (origin.kind === "script") origin = origin.caller;
       if (origin.kind === "remote-client") throw new Error("Remote clients cannot open local mounted files");
       await this.writes;
-      return await this.options.mountedResource?.(path) ?? null;
-    } finally { this.releaseRead(); }
+      return (await this.options.mountedResource?.(path)) ?? null;
+    } finally {
+      this.releaseRead();
+    }
   }
   close(): Promise<void> {
     if (this.retirement !== null) return this.retirement;
     this.retiring = true;
-    const settled = this.reads === 0 ? Promise.resolve() : new Promise<void>(resolve => { this.readsSettled = resolve; });
+    const settled =
+      this.reads === 0
+        ? Promise.resolve()
+        : new Promise<void>(resolve => {
+            this.readsSettled = resolve;
+          });
     this.retirement = Promise.all([settled, this.writes]).then(() => this.retireMounted?.());
     return this.retirement;
   }
@@ -182,7 +209,10 @@ export class ConsoleScriptFiles {
   }
   private releaseRead(): void {
     this.reads--;
-    if (this.reads === 0) { this.readsSettled?.(); this.readsSettled = null; }
+    if (this.reads === 0) {
+      this.readsSettled?.();
+      this.readsSettled = null;
+    }
   }
   write(operation: () => Promise<void>): Promise<void> {
     if (this.retiring) return Promise.reject(new Error("Configuration reader is retired"));

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -9,7 +10,9 @@ const ANCHORS: Readonly<Record<GameFamily, string>> = { q1: "id1", q2: "baseq2",
 const CANONICAL: Readonly<Record<GameFamily, string>> = { q1: "q1", q2: "q2", q3: "q3a" };
 const FAMILIES: readonly GameFamily[] = ["q1", "q2", "q3"];
 
-export function gameFamilyDirectory(family: GameFamily): string { return CANONICAL[family]; }
+export function gameFamilyDirectory(family: GameFamily): string {
+  return CANONICAL[family];
+}
 
 export function gameFamilyForDirectory(name: string): GameFamily | null {
   const lowered = name.toLowerCase();
@@ -23,15 +26,24 @@ export function gameRelativePath(canonicalPath: string, family: GameFamily): str
 }
 
 function isDirectory(path: string): boolean {
-  try { return statSync(path).isDirectory(); } catch { return false; }
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function childDirectories(directory: string): string[] {
   try {
     return readdirSync(directory, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() || entry.isSymbolicLink() && isDirectory(resolve(directory, entry.name)))
-      .map(entry => entry.name).sort((left, right) => left.toLowerCase() < right.toLowerCase() ? -1 : left.toLowerCase() > right.toLowerCase() ? 1 : left < right ? -1 : left > right ? 1 : 0);
-  } catch { return []; }
+      .filter(entry => entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(resolve(directory, entry.name))))
+      .map(entry => entry.name)
+      .sort((left, right) =>
+        left.toLowerCase() < right.toLowerCase() ? -1 : left.toLowerCase() > right.toLowerCase() ? 1 : left < right ? -1 : left > right ? 1 : 0,
+      );
+  } catch {
+    return [];
+  }
 }
 
 /** Actual spelling of a child directory, matching case-insensitively. */
@@ -41,7 +53,8 @@ function childDirectory(directory: string, loweredName: string): string | null {
 }
 
 function anchoredGameRoot(root: string, family: GameFamily): string | null {
-  const absolute = resolve(root), anchor = ANCHORS[family];
+  const absolute = resolve(root),
+    anchor = ANCHORS[family];
   const canonical = childDirectory(absolute, CANONICAL[family]);
   if (canonical !== null && childDirectory(resolve(absolute, canonical), anchor) !== null) return resolve(absolute, canonical);
   if (childDirectory(absolute, anchor) !== null) return absolute;
@@ -76,8 +89,7 @@ export function hasGameAnchor(root: string): boolean {
 }
 
 function steamRootDirectories(home: string): string[] {
-  return [resolve(home, ".local/share/Steam"), resolve(home, ".steam/steam"),
-    resolve(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam")];
+  return [resolve(home, ".local/share/Steam"), resolve(home, ".steam/steam"), resolve(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam")];
 }
 
 /** Every Steam library's `steamapps` directory, main roots first, then extra libraries. */
@@ -90,14 +102,18 @@ function steamAppsDirectories(home: string): string[] {
         const library = match[1];
         if (library !== undefined) apps.add(resolve(library.replaceAll("\\\\", "/"), "steamapps"));
       }
-    } catch { /* This Steam root is not installed. */ }
+    } catch {
+      /* This Steam root is not installed. */
+    }
   }
   return [...apps];
 }
 
 /** Default Steam `steamapps/common` directories, including extra libraries. */
 export function steamCommonDirectories(home: string = homedir()): string[] {
-  return steamAppsDirectories(home).map(apps => resolve(apps, "common")).filter(isDirectory);
+  return steamAppsDirectories(home)
+    .map(apps => resolve(apps, "common"))
+    .filter(isDirectory);
 }
 
 export interface NightdiveAddonRoot {

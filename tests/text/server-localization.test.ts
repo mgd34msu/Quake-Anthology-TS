@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { LocalizationCatalog } from "../../src/text/localization.ts";
 import { expect, test } from "bun:test";
@@ -10,7 +11,8 @@ test("server chat localization shares source parser and overlays without assigni
     ["localization/loc_french_mod.txt", 'm_bot_chat_connected_0="Salut"'],
   ]);
   const table = await loadServerLocalizationResources("french", async path => {
-    const text = files.get(path); return text === undefined ? null : new TextEncoder().encode(text);
+    const text = files.get(path);
+    return text === undefined ? null : new TextEncoder().encode(text);
   });
   expect("seat" in table).toBe(false);
   expect(table.lookup("m_bot_chat_connected_0")).toBe("Salut");
@@ -22,22 +24,34 @@ test("server chat localization shares source parser and overlays without assigni
 
 test("missing server localization stays absent without fabricating chat text", async () => {
   const table = await loadServerLocalizationResources("english", async () => null);
-  expect(table.size()).toBe(0); expect(table.lookup("$m_bot_chat_connected_0")).toBeNull();
+  expect(table.size()).toBe(0);
+  expect(table.lookup("$m_bot_chat_connected_0")).toBeNull();
 });
 
 test("seat-owned localization retains its public identity and formatting contract", () => {
   const seat = createIdentityOwner("localization-compatibility").seat(1);
   const catalog = new LocalizationCatalog(seat, "q2-rerelease");
   catalog.reload(new TextEncoder().encode('line="Hello {0}"'));
-  expect(catalog.seat).toBe(seat); expect(catalog.profile).toBe("q2-rerelease");
+  expect(catalog.seat).toBe(seat);
+  expect(catalog.profile).toBe("q2-rerelease");
   expect(catalog.localize("$line", ["Marine"])).toBe("Hello Marine");
 });
 
 test("escaped braces load, unquoted escapes decode, and file errors reach the supplied log", async () => {
   const warnings: string[] = [];
-  const table = await loadServerLocalizationResources("english", async path => path === "localization/loc_english.txt"
-    ? new TextEncoder().encode('brace="x {{y}} z"\nopen="lit {{ open"\nmixed="{0} and {{1}}"\nplain=plain\\nword\nbad "oops"') : null,
-  "q1-rerelease", { warn: text => { warnings.push(text); } });
+  const table = await loadServerLocalizationResources(
+    "english",
+    async path =>
+      path === "localization/loc_english.txt"
+        ? new TextEncoder().encode('brace="x {{y}} z"\nopen="lit {{ open"\nmixed="{0} and {{1}}"\nplain=plain\\nword\nbad "oops"')
+        : null,
+    "q1-rerelease",
+    {
+      warn: text => {
+        warnings.push(text);
+      },
+    },
+  );
   expect(table.lookup("$brace")).toBe("x {y}} z");
   expect(table.lookup("$open")).toBe("lit { open");
   expect(table.localize("$mixed", ["A"])).toBe("A and {1}}");

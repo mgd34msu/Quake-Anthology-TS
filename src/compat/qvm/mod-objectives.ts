@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QvmModObjectiveAddress } from "../../contracts/qvm-mod-callbacks.ts";
 import type { QvmMemory } from "./memory.ts";
 
@@ -7,14 +8,17 @@ function word(end: number, address: number): number {
   return address;
 }
 export function validateQvmObjectiveAddress(end: number, address: QvmModObjectiveAddress): void {
-  if (typeof address === "number") { word(end, address); return; }
-  word(end, address.address); word(end, address.offset);
+  if (typeof address === "number") {
+    word(end, address);
+    return;
+  }
+  word(end, address.address);
+  word(end, address.offset);
   for (const offset of address.indirections) word(end, offset);
 }
 
 /** Persistent objectives use the existing source global-pointer encoding, never a transient call argument. */
-export function resolveQvmObjectiveAddress(memory: Pick<QvmMemory, "dataView">, end: number,
-  address: QvmModObjectiveAddress, current: () => void): number {
+export function resolveQvmObjectiveAddress(memory: Pick<QvmMemory, "dataView">, end: number, address: QvmModObjectiveAddress, current: () => void): number {
   current();
   if (typeof address === "number") return word(end, address);
   let pointer = memory.dataView(word(end, address.address), 4).getInt32(0, true);

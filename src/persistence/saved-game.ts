@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SaveImage } from "../contracts/session.ts";
 import { decodeSaveImage, encodeSaveImage } from "./save-image.ts";
 import { decodeQ1Save, encodeQ1Save, type Q1SaveData } from "./q1.ts";
 import { SaveFormatError } from "./value.ts";
 import { writeContainedSave } from "./save-policy.ts";
 
-export type SavedGame = { readonly kind: "shared"; readonly image: SaveImage }
-  | { readonly kind: "q1-source"; readonly data: Q1SaveData };
+export type SavedGame = { readonly kind: "shared"; readonly image: SaveImage } | { readonly kind: "q1-source"; readonly data: Q1SaveData };
 
 /** Inspect the signature before choosing a codec; malformed shared saves never fall back to source parsing. */
 export function decodeSavedGame(bytes: Uint8Array): SavedGame {

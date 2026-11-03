@@ -5,20 +5,63 @@ import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { executeNumericInstruction, readX87Register, writeX87Return, readX87Return } from "../../../src/guest/floating-point/index.ts";
 import type { NumericInstruction } from "../../../src/guest/floating-point/index.ts";
-import { arithmetic, binary32, binary64, binary80, decodeBinary, decodeBinary32, encodeBinary, fromInteger, readBits, squareRoot, writeBits } from "../../../src/guest/floating-point/binary.ts";
+import {
+  arithmetic,
+  binary32,
+  binary64,
+  binary80,
+  decodeBinary,
+  decodeBinary32,
+  encodeBinary,
+  fromInteger,
+  readBits,
+  squareRoot,
+  writeBits,
+} from "../../../src/guest/floating-point/binary.ts";
 
-const module: ModuleIdentity = { id: "test:floating-point", artifactPath: "authored-instruction-vectors", revision: "1", digest: createContentDigest("34".repeat(32)) };
+const module: ModuleIdentity = {
+  id: "test:floating-point",
+  artifactPath: "authored-instruction-vectors",
+  revision: "1",
+  digest: createContentDigest("34".repeat(32)),
+};
 function fixture() {
-  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: 0x1000n, stackPointer: 0x3000n, flags: 0n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "x86-64",
+    instructionPointer: 0x1000n,
+    stackPointer: 0x3000n,
+    flags: 0n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const address = memory.map({ base: 0x2000n, byteLength: 256, permissions: "read-write" });
-  function run(opcode: number, modrm: number, secondaryOpcode: number | null = null, prefix: NumericInstruction["prefix"] = "none", immediate: number | null = null) {
-    const instruction: NumericInstruction = { opcode, secondaryOpcode, modrm, registerIndex: (modrm >> 3) & 7,
-      operand: modrm >= 0xc0 ? { kind: "register", index: modrm & 7 } : { kind: "memory", address }, prefix, operandBits: 32, immediate };
+  function run(
+    opcode: number,
+    modrm: number,
+    secondaryOpcode: number | null = null,
+    prefix: NumericInstruction["prefix"] = "none",
+    immediate: number | null = null,
+  ) {
+    const instruction: NumericInstruction = {
+      opcode,
+      secondaryOpcode,
+      modrm,
+      registerIndex: (modrm >> 3) & 7,
+      operand: modrm >= 0xc0 ? { kind: "register", index: modrm & 7 } : { kind: "memory", address },
+      prefix,
+      operandBits: 32,
+      immediate,
+    };
     return executeNumericInstruction({ state, memory, instruction });
   }
-  function setXmm(index: number, bits: bigint, bytes = 16): void { state.simd.xmm.set(writeBits(bits, bytes), index * 16); }
-  function getXmm(index: number, bytes = 16): bigint { return readBits(state.simd.xmm.subarray(index * 16, index * 16 + bytes)); }
+  function setXmm(index: number, bits: bigint, bytes = 16): void {
+    state.simd.xmm.set(writeBits(bits, bytes), index * 16);
+  }
+  function getXmm(index: number, bytes = 16): bigint {
+    return readBits(state.simd.xmm.subarray(index * 16, index * 16 + bytes));
+  }
   return { state, memory, address, run, setXmm, getXmm };
 }
 
@@ -35,7 +78,11 @@ test("integer arithmetic preserves x87 64-bit significand beyond JavaScript doub
 });
 
 test("precision control clears low significand bits only at arithmetic", () => {
-  for (const [control, expected, flags] of [[0x37f, 16777217, 0], [0x7f, 16777216, 32], [0x87f, 16777218, 32]]) {
+  for (const [control, expected, flags] of [
+    [0x37f, 16777217, 0],
+    [0x7f, 16777216, 32],
+    [0x87f, 16777218, 32],
+  ]) {
     if (control === undefined || expected === undefined || flags === undefined) throw new Error("Incomplete fixture");
     const { state, run } = fixture();
     state.x87.controlWord = control;
@@ -48,7 +95,12 @@ test("precision control clears low significand bits only at arithmetic", () => {
 });
 
 test("x87 float stores round midpoint under all four modes and preserve negative zero", () => {
-  for (const [mode, expected] of [[0, 0x3f800000], [1, 0x3f800000], [2, 0x3f800001], [3, 0x3f800000]]) {
+  for (const [mode, expected] of [
+    [0, 0x3f800000],
+    [1, 0x3f800000],
+    [2, 0x3f800001],
+    [3, 0x3f800000],
+  ]) {
     if (mode === undefined || expected === undefined) throw new Error("Incomplete fixture");
     const { state, memory, address, run } = fixture();
     state.x87.controlWord = 0x37f | (mode << 10);
@@ -116,16 +168,30 @@ test("x87 stack fault is deferred until a waiting instruction", () => {
   const { state, memory } = fixture();
   state.x87.controlWord &= ~1;
   const before = state.x87.registers.slice();
-  const instruction: NumericInstruction = { opcode: 0xd8, secondaryOpcode: null, modrm: 0xc1, registerIndex: 0, operand: { kind: "register", index: 1 }, prefix: "none", operandBits: 32, immediate: null };
+  const instruction: NumericInstruction = {
+    opcode: 0xd8,
+    secondaryOpcode: null,
+    modrm: 0xc1,
+    registerIndex: 0,
+    operand: { kind: "register", index: 1 },
+    prefix: "none",
+    operandBits: 32,
+    immediate: null,
+  };
   expect(executeNumericInstruction({ state, memory, instruction }).kind).toBe("executed");
   expect(state.x87.statusWord & 0x80c1).toBe(0x80c1);
   expect(state.x87.registers).toEqual(before);
   expect(state.x87.tagWord).toBe(0xffff);
-  expect(executeNumericInstruction({ state, memory, instruction: { ...instruction, opcode: 0x9b, modrm: null, operand: null } })).toEqual({ kind: "exception", vector: 16, detail: "Pending x87 floating-point exception" });
+  expect(executeNumericInstruction({ state, memory, instruction: { ...instruction, opcode: 0x9b, modrm: null, operand: null } })).toEqual({
+    kind: "exception",
+    vector: 16,
+    detail: "Pending x87 floating-point exception",
+  });
 });
 
 test("exact divide and square root produce correctly rounded binary64", () => {
-  const one = fromInteger(1n); const three = fromInteger(3n);
+  const one = fromInteger(1n);
+  const three = fromInteger(3n);
   expect(encodeBinary(arithmetic("divide", one, three, binary64, "nearest").value, 64)).toBe(0x3fd5555555555555n);
   expect(encodeBinary(squareRoot(fromInteger(2n), binary64, "nearest").value, 64)).toBe(0x3ff6a09e667f3bcdn);
   const extended = arithmetic("add", fromInteger(1n << 63n), one, binary80, "nearest");
@@ -147,7 +213,16 @@ test("SSE unaligned MOVUPS works while MOVAPS faults before changing destination
   const { state, memory, address, getXmm } = fixture();
   const unaligned = memory.offset(address, 1n);
   memory.write(unaligned, new Uint8Array(16).fill(0xab));
-  const instruction: NumericInstruction = { opcode: 0x0f, secondaryOpcode: 0x10, modrm: 0, registerIndex: 0, operand: { kind: "memory", address: unaligned }, prefix: "none", operandBits: 32, immediate: null };
+  const instruction: NumericInstruction = {
+    opcode: 0x0f,
+    secondaryOpcode: 0x10,
+    modrm: 0,
+    registerIndex: 0,
+    operand: { kind: "memory", address: unaligned },
+    prefix: "none",
+    operandBits: 32,
+    immediate: null,
+  };
   expect(executeNumericInstruction({ state, memory, instruction }).kind).toBe("executed");
   expect(getXmm(0)).toBe(0xababababababababababababababababn);
   expect(executeNumericInstruction({ state, memory, instruction: { ...instruction, secondaryOpcode: 0x28 } }).kind).toBe("exception");
@@ -157,18 +232,21 @@ test("SSE unaligned MOVUPS works while MOVAPS faults before changing destination
 test("SSE uses MXCSR rounding and preserves first-source NaN payload", () => {
   const { state, setXmm, getXmm, run } = fixture();
   state.simd.mxcsr = 0x5f80;
-  setXmm(0, 0x3f800000n); setXmm(1, 0x33800000n);
+  setXmm(0, 0x3f800000n);
+  setXmm(1, 0x33800000n);
   expect(run(0x0f, 0xc1, 0x58, "f3").kind).toBe("executed");
   expect(getXmm(0, 4)).toBe(0x3f800001n);
   expect(state.simd.mxcsr & 32).toBe(32);
-  setXmm(0, 0xffc12345n); setXmm(1, 0x7fc54321n);
+  setXmm(0, 0xffc12345n);
+  setXmm(1, 0x7fc54321n);
   expect(run(0x0f, 0xc1, 0x58, "f3").kind).toBe("executed");
   expect(getXmm(0, 4)).toBe(0xffc12345n);
 });
 
 test("SSE exceptions aggregate before packed destination changes", () => {
   const { state, setXmm, getXmm, run } = fixture();
-  setXmm(0, 0x3f8000003f8000003f8000003f800000n); setXmm(1, 0x3f8000003f800000000000003f800000n);
+  setXmm(0, 0x3f8000003f8000003f8000003f800000n);
+  setXmm(1, 0x3f8000003f800000000000003f800000n);
   state.simd.mxcsr &= ~(1 << 9);
   const before = getXmm(0);
   expect(run(0x0f, 0xc1, 0x5e)).toEqual({ kind: "exception", vector: 19, detail: "Unmasked SIMD floating-point exception" });
@@ -179,7 +257,8 @@ test("SSE exceptions aggregate before packed destination changes", () => {
 test("SSE DAZ turns a signed denormal source into signed zero", () => {
   const { state, setXmm, getXmm, run } = fixture();
   state.simd.mxcsr |= 64;
-  setXmm(0, 0x80000001n); setXmm(1, 0x3f800000n);
+  setXmm(0, 0x80000001n);
+  setXmm(1, 0x3f800000n);
   expect(run(0x0f, 0xc1, 0x59, "f3").kind).toBe("executed");
   expect(getXmm(0, 4)).toBe(0x80000000n);
   expect(state.simd.mxcsr & 2).toBe(0);
@@ -198,7 +277,8 @@ test("SSE integer conversion truncates and returns indefinite on invalid range",
 
 test("packed integer lanes wrap independently and comparison yields lane masks", () => {
   const { setXmm, getXmm, run } = fixture();
-  setXmm(0, 0x7fffffff00000000ffffffffffffffffn); setXmm(1, 0x00000001000000010000000100000001n);
+  setXmm(0, 0x7fffffff00000000ffffffffffffffffn);
+  setXmm(1, 0x00000001000000010000000100000001n);
   expect(run(0x0f, 0xc1, 0xfe, "66").kind).toBe("executed");
   expect(getXmm(0)).toBe(0x80000000000000010000000000000000n);
   expect(run(0x0f, 0xc1, 0x76, "66").kind).toBe("executed");
@@ -214,10 +294,10 @@ test("binary32 arithmetic keeps exact subnormals and signs for cancellation", ()
   expect(encodeBinary(cancelled.value, 80)).toBe(1n << 79n);
 });
 
-
 test("binary32 word decoding matches exact significands, signs and NaN payloads", () => {
-  for (const bits of [0, 1, 0x007fffff, 0x00800000, 0x3f7fffff, 0x3f800000, 0x3f800001, 0x7f7fffff,
-    0x7f800000, 0x7f800001, 0x7fbfffff, 0x7fc00000, 0x7fc12345, 0x7fffffff]) {
+  for (const bits of [
+    0, 1, 0x007fffff, 0x00800000, 0x3f7fffff, 0x3f800000, 0x3f800001, 0x7f7fffff, 0x7f800000, 0x7f800001, 0x7fbfffff, 0x7fc00000, 0x7fc12345, 0x7fffffff,
+  ]) {
     for (const sign of [0, 0x80000000]) {
       const word = (bits | sign) >>> 0;
       expect(decodeBinary32(word)).toEqual(decodeBinary(BigInt(word), 32));

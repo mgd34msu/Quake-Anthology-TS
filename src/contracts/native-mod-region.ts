@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { NativeModScalar, NativeModSourceCall, NativeModValue } from "./native-mod-callbacks.ts";
 
-export type NativeModRegionRegister = "rax" | "rcx" | "rdx" | "rbx" | "rbp" | "rsi" | "rdi"
-  | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15";
+export type NativeModRegionRegister = "rax" | "rcx" | "rdx" | "rbx" | "rbp" | "rsi" | "rdi" | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15";
 export type NativeModRegionStorage = NativeModScalar | "pointer";
 export type NativeModRegionLocation =
   | { readonly kind: "register"; readonly register: NativeModRegionRegister; readonly storage: NativeModRegionStorage }

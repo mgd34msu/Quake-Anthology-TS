@@ -5,10 +5,19 @@ import { GuestMemoryFault } from "../core/memory.ts";
 import type { X64SemanticPlan } from "./plan.ts";
 
 export class X64ProcessorFault extends Error {
-  constructor(readonly vector: number, detail: string) { super(detail); this.name = "X64ProcessorFault"; }
+  constructor(
+    readonly vector: number,
+    detail: string,
+  ) {
+    super(detail);
+    this.name = "X64ProcessorFault";
+  }
 }
 export class X64Unsupported extends Error {
-  constructor(detail: string) { super(detail); this.name = "X64Unsupported"; }
+  constructor(detail: string) {
+    super(detail);
+    this.name = "X64Unsupported";
+  }
 }
 
 const registers: readonly GuestRegister[] = ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"];
@@ -43,8 +52,15 @@ export interface X64ModRM {
   readonly reg: X64RegisterOperand;
   readonly rm: X64Operand;
 }
-interface DecodedOperand { readonly width: GuestIntegerWidth; readonly end: number; readonly value: X64ModRM }
-interface DecodedImmediate { readonly length: number; readonly value: bigint }
+interface DecodedOperand {
+  readonly width: GuestIntegerWidth;
+  readonly end: number;
+  readonly value: X64ModRM;
+}
+interface DecodedImmediate {
+  readonly length: number;
+  readonly value: bigint;
+}
 interface DecodeRecords {
   readonly bytes: number[];
   readonly operands: (DecodedOperand | undefined)[];
@@ -85,19 +101,27 @@ export function guestAddress(memory: MappedGuestMemory, raw: bigint, access: "re
 
 export function readMemory(memory: MappedGuestMemory, address: GuestAddress, width: GuestIntegerWidth): bigint {
   switch (width) {
-    case 8: return BigInt(memory.readUint8(address));
-    case 16: return BigInt(memory.readUint16(address));
-    case 32: return BigInt(memory.readUint32(address));
-    case 64: return memory.readUint64(address);
+    case 8:
+      return BigInt(memory.readUint8(address));
+    case 16:
+      return BigInt(memory.readUint16(address));
+    case 32:
+      return BigInt(memory.readUint32(address));
+    case 64:
+      return memory.readUint64(address);
   }
 }
 export function writeMemory(memory: MappedGuestMemory, address: GuestAddress, width: GuestIntegerWidth, value: bigint): undefined {
   const normalized = BigInt.asUintN(width, value);
   switch (width) {
-    case 8: return memory.writeUint8(address, Number(normalized));
-    case 16: return memory.writeUint16(address, Number(normalized));
-    case 32: return memory.writeUint32(address, Number(normalized));
-    case 64: return memory.writeUint64(address, normalized);
+    case 8:
+      return memory.writeUint8(address, Number(normalized));
+    case 16:
+      return memory.writeUint16(address, Number(normalized));
+    case 32:
+      return memory.writeUint32(address, Number(normalized));
+    case 64:
+      return memory.writeUint64(address, normalized);
   }
 }
 
@@ -118,12 +142,22 @@ export class X64DecodeCursor {
   repeat: "none" | "f2" | "f3" = "none";
   segment: "fs" | "gs" | null = null;
 
-  constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState, decoded: X64DecodedInstruction | null = null) {
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly state: GuestProcessorState,
+    decoded: X64DecodedInstruction | null = null,
+  ) {
     this.reset(decoded);
   }
-  get start(): bigint { return this.#start; }
-  get decoded(): X64DecodedInstruction | null { return this.#decoded; }
-  get opcode(): number { return this.#opcode; }
+  get start(): bigint {
+    return this.#start;
+  }
+  get decoded(): X64DecodedInstruction | null {
+    return this.#decoded;
+  }
+  get opcode(): number {
+    return this.#opcode;
+  }
   reset(decoded: X64DecodedInstruction | null): void {
     this.#start = this.state.instructionPointer;
     this.plan = null;
@@ -132,22 +166,34 @@ export class X64DecodeCursor {
     if (decoded !== null) {
       this.#fetchNext = null;
       this.#prefixLength = this.#position = decoded.prefixLength;
-      this.#opcode = decoded.opcode; this.rex = decoded.rex;
-      this.operandOverride = decoded.operandOverride; this.addressOverride = decoded.addressOverride;
-      this.lock = decoded.lock; this.repeat = decoded.repeat; this.segment = decoded.segment;
+      this.#opcode = decoded.opcode;
+      this.rex = decoded.rex;
+      this.operandOverride = decoded.operandOverride;
+      this.addressOverride = decoded.addressOverride;
+      this.lock = decoded.lock;
+      this.repeat = decoded.repeat;
+      this.segment = decoded.segment;
       return;
     }
     this.#position = 0;
-    this.rex = null; this.operandOverride = false; this.addressOverride = false;
-    this.lock = false; this.repeat = "none"; this.segment = null;
+    this.rex = null;
+    this.operandOverride = false;
+    this.addressOverride = false;
+    this.lock = false;
+    this.repeat = "none";
+    this.segment = null;
     // The complete architectural instruction window stays canonical and cannot wrap.
     // Boundary instructions retain the per-byte address/fault path below.
-    this.#fetchNext = (this.start > 0n && this.start <= 0x7ffffffffff1n)
-      || (this.start >= 0xffff800000000000n && this.start <= 0xfffffffffffffff1n)
-      ? this.memory.fetchSequence(this.start) : null;
+    this.#fetchNext =
+      (this.start > 0n && this.start <= 0x7ffffffffff1n) || (this.start >= 0xffff800000000000n && this.start <= 0xfffffffffffffff1n)
+        ? this.memory.fetchSequence(this.start)
+        : null;
     while (true) {
       const byte = this.readByte();
-      if (byte >= 0x40 && byte <= 0x4f) { this.rex = byte; continue; }
+      if (byte >= 0x40 && byte <= 0x4f) {
+        this.rex = byte;
+        continue;
+      }
       if (byte === 0x66) this.operandOverride = true;
       else if (byte === 0x67) this.addressOverride = true;
       else if (byte === 0xf0) this.lock = true;
@@ -156,7 +202,10 @@ export class X64DecodeCursor {
       else if (byte === 0x64) this.segment = "fs";
       else if (byte === 0x65) this.segment = "gs";
       else if (byte === 0x2e || byte === 0x36 || byte === 0x3e || byte === 0x26) this.segment = null;
-      else { this.#opcode = byte; break; }
+      else {
+        this.#opcode = byte;
+        break;
+      }
       this.rex = null;
     }
     this.#prefixLength = this.#position;
@@ -171,18 +220,45 @@ export class X64DecodeCursor {
     if (this.#records === null) return null;
     const unchanged = this.memory.retainExecutableBytes(this.start, this.#records.bytes);
     if (unchanged === null) return null;
-    return { bytes: this.#records.bytes, prefixLength: this.#prefixLength, opcode: this.opcode, rex: this.rex, operandOverride: this.operandOverride,
-      addressOverride: this.addressOverride, lock: this.lock, repeat: this.repeat, segment: this.segment,
-      operands: this.#records.operands, immediates: this.#records.immediates, unchanged };
+    return {
+      bytes: this.#records.bytes,
+      prefixLength: this.#prefixLength,
+      opcode: this.opcode,
+      rex: this.rex,
+      operandOverride: this.operandOverride,
+      addressOverride: this.addressOverride,
+      lock: this.lock,
+      repeat: this.repeat,
+      segment: this.segment,
+      operands: this.#records.operands,
+      immediates: this.#records.immediates,
+      unchanged,
+    };
   }
-  get nextIP(): bigint { return BigInt.asUintN(64, this.start + BigInt(this.#position)); }
-  get width(): 16 | 32 | 64 { return ((this.rex ?? 0) & 8) !== 0 ? 64 : this.operandOverride ? 16 : 32; }
-  get stackWidth(): 16 | 64 { return this.operandOverride ? 16 : 64; }
-  get addressBits(): 32 | 64 { return this.addressOverride ? 32 : 64; }
-  get rexB(): number { return ((this.rex ?? 0) & 1) !== 0 ? 8 : 0; }
-  get rexX(): number { return ((this.rex ?? 0) & 2) !== 0 ? 8 : 0; }
-  get rexR(): number { return ((this.rex ?? 0) & 4) !== 0 ? 8 : 0; }
-  get numericPrefix(): "none" | "66" | "f2" | "f3" { return this.repeat !== "none" ? this.repeat : this.operandOverride ? "66" : "none"; }
+  get nextIP(): bigint {
+    return BigInt.asUintN(64, this.start + BigInt(this.#position));
+  }
+  get width(): 16 | 32 | 64 {
+    return ((this.rex ?? 0) & 8) !== 0 ? 64 : this.operandOverride ? 16 : 32;
+  }
+  get stackWidth(): 16 | 64 {
+    return this.operandOverride ? 16 : 64;
+  }
+  get addressBits(): 32 | 64 {
+    return this.addressOverride ? 32 : 64;
+  }
+  get rexB(): number {
+    return ((this.rex ?? 0) & 1) !== 0 ? 8 : 0;
+  }
+  get rexX(): number {
+    return ((this.rex ?? 0) & 2) !== 0 ? 8 : 0;
+  }
+  get rexR(): number {
+    return ((this.rex ?? 0) & 4) !== 0 ? 8 : 0;
+  }
+  get numericPrefix(): "none" | "66" | "f2" | "f3" {
+    return this.repeat !== "none" ? this.repeat : this.operandOverride ? "66" : "none";
+  }
 
   readByte(): number {
     if (this.#position >= 15) throw new X64ProcessorFault(13, "Instruction exceeds 15 bytes");
@@ -194,12 +270,17 @@ export class X64DecodeCursor {
     }
     const byte = this.#fetchNext === null ? this.memory.fetchByte(canonicalAddress(this.nextIP)) : this.#fetchNext();
     if (this.#records === null) throw new Error("Instruction decoding has no byte storage");
-    this.#records.bytes.push(byte); this.#position++;
+    this.#records.bytes.push(byte);
+    this.#position++;
     return byte;
   }
   readUnsigned(byteLength: number): bigint {
-    const start = this.#position, saved = this.decoded?.immediates[start];
-    if (saved !== undefined && saved.length === byteLength) { this.#position += byteLength; return saved.value; }
+    const start = this.#position,
+      saved = this.decoded?.immediates[start];
+    if (saved !== undefined && saved.length === byteLength) {
+      this.#position += byteLength;
+      return saved.value;
+    }
     const value = this.#unsigned(byteLength);
     if (this.#records !== null) this.#records.immediates[start] = { length: byteLength, value };
     return value;
@@ -207,21 +288,28 @@ export class X64DecodeCursor {
   #unsigned(byteLength: number): bigint {
     if (byteLength === 1) return BigInt(this.readByte());
     if (byteLength === 2) return BigInt(this.readByte() + this.readByte() * 0x100);
-    if (byteLength === 4) return BigInt(this.readByte() + this.readByte() * 0x100
-      + this.readByte() * 0x10000 + this.readByte() * 0x1000000);
+    if (byteLength === 4) return BigInt(this.readByte() + this.readByte() * 0x100 + this.readByte() * 0x10000 + this.readByte() * 0x1000000);
     let result = 0n;
     for (let index = 0; index < byteLength; index += 1) result |= BigInt(this.readByte()) << BigInt(index * 8);
     return result;
   }
-  readSigned(byteLength: number): bigint { return BigInt.asIntN(byteLength * 8, this.readUnsigned(byteLength)); }
-  immediate(width: GuestIntegerWidth): bigint { return width === 64 ? this.readSigned(4) : this.readUnsigned(width / 8); }
+  readSigned(byteLength: number): bigint {
+    return BigInt.asIntN(byteLength * 8, this.readUnsigned(byteLength));
+  }
+  immediate(width: GuestIntegerWidth): bigint {
+    return width === 64 ? this.readSigned(4) : this.readUnsigned(width / 8);
+  }
   register(index: number, width: GuestIntegerWidth): X64RegisterOperand {
     if (width === 8 && this.rex === null && index >= 4 && index < 8) return { kind: "register", register: registerName(index - 4), width, highByte: true };
     return { kind: "register", register: registerName(index), width, highByte: false };
   }
   decodeModRM(width: GuestIntegerWidth): X64ModRM {
-    const start = this.#position, saved = this.decoded?.operands[start];
-    if (saved !== undefined && saved.width === width) { this.#position = saved.end; return saved.value; }
+    const start = this.#position,
+      saved = this.decoded?.operands[start];
+    if (saved !== undefined && saved.width === width) {
+      this.#position = saved.end;
+      return saved.value;
+    }
     const value = this.#modRM(width);
     if (this.#records !== null) this.#records.operands[start] = { width, end: this.#position, value };
     return value;
@@ -254,10 +342,17 @@ export class X64DecodeCursor {
     } else base = registerName(rmIndex);
     if (mode === 1) displacement = this.readSigned(1);
     else if (mode === 2) displacement = this.readSigned(4);
-    return { byte, extension, registerIndex, rmIndex, reg, rm: { kind: "memory", width, base, index, scale, displacement, ripRelative, addressBits: this.addressBits, segment: this.segment } };
+    return {
+      byte,
+      extension,
+      registerIndex,
+      rmIndex,
+      reg,
+      rm: { kind: "memory", width, base, index, scale, displacement, ripRelative, addressBits: this.addressBits, segment: this.segment },
+    };
   }
   effectiveOffset(operand: X64MemoryOperand, nextIP?: bigint): bigint {
-    return effectiveOperandOffset(this.state, operand, operand.ripRelative ? nextIP ?? this.nextIP : 0n);
+    return effectiveOperandOffset(this.state, operand, operand.ripRelative ? (nextIP ?? this.nextIP) : 0n);
   }
   address(operand: X64MemoryOperand, access: "read" | "write" = "read"): GuestAddress {
     return operandAddress(this.memory, this.state, operand, operand.ripRelative ? this.nextIP : 0n, access);
@@ -271,25 +366,31 @@ export class X64DecodeCursor {
   writable(operand: X64Operand): undefined {
     return writableOperand(this.memory, this.state, operand, operand.kind === "memory" && operand.ripRelative ? this.nextIP : 0n);
   }
-
 }
-
 
 export function effectiveOperandOffset(state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint): bigint {
   const base = operand.ripRelative ? nextIP : operand.base === null ? 0n : state.registers.read(operand.base, operand.addressBits);
   const index = operand.index === null ? 0n : state.registers.read(operand.index, operand.addressBits) * operand.scale;
   return BigInt.asUintN(operand.addressBits, base + index + operand.displacement);
 }
-export function operandAddress(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint, access: "read" | "write" = "read"): GuestAddress {
+export function operandAddress(
+  memory: MappedGuestMemory,
+  state: GuestProcessorState,
+  operand: X64MemoryOperand,
+  nextIP: bigint,
+  access: "read" | "write" = "read",
+): GuestAddress {
   const segmentBase = operand.segment === null ? 0n : state.segments[operand.segment].base;
   return guestAddress(memory, effectiveOperandOffset(state, operand, nextIP) + segmentBase, access);
 }
 export function readOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint): bigint {
-  return operand.kind === "register" ? state.registers.read(operand.register, operand.width, operand.highByte)
+  return operand.kind === "register"
+    ? state.registers.read(operand.register, operand.width, operand.highByte)
     : readMemory(memory, operandAddress(memory, state, operand, nextIP), operand.width);
 }
 export function writeOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint, value: bigint): undefined {
-  return operand.kind === "register" ? state.registers.write(operand.register, operand.width, value, operand.highByte)
+  return operand.kind === "register"
+    ? state.registers.write(operand.register, operand.width, value, operand.highByte)
     : writeMemory(memory, operandAddress(memory, state, operand, nextIP, "write"), operand.width, value);
 }
 export function writableOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint): undefined {

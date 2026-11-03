@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RankingAccountRequest, RankingPlayerState, RankingServiceState } from "../../network/services/rankings.ts";
 
 /** Account UI actions target an admitted source slot, never a platform identity inferred from a player name. */
@@ -16,9 +17,14 @@ export type RankingAccountView =
 export function rankingAccountView(actions: RankingAccountActions): RankingAccountView {
   const service = actions.service();
   switch (service.kind) {
-    case "disabled": return { kind: "disabled" };
-    case "unavailable": return { kind: "unavailable", message: service.reason };
-    case "starting": case "ending": return { kind: "busy" };
-    case "active": return { kind: "account", player: actions.player() };
+    case "disabled":
+      return { kind: "disabled" };
+    case "unavailable":
+      return { kind: "unavailable", message: service.reason };
+    case "starting":
+    case "ending":
+      return { kind: "busy" };
+    case "active":
+      return { kind: "account", player: actions.player() };
   }
 }

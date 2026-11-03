@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's game/ai_cmd.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -12,13 +13,41 @@ import { GameType, Team } from "../../../content/q3/base/shared/definitions.ts";
 import { botInitialChat } from "./ai-chat.ts";
 import { botEntityInfo } from "./ai-combat.ts";
 import type { GameAiContext } from "./ai-context.ts";
-import { BotLongTermGoal, BotMatchContext, BotMatchSubtype, BotMatchVariable, BotMessage, BotPatrolFlag,
-  BotTeamTaskPreference, CTF_GETFLAG_TIME, CTF_RETURNFLAG_TIME, CTF_RUSHBASE_TIME, TEAM_ACCOMPANY_TIME,
-  TEAM_ATTACKENEMYBASE_TIME, TEAM_CAMP_TIME, TEAM_DEFENDKEYAREA_TIME, TEAM_GETITEM_TIME,
-  TEAM_HARVEST_TIME, TEAM_HELP_TIME, TEAM_KILL_SOMEONE, TEAM_LEAD_TIME, TEAM_PATROL_TIME } from "./ai-definitions.ts";
+import {
+  BotLongTermGoal,
+  BotMatchContext,
+  BotMatchSubtype,
+  BotMatchVariable,
+  BotMessage,
+  BotPatrolFlag,
+  BotTeamTaskPreference,
+  CTF_GETFLAG_TIME,
+  CTF_RETURNFLAG_TIME,
+  CTF_RUSHBASE_TIME,
+  TEAM_ACCOMPANY_TIME,
+  TEAM_ATTACKENEMYBASE_TIME,
+  TEAM_CAMP_TIME,
+  TEAM_DEFENDKEYAREA_TIME,
+  TEAM_GETITEM_TIME,
+  TEAM_HARVEST_TIME,
+  TEAM_HELP_TIME,
+  TEAM_KILL_SOMEONE,
+  TEAM_LEAD_TIME,
+  TEAM_PATROL_TIME,
+} from "./ai-definitions.ts";
 import { botCreateWayPoint, botFindWayPoint, botFreeWaypoints, botGetAlternateRouteGoal, botPointAreaNum } from "./ai-navigation.ts";
-import { botOppositeTeam, botRememberLastOrderedTask, botSameTeam, botSetTeamStatus, botTeam,
-  clientFromName, clientName, clientOnSameTeamFromName, copyClientNameToTeamLeader, easyClientName } from "./ai-orders.ts";
+import {
+  botOppositeTeam,
+  botRememberLastOrderedTask,
+  botSameTeam,
+  botSetTeamStatus,
+  botTeam,
+  clientFromName,
+  clientName,
+  clientOnSameTeamFromName,
+  copyClientNameToTeamLeader,
+  easyClientName,
+} from "./ai-orders.ts";
 import { BotGoalState } from "./ai-state.ts";
 import type { BotState, BotWaypoint } from "./ai-state.ts";
 import { botGetTeamMateTaskPreference, botSetTeamMateTaskPreference, botVoiceChat, botVoiceChatOnly } from "./ai-team.ts";
@@ -40,23 +69,43 @@ export function botPrintTeamGoal(context: GameAiContext, state: BotState): void 
   let time = f(state.teamGoalTime - context.time);
   let action: string | null = null;
   switch (state.ltgType) {
-    case BotLongTermGoal.TEAMHELP: action = "help a team mate"; break;
-    case BotLongTermGoal.TEAMACCOMPANY: action = "accompany a team mate"; break;
-    case BotLongTermGoal.GETFLAG: action = "get the flag"; break;
-    case BotLongTermGoal.RUSHBASE: action = "rush to the base"; break;
-    case BotLongTermGoal.RETURNFLAG: action = "try to return the flag"; break;
+    case BotLongTermGoal.TEAMHELP:
+      action = "help a team mate";
+      break;
+    case BotLongTermGoal.TEAMACCOMPANY:
+      action = "accompany a team mate";
+      break;
+    case BotLongTermGoal.GETFLAG:
+      action = "get the flag";
+      break;
+    case BotLongTermGoal.RUSHBASE:
+      action = "rush to the base";
+      break;
+    case BotLongTermGoal.RETURNFLAG:
+      action = "try to return the flag";
+      break;
     case BotLongTermGoal.ATTACKENEMYBASE:
       if (context.game.options.product === "missionpack") action = "attack the enemy base";
       break;
     case BotLongTermGoal.HARVEST:
       if (context.game.options.product === "missionpack") action = "harvest";
       break;
-    case BotLongTermGoal.DEFENDKEYAREA: action = "defend a key area"; break;
-    case BotLongTermGoal.GETITEM: action = "get an item"; break;
-    case BotLongTermGoal.KILL: action = "kill someone"; break;
+    case BotLongTermGoal.DEFENDKEYAREA:
+      action = "defend a key area";
+      break;
+    case BotLongTermGoal.GETITEM:
+      action = "get an item";
+      break;
+    case BotLongTermGoal.KILL:
+      action = "kill someone";
+      break;
     case BotLongTermGoal.CAMP:
-    case BotLongTermGoal.CAMPORDER: action = "camp"; break;
-    case BotLongTermGoal.PATROL: action = "patrol"; break;
+    case BotLongTermGoal.CAMPORDER:
+      action = "camp";
+      break;
+    case BotLongTermGoal.PATROL:
+      action = "patrol";
+      break;
   }
   if (action === null) {
     if (state.ctfRoamTime > context.time) {
@@ -134,8 +183,10 @@ export function findClientByName(context: GameAiContext, name: string): number {
 
 export function findEnemyByName(context: GameAiContext, state: BotState, name: string): number {
   const maximum = maximumClients(context, "FindEnemyByName");
-  for (let client = 0; client < maximum; client++) if (!botSameTeam(context, state, client) && folded(clientName(context, client, 1024)) === folded(name)) return client;
-  for (let client = 0; client < maximum; client++) if (!botSameTeam(context, state, client) && stringContains(clientName(context, client, 1024), name, false) >= 0) return client;
+  for (let client = 0; client < maximum; client++)
+    if (!botSameTeam(context, state, client) && folded(clientName(context, client, 1024)) === folded(name)) return client;
+  for (let client = 0; client < maximum; client++)
+    if (!botSameTeam(context, state, client) && stringContains(clientName(context, client, 1024), name, false) >= 0) return client;
   return -1;
 }
 
@@ -173,10 +224,21 @@ export function botGetPatrolWaypoints(context: GameAiContext, state: BotState, m
     point.next = null;
     let tail = points;
     while (tail !== null && tail.next !== null) tail = tail.next;
-    if (tail === null) { points = point; point.prev = null; }
-    else { tail.next = point; point.prev = tail; }
-    if ((areaMatch.subtype & BotMatchSubtype.BACK) !== 0) { flags = BotPatrolFlag.LOOP; break; }
-    if ((areaMatch.subtype & BotMatchSubtype.REVERSE) !== 0) { flags = BotPatrolFlag.REVERSE; break; }
+    if (tail === null) {
+      points = point;
+      point.prev = null;
+    } else {
+      tail.next = point;
+      point.prev = tail;
+    }
+    if ((areaMatch.subtype & BotMatchSubtype.BACK) !== 0) {
+      flags = BotPatrolFlag.LOOP;
+      break;
+    }
+    if ((areaMatch.subtype & BotMatchSubtype.REVERSE) !== 0) {
+      flags = BotPatrolFlag.REVERSE;
+      break;
+    }
     if ((areaMatch.subtype & BotMatchSubtype.MORE) === 0) break;
     text = variable(context, areaMatch, BotMatchVariable.MORE);
   }
@@ -277,8 +339,12 @@ export function botMatchHelpAccompany(context: GameAiContext, state: BotState, m
   }
   if (client === state.client) return;
   locate(context, client, state.teamGoal);
-  if (state.teamGoal.entity < 0 && (match.subtype & BotMatchSubtype.NEARITEM) !== 0 &&
-    !botGetMessageTeamGoal(context, state, variable(context, match, BotMatchVariable.ITEM), state.teamGoal)) return;
+  if (
+    state.teamGoal.entity < 0 &&
+    (match.subtype & BotMatchSubtype.NEARITEM) !== 0 &&
+    !botGetMessageTeamGoal(context, state, variable(context, match, BotMatchVariable.ITEM), state.teamGoal)
+  )
+    return;
   if (state.teamGoal.entity < 0) {
     if (other) botInitialChat(context, state, "whereis", teammate);
     else {
@@ -400,7 +466,10 @@ export function botMatchGetFlag(context: GameAiContext, state: BotState, match: 
 
 export function botMatchAttackEnemyBase(context: GameAiContext, state: BotState, match: ChatMatch): void {
   if (context.gameType === GameType.GT_CTF) botMatchGetFlag(context, state, match);
-  else if (context.game.options.product === "missionpack" && (context.gameType === GameType.GT_1FCTF || context.gameType === GameType.GT_OBELISK || context.gameType === GameType.GT_HARVESTER)) {
+  else if (
+    context.game.options.product === "missionpack" &&
+    (context.gameType === GameType.GT_1FCTF || context.gameType === GameType.GT_OBELISK || context.gameType === GameType.GT_HARVESTER)
+  ) {
     if (context.deathmatch.redObelisk.area === 0 || context.deathmatch.blueObelisk.area === 0) return;
   } else return;
   // Source continues after GetFlag in CTF, including its second address check.
@@ -416,7 +485,14 @@ export function botMatchAttackEnemyBase(context: GameAiContext, state: BotState,
 
 export function botMatchHarvest(context: GameAiContext, state: BotState, match: ChatMatch): void {
   const goals = context.deathmatch;
-  if (context.game.options.product !== "missionpack" || context.gameType !== GameType.GT_HARVESTER || goals.neutralObelisk.area === 0 || goals.redObelisk.area === 0 || goals.blueObelisk.area === 0) return;
+  if (
+    context.game.options.product !== "missionpack" ||
+    context.gameType !== GameType.GT_HARVESTER ||
+    goals.neutralObelisk.area === 0 ||
+    goals.redObelisk.area === 0 ||
+    goals.blueObelisk.area === 0
+  )
+    return;
   if (!botAddressedToBot(context, state, match)) return;
   ordered(context, state, findClientByName(context, variable(context, match, BotMatchVariable.NETNAME)));
   state.ltgType = BotLongTermGoal.HARVEST;
@@ -449,9 +525,15 @@ export function botMatchTaskPreference(context: GameAiContext, state: BotState, 
   if (teammate < 0) return;
   let preference = botGetTeamMateTaskPreference(context, state, teammate);
   switch (match.subtype) {
-    case BotMatchSubtype.DEFENDER: preference = (preference & ~BotTeamTaskPreference.ATTACKER) | BotTeamTaskPreference.DEFENDER; break;
-    case BotMatchSubtype.ATTACKER: preference = (preference & ~BotTeamTaskPreference.DEFENDER) | BotTeamTaskPreference.ATTACKER; break;
-    case BotMatchSubtype.ROAMER: preference &= ~(BotTeamTaskPreference.ATTACKER | BotTeamTaskPreference.DEFENDER); break;
+    case BotMatchSubtype.DEFENDER:
+      preference = (preference & ~BotTeamTaskPreference.ATTACKER) | BotTeamTaskPreference.DEFENDER;
+      break;
+    case BotMatchSubtype.ATTACKER:
+      preference = (preference & ~BotTeamTaskPreference.DEFENDER) | BotTeamTaskPreference.ATTACKER;
+      break;
+    case BotMatchSubtype.ROAMER:
+      preference &= ~(BotTeamTaskPreference.ATTACKER | BotTeamTaskPreference.DEFENDER);
+      break;
   }
   botSetTeamMateTaskPreference(context, state, teammate, preference);
   botInitialChat(context, state, "keepinmind", easyClientName(context, teammate, 256));
@@ -590,19 +672,46 @@ export function botMatchWhoIsTeamLeader(context: GameAiContext, state: BotState,
 export function botMatchWhatAreYouDoing(context: GameAiContext, state: BotState, match: ChatMatch): void {
   if (!botAddressedToBot(context, state, match)) return;
   switch (state.ltgType) {
-    case BotLongTermGoal.TEAMHELP: botInitialChat(context, state, "helping", easyClientName(context, state.teammate, 256)); break;
-    case BotLongTermGoal.TEAMACCOMPANY: botInitialChat(context, state, "accompanying", easyClientName(context, state.teammate, 256)); break;
-    case BotLongTermGoal.DEFENDKEYAREA: botInitialChat(context, state, "defending", context.library.goals.goalName(state.teamGoal.number).slice(0, 255)); break;
-    case BotLongTermGoal.GETITEM: botInitialChat(context, state, "gettingitem", context.library.goals.goalName(state.teamGoal.number).slice(0, 255)); break;
-    case BotLongTermGoal.KILL: botInitialChat(context, state, "killing", clientName(context, state.teamGoal.entity, 256)); break;
-    case BotLongTermGoal.CAMP: case BotLongTermGoal.CAMPORDER: botInitialChat(context, state, "camping"); break;
-    case BotLongTermGoal.PATROL: botInitialChat(context, state, "patrolling"); break;
-    case BotLongTermGoal.GETFLAG: botInitialChat(context, state, "capturingflag"); break;
-    case BotLongTermGoal.RUSHBASE: botInitialChat(context, state, "rushingbase"); break;
-    case BotLongTermGoal.RETURNFLAG: botInitialChat(context, state, "returningflag"); break;
-    case BotLongTermGoal.ATTACKENEMYBASE: botInitialChat(context, state, context.game.options.product === "missionpack" ? "attackingenemybase" : "roaming"); break;
-    case BotLongTermGoal.HARVEST: botInitialChat(context, state, context.game.options.product === "missionpack" ? "harvesting" : "roaming"); break;
-    default: botInitialChat(context, state, "roaming"); break;
+    case BotLongTermGoal.TEAMHELP:
+      botInitialChat(context, state, "helping", easyClientName(context, state.teammate, 256));
+      break;
+    case BotLongTermGoal.TEAMACCOMPANY:
+      botInitialChat(context, state, "accompanying", easyClientName(context, state.teammate, 256));
+      break;
+    case BotLongTermGoal.DEFENDKEYAREA:
+      botInitialChat(context, state, "defending", context.library.goals.goalName(state.teamGoal.number).slice(0, 255));
+      break;
+    case BotLongTermGoal.GETITEM:
+      botInitialChat(context, state, "gettingitem", context.library.goals.goalName(state.teamGoal.number).slice(0, 255));
+      break;
+    case BotLongTermGoal.KILL:
+      botInitialChat(context, state, "killing", clientName(context, state.teamGoal.entity, 256));
+      break;
+    case BotLongTermGoal.CAMP:
+    case BotLongTermGoal.CAMPORDER:
+      botInitialChat(context, state, "camping");
+      break;
+    case BotLongTermGoal.PATROL:
+      botInitialChat(context, state, "patrolling");
+      break;
+    case BotLongTermGoal.GETFLAG:
+      botInitialChat(context, state, "capturingflag");
+      break;
+    case BotLongTermGoal.RUSHBASE:
+      botInitialChat(context, state, "rushingbase");
+      break;
+    case BotLongTermGoal.RETURNFLAG:
+      botInitialChat(context, state, "returningflag");
+      break;
+    case BotLongTermGoal.ATTACKENEMYBASE:
+      botInitialChat(context, state, context.game.options.product === "missionpack" ? "attackingenemybase" : "roaming");
+      break;
+    case BotLongTermGoal.HARVEST:
+      botInitialChat(context, state, context.game.options.product === "missionpack" ? "harvesting" : "roaming");
+      break;
+    default:
+      botInitialChat(context, state, "roaming");
+      break;
   }
   context.library.chat.enterChat(state.cs, clientFromName(context, variable(context, match, BotMatchVariable.NETNAME)), ChatDestination.Tell);
 }
@@ -623,9 +732,17 @@ export function botNearestVisibleItem(context: GameAiContext, state: BotState, n
     if (folded(context.library.goals.goalName(candidate.number).slice(0, 63)) === folded(name)) {
       const distance = length3(sub3(candidate.origin, state.origin));
       if (distance < bestDistance) {
-        const trace = context.game.world.trace({ start: state.eye, end: candidate.origin,
-          shape: { kind: "point" }, passEntityNum: state.client, mask: 1 | 0x10000 });
-        if (trace.fraction >= 1) { bestDistance = distance; goal.copyFrom(candidate); }
+        const trace = context.game.world.trace({
+          start: state.eye,
+          end: candidate.origin,
+          shape: { kind: "point" },
+          passEntityNum: state.client,
+          mask: 1 | 0x10000,
+        });
+        if (trace.fraction >= 1) {
+          bestDistance = distance;
+          goal.copyFrom(candidate);
+        }
       }
     }
     if (index <= 0) break;
@@ -635,27 +752,70 @@ export function botNearestVisibleItem(context: GameAiContext, state: BotState, n
 
 export function botMatchWhereAreYou(context: GameAiContext, state: BotState, match: ChatMatch): void {
   if (context.gameType < GameType.GT_TEAM || !botAddressedToBot(context, state, match)) return;
-  const items = ["Shotgun", "Grenade Launcher", "Rocket Launcher", "Plasmagun", "Railgun", "Lightning Gun", "BFG10K",
-    "Quad Damage", "Regeneration", "Battle Suit", "Speed", "Invisibility", "Flight", "Armor", "Heavy Armor", "Red Flag", "Blue Flag"];
-  if (context.game.options.product === "missionpack") items.push("Nailgun", "Prox Launcher", "Chaingun", "Scout", "Guard", "Doubler", "Ammo Regen", "Neutral Flag", "Red Obelisk", "Blue Obelisk", "Neutral Obelisk");
-  let nearest: string | null = null, bestDistance = 999999;
+  const items = [
+    "Shotgun",
+    "Grenade Launcher",
+    "Rocket Launcher",
+    "Plasmagun",
+    "Railgun",
+    "Lightning Gun",
+    "BFG10K",
+    "Quad Damage",
+    "Regeneration",
+    "Battle Suit",
+    "Speed",
+    "Invisibility",
+    "Flight",
+    "Armor",
+    "Heavy Armor",
+    "Red Flag",
+    "Blue Flag",
+  ];
+  if (context.game.options.product === "missionpack")
+    items.push(
+      "Nailgun",
+      "Prox Launcher",
+      "Chaingun",
+      "Scout",
+      "Guard",
+      "Doubler",
+      "Ammo Regen",
+      "Neutral Flag",
+      "Red Obelisk",
+      "Blue Obelisk",
+      "Neutral Obelisk",
+    );
+  let nearest: string | null = null,
+    bestDistance = 999999;
   const goal = new BotGoalState();
   for (const name of items) {
     const distance = botNearestVisibleItem(context, state, name, goal);
-    if (distance < bestDistance) { bestDistance = distance; nearest = name; }
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      nearest = name;
+    }
   }
   if (nearest === null) return;
-  let red = 0, blue = 0;
-  const flags = context.gameType === GameType.GT_CTF || context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF;
+  let red = 0,
+    blue = 0;
+  const flags = context.gameType === GameType.GT_CTF || (context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF);
   const obelisks = context.game.options.product === "missionpack" && (context.gameType === GameType.GT_OBELISK || context.gameType === GameType.GT_HARVESTER);
   if (flags || obelisks) {
     const navigation = context.navigation;
     if (!navigation.ready) throw new Error("BotMatch_WhereAreYou requires loaded AAS routing");
     const goals = context.deathmatch;
-    red = navigation.areaTravelTimeToGoal({ area: state.areaNum, origin: state.origin,
-      goalArea: flags ? goals.ctfRedFlag.area : goals.redObelisk.area, travelFlags: TravelFlags.DEFAULT });
-    blue = navigation.areaTravelTimeToGoal({ area: state.areaNum, origin: state.origin,
-      goalArea: flags ? goals.ctfBlueFlag.area : goals.blueObelisk.area, travelFlags: TravelFlags.DEFAULT });
+    red = navigation.areaTravelTimeToGoal({
+      area: state.areaNum,
+      origin: state.origin,
+      goalArea: flags ? goals.ctfRedFlag.area : goals.redObelisk.area,
+      travelFlags: TravelFlags.DEFAULT,
+    });
+    blue = navigation.areaTravelTimeToGoal({
+      area: state.areaNum,
+      origin: state.origin,
+      goalArea: flags ? goals.ctfBlueFlag.area : goals.blueObelisk.area,
+      travelFlags: TravelFlags.DEFAULT,
+    });
   }
   if (red < f((red + blue) * f(0.4))) botInitialChat(context, state, "teamlocation", nearest, "red");
   else if (blue < f((red + blue) * f(0.4))) botInitialChat(context, state, "teamlocation", nearest, "blue");
@@ -665,7 +825,8 @@ export function botMatchWhereAreYou(context: GameAiContext, state: BotState, mat
 
 export function botMatchLeadTheWay(context: GameAiContext, state: BotState, match: ChatMatch): void {
   if (context.gameType < GameType.GT_TEAM || !botAddressedToBot(context, state, match)) return;
-  let netname: string | null = null, teammate: string | null = null;
+  let netname: string | null = null,
+    teammate: string | null = null;
   let client: number, other: boolean;
   if ((match.subtype & BotMatchSubtype.SOMEONE) !== 0) {
     teammate = variable(context, match, BotMatchVariable.TEAMMATE);
@@ -739,7 +900,11 @@ export function botMatchCTF(context: GameAiContext, state: BotState, match: Chat
       else state.blueFlagStatus = 0;
       state.flagStatusChanged = true;
     }
-  } else if (context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF && (match.subtype & BotMatchSubtype.ONEFLAG_CTF_GOTFLAG) !== 0) {
+  } else if (
+    context.game.options.product === "missionpack" &&
+    context.gameType === GameType.GT_1FCTF &&
+    (match.subtype & BotMatchSubtype.ONEFLAG_CTF_GOTFLAG) !== 0
+  ) {
     state.flagCarrier = clientFromName(context, variable(context, match, BotMatchVariable.NETNAME, 36));
   }
 }
@@ -759,11 +924,22 @@ export function botMatchMessage(context: GameAiContext, state: BotState, message
   const match = context.library.chat.findMatch(message, BotMatchContext.MISC | BotMatchContext.INITIALTEAMCHAT | BotMatchContext.CTF);
   if (match === null) return false;
   switch (match.type) {
-    case BotMessage.HELP: case BotMessage.ACCOMPANY: botMatchHelpAccompany(context, state, match); break;
-    case BotMessage.DEFENDKEYAREA: botMatchDefendKeyArea(context, state, match); break;
-    case BotMessage.CAMP: botMatchCamp(context, state, match); break;
-    case BotMessage.PATROL: botMatchPatrol(context, state, match); break;
-    case BotMessage.GETFLAG: botMatchGetFlag(context, state, match); break;
+    case BotMessage.HELP:
+    case BotMessage.ACCOMPANY:
+      botMatchHelpAccompany(context, state, match);
+      break;
+    case BotMessage.DEFENDKEYAREA:
+      botMatchDefendKeyArea(context, state, match);
+      break;
+    case BotMessage.CAMP:
+      botMatchCamp(context, state, match);
+      break;
+    case BotMessage.PATROL:
+      botMatchPatrol(context, state, match);
+      break;
+    case BotMessage.GETFLAG:
+      botMatchGetFlag(context, state, match);
+      break;
     case BotMessage.ATTACKENEMYBASE:
       if (context.game.options.product === "missionpack") botMatchAttackEnemyBase(context, state, match);
       else context.game.options.engine.print("unknown match type\n");
@@ -772,32 +948,82 @@ export function botMatchMessage(context: GameAiContext, state: BotState, message
       if (context.game.options.product === "missionpack") botMatchHarvest(context, state, match);
       else context.game.options.engine.print("unknown match type\n");
       break;
-    case BotMessage.RUSHBASE: botMatchRushBase(context, state, match); break;
-    case BotMessage.RETURNFLAG: botMatchReturnFlag(context, state, match); break;
-    case BotMessage.TASKPREFERENCE: botMatchTaskPreference(context, state, match); break;
-    case BotMessage.CTF: botMatchCTF(context, state, match); break;
-    case BotMessage.GETITEM: botMatchGetItem(context, state, match); break;
-    case BotMessage.JOINSUBTEAM: botMatchJoinSubteam(context, state, match); break;
-    case BotMessage.LEAVESUBTEAM: botMatchLeaveSubteam(context, state, match); break;
-    case BotMessage.WHICHTEAM: botMatchWhichTeam(context, state, match); break;
-    case BotMessage.CHECKPOINT: botMatchCheckPoint(context, state, match); break;
-    case BotMessage.CREATENEWFORMATION: case BotMessage.FORMATIONPOSITION:
-      context.library.actions.sayTeam(state.client, "the part of my brain to create formations has been damaged"); break;
-    case BotMessage.FORMATIONSPACE: botMatchFormationSpace(context, state, match); break;
-    case BotMessage.DOFORMATION: case BotMessage.WAIT: break;
-    case BotMessage.DISMISS: botMatchDismiss(context, state, match); break;
-    case BotMessage.STARTTEAMLEADERSHIP: botMatchStartTeamLeaderShip(context, state, match); break;
-    case BotMessage.STOPTEAMLEADERSHIP: botMatchStopTeamLeaderShip(context, state, match); break;
-    case BotMessage.WHOISTEAMLAEDER: botMatchWhoIsTeamLeader(context, state, match); break;
-    case BotMessage.WHATAREYOUDOING: botMatchWhatAreYouDoing(context, state, match); break;
-    case BotMessage.WHATISMYCOMMAND: botMatchWhatIsMyCommand(context, state, match); break;
-    case BotMessage.WHEREAREYOU: botMatchWhereAreYou(context, state, match); break;
-    case BotMessage.LEADTHEWAY: botMatchLeadTheWay(context, state, match); break;
-    case BotMessage.KILL: botMatchKill(context, state, match); break;
-    case BotMessage.ENTERGAME: botMatchEnterGame(context, state, match); break;
-    case BotMessage.NEWLEADER: botMatchNewLeader(context, state, match); break;
-    case BotMessage.SUICIDE: botMatchSuicide(context, state, match); break;
-    default: context.game.options.engine.print("unknown match type\n"); break;
+    case BotMessage.RUSHBASE:
+      botMatchRushBase(context, state, match);
+      break;
+    case BotMessage.RETURNFLAG:
+      botMatchReturnFlag(context, state, match);
+      break;
+    case BotMessage.TASKPREFERENCE:
+      botMatchTaskPreference(context, state, match);
+      break;
+    case BotMessage.CTF:
+      botMatchCTF(context, state, match);
+      break;
+    case BotMessage.GETITEM:
+      botMatchGetItem(context, state, match);
+      break;
+    case BotMessage.JOINSUBTEAM:
+      botMatchJoinSubteam(context, state, match);
+      break;
+    case BotMessage.LEAVESUBTEAM:
+      botMatchLeaveSubteam(context, state, match);
+      break;
+    case BotMessage.WHICHTEAM:
+      botMatchWhichTeam(context, state, match);
+      break;
+    case BotMessage.CHECKPOINT:
+      botMatchCheckPoint(context, state, match);
+      break;
+    case BotMessage.CREATENEWFORMATION:
+    case BotMessage.FORMATIONPOSITION:
+      context.library.actions.sayTeam(state.client, "the part of my brain to create formations has been damaged");
+      break;
+    case BotMessage.FORMATIONSPACE:
+      botMatchFormationSpace(context, state, match);
+      break;
+    case BotMessage.DOFORMATION:
+    case BotMessage.WAIT:
+      break;
+    case BotMessage.DISMISS:
+      botMatchDismiss(context, state, match);
+      break;
+    case BotMessage.STARTTEAMLEADERSHIP:
+      botMatchStartTeamLeaderShip(context, state, match);
+      break;
+    case BotMessage.STOPTEAMLEADERSHIP:
+      botMatchStopTeamLeaderShip(context, state, match);
+      break;
+    case BotMessage.WHOISTEAMLAEDER:
+      botMatchWhoIsTeamLeader(context, state, match);
+      break;
+    case BotMessage.WHATAREYOUDOING:
+      botMatchWhatAreYouDoing(context, state, match);
+      break;
+    case BotMessage.WHATISMYCOMMAND:
+      botMatchWhatIsMyCommand(context, state, match);
+      break;
+    case BotMessage.WHEREAREYOU:
+      botMatchWhereAreYou(context, state, match);
+      break;
+    case BotMessage.LEADTHEWAY:
+      botMatchLeadTheWay(context, state, match);
+      break;
+    case BotMessage.KILL:
+      botMatchKill(context, state, match);
+      break;
+    case BotMessage.ENTERGAME:
+      botMatchEnterGame(context, state, match);
+      break;
+    case BotMessage.NEWLEADER:
+      botMatchNewLeader(context, state, match);
+      break;
+    case BotMessage.SUICIDE:
+      botMatchSuicide(context, state, match);
+      break;
+    default:
+      context.game.options.engine.print("unknown match type\n");
+      break;
   }
   return true;
 }

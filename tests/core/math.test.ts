@@ -1,12 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import {
-  Float32VectorView, createMutableVectorMath, dot3, floorDivMod, identityMat4,
-  mutableVec3, normalize3, planeFromPoints, q1DonorMath, q2DonorMath,
-  transformVec4, vec3, vec4,
+  Float32VectorView,
+  createMutableVectorMath,
+  dot3,
+  floorDivMod,
+  identityMat4,
+  mutableVec3,
+  normalize3,
+  planeFromPoints,
+  q1DonorMath,
+  q2DonorMath,
+  transformVec4,
+  vec3,
+  vec4,
 } from "../../src/core/math.ts";
 import {
-  Q3Random, Q3_BINARY32_PROFILE, checkedFloatToInt, createNumericOperations,
-  float32ToBits, nativeAtof, nativeAtoi, qCrandom, qRandom, qvmFloatToInt,
+  Q3Random,
+  Q3_BINARY32_PROFILE,
+  checkedFloatToInt,
+  createNumericOperations,
+  float32ToBits,
+  nativeAtof,
+  nativeAtoi,
+  qCrandom,
+  qRandom,
+  qvmFloatToInt,
 } from "../../src/core/numeric.ts";
 import { qvmAngleMod, qvmAngleVectors } from "../../src/core/math.ts";
 import { inverseSqrt32, rendererSine } from "../../src/core/renderer-math.ts";
@@ -47,8 +66,7 @@ describe("source math", () => {
 
   test("Q3 geometry and QVM angle entry points are usable", () => {
     expect(transformVec4(identityMat4(), vec4(2, 3, 4, 1))).toEqual(vec4(2, 3, 4, 1));
-    expect(planeFromPoints(vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 0, 0)))
-      .toEqual({ normal: vec3(0, 0, 1), distance: 0 });
+    expect(planeFromPoints(vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 0, 0))).toEqual({ normal: vec3(0, 0, 1), distance: 0 });
     expect(qvmAngleMod(-90)).toBe(270);
     expect(qvmAngleVectors(vec3(0, 0, 0)).forward).toEqual(vec3(1, 0, -0));
     expect(rendererSine(1024)).toBe(0);

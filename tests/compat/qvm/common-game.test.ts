@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -11,51 +12,109 @@ function fixture() {
   const guest = new QvmMemory(new Uint8Array(4096));
   const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("common game ABI").session, origin: { kind: "local-console" } } });
   const call = (code: QvmGameImport, args: readonly number[] = [], commandArguments: readonly string[] | null = null): QvmHostCall => {
-    const words = new DataView(new ArrayBuffer((args.length + 1) * 4)); words.setInt32(0, code, true);
+    const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
+    words.setInt32(0, code, true);
     args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
-    return { kind: "engine", role: "qagame", code, guest, words, memory: guest.bytes, commandArguments,
-      invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
+    return {
+      kind: "engine",
+      role: "qagame",
+      code,
+      guest,
+      words,
+      memory: guest.bytes,
+      commandArguments,
+      invoke: () => {
+        throw new Error("Unexpected reentry");
+      },
+      invokeAsync: async () => {
+        throw new Error("Unexpected reentry");
+      },
+      cancelFunction: () => {
+        throw new Error("Unexpected cancellation");
+      },
+    };
   };
   return { guest, cvars, call };
 }
 
 test("qagame common traps use command scope, console completion and supplied realtime", async () => {
-  const f = fixture(), gate = Promise.withResolvers<void>(), commands: unknown[] = [];
-  const common: QvmCommonServices = { role: "qagame", cvars: f.cvars, print: text => { commands.push(text); },
-    milliseconds: () => 987, arguments: () => ["fallback"], commands: { executeNow: text => { commands.push(text); return gate.promise; },
-      insert: text => { commands.push(["insert", text]); }, append: text => { commands.push(["append", text]); } },
-    realTime: output => { output?.({ second: 1, minute: 2, hour: 3, day: 4, month: 5, year: 126, weekday: 6, yearDay: 42, isDst: 1 }); return 12345; } };
-  f.guest.writeString(128, "g_speed", 32); f.guest.writeString(160, "320", 32);
+  const f = fixture(),
+    gate = Promise.withResolvers<void>(),
+    commands: unknown[] = [];
+  const common: QvmCommonServices = {
+    role: "qagame",
+    cvars: f.cvars,
+    print: text => {
+      commands.push(text);
+    },
+    milliseconds: () => 987,
+    arguments: () => ["fallback"],
+    commands: {
+      executeNow: text => {
+        commands.push(text);
+        return gate.promise;
+      },
+      insert: text => {
+        commands.push(["insert", text]);
+      },
+      append: text => {
+        commands.push(["append", text]);
+      },
+    },
+    realTime: output => {
+      output?.({ second: 1, minute: 2, hour: 3, day: 4, month: 5, year: 126, weekday: 6, yearDay: 42, isDst: 1 });
+      return 12345;
+    },
+  };
+  f.guest.writeString(128, "g_speed", 32);
+  f.guest.writeString(160, "320", 32);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_REGISTER, [1024, 128, 160, 0]), common)).toBe(0);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_VARIABLE_INTEGER_VALUE, [128]), common)).toBe(320);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_MILLISECONDS), common)).toBe(987);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_ARGC, [], ["say", "hello"]), common)).toBe(2);
-  qvmCommonSyscall(f.call(QvmGameImport.G_ARGV, [1, 512, 32], ["say", "hello"]), common); expect(f.guest.readString(512)).toBe("hello");
+  qvmCommonSyscall(f.call(QvmGameImport.G_ARGV, [1, 512, 32], ["say", "hello"]), common);
+  expect(f.guest.readString(512)).toBe("hello");
   const pending = qvmCommonSyscall(f.call(QvmGameImport.G_SEND_CONSOLE_COMMAND, [0, 0]), common);
-  expect(pending).toBeInstanceOf(Promise); gate.resolve(); expect(await pending).toBe(0); expect(commands).toEqual([null]);
+  expect(pending).toBeInstanceOf(Promise);
+  gate.resolve();
+  expect(await pending).toBe(0);
+  expect(commands).toEqual([null]);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_REAL_TIME, [0]), common)).toBe(12345);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_REAL_TIME, [512]), common)).toBe(12345);
   expect(Array.from({ length: 9 }, (_, index) => f.guest.view(512, 36).getInt32(index * 4, true))).toEqual([1, 2, 3, 4, 5, 126, 6, 42, 1]);
 });
 
 test("candidate qagame NOW trap updates its VM cvar before the host call returns", () => {
-  const f = fixture(), liveCvars = new CvarRegistry({ dialect: "q3", context: f.cvars.context });
+  const f = fixture(),
+    liveCvars = new CvarRegistry({ dialect: "q3", context: f.cvars.context });
   liveCvars.register("marker", "9");
   const live = new CommandBuffer({ dialect: "q3", context: f.cvars.context, cvars: liveCvars });
   live.append("echo inherited\n");
   const prepared = live.prepareProgram({ dialect: "q3", context: f.cvars.context, cvars: f.cvars });
-  const common: QvmCommonServices = { role: "qagame", cvars: f.cvars, print: () => {}, milliseconds: () => 0,
-    arguments: () => [], realTime: () => 0, commands: {
-      executeNow: text => { prepared.commands.executeNow(text); },
-      append: text => prepared.commands.append(text), insert: text => prepared.commands.insert(text),
-    } };
-  f.guest.writeString(128, "marker", 32); f.guest.writeString(160, "1", 32);
+  const common: QvmCommonServices = {
+    role: "qagame",
+    cvars: f.cvars,
+    print: () => {},
+    milliseconds: () => 0,
+    arguments: () => [],
+    realTime: () => 0,
+    commands: {
+      executeNow: text => {
+        prepared.commands.executeNow(text);
+      },
+      append: text => prepared.commands.append(text),
+      insert: text => prepared.commands.insert(text),
+    },
+  };
+  f.guest.writeString(128, "marker", 32);
+  f.guest.writeString(160, "1", 32);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_REGISTER, [1024, 128, 160, 0]), common)).toBe(0);
   f.guest.writeString(256, "set marker 2", 64);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_SEND_CONSOLE_COMMAND, [0, 256]), common)).toBe(0);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_UPDATE, [1024]), common)).toBe(0);
   expect(f.guest.view(1024, 272).getInt32(12, true)).toBe(2);
-  expect(liveCvars.variableString("marker")).toBe("9"); expect(live.pendingText).toBe("echo inherited\n");
+  expect(liveCvars.variableString("marker")).toBe("9");
+  expect(live.pendingText).toBe("echo inherited\n");
   f.guest.writeString(256, "echo inserted\n", 64);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_SEND_CONSOLE_COMMAND, [1, 256]), common)).toBe(0);
   expect(prepared.commands.pendingText).toBe("echo inserted\n\necho inherited\n");

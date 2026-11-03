@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_misc.c missionpack personal portals.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -33,21 +34,27 @@ export type PersonalPortalHost = {
   readonly world: ServerWorld;
   readonly models: Pick<ConfigStringRegistry, "modelIndex">;
   readonly random: Pick<GameRandom, "random">;
-} & ({
-  readonly items: Pick<LaunchItemContext, "touchItem" | "droppedFlagThink" | "checkDroppedTeamItem">;
-  readonly mapTravel?: undefined;
-} | {
-  readonly mapTravel: {
-    dropCarriedFlag(player: GameEntity): void;
-    teleport(player: GameEntity, origin: Vec3, angles: Vec3): void;
-  };
-});
+} & (
+  | {
+      readonly items: Pick<LaunchItemContext, "touchItem" | "droppedFlagThink" | "checkDroppedTeamItem">;
+      readonly mapTravel?: undefined;
+    }
+  | {
+      readonly mapTravel: {
+        dropCarriedFlag(player: GameEntity): void;
+        teleport(player: GameEntity, origin: Vec3, angles: Vec3): void;
+      };
+    }
+);
 
 /** Owns level.portalSequence and the source/destination entity lifecycle. */
 export class PersonalPortalRuntime {
-  captureSaveState() { return { portalSequence: this.#portalSequence }; }
+  captureSaveState() {
+    return { portalSequence: this.#portalSequence };
+  }
   restoreSaveState(value: unknown): void {
-    const reader = new SaveReader(value, "q3.portals").field("portalSequence"), sequence = reader.integer(-2147483648);
+    const reader = new SaveReader(value, "q3.portals").field("portalSequence"),
+      sequence = reader.integer(-2147483648);
     if (sequence > 2147483647) reader.fail("portal sequence exceeds source integer range");
     this.#portalSequence = sequence;
   }
@@ -65,7 +72,9 @@ export class PersonalPortalRuntime {
     this.bindSaveCallbacks();
   }
 
-  private get time(): number { return this.host.combat.time; }
+  private get time(): number {
+    return this.host.combat.time;
+  }
 
   private owned(entity: GameEntity): void {
     if (this.host.combat.entities.get(entity.slot) !== entity) {
@@ -110,12 +119,20 @@ export class PersonalPortalRuntime {
   }
 
   private dropCarriedFlag(player: GameEntity): void {
-    if (this.host.mapTravel !== undefined) { this.host.mapTravel.dropCarriedFlag(player); return; }
+    if (this.host.mapTravel !== undefined) {
+      this.host.mapTravel.dropCarriedFlag(player);
+      return;
+    }
     const client = player.client;
     if (client === null) throw new Error("Portal touch requires a client entity");
-    const powerup = client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) !== 0 ? Powerup.PW_NEUTRALFLAG
-      : client.ps.powerups.get(Powerup.PW_REDFLAG) !== 0 ? Powerup.PW_REDFLAG
-        : client.ps.powerups.get(Powerup.PW_BLUEFLAG) !== 0 ? Powerup.PW_BLUEFLAG : Powerup.PW_NONE;
+    const powerup =
+      client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) !== 0
+        ? Powerup.PW_NEUTRALFLAG
+        : client.ps.powerups.get(Powerup.PW_REDFLAG) !== 0
+          ? Powerup.PW_REDFLAG
+          : client.ps.powerups.get(Powerup.PW_BLUEFLAG) !== 0
+            ? Powerup.PW_BLUEFLAG
+            : Powerup.PW_NONE;
     if (powerup === Powerup.PW_NONE) return;
     const item = findItemForPowerup("missionpack", powerup);
     if (item === null) throw new Error(`Portal carried flag ${powerup} is absent from the missionpack item table`);
@@ -201,9 +218,17 @@ export class PersonalPortalRuntime {
   }
 
   bindSaveCallbacks(): void {
-    this.host.combat.entities.callbacks.touch.intern("q3.base.game.personal-portal.portalEnable.touch", (self, other) => { if (other instanceof GameEntity) this.portalTouch(self, other); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.portalEnable.think", self => { this.freePortal(self); });
-    this.host.combat.entities.callbacks.die.intern("q3.base.game.personal-portal.dropPortalDestination.die", self => { this.portalDie(self); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.dropPortalSource.think", self => { this.portalEnable(self); });
+    this.host.combat.entities.callbacks.touch.intern("q3.base.game.personal-portal.portalEnable.touch", (self, other) => {
+      if (other instanceof GameEntity) this.portalTouch(self, other);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.portalEnable.think", self => {
+      this.freePortal(self);
+    });
+    this.host.combat.entities.callbacks.die.intern("q3.base.game.personal-portal.dropPortalDestination.die", self => {
+      this.portalDie(self);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.dropPortalSource.think", self => {
+      this.portalEnable(self);
+    });
   }
 }

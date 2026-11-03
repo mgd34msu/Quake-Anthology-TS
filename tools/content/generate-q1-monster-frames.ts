@@ -21,11 +21,18 @@ for (const target of FRAME_TABLE_TARGETS) {
       const entry = archive.findEntries("progs.dat").at(-1);
       if (entry === undefined) throw new Error(`${target.archive} has no progs.dat`);
       progs = await archive.readEntry(entry);
-    } finally { archive.close(); }
+    } finally {
+      archive.close();
+    }
     archives.set(target.archive, progs);
   }
-  const text = renderTarget(target, progs), path = resolve(repository, target.output);
-  if (flag === "--check") { if (readFileSync(path, "utf8") !== text) { stale++; console.log(`stale: ${target.output}`); } }
-  else writeFileSync(path, text);
+  const text = renderTarget(target, progs),
+    path = resolve(repository, target.output);
+  if (flag === "--check") {
+    if (readFileSync(path, "utf8") !== text) {
+      stale++;
+      console.log(`stale: ${target.output}`);
+    }
+  } else writeFileSync(path, text);
 }
 if (flag === "--check" && stale !== 0) process.exit(1);

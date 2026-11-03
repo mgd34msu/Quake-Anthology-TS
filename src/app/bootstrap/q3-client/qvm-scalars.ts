@@ -1,22 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { physicalMouseButton, quakeMouseButton } from "../../../input/mouse-buttons.ts";
-import { freemem } from 'node:os';
-import type { InputBindingTarget, InputAction, PhysicalInput } from '../../../contracts/ui.ts';
-import type { Vec3 } from '../../../contracts/math.ts';
-import type { LightingSample } from '../../../materials/q3-lighting.ts';
-import { QvmCgameImport, QvmUiImport } from '../../../compat/qvm/abi.ts';
-import type { QvmHostCall, QvmHostResult } from '../../../compat/qvm/syscalls.ts';
+import { freemem } from "node:os";
+import type { InputBindingTarget, InputAction, PhysicalInput } from "../../../contracts/ui.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
+import type { LightingSample } from "../../../materials/q3-lighting.ts";
+import { QvmCgameImport, QvmUiImport } from "../../../compat/qvm/abi.ts";
+import type { QvmHostCall, QvmHostResult } from "../../../compat/qvm/syscalls.ts";
 import { qvmDisplaySyscall } from "./qvm-display.ts";
-import { keynumToString } from '../../../input/keys.ts';
-import { KeyCode } from '../../../core/key-codes.ts';
-import { readSdlClipboard } from '../../../platform/sdl.ts';
-import type { NativeRenderer } from '../renderer.ts';
-import type { LocalInput } from '../input.ts';
-import type { ApplicationQ3Assets } from './assets.ts';
-import type { ApplicationQ3Services } from './services.ts';
-import type { BindingCommandSeat } from '../../../input/bindings.ts';
-import type { SeatInput } from '../../../input/seat.ts';
+import { keynumToString } from "../../../input/keys.ts";
+import { KeyCode } from "../../../core/key-codes.ts";
+import { readSdlClipboard } from "../../../platform/sdl.ts";
+import type { NativeRenderer } from "../renderer.ts";
+import type { LocalInput } from "../input.ts";
+import type { ApplicationQ3Assets } from "./assets.ts";
+import type { ApplicationQ3Services } from "./services.ts";
+import type { BindingCommandSeat } from "../../../input/bindings.ts";
+import type { SeatInput } from "../../../input/seat.ts";
 
-export interface QvmClientInput extends BindingCommandSeat, Pick<SeatInput, "isDown"> { clearStates(): void; }
+export interface QvmClientInput extends BindingCommandSeat, Pick<SeatInput, "isDown"> {
+  clearStates(): void;
+}
 
 export interface QvmApplicationScalarOptions {
   readonly renderer: Pick<NativeRenderer, "backend" | "driver" | "glConfig">;
@@ -27,81 +30,161 @@ export interface QvmApplicationScalarOptions {
   readonly services: ApplicationQ3Services;
   readonly now: () => number;
   readonly keyCatcher: { get(): number; set(value: number): void };
-  clientState(): { readonly phase: number; readonly connectPacketCount: number; readonly clientNumber: number; readonly serverName: string; readonly message: string };
+  clientState(): {
+    readonly phase: number;
+    readonly connectPacketCount: number;
+    readonly clientNumber: number;
+    readonly serverName: string;
+    readonly message: string;
+  };
   lightForPoint(point: Vec3): LightingSample;
   assertCurrent(): void;
 }
 const actionCommands: Readonly<Record<InputAction, string>> = {
-  attack: "+attack", jump: "+moveup", forward: "+forward", back: "+back", "move-left": "+moveleft", "move-right": "+moveright",
-  "move-up": "+moveup", "move-down": "+movedown", use: "+use", crouch: "+movedown", walk: "+speed", scores: "+scores",
-  "next-weapon": "weapnext", "previous-weapon": "weapprev", menu: "togglemenu",
+  attack: "+attack",
+  jump: "+moveup",
+  forward: "+forward",
+  back: "+back",
+  "move-left": "+moveleft",
+  "move-right": "+moveright",
+  "move-up": "+moveup",
+  "move-down": "+movedown",
+  use: "+use",
+  crouch: "+movedown",
+  walk: "+speed",
+  scores: "+scores",
+  "next-weapon": "weapnext",
+  "previous-weapon": "weapprev",
+  menu: "togglemenu",
 };
-function bindingCommand(target: InputBindingTarget): string { return target.kind === "command" ? target.text : actionCommands[target.action]; }
+function bindingCommand(target: InputBindingTarget): string {
+  return target.kind === "command" ? target.text : actionCommands[target.action];
+}
 function physical(key: number): PhysicalInput {
-  return key >= KeyCode.Mouse1 && key <= KeyCode.Mouse5 ? { kind: 'mouse-button', button: physicalMouseButton(key - KeyCode.Mouse1 + 1) } : { kind: 'key', code: key };
+  return key >= KeyCode.Mouse1 && key <= KeyCode.Mouse5
+    ? { kind: "mouse-button", button: physicalMouseButton(key - KeyCode.Mouse1 + 1) }
+    : { kind: "key", code: key };
 }
 export function qvmClientInputSyscall(call: QvmHostCall, input: QvmClientInput): number | null {
-  if (call.kind !== 'engine' || call.role !== 'ui' && call.role !== 'cgame') return null;
-  const { guest, words, code } = call, ui = call.role === 'ui';
+  if (call.kind !== "engine" || (call.role !== "ui" && call.role !== "cgame")) return null;
+  const { guest, words, code } = call,
+    ui = call.role === "ui";
   if (code === (ui ? QvmUiImport.UI_KEY_ISDOWN : QvmCgameImport.CG_KEY_ISDOWN)) return Number(input.isDown(physical(words.getInt32(4, true))));
-  if (ui) switch (code) {
-    case QvmUiImport.UI_KEY_GETBINDINGBUF: {
-      const binding = input.binding(physical(words.getInt32(4, true)));
-      guest.writeString(words.getInt32(8, true), binding === null ? '' : bindingCommand(binding), words.getInt32(12, true)); return 0;
+  if (ui)
+    switch (code) {
+      case QvmUiImport.UI_KEY_GETBINDINGBUF: {
+        const binding = input.binding(physical(words.getInt32(4, true)));
+        guest.writeString(words.getInt32(8, true), binding === null ? "" : bindingCommand(binding), words.getInt32(12, true));
+        return 0;
+      }
+      case QvmUiImport.UI_KEY_SETBINDING:
+        input.bind({ input: physical(words.getInt32(4, true)), target: { kind: "command", text: guest.readString(words.getInt32(8, true)) } });
+        return 0;
+      case QvmUiImport.UI_KEY_CLEARSTATES:
+        input.clearStates();
+        return 0;
     }
-    case QvmUiImport.UI_KEY_SETBINDING: input.bind({ input: physical(words.getInt32(4, true)), target: { kind: 'command', text: guest.readString(words.getInt32(8, true)) } }); return 0;
-    case QvmUiImport.UI_KEY_CLEARSTATES: input.clearStates(); return 0;
-  }
   else if (code === QvmCgameImport.CG_KEY_GETKEY) {
     const name = guest.readString(words.getInt32(4, true));
     const binding = input.bindings.find(binding => bindingCommand(binding.target).toLowerCase() === name.toLowerCase());
-    return binding?.input.kind === 'key' ? binding.input.code : binding?.input.kind === 'mouse-button' ? KeyCode.Mouse1 + quakeMouseButton(binding.input.button) - 1 : -1;
+    return binding?.input.kind === "key"
+      ? binding.input.code
+      : binding?.input.kind === "mouse-button"
+        ? KeyCode.Mouse1 + quakeMouseButton(binding.input.button) - 1
+        : -1;
   }
   return null;
 }
-function vector(view: DataView, offset = 0): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
-function writeVector(view: DataView, value: Vec3): void { view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true); }
+function vector(view: DataView, offset = 0): Vec3 {
+  return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
+}
+function writeVector(view: DataView, value: Vec3): void {
+  view.setFloat32(0, value.x, true);
+  view.setFloat32(4, value.y, true);
+  view.setFloat32(8, value.z, true);
+}
 
 export class QvmApplicationScalars {
   constructor(readonly options: QvmApplicationScalarOptions) {}
   dispatch(call: QvmHostCall, updateScreen: () => Promise<void>): QvmHostResult | null {
     this.options.assertCurrent();
-    if (call.kind !== 'engine' || call.role !== 'ui' && call.role !== 'cgame') return null;
-    const o = this.options, { guest, words } = call, ui = call.role === 'ui', code = call.code;
-    const display = qvmDisplaySyscall(call, o); if (display !== null) return display;
+    if (call.kind !== "engine" || (call.role !== "ui" && call.role !== "cgame")) return null;
+    const o = this.options,
+      { guest, words } = call,
+      ui = call.role === "ui",
+      code = call.code;
+    const display = qvmDisplaySyscall(call, o);
+    if (display !== null) return display;
     if (ui && code === QvmUiImport.UI_GETCLIENTSTATE) {
-      const pointer = words.getInt32(4, true), record = guest.view(pointer, 3084), state = o.clientState();
-      guest.span(pointer, 3084).fill(0); record.setInt32(0, state.phase, true); record.setInt32(4, state.connectPacketCount, true); record.setInt32(8, state.clientNumber, true);
-      guest.writeString(pointer + 12, state.serverName, 1024); guest.writeString(pointer + 2060, state.message, 1024); return 0;
+      const pointer = words.getInt32(4, true),
+        record = guest.view(pointer, 3084),
+        state = o.clientState();
+      guest.span(pointer, 3084).fill(0);
+      record.setInt32(0, state.phase, true);
+      record.setInt32(4, state.connectPacketCount, true);
+      record.setInt32(8, state.clientNumber, true);
+      guest.writeString(pointer + 12, state.serverName, 1024);
+      guest.writeString(pointer + 2060, state.message, 1024);
+      return 0;
     }
     if (code === (ui ? QvmUiImport.UI_MEMORY_REMAINING : QvmCgameImport.CG_MEMORY_REMAINING)) return Math.min(0x7fffffff, freemem());
-    if (code === (ui ? QvmUiImport.UI_UPDATESCREEN : QvmCgameImport.CG_UPDATESCREEN)) return updateScreen().then(() => { o.assertCurrent(); return 0; });
-    const input = qvmClientInputSyscall(call, o.input); if (input !== null) return input;
+    if (code === (ui ? QvmUiImport.UI_UPDATESCREEN : QvmCgameImport.CG_UPDATESCREEN))
+      return updateScreen().then(() => {
+        o.assertCurrent();
+        return 0;
+      });
+    const input = qvmClientInputSyscall(call, o.input);
+    if (input !== null) return input;
     if (code === (ui ? QvmUiImport.UI_KEY_GETCATCHER : QvmCgameImport.CG_KEY_GETCATCHER)) return o.keyCatcher.get();
-    if (code === (ui ? QvmUiImport.UI_KEY_SETCATCHER : QvmCgameImport.CG_KEY_SETCATCHER)) { o.keyCatcher.set(words.getInt32(4, true)); return 0; }
+    if (code === (ui ? QvmUiImport.UI_KEY_SETCATCHER : QvmCgameImport.CG_KEY_SETCATCHER)) {
+      o.keyCatcher.set(words.getInt32(4, true));
+      return 0;
+    }
     if (ui) {
       switch (code) {
-        case QvmUiImport.UI_KEY_KEYNUMTOSTRINGBUF: guest.writeString(words.getInt32(8, true), keynumToString(words.getInt32(4, true)), words.getInt32(12, true)); return 0;
-        case QvmUiImport.UI_KEY_GETOVERSTRIKEMODE: return Number(o.local.console.field.overstrike);
-        case QvmUiImport.UI_KEY_SETOVERSTRIKEMODE: o.local.console.field.overstrike = words.getInt32(4, true) !== 0; return 0;
+        case QvmUiImport.UI_KEY_KEYNUMTOSTRINGBUF:
+          guest.writeString(words.getInt32(8, true), keynumToString(words.getInt32(4, true)), words.getInt32(12, true));
+          return 0;
+        case QvmUiImport.UI_KEY_GETOVERSTRIKEMODE:
+          return Number(o.local.console.field.overstrike);
+        case QvmUiImport.UI_KEY_SETOVERSTRIKEMODE:
+          o.local.console.field.overstrike = words.getInt32(4, true) !== 0;
+          return 0;
         case QvmUiImport.UI_GETCLIPBOARDDATA: {
-          const bytes = readSdlClipboard(); guest.writeString(words.getInt32(4, true), bytes === null ? '' : new TextDecoder().decode(bytes), words.getInt32(8, true)); return 0;
+          const bytes = readSdlClipboard();
+          guest.writeString(words.getInt32(4, true), bytes === null ? "" : new TextDecoder().decode(bytes), words.getInt32(8, true));
+          return 0;
         }
       }
     }
     if (code === (ui ? QvmUiImport.UI_REAL_TIME : QvmCgameImport.CG_REAL_TIME)) {
-      const time = new Date(), pointer = words.getInt32(4, true);
+      const time = new Date(),
+        pointer = words.getInt32(4, true);
       if (pointer !== 0) {
-        const view = guest.view(pointer, 36), january = new Date(time.getFullYear(), 0, 1), july = new Date(time.getFullYear(), 6, 1);
-        const fields = [time.getSeconds(), time.getMinutes(), time.getHours(), time.getDate(), time.getMonth(), time.getFullYear() - 1900, time.getDay(),
-          Math.floor((Date.UTC(time.getFullYear(), time.getMonth(), time.getDate()) - Date.UTC(time.getFullYear(), 0, 1)) / 86400000), Number(time.getTimezoneOffset() < Math.max(january.getTimezoneOffset(), july.getTimezoneOffset()))];
+        const view = guest.view(pointer, 36),
+          january = new Date(time.getFullYear(), 0, 1),
+          july = new Date(time.getFullYear(), 6, 1);
+        const fields = [
+          time.getSeconds(),
+          time.getMinutes(),
+          time.getHours(),
+          time.getDate(),
+          time.getMonth(),
+          time.getFullYear() - 1900,
+          time.getDay(),
+          Math.floor((Date.UTC(time.getFullYear(), time.getMonth(), time.getDate()) - Date.UTC(time.getFullYear(), 0, 1)) / 86400000),
+          Number(time.getTimezoneOffset() < Math.max(january.getTimezoneOffset(), july.getTimezoneOffset())),
+        ];
         fields.forEach((value, index) => view.setInt32(index * 4, value, true));
       }
       return Math.trunc(time.getTime() / 1000) | 0;
     }
     if (!ui && code === QvmCgameImport.CG_R_LIGHTFORPOINT) {
       const light = o.lightForPoint(vector(guest.view(words.getInt32(4, true), 12)));
-      writeVector(guest.view(words.getInt32(8, true), 12), light.ambientLight); writeVector(guest.view(words.getInt32(12, true), 12), light.directedLight); writeVector(guest.view(words.getInt32(16, true), 12), light.lightDir); return 1;
+      writeVector(guest.view(words.getInt32(8, true), 12), light.ambientLight);
+      writeVector(guest.view(words.getInt32(12, true), 12), light.directedLight);
+      writeVector(guest.view(words.getInt32(16, true), 12), light.lightDir);
+      return 1;
     }
     return null;
   }

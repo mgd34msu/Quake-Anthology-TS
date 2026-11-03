@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -28,8 +29,13 @@ function lmctfCarrier(sim: Simulation, team: 1 | 2): ActorId | null {
 
 function teleport(sim: Simulation, actor: ActorId, origin: { x: number; y: number; z: number }): void {
   sim.diagnostics().movePlayer(actor, {
-    kind: "teleport", origin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
-    commandAngles: { x: 0, y: 0, z: 0 }, holdMilliseconds: 0, spectator: false,
+    kind: "teleport",
+    origin,
+    angles: { x: 0, y: 0, z: 0 },
+    velocity: { x: 0, y: 0, z: 0 },
+    commandAngles: { x: 0, y: 0, z: 0 },
+    holdMilliseconds: 0,
+    spectator: false,
   });
 }
 
@@ -50,23 +56,48 @@ function lmctfRuneHolder(sim: Simulation, kind: string): ActorId | null | undefi
 }
 
 test("LMCTF plays on a Q3 world through the runtime match layer", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
-    "--map", "q3dm1", "--rules", "lmctf",
-    "--movement", "q3", "--character", "q3", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--rules",
+    "lmctf",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   // LMCTF is its own PvP mode: no deathmatch selection is required with it.
   expect(parsed.options.mode).toBe("deathmatch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     expect(sim.recipe.match.provider).toBe("q2:lmctf");
     expect(sim.diagnostics().modes.lmctf).toBe(true);
     const stepUntil = async (condition: () => boolean, label: string): Promise<void> => {
-      for (let index = 0; index < 400; index++) { await app.step(50); if (condition()) return; }
+      for (let index = 0; index < 400; index++) {
+        await app.step(50);
+        if (condition()) return;
+      }
       throw new Error(`Timed out waiting for ${label}`);
     };
-    for (let index = 0; index < 200 && sim.players().length < 2; index++) { sim.botServices.tryAddBot(); await app.step(50); }
+    for (let index = 0; index < 200 && sim.players().length < 2; index++) {
+      sim.botServices.tryAddBot();
+      await app.step(50);
+    }
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing bot");
 
@@ -102,19 +133,40 @@ test("LMCTF plays on a Q3 world through the runtime match layer", async () => {
     const runeOrigin = lmctfRuneOrigin(sim, "damage");
     teleport(sim, local.actor, runeOrigin);
     await stepUntil(() => lmctfRuneHolder(sim, "damage") === local.actor, "local player to hold the damage rune");
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 test("LMCTF flags spawn and are taken on a Q1 world", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1",
-    "--map", "dm3", "--rules", "lmctf",
-    "--movement", "q1", "--character", "q1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q1-classic-id1",
+    "--map",
+    "dm3",
+    "--rules",
+    "lmctf",
+    "--movement",
+    "q1",
+    "--character",
+    "q1",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   expect(parsed.options.mode).toBe("deathmatch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     expect(sim.diagnostics().modes.lmctf).toBe(true);
     // The synthesized blue base is the farthest deathmatch spawn, which can
     // be the local player's own spawn: they may already be carrying it.
@@ -129,7 +181,9 @@ test("LMCTF flags spawn and are taken on a Q1 world", async () => {
     }
     expect(lmctfCarrier(sim, 2)?.equals(local.actor)).toBe(true);
     expect(sim.combat.read(local.actor)?.team).toBe("red");
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 type TestApplication = Awaited<ReturnType<typeof Application.open>>;
@@ -137,14 +191,22 @@ type TestApplication = Awaited<ReturnType<typeof Application.open>>;
 async function spendAmmo(app: TestApplication, seat: import("../../../src/contracts/identity.ts").SeatId, read: () => number, steps: number): Promise<number> {
   const before = read();
   app.input({ kind: "mouse-button", seat, button: 1, down: true, timeMilliseconds: performance.now() });
-  try { for (let index = 0; index < steps; index++) await app.step(50); }
-  finally { app.input({ kind: "mouse-button", seat, button: 1, down: false, timeMilliseconds: performance.now() }); }
+  try {
+    for (let index = 0; index < steps; index++) await app.step(50);
+  } finally {
+    app.input({ kind: "mouse-button", seat, button: 1, down: false, timeMilliseconds: performance.now() });
+  }
   return before - read();
 }
 
 async function takeRune(app: TestApplication, sim: Simulation, actor: ActorId, kind: string): Promise<void> {
   for (let index = 0; index < 400; index++) {
-    try { lmctfRuneOrigin(sim, kind); break; } catch { await app.step(50); }
+    try {
+      lmctfRuneOrigin(sim, kind);
+      break;
+    } catch {
+      await app.step(50);
+    }
   }
   teleport(sim, actor, lmctfRuneOrigin(sim, kind));
   for (let index = 0; index < 200 && lmctfRuneHolder(sim, kind) !== actor; index++) await app.step(50);
@@ -152,14 +214,33 @@ async function takeRune(app: TestApplication, sim: Simulation, actor: ActorId, k
 }
 
 test("LMCTF haste speeds Q3 weapons on a Q3 world", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
-    "--map", "q3dm1", "--rules", "lmctf",
-    "--movement", "q3", "--character", "q3", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--rules",
+    "lmctf",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     for (let index = 0; index < 20; index++) await app.step(50);
     const bullets = (): number => sim.inventory.count(local.actor, "q3:ammo/machinegun");
     const baseline = await spendAmmo(app, local.seat.id, bullets, 40);
@@ -168,18 +249,39 @@ test("LMCTF haste speeds Q3 weapons on a Q3 world", async () => {
     const hastened = await spendAmmo(app, local.seat.id, bullets, 40);
     // Q3's own haste response divides firing delay by 1.3 (~30% more shots).
     if (hastened <= baseline * 1.15) throw new Error(`Haste did not speed Q3 weapons: baseline ${baseline}, hastened ${hastened}`);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 test("LMCTF haste doubles Q1 weapon rate on a Q1 world", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1",
-    "--map", "dm3", "--rules", "lmctf",
-    "--movement", "q1", "--character", "q1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q1-classic-id1",
+    "--map",
+    "dm3",
+    "--rules",
+    "lmctf",
+    "--movement",
+    "q1",
+    "--character",
+    "q1",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     for (let index = 0; index < 20; index++) await app.step(50);
     const shells = (): number => sim.inventory.count(local.actor, "q1:ammo/shells");
     const baseline = await spendAmmo(app, local.seat.id, shells, 60);
@@ -188,20 +290,44 @@ test("LMCTF haste doubles Q1 weapon rate on a Q1 world", async () => {
     const hastened = await spendAmmo(app, local.seat.id, shells, 60);
     // Native LMCTF runs the weapon cycle twice per frame under haste.
     if (hastened < baseline * 1.5) throw new Error(`Haste did not speed Q1 weapons: baseline ${baseline}, hastened ${hastened}`);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 // SIM-004, SIM-005, SIM-007, SIM-019: runtime LMCTF state is not saved, is replaced on restart, and forgets departed players.
 test("LMCTF refuses saves, asks for world replacement on restart and drops departed players", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
-    "--map", "q3dm1", "--rules", "lmctf",
-    "--movement", "q3", "--character", "q3", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--rules",
+    "lmctf",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
-    for (let index = 0; index < 200 && sim.players().length < 2; index++) { sim.botServices.tryAddBot(); await app.step(50); }
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
+    for (let index = 0; index < 200 && sim.players().length < 2; index++) {
+      sim.botServices.tryAddBot();
+      await app.step(50);
+    }
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing bot");
     for (let index = 0; index < 20; index++) await app.step(50);
@@ -212,5 +338,7 @@ test("LMCTF refuses saves, asks for world replacement on restart and drops depar
     if (owned === null) throw new Error("Bot actor missing");
     sim.actors.release(owned);
     expect(sim.diagnostics().lmctf.team(bot) !== undefined).toBe(false);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);

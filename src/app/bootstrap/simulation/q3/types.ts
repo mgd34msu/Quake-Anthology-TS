@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { VictimArmorContext } from "../../../../world/gameplay/armor.ts";
 import type { MoverActorAccess } from "../../../../content/q3/base/game/mover.ts";
 import type { ExecutableRecipe, ProviderReference } from "../../../../contracts/content.ts";
@@ -55,10 +56,11 @@ export interface Q3SourceEngine {
   executeConsoleNow(text: string): void;
 }
 
-export type Q3SourceBots = ClientBotServices & (
-  | { readonly kind: "unavailable"; readonly reason: string }
-  | { readonly kind: "available"; testAas(origin: Vec3): void; interbreedEndMatch(): void; consoleCommand(argv: readonly string[]): void }
-);
+export type Q3SourceBots = ClientBotServices &
+  (
+    | { readonly kind: "unavailable"; readonly reason: string }
+    | { readonly kind: "available"; testAas(origin: Vec3): void; interbreedEndMatch(): void; consoleCommand(argv: readonly string[]): void }
+  );
 
 /** W73 supplies the existing owners; this provider contains source game records and phase functions. */
 export interface Q3SourceHost extends ClientMovementHost {
@@ -70,8 +72,12 @@ export interface Q3SourceHost extends ClientMovementHost {
   primaryAttackAllowed?(actor: ActorId): boolean;
   grantSelectedArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
   giveSelectedItem?(actor: ActorId, args: readonly string[]): boolean;
-  previewPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupPreview;
-  admitPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupAdmission;
+  previewPickup?(
+    item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor,
+  ): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupPreview;
+  admitPickup?(
+    item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor,
+  ): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupAdmission;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;

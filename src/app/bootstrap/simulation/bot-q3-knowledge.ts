@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { botKnowledgePersistence } from "./bot-knowledge-checkpoint.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -31,46 +32,76 @@ export function createQ3BotKnowledge(options: {
   const knowledge = createBotArsenalKnowledge({
     updateInventory(state) {
       const actor = actorForClient(state.client);
-      if (actor === null) actorsForHandle.delete(state.ws); else actorsForHandle.set(state.ws, actor);
+      if (actor === null) actorsForHandle.delete(state.ws);
+      else actorsForHandle.set(state.ws, actor);
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       const combat = actor === null ? null : options.simulation.combat.read(actor);
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
       state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points;
-      updateQ3BotWeaponInventory(state, weapon => {
-        const entry = q3WeaponItem(weapon);
-        return actor !== null && entry !== null && inventory.count(actor, entry.item) > 0;
-      }, weapon => {
-        const entry = q3WeaponItem(weapon);
-        return actor === null || entry?.ammo == null ? 0 : inventory.count(actor, entry.ammo);
-      });
+      updateQ3BotWeaponInventory(
+        state,
+        weapon => {
+          const entry = q3WeaponItem(weapon);
+          return actor !== null && entry !== null && inventory.count(actor, entry.item) > 0;
+        },
+        weapon => {
+          const entry = q3WeaponItem(weapon);
+          return actor === null || entry?.ammo == null ? 0 : inventory.count(actor, entry.ammo);
+        },
+      );
     },
     candidates(library, handle) {
       const actor = actorsForHandle.get(handle);
       return entries.flatMap(entry => {
         const info = library.weapons.getWeaponInfo(handle, entry.weapon);
-        return info === undefined || !info.valid ? [] : [{ info,
-          maximumRange: entry.weapon === Weapon.WP_GAUNTLET ? 60 : null,
-          melee: entry.weapon === Weapon.WP_GAUNTLET, personalityRole: entry.weapon,
-          supply: { weapon: entry.item, owned: actor !== undefined && inventory.count(actor, entry.item) > 0,
-            ammo: entry.ammo === null ? null : { item: entry.ammo, perShot: 1 } } }];
+        return info === undefined || !info.valid
+          ? []
+          : [
+              {
+                info,
+                maximumRange: entry.weapon === Weapon.WP_GAUNTLET ? 60 : null,
+                melee: entry.weapon === Weapon.WP_GAUNTLET,
+                personalityRole: entry.weapon,
+                supply: {
+                  weapon: entry.item,
+                  owned: actor !== undefined && inventory.count(actor, entry.item) > 0,
+                  ammo: entry.ammo === null ? null : { item: entry.ammo, perShot: 1 },
+                },
+              },
+            ];
       });
     },
   });
-  return { ...botKnowledgePersistence("q3", actorsForHandle), knowledge, uncoveredWeapons: [],
+  return {
+    ...botKnowledgePersistence("q3", actorsForHandle),
+    knowledge,
+    uncoveredWeapons: [],
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {
-      const actor = actorForClient(client), entry = entries.find(entry => entry.weapon === decisionSlot);
-      return actor !== null && entry !== undefined && inventory.count(actor, entry.item) > 0
-        && (entry.ammo === null || inventory.count(actor, entry.ammo) !== 0) ? entry.item : null;
+      const actor = actorForClient(client),
+        entry = entries.find(entry => entry.weapon === decisionSlot);
+      return actor !== null &&
+        entry !== undefined &&
+        inventory.count(actor, entry.item) > 0 &&
+        (entry.ammo === null || inventory.count(actor, entry.ammo) !== 0)
+        ? entry.item
+        : null;
     },
-    sourceWeapon(client: number): number { return sourceState(client)?.sourceWeapon ?? Weapon.WP_NONE; },
+    sourceWeapon(client: number): number {
+      return sourceState(client)?.sourceWeapon ?? Weapon.WP_NONE;
+    },
     sourceWeaponState(client: number): WeaponState {
       const phase = sourceState(client)?.state ?? WeaponState.WEAPON_READY;
       switch (phase) {
-        case WeaponState.WEAPON_READY: return WeaponState.WEAPON_READY;
-        case WeaponState.WEAPON_RAISING: return WeaponState.WEAPON_RAISING;
-        case WeaponState.WEAPON_DROPPING: return WeaponState.WEAPON_DROPPING;
-        case WeaponState.WEAPON_FIRING: return WeaponState.WEAPON_FIRING;
-        default: throw new Error("Selected Q3 source has an invalid weapon phase");
+        case WeaponState.WEAPON_READY:
+          return WeaponState.WEAPON_READY;
+        case WeaponState.WEAPON_RAISING:
+          return WeaponState.WEAPON_RAISING;
+        case WeaponState.WEAPON_DROPPING:
+          return WeaponState.WEAPON_DROPPING;
+        case WeaponState.WEAPON_FIRING:
+          return WeaponState.WEAPON_FIRING;
+        default:
+          throw new Error("Selected Q3 source has an invalid weapon phase");
       }
     },
   };

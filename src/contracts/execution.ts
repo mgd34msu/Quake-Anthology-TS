@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Execution boundaries follow Quake pr_comp.h/progs.h, Quake II game.h,
  * rerelease game.h, and Quake III qfiles.h/g_public.h. GPL-2.0-or-later. */
 import type { ContentDigest } from "./content.ts";
@@ -7,10 +8,11 @@ import type { NumericProfile, RandomState } from "./numeric.ts";
 export type QuakeCApiIdentity =
   | { readonly kind: "q1-netquake"; readonly programVersion: 6; readonly systemCrc: 5927 }
   | { readonly kind: "q1-quakeworld"; readonly programVersion: 6; readonly systemCrc: 54730 };
-export type Q2GameApiIdentity =
-  | { readonly kind: "q2-classic-game"; readonly version: 3 }
-  | { readonly kind: "q2-rerelease-game"; readonly version: 2023 };
-export interface Q2CgameApiIdentity { readonly kind: "q2-rerelease-cgame"; readonly version: 2022; }
+export type Q2GameApiIdentity = { readonly kind: "q2-classic-game"; readonly version: 3 } | { readonly kind: "q2-rerelease-game"; readonly version: 2023 };
+export interface Q2CgameApiIdentity {
+  readonly kind: "q2-rerelease-cgame";
+  readonly version: 2022;
+}
 export type Q3ApiIdentity =
   | { readonly kind: "q3-qagame"; readonly version: 7 | 8 }
   | { readonly kind: "q3-cgame"; readonly version: 3 | 4 }
@@ -30,7 +32,8 @@ export type NativeAbi =
   | { readonly kind: "linux-i386"; readonly image: "elf32"; readonly pointerBytes: 4; readonly call: "system-v-i386" }
   | { readonly kind: "linux-x86-64"; readonly image: "elf64"; readonly pointerBytes: 8; readonly call: "system-v-x86-64" };
 /** Win32 runtime imports and callbacks can use a convention distinct from GetGameAPI. */
-export type NativeCallAbi = NativeAbi
+export type NativeCallAbi =
+  | NativeAbi
   | (Omit<Extract<NativeAbi, { readonly kind: "windows-i386" }>, "call"> & { readonly call: "stdcall" | "thiscall" | "fastcall" });
 
 export interface QuakeCBuiltinBinding {
@@ -48,10 +51,22 @@ export interface QuakeCHostProfile {
   readonly extensions: readonly string[];
 }
 export type ExecutionProfile =
-  | { readonly kind: "typescript"; readonly module: ModuleIdentity; readonly api: GameApiIdentity; readonly implementation: ProviderId; readonly numeric: NumericProfile }
+  | {
+      readonly kind: "typescript";
+      readonly module: ModuleIdentity;
+      readonly api: GameApiIdentity;
+      readonly implementation: ProviderId;
+      readonly numeric: NumericProfile;
+    }
   | { readonly kind: "quakec"; readonly module: ModuleIdentity; readonly host: QuakeCHostProfile; readonly numeric: NumericProfile }
   | { readonly kind: "qvm"; readonly module: ModuleIdentity; readonly api: Q3ApiIdentity; readonly magic: 0x12721444; readonly numeric: NumericProfile }
-  | { readonly kind: "native-guest"; readonly module: ModuleIdentity; readonly api: Q2GameApiIdentity | Q2CgameApiIdentity | Q3ApiIdentity; readonly abi: NativeAbi; readonly numeric: NumericProfile };
+  | {
+      readonly kind: "native-guest";
+      readonly module: ModuleIdentity;
+      readonly api: Q2GameApiIdentity | Q2CgameApiIdentity | Q3ApiIdentity;
+      readonly abi: NativeAbi;
+      readonly numeric: NumericProfile;
+    };
 
 /** The owning memory validates addresses. Pointers intentionally have no actor generation. */
 export interface GuestAddress {
@@ -129,9 +144,7 @@ export interface GuestCallbackBinding {
   readonly parameters: readonly GuestValueLayout[];
   readonly result: GuestValueLayout | "void";
 }
-export type GuestValueLayout =
-  | { readonly kind: "scalar"; readonly storage: GuestStorage }
-  | { readonly kind: "aggregate"; readonly layout: GuestLayout };
+export type GuestValueLayout = { readonly kind: "scalar"; readonly storage: GuestStorage } | { readonly kind: "aggregate"; readonly layout: GuestLayout };
 /** Saved native offsets are rebound into the restored address space. */
 export type SavedGuestCallbackReference =
   | Exclude<GuestCallbackReference, { readonly kind: "native-guest" }>

@@ -30,23 +30,29 @@ export interface PreparedNavigation {
   readonly resource: ResolvedResourceReference | null;
 }
 
-export async function preloadNavigation(options: Pick<NavigationLoadOptions, "map" | "resources" | "mapBytes" | "navigationContent">): Promise<PreparedNavigation> {
+export async function preloadNavigation(
+  options: Pick<NavigationLoadOptions, "map" | "resources" | "mapBytes" | "navigationContent">,
+): Promise<PreparedNavigation> {
   const { map } = options;
   const relative = map.name.replace(/^maps\//i, "").replace(/\.bsp$/i, "");
-  if (relative.length === 0 || relative.split("/").some(part => part.length === 0 || part === "." || part === "..")) throw new RangeError("Invalid navigation map resource path");
-  const paths = map.format === "q3-bsp" ? [`maps/${relative}.aas`, `bots/navigation/${relative}.nav`]
-    : [`bots/navigation/${relative}.nav`, `maps/${relative}.aas`];
+  if (relative.length === 0 || relative.split("/").some(part => part.length === 0 || part === "." || part === ".."))
+    throw new RangeError("Invalid navigation map resource path");
+  const paths =
+    map.format === "q3-bsp" ? [`maps/${relative}.aas`, `bots/navigation/${relative}.nav`] : [`bots/navigation/${relative}.nav`, `maps/${relative}.aas`];
   for (const path of paths) {
     const opened = await options.resources.open(path);
     if (opened === null) continue;
-    if (path.endsWith(".nav") && options.navigationContent !== undefined && opened.reference.provenance.mount.identity.content !== options.navigationContent) continue;
+    if (path.endsWith(".nav") && options.navigationContent !== undefined && opened.reference.provenance.mount.identity.content !== options.navigationContent)
+      continue;
     // A supplied asset that does not describe this map (stale checksum,
     // foreign or corrupt file) counts as absent, like botlib refusing the
     // file: try the next candidate, then constructed navigation.
     try {
       const asset = path.endsWith(".aas") ? parseAas(opened.bytes, path, blockChecksum(options.mapBytes)) : parseKexNavigation(opened.bytes, path);
       return { map, asset, resource: opened.reference };
-    } catch { continue; }
+    } catch {
+      continue;
+    }
   }
   return { map, asset: null, resource: null };
 }

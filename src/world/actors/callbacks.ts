@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import type { ActorCallbacks, DeathReaction, PainReaction, TouchContact } from "../../contracts/world.ts";
@@ -22,10 +23,15 @@ export class ActorCallbackTable {
   private invocation: ActorInvocation | null = null;
 
   constructor(private readonly actors: SessionActorRegistry) {
-    actors.onRelease(actor => { this.bindings.delete(actor); return undefined; });
+    actors.onRelease(actor => {
+      this.bindings.delete(actor);
+      return undefined;
+    });
   }
 
-  get current(): ActorInvocation | null { return this.invocation; }
+  get current(): ActorInvocation | null {
+    return this.invocation;
+  }
 
   bind(actor: OwnedActor, callbacks: ActorCallbacks): undefined {
     this.actors.assertOwned(actor);
@@ -34,30 +40,46 @@ export class ActorCallbackTable {
   }
 
   think(self: OwnedActor, frame: FrameContext): boolean {
-    return this.operations.think.active ? this.compose(self, this.operations.think, [self, frame], args => this.thinkCanonical(...args)) : this.thinkCanonical(self, frame);
+    return this.operations.think.active
+      ? this.compose(self, this.operations.think, [self, frame], args => this.thinkCanonical(...args))
+      : this.thinkCanonical(self, frame);
   }
-  private thinkCanonical(self: OwnedActor, frame: FrameContext): boolean { return this.invoke(self, "think", callbacks => callbacks.think?.(self, frame)); }
+  private thinkCanonical(self: OwnedActor, frame: FrameContext): boolean {
+    return this.invoke(self, "think", callbacks => callbacks.think?.(self, frame));
+  }
   touch(contact: TouchContact): boolean {
-    return this.operations.touch.active ? this.compose(contact.self, this.operations.touch, [contact], args => this.touchCanonical(...args)) : this.touchCanonical(contact);
+    return this.operations.touch.active
+      ? this.compose(contact.self, this.operations.touch, [contact], args => this.touchCanonical(...args))
+      : this.touchCanonical(contact);
   }
   private touchCanonical(contact: TouchContact): boolean {
     if (!this.actors.isLive(contact.other) && contact.sourceTrace?.inverted !== true) return false;
     return this.invoke(contact.self, "touch", callbacks => callbacks.touch?.(contact));
   }
   use(self: OwnedActor, other: ActorId | null, activator: ActorId | null): boolean {
-    return this.operations.use.active ? this.compose(self, this.operations.use, [self, other, activator], args => this.useCanonical(...args)) : this.useCanonical(self, other, activator);
+    return this.operations.use.active
+      ? this.compose(self, this.operations.use, [self, other, activator], args => this.useCanonical(...args))
+      : this.useCanonical(self, other, activator);
   }
   private useCanonical(self: OwnedActor, other: ActorId | null, activator: ActorId | null): boolean {
     return this.invoke(self, "use", callbacks => callbacks.use?.(self, other, activator));
   }
   pain(reaction: PainReaction): boolean {
-    return this.operations.pain.active ? this.compose(reaction.self, this.operations.pain, [reaction], args => this.painCanonical(...args)) : this.painCanonical(reaction);
+    return this.operations.pain.active
+      ? this.compose(reaction.self, this.operations.pain, [reaction], args => this.painCanonical(...args))
+      : this.painCanonical(reaction);
   }
-  private painCanonical(reaction: PainReaction): boolean { return this.invoke(reaction.self, "pain", callbacks => callbacks.pain?.(reaction)); }
+  private painCanonical(reaction: PainReaction): boolean {
+    return this.invoke(reaction.self, "pain", callbacks => callbacks.pain?.(reaction));
+  }
   die(reaction: DeathReaction): boolean {
-    return this.operations.die.active ? this.compose(reaction.self, this.operations.die, [reaction], args => this.dieCanonical(...args)) : this.dieCanonical(reaction);
+    return this.operations.die.active
+      ? this.compose(reaction.self, this.operations.die, [reaction], args => this.dieCanonical(...args))
+      : this.dieCanonical(reaction);
   }
-  private dieCanonical(reaction: DeathReaction): boolean { return this.invoke(reaction.self, "die", callbacks => callbacks.die?.(reaction)); }
+  private dieCanonical(reaction: DeathReaction): boolean {
+    return this.invoke(reaction.self, "die", callbacks => callbacks.die?.(reaction));
+  }
 
   sourcePain(reaction: PainReaction, execute: (reaction: PainReaction) => undefined): boolean {
     const canonical = (args: readonly [PainReaction]) => this.invokeSource(args[0].self, "pain", () => execute(args[0]));
@@ -68,7 +90,12 @@ export class ActorCallbackTable {
     return this.operations.die.active ? this.compose(reaction.self, this.operations.die, [reaction], canonical) : canonical([reaction]);
   }
 
-  sourceUse(self: OwnedActor, other: ActorId | null, activator: ActorId | null, execute: (self: OwnedActor, other: ActorId | null, activator: ActorId | null) => undefined): boolean {
+  sourceUse(
+    self: OwnedActor,
+    other: ActorId | null,
+    activator: ActorId | null,
+    execute: (self: OwnedActor, other: ActorId | null, activator: ActorId | null) => undefined,
+  ): boolean {
     const canonical = (args: readonly [OwnedActor, ActorId | null, ActorId | null]) => this.invokeSource(args[0], "use", () => execute(...args));
     return this.operations.use.active ? this.compose(self, this.operations.use, [self, other, activator], canonical) : canonical([self, other, activator]);
   }
@@ -86,7 +113,11 @@ export class ActorCallbackTable {
     this.actors.assertOwned(self);
     const parent = this.invocation;
     this.invocation = Object.freeze({ self, kind, parent });
-    try { execute(); } finally { this.invocation = parent; }
+    try {
+      execute();
+    } finally {
+      this.invocation = parent;
+    }
     return true;
   }
 
@@ -103,7 +134,11 @@ export class ActorCallbackTable {
     if (callbacks === undefined || callbacks[kind] === null) return false;
     const parent = this.invocation;
     this.invocation = Object.freeze({ self, kind, parent });
-    try { call(callbacks); } finally { this.invocation = parent; }
+    try {
+      call(callbacks);
+    } finally {
+      this.invocation = parent;
+    }
     return true;
   }
 }

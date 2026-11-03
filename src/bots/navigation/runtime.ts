@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Directed source reachabilities, NAV conditional-node checks, and movement-backed route admission.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { NavigationEstimates } from "./estimates.ts";
@@ -10,19 +11,38 @@ import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { aasBBoxAreas, aasPointArea, aasTraceAreas } from "./aas.ts";
 import { aasAreaTravelFlags, aasTravelFlag, KEX_TRAVEL_ELEVATOR, navigationEdgeTravelFlag } from "./graph.ts";
 import { clear, contents, distance, nodeProfile, trace, translated } from "./helpers.ts";
-import type { NavigationEdge, NavigationGraph, NavigationNode, NavigationRoute, NavigationRouteResult, NavigationWorld, TraversalAdmission, TraversalRequest } from "./types.ts";
+import type {
+  NavigationEdge,
+  NavigationGraph,
+  NavigationNode,
+  NavigationRoute,
+  NavigationRouteResult,
+  NavigationWorld,
+  TraversalAdmission,
+  TraversalRequest,
+} from "./types.ts";
 
 export interface NavigationRouteQuery {
-  readonly start: Vec3; readonly goal: Vec3;
-  readonly startNode?: number; readonly goalNode?: number;
+  readonly start: Vec3;
+  readonly goal: Vec3;
+  readonly startNode?: number;
+  readonly goalNode?: number;
   readonly travelFlags?: number;
   readonly disabledAreas?: ReadonlySet<number>;
   readonly edgeFilter?: (edge: NavigationEdge) => boolean;
   readonly maximumSearches?: number;
 }
 type NavigationEligibilityQuery = Pick<NavigationRouteQuery, "travelFlags" | "disabledAreas" | "edgeFilter">;
-interface RouteTraversal { prediction: NavigationRoutePrediction; cursor: Vec3; seconds: number; readonly points: Vec3[]; }
-interface QueueItem { readonly node: number; readonly cost: number; }
+interface RouteTraversal {
+  prediction: NavigationRoutePrediction;
+  cursor: Vec3;
+  seconds: number;
+  readonly points: Vec3[];
+}
+interface QueueItem {
+  readonly node: number;
+  readonly cost: number;
+}
 
 export interface NavigationRuntimeCheckpoint {
   readonly version: 1;
@@ -46,37 +66,58 @@ export class NavigationRuntime {
   #worldRevision: number;
   #generation = 0;
   #estimateScope: string | null = null;
-  constructor(readonly graph: NavigationGraph, readonly world: NavigationWorld) {
+  constructor(
+    readonly graph: NavigationGraph,
+    readonly world: NavigationWorld,
+  ) {
     this.#worldRevision = world.revision;
     for (const node of graph.nodes) {
       if (this.#nodes.has(node.id)) throw new RangeError(`Duplicate navigation node ${node.id}`);
-      this.#nodes.set(node.id, node); this.#outgoing.set(node.id, []);
+      this.#nodes.set(node.id, node);
+      this.#outgoing.set(node.id, []);
     }
     for (const edge of graph.edges) {
       const list = this.#outgoing.get(edge.from);
       if (list === undefined || !this.#nodes.has(edge.to) || this.#edges.has(edge.id)) throw new RangeError("Invalid navigation edge identity/reference");
       if (!Number.isFinite(edge.travelSeconds) || edge.travelSeconds < 0) throw new RangeError("Invalid navigation edge cost");
-      this.#edges.set(edge.id, edge); list.push(edge);
+      this.#edges.set(edge.id, edge);
+      list.push(edge);
       const model = edge.entity?.model;
       if (edge.mode === "mover" && model !== undefined && model !== null && !this.#moverEdges.has(model)) this.#moverEdges.set(model, edge);
     }
-    this.#estimates = new NavigationEstimates(graph, (edge, flags) => this.#staticEdgeAllowed(edge, flags === undefined ? undefined : { travelFlags: flags }),
-      () => this.#scopeKey());
+    this.#estimates = new NavigationEstimates(
+      graph,
+      (edge, flags) => this.#staticEdgeAllowed(edge, flags === undefined ? undefined : { travelFlags: flags }),
+      () => this.#scopeKey(),
+    );
   }
   /** Everything #staticEdgeAllowed reads that differs between runtimes of one graph, so equal keys give equal estimates. */
   #scopeKey(): string {
     if (this.#estimateScope !== null) return this.#estimateScope;
-    const profile = this.graph.profile, byId = (a: number, b: number): number => a - b;
-    return this.#estimateScope = [[...profile.capabilities].sort().join(","), profile.team ?? "-", profile.monster ? 1 : 0, profile.maximumDrop,
+    const profile = this.graph.profile,
+      byId = (a: number, b: number): number => a - b;
+    return (this.#estimateScope = [
+      [...profile.capabilities].sort().join(","),
+      profile.team ?? "-",
+      profile.monster ? 1 : 0,
+      profile.maximumDrop,
       [...this.#blocked.keys()].sort(byId).join(","),
-      [...this.#enabled].sort((a, b) => a[0] - b[0]).map(([id, enabled]) => `${id}${enabled ? "+" : "-"}`).join(",")].join("|");
+      [...this.#enabled]
+        .sort((a, b) => a[0] - b[0])
+        .map(([id, enabled]) => `${id}${enabled ? "+" : "-"}`)
+        .join(","),
+    ].join("|"));
   }
   checkpoint(): NavigationRuntimeCheckpoint {
-    return { version: 1, map: { ...this.graph.map },
+    return {
+      version: 1,
+      map: { ...this.graph.map },
       enabled: Array.from(this.#enabled, ([id, enabled]) => ({ id, enabled })),
       blocked: Array.from(this.#blocked, ([id, reason]) => ({ id, reason })),
       admissionSeconds: Array.from(this.#admissionSeconds, ([id, seconds]) => ({ id, seconds })),
-      worldRevision: this.#worldRevision, generation: this.#generation };
+      worldRevision: this.#worldRevision,
+      generation: this.#generation,
+    };
   }
   restoreCheckpoint(value: unknown): void {
     const reader = new SaveReader(value, "navigation");
@@ -102,21 +143,45 @@ export class NavigationRuntime {
       if (seconds < 0) entry.fail("negative admission duration");
       return seconds;
     });
-    const revision = reader.field("worldRevision").finite(), generation = reader.field("generation").integer(0);
-    this.#enabled.clear(); for (const [id, state] of enabled) this.#enabled.set(id, state);
-    this.#blocked.clear(); for (const [id, reason] of blocked) this.#blocked.set(id, reason);
-    this.#admissionSeconds.clear(); for (const [id, seconds] of admissions) this.#admissionSeconds.set(id, seconds);
-    this.#worldRevision = revision; this.#generation = generation; this.#estimateScope = null; this.#estimates.invalidate();
+    const revision = reader.field("worldRevision").finite(),
+      generation = reader.field("generation").integer(0);
+    this.#enabled.clear();
+    for (const [id, state] of enabled) this.#enabled.set(id, state);
+    this.#blocked.clear();
+    for (const [id, reason] of blocked) this.#blocked.set(id, reason);
+    this.#admissionSeconds.clear();
+    for (const [id, seconds] of admissions) this.#admissionSeconds.set(id, seconds);
+    this.#worldRevision = revision;
+    this.#generation = generation;
+    this.#estimateScope = null;
+    this.#estimates.invalidate();
   }
-  get generation(): number { this.#refresh(); return this.#generation; }
-  node(id: number): NavigationNode | null { return this.#nodes.get(id) ?? null; }
-  edge(id: number): NavigationEdge | null { return this.#edges.get(id) ?? null; }
+  get generation(): number {
+    this.#refresh();
+    return this.#generation;
+  }
+  node(id: number): NavigationNode | null {
+    return this.#nodes.get(id) ?? null;
+  }
+  edge(id: number): NavigationEdge | null {
+    return this.#edges.get(id) ?? null;
+  }
   /** The first mover edge bound to a brush model, in graph order. */
-  moverEdge(model: number): NavigationEdge | null { return this.#moverEdges.get(model) ?? null; }
-  outgoing(id: number): readonly NavigationEdge[] { return this.#outgoing.get(id) ?? []; }
+  moverEdge(model: number): NavigationEdge | null {
+    return this.#moverEdges.get(model) ?? null;
+  }
+  outgoing(id: number): readonly NavigationEdge[] {
+    return this.#outgoing.get(id) ?? [];
+  }
   boardingElevator(node: number) {
     for (const edge of this.outgoing(node)) {
-      if ((edge.source.kind !== "nav3" && edge.source.kind !== "nav2") || edge.mode !== "mover" || edge.sourceTravelType !== KEX_TRAVEL_ELEVATOR || edge.entity === null) continue;
+      if (
+        (edge.source.kind !== "nav3" && edge.source.kind !== "nav2") ||
+        edge.mode !== "mover" ||
+        edge.sourceTravelType !== KEX_TRAVEL_ELEVATOR ||
+        edge.entity === null
+      )
+        continue;
       const state = this.world.entity(edge.entity);
       if (state?.elevator !== undefined && state.enabled && !state.locked) return { edge, actor: state.actor, platform: state.elevator };
     }
@@ -132,14 +197,18 @@ export class NavigationRuntime {
     }
     return null;
   }
-  trainStep(edge: NavigationEdge, origin: Vec3, ground: ActorId | null): { readonly kind: "move"; readonly stage: "approach" | "exit"; readonly target: Vec3 }
-    | { readonly kind: "wait" | "ride" | "unavailable" } | null {
+  trainStep(
+    edge: NavigationEdge,
+    origin: Vec3,
+    ground: ActorId | null,
+  ): { readonly kind: "move"; readonly stage: "approach" | "exit"; readonly target: Vec3 } | { readonly kind: "wait" | "ride" | "unavailable" } | null {
     if (edge.mode !== "mover" || edge.entity === null) return null;
     const state = this.world.entity(edge.entity);
     if (state?.train === undefined) return null;
-    const train = state.train, ride = navigationTrainRide(state, edge, this.graph.profile);
+    const train = state.train,
+      ride = navigationTrainRide(state, edge, this.graph.profile);
     const aboard = ground?.equals(state.actor) === true;
-    if (ride === null || !this.#staticEdgeAllowed(edge) || !aboard && !train.running) return { kind: "unavailable" };
+    if (ride === null || !this.#staticEdgeAllowed(edge) || (!aboard && !train.running)) return { kind: "unavailable" };
     if (this.world.hazard(translated(origin, this.graph.profile.shape.bounds))) return { kind: "unavailable" };
     if (aboard && !train.running && distance(train.origin, ride.arrival.origin) > this.graph.profile.maximumStep) return { kind: "unavailable" };
     if (aboard && distance(train.origin, ride.arrival.origin) > this.graph.profile.maximumStep) return { kind: "ride" };
@@ -155,17 +224,35 @@ export class NavigationRuntime {
     if (node === null) throw new RangeError(`Unknown navigation area ${id}`);
     const previous = this.#enabled.get(id) ?? !(node.source.kind === "aas" && (node.flags & 8) !== 0);
     if (previous === enabled) return previous;
-    this.#enabled.set(id, enabled); this.#invalidate(); this.#estimateScope = null; this.#estimates.invalidate(); return previous;
+    this.#enabled.set(id, enabled);
+    this.#invalidate();
+    this.#estimateScope = null;
+    this.#estimates.invalidate();
+    return previous;
   }
   blockEdge(id: number, reason: string | null): void {
     if (!this.#edges.has(id)) throw new RangeError(`Unknown navigation edge ${id}`);
-    if (reason === null) this.#blocked.delete(id); else this.#blocked.set(id, reason);
-    this.#invalidate(); this.#estimateScope = null; this.#estimates.invalidate();
+    if (reason === null) this.#blocked.delete(id);
+    else this.#blocked.set(id, reason);
+    this.#invalidate();
+    this.#estimateScope = null;
+    this.#estimates.invalidate();
   }
-  #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); }
-  #refresh(): void { if (this.#worldRevision !== this.world.revision) { this.#worldRevision = this.world.revision; this.#invalidate(); } }
+  #invalidate(): void {
+    this.#generation++;
+    this.#admissionSeconds.clear();
+  }
+  #refresh(): void {
+    if (this.#worldRevision !== this.world.revision) {
+      this.#worldRevision = this.world.revision;
+      this.#invalidate();
+    }
+  }
   areaAt(point: Vec3): number | null {
-    if (this.graph.asset?.kind === "aas") { const area = aasPointArea(this.graph.asset, point); return this.#nodes.has(area) ? area : null; }
+    if (this.graph.asset?.kind === "aas") {
+      const area = aasPointArea(this.graph.asset, point);
+      return this.#nodes.has(area) ? area : null;
+    }
     return this.nearest(point)?.id ?? null;
   }
   nearest(point: Vec3, radius = 512): NavigationNode | null {
@@ -184,7 +271,8 @@ export class NavigationRuntime {
     }
     candidates.sort((a, b) => a.d - b.d);
     const startSolid = new Map<object, boolean>();
-    let selected: NavigationNode | null = null, best = radius;
+    let selected: NavigationNode | null = null,
+      best = radius;
     for (const { node, d, profile } of candidates) {
       if (d > best) break;
       let solid = startSolid.get(profile.shape);
@@ -194,32 +282,57 @@ export class NavigationRuntime {
         startSolid.set(profile.shape, solid);
       }
       if (solid) continue;
-      if (this.#nodeAllowed(node) && clear(this.world, profile, point, node.origin)) { best = d; selected = node; }
+      if (this.#nodeAllowed(node) && clear(this.world, profile, point, node.origin)) {
+        best = d;
+        selected = node;
+      }
     }
     return selected;
   }
   bboxAreas(bounds: Bounds): readonly number[] {
     if (this.graph.asset?.kind === "aas") return aasBBoxAreas(this.graph.asset, bounds);
-    return this.graph.nodes.filter(node => node.bounds.min.x <= bounds.max.x && node.bounds.max.x >= bounds.min.x
-      && node.bounds.min.y <= bounds.max.y && node.bounds.max.y >= bounds.min.y && node.bounds.min.z <= bounds.max.z && node.bounds.max.z >= bounds.min.z).map(node => node.id);
+    return this.graph.nodes
+      .filter(
+        node =>
+          node.bounds.min.x <= bounds.max.x &&
+          node.bounds.max.x >= bounds.min.x &&
+          node.bounds.min.y <= bounds.max.y &&
+          node.bounds.max.y >= bounds.min.y &&
+          node.bounds.min.z <= bounds.max.z &&
+          node.bounds.max.z >= bounds.min.z,
+      )
+      .map(node => node.id);
   }
   traceAreas(start: Vec3, end: Vec3, maximum = this.graph.nodes.length): readonly { readonly area: number; readonly point: Vec3 }[] {
     if (this.graph.asset?.kind === "aas") return aasTraceAreas(this.graph.asset, start, end, maximum);
     if (!Number.isInteger(maximum) || maximum < 0) throw new RangeError("Invalid navigation area limit");
     const crossed: { area: number; point: Vec3; fraction: number }[] = [];
     for (const node of this.graph.nodes) {
-      let enter = 0, leave = 1;
+      let enter = 0,
+        leave = 1;
       const axes: readonly ("x" | "y" | "z")[] = ["x", "y", "z"];
       for (const axis of axes) {
         const delta = end[axis] - start[axis];
-        if (delta === 0) { if (start[axis] < node.bounds.min[axis] || start[axis] > node.bounds.max[axis]) leave = -1; continue; }
-        const first = (node.bounds.min[axis] - start[axis]) / delta, second = (node.bounds.max[axis] - start[axis]) / delta;
-        enter = Math.max(enter, Math.min(first, second)); leave = Math.min(leave, Math.max(first, second));
+        if (delta === 0) {
+          if (start[axis] < node.bounds.min[axis] || start[axis] > node.bounds.max[axis]) leave = -1;
+          continue;
+        }
+        const first = (node.bounds.min[axis] - start[axis]) / delta,
+          second = (node.bounds.max[axis] - start[axis]) / delta;
+        enter = Math.max(enter, Math.min(first, second));
+        leave = Math.min(leave, Math.max(first, second));
       }
-      if (enter <= leave) crossed.push({ area: node.id, fraction: enter,
-        point: { x: start.x + (end.x - start.x) * enter, y: start.y + (end.y - start.y) * enter, z: start.z + (end.z - start.z) * enter } });
+      if (enter <= leave)
+        crossed.push({
+          area: node.id,
+          fraction: enter,
+          point: { x: start.x + (end.x - start.x) * enter, y: start.y + (end.y - start.y) * enter, z: start.z + (end.z - start.z) * enter },
+        });
     }
-    return crossed.sort((a, b) => a.fraction - b.fraction).slice(0, maximum).map(({ area, point }) => ({ area, point }));
+    return crossed
+      .sort((a, b) => a.fraction - b.fraction)
+      .slice(0, maximum)
+      .map(({ area, point }) => ({ area, point }));
   }
   #staticNodeAllowed(node: NavigationNode, query?: NavigationEligibilityQuery): boolean {
     const profile = nodeProfile(this.graph.profile, node);
@@ -227,7 +340,7 @@ export class NavigationRuntime {
     if (this.#enabled.get(node.id) === false || query?.disabledAreas?.has(node.id)) return false;
     if (node.source.kind === "aas" && (node.flags & 8) !== 0 && this.#enabled.get(node.id) !== true) return false;
     if (node.source.kind === "nav3") {
-      if ((node.flags & 8192) !== 0 || profile.monster && (node.flags & 256) !== 0) return false;
+      if ((node.flags & 8192) !== 0 || (profile.monster && (node.flags & 256) !== 0)) return false;
       if ((node.flags & 512) !== 0 && !profile.capabilities.has("crouch")) return false;
     }
     return true;
@@ -244,14 +357,20 @@ export class NavigationRuntime {
     const profile = nodeProfile(this.graph.profile, node);
     if (profile === null || !this.#staticNodeAllowed(node, query)) return false;
     const medium = contents(this.world, profile, node.origin);
-    if ((medium & 6) !== 0 || (medium & 1) !== 0 && !profile.capabilities.has("swim")) return false;
+    if ((medium & 6) !== 0 || ((medium & 1) !== 0 && !profile.capabilities.has("swim"))) return false;
     if (this.world.hazard(translated(node.origin, profile.shape.bounds))) return false;
     if (!awaitElevator && !clear(this.world, profile, node.origin, node.origin)) return false;
     if (node.source.kind === "nav3" && (node.flags & 2048) !== 0 && (medium & 7) === 0) return false;
     if (node.source.kind === "nav3" && (node.flags & 64) !== 0) {
-      const result = this.world.scene.trace({ start: node.origin, end: { ...node.origin, z: node.origin.z - 96 },
+      const result = this.world.scene.trace({
+        start: node.origin,
+        end: { ...node.origin, z: node.origin.z - 96 },
         shape: { kind: "box", bounds: { min: { ...profile.shape.bounds.min, z: 0 }, max: { ...profile.shape.bounds.max, z: 0 } } },
-        target: { kind: "world" }, policy: profile.policy, numeric: profile.movement.numeric, passActor: this.world.passActor });
+        target: { kind: "world" },
+        policy: profile.policy,
+        numeric: profile.movement.numeric,
+        passActor: this.world.passActor,
+      });
       if (result.fraction === 1 && !awaitElevator) return false;
     }
     return true;
@@ -276,11 +395,12 @@ export class NavigationRuntime {
     if (edge.mode === "drop" && edge.source.kind !== "aas" && edge.start.z - edge.end.z > profile.maximumDrop) return false;
     if (edge.source.kind === "aas") {
       if (query?.travelFlags !== undefined && (aasTravelFlag(edge.sourceTravelType) & query.travelFlags) === 0) return false;
-      if (profile.team === "red" && (edge.sourceTravelType & 0x01000000) !== 0 || profile.team === "blue" && (edge.sourceTravelType & 0x02000000) !== 0) return false;
+      if ((profile.team === "red" && (edge.sourceTravelType & 0x01000000) !== 0) || (profile.team === "blue" && (edge.sourceTravelType & 0x02000000) !== 0))
+        return false;
       const settings = this.graph.asset?.kind === "aas" ? this.graph.asset.settings[edge.to] : undefined;
       if (settings !== undefined) {
         if (query?.travelFlags !== undefined && (aasAreaTravelFlags(settings) & ~query.travelFlags) !== 0) return false;
-        if (profile.team === "red" && (settings.contents & 2048) !== 0 || profile.team === "blue" && (settings.contents & 4096) !== 0) return false;
+        if ((profile.team === "red" && (settings.contents & 2048) !== 0) || (profile.team === "blue" && (settings.contents & 4096) !== 0)) return false;
       }
     } else if (edge.source.kind === "nav3") {
       if ((edge.sourceFlags & 64) !== 0) return false;
@@ -290,31 +410,43 @@ export class NavigationRuntime {
   }
   #edgeAllowed(edge: NavigationEdge, query: NavigationRouteQuery | undefined, nodeAllowed: (node: NavigationNode, awaitElevator: boolean) => boolean): boolean {
     if (!this.#staticEdgeAllowed(edge, query)) return false;
-    const target = this.node(edge.to), elevator = this.boardingElevator(edge.to), train = this.boardingTrain(edge.to);
+    const target = this.node(edge.to),
+      elevator = this.boardingElevator(edge.to),
+      train = this.boardingTrain(edge.to);
     if (target === null) return false;
     const sourceTrain = edge.mode === "mover" && edge.entity !== null ? this.world.entity(edge.entity) : null;
     const ride = sourceTrain === null ? null : navigationTrainRide(sourceTrain, edge, this.graph.profile);
-    const awaitingTrain = train !== null && train.state.train !== undefined && distance(train.state.train.origin, train.ride.boarding.origin) > this.graph.profile.maximumStep
-      || sourceTrain?.train?.running === true && ride !== null && distance(sourceTrain.train.origin, ride.arrival.origin) > this.graph.profile.maximumStep;
+    const awaitingTrain =
+      (train !== null && train.state.train !== undefined && distance(train.state.train.origin, train.ride.boarding.origin) > this.graph.profile.maximumStep) ||
+      (sourceTrain?.train?.running === true && ride !== null && distance(sourceTrain.train.origin, ride.arrival.origin) > this.graph.profile.maximumStep);
     if (awaitingTrain && !clear(this.world, this.graph.profile, target.origin, target.origin)) return false;
-    if (!nodeAllowed(target, awaitingTrain || elevator !== null && elevator.platform.phase !== "bottom")) return false;
+    if (!nodeAllowed(target, awaitingTrain || (elevator !== null && elevator.platform.phase !== "bottom"))) return false;
     if (edge.entity !== null) {
       const state = this.world.entity(edge.entity);
       if (state === null || !state.enabled || state.locked) return false;
     }
     return true;
   }
-  #candidate(start: number, goal: number, query: NavigationRouteQuery, rejected: ReadonlySet<number>, nodeAllowed: (node: NavigationNode, awaitElevator: boolean) => boolean): NavigationEdge[] | null {
-    const queue = new MinHeap<QueueItem>(item => item.cost), costs = new Map([[start, 0]]), parents = new Map<number, NavigationEdge>();
+  #candidate(
+    start: number,
+    goal: number,
+    query: NavigationRouteQuery,
+    rejected: ReadonlySet<number>,
+    nodeAllowed: (node: NavigationNode, awaitElevator: boolean) => boolean,
+  ): NavigationEdge[] | null {
+    const queue = new MinHeap<QueueItem>(item => item.cost),
+      costs = new Map([[start, 0]]),
+      parents = new Map<number, NavigationEdge>();
     queue.push({ node: start, cost: 0 });
     for (let current = queue.pop(); current !== null; current = queue.pop()) {
       if (current.cost !== costs.get(current.node)) continue;
       if (current.node === goal) {
         const path: NavigationEdge[] = [];
-        for (let node = goal; node !== start;) {
+        for (let node = goal; node !== start; ) {
           const edge = parents.get(node);
           if (edge === undefined) throw new Error("Navigation predecessor chain is incomplete");
-          path.push(edge); node = edge.from;
+          path.push(edge);
+          node = edge.from;
         }
         return path.reverse();
       }
@@ -322,18 +454,25 @@ export class NavigationRuntime {
         if (rejected.has(edge.id) || !this.#edgeAllowed(edge, query, nodeAllowed)) continue;
         const cost = current.cost + (this.#admissionSeconds.get(edge.id) ?? edge.travelSeconds);
         if (cost >= (costs.get(edge.to) ?? Infinity)) continue;
-        costs.set(edge.to, cost); parents.set(edge.to, edge); queue.push({ node: edge.to, cost });
+        costs.set(edge.to, cost);
+        parents.set(edge.to, edge);
+        queue.push({ node: edge.to, cost });
       }
     }
     return null;
   }
-  #traversal(from: Vec3): RouteTraversal { return { prediction: this.world.beginRoute(this.graph.profile), cursor: from, seconds: 0, points: [from] }; }
+  #traversal(from: Vec3): RouteTraversal {
+    return { prediction: this.world.beginRoute(this.graph.profile), cursor: from, seconds: 0, points: [from] };
+  }
   #admit(state: RouteTraversal, request: TraversalRequest): TraversalAdmission {
     const result = state.prediction.admit(request);
     if (result.admitted) {
       const last = result.trajectory[result.trajectory.length - 1];
-      if (last === undefined || !Number.isFinite(result.seconds) || result.seconds < 0) throw new RangeError("Movement admission returned no trajectory or invalid duration");
-      state.seconds += result.seconds; state.points.push(...result.trajectory.slice(1)); state.cursor = last;
+      if (last === undefined || !Number.isFinite(result.seconds) || result.seconds < 0)
+        throw new RangeError("Movement admission returned no trajectory or invalid duration");
+      state.seconds += result.seconds;
+      state.points.push(...result.trajectory.slice(1));
+      state.cursor = last;
     }
     return result;
   }
@@ -342,32 +481,71 @@ export class NavigationRuntime {
     if (train?.train !== undefined) {
       if (!train.train.running || navigationTrainRide(train, edge, this.graph.profile) === null) return false;
       const staging = edge.hint?.funnel ?? edge.start;
-      if (distance(state.cursor, staging) > 1 && !this.#admit(state, { from: state.cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted) return false;
-      state.points.push(edge.start, edge.end); state.cursor = edge.end; state.seconds += edge.travelSeconds;
-      state.prediction = this.world.beginRoute(this.graph.profile); return true;
+      if (distance(state.cursor, staging) > 1 && !this.#admit(state, { from: state.cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted)
+        return false;
+      state.points.push(edge.start, edge.end);
+      state.cursor = edge.end;
+      state.seconds += edge.travelSeconds;
+      state.prediction = this.world.beginRoute(this.graph.profile);
+      return true;
     }
-    const mover = edge.mode === "mover" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") && edge.sourceTravelType === KEX_TRAVEL_ELEVATOR && edge.entity !== null ? this.world.entity(edge.entity) : null;
+    const mover =
+      edge.mode === "mover" &&
+      (edge.source.kind === "nav3" || edge.source.kind === "nav2") &&
+      edge.sourceTravelType === KEX_TRAVEL_ELEVATOR &&
+      edge.entity !== null
+        ? this.world.entity(edge.entity)
+        : null;
     if (mover?.elevator !== undefined && mover.enabled && !mover.locked) {
       const elevator = mover.elevator;
       if (elevator.top.z <= elevator.bottom.z || elevator.top.x !== elevator.bottom.x || elevator.top.y !== elevator.bottom.y) return false;
       const staging = edge.hint?.funnel ?? edge.start;
-      if (distance(state.cursor, edge.start) > Math.max(this.graph.profile.maximumStep, this.node(edge.from)?.radius ?? 0) && distance(state.cursor, staging) > 1
-        && !this.#admit(state, { from: state.cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted) return false;
-      state.points.push(edge.end); state.cursor = edge.end; state.seconds += edge.travelSeconds;
-      state.prediction = this.world.beginRoute(this.graph.profile); return true;
+      if (
+        distance(state.cursor, edge.start) > Math.max(this.graph.profile.maximumStep, this.node(edge.from)?.radius ?? 0) &&
+        distance(state.cursor, staging) > 1 &&
+        !this.#admit(state, { from: state.cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted
+      )
+        return false;
+      state.points.push(edge.end);
+      state.cursor = edge.end;
+      state.seconds += edge.travelSeconds;
+      state.prediction = this.world.beginRoute(this.graph.profile);
+      return true;
     }
-    if (distance(state.cursor, edge.start) > 1 && !this.#admit(state, { from: state.cursor, to: edge.start, mode: edge.mode === "crouch" ? "crouch" : "walk", hint: null, entity: null }).admitted) return false;
+    if (
+      distance(state.cursor, edge.start) > 1 &&
+      !this.#admit(state, { from: state.cursor, to: edge.start, mode: edge.mode === "crouch" ? "crouch" : "walk", hint: null, entity: null }).admitted
+    )
+      return false;
     let landing = edge.end;
     const boarding = edge.mode === "walk" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") ? this.boardingElevator(edge.to) : null;
     const trainBoarding = edge.mode === "walk" ? this.boardingTrain(edge.to) : null;
-    if (trainBoarding !== null && trainBoarding.state.train !== undefined
-      && distance(trainBoarding.state.train.origin, trainBoarding.ride.boarding.origin) > this.graph.profile.maximumStep) landing = trainBoarding.edge.hint?.funnel ?? edge.start;
+    if (
+      trainBoarding !== null &&
+      trainBoarding.state.train !== undefined &&
+      distance(trainBoarding.state.train.origin, trainBoarding.ride.boarding.origin) > this.graph.profile.maximumStep
+    )
+      landing = trainBoarding.edge.hint?.funnel ?? edge.start;
     else if (boarding !== null && boarding.platform.phase !== "bottom") landing = edge.start;
     else if (boarding !== null) {
-      const floor = this.world.scene.trace({ start: edge.end, end: { ...edge.end, z: edge.end.z - 96 }, shape: this.graph.profile.shape,
-        target: { kind: "world" }, policy: this.graph.profile.policy, numeric: this.graph.profile.movement.numeric, passActor: this.world.passActor });
-      if (!floor.startSolid && !floor.allSolid && floor.hit.kind === "actor" && floor.hit.actor.equals(boarding.actor)
-        && floor.contact.kind === "plane" && floor.contact.plane.normal.z >= this.graph.profile.minimumFloorNormal) landing = floor.end;
+      const floor = this.world.scene.trace({
+        start: edge.end,
+        end: { ...edge.end, z: edge.end.z - 96 },
+        shape: this.graph.profile.shape,
+        target: { kind: "world" },
+        policy: this.graph.profile.policy,
+        numeric: this.graph.profile.movement.numeric,
+        passActor: this.world.passActor,
+      });
+      if (
+        !floor.startSolid &&
+        !floor.allSolid &&
+        floor.hit.kind === "actor" &&
+        floor.hit.actor.equals(boarding.actor) &&
+        floor.contact.kind === "plane" &&
+        floor.contact.plane.normal.z >= this.graph.profile.minimumFloorNormal
+      )
+        landing = floor.end;
     }
     const result = this.#admit(state, { from: state.cursor, to: landing, mode: edge.mode, hint: edge.hint, entity: edge.entity });
     if (result.admitted) this.#admissionSeconds.set(edge.id, result.seconds);
@@ -380,34 +558,58 @@ export class NavigationRuntime {
     if (!this.#traverseEdge(edge, state)) return { admitted: false, reason: "Selected movement cannot perform this traversal" };
     return { admitted: true, seconds: state.seconds, trajectory: state.points };
   }
-  estimate(query: NavigationEstimateQuery): NavigationEstimateResult { return this.#estimates.estimate(query); }
+  estimate(query: NavigationEstimateQuery): NavigationEstimateResult {
+    return this.#estimates.estimate(query);
+  }
   route(query: NavigationRouteQuery): NavigationRouteResult {
     this.#refresh();
     const start = query.startNode === undefined ? this.areaAt(query.start) : query.startNode;
     const goal = query.goalNode === undefined ? this.areaAt(query.goal) : query.goalNode;
-    if (start === null || goal === null || this.node(start) === null || this.node(goal) === null) return { kind: "unreachable", reason: "start or goal has no navigation area" };
+    if (start === null || goal === null || this.node(start) === null || this.node(goal) === null)
+      return { kind: "unreachable", reason: "start or goal has no navigation area" };
     const startNode = this.node(start);
     if (startNode === null || !this.#nodeAllowed(startNode, query)) return { kind: "unreachable", reason: "start area is disabled or occupied" };
-    const groundedAdmissions = new Map<number, boolean>(), elevatorAdmissions = new Map<number, boolean>();
+    const groundedAdmissions = new Map<number, boolean>(),
+      elevatorAdmissions = new Map<number, boolean>();
     const nodeAllowed = (node: NavigationNode, awaitElevator: boolean): boolean => {
       const admissions = awaitElevator ? elevatorAdmissions : groundedAdmissions;
       const known = admissions.get(node.id);
       if (known !== undefined) return known;
       const admitted = this.#nodeAllowed(node, query, awaitElevator);
-      admissions.set(node.id, admitted); return admitted;
+      admissions.set(node.id, admitted);
+      return admitted;
     };
     const rejected = new Set<number>();
     const maximumSearches = query.maximumSearches ?? 64;
     for (let attempt = 0; attempt < maximumSearches; attempt++) {
       const edges = this.#candidate(start, goal, query, rejected, nodeAllowed);
       if (edges === null) return { kind: "unreachable", reason: "no route satisfies source flags, character capabilities, and current obstacles" };
-      const state = this.#traversal(query.start); let failed = false;
+      const state = this.#traversal(query.start);
+      let failed = false;
       for (const edge of edges) {
-        if (!this.#traverseEdge(edge, state)) { rejected.add(edge.id); failed = true; break; }
+        if (!this.#traverseEdge(edge, state)) {
+          rejected.add(edge.id);
+          failed = true;
+          break;
+        }
       }
       if (failed) continue;
-      if (distance(state.cursor, query.goal) > 1 && !this.#admit(state, { from: state.cursor, to: query.goal, mode: "walk", hint: null, entity: null }).admitted) return { kind: "unreachable", reason: "selected movement cannot reach the goal within its area" };
-      return { kind: "route", route: { map: this.graph.map, nodes: [start, ...edges.map(edge => edge.to)], edges, points: state.points, travelSeconds: state.seconds, generation: this.#generation } };
+      if (
+        distance(state.cursor, query.goal) > 1 &&
+        !this.#admit(state, { from: state.cursor, to: query.goal, mode: "walk", hint: null, entity: null }).admitted
+      )
+        return { kind: "unreachable", reason: "selected movement cannot reach the goal within its area" };
+      return {
+        kind: "route",
+        route: {
+          map: this.graph.map,
+          nodes: [start, ...edges.map(edge => edge.to)],
+          edges,
+          points: state.points,
+          travelSeconds: state.seconds,
+          generation: this.#generation,
+        },
+      };
     }
     return { kind: "unreachable", reason: `movement admission exhausted ${maximumSearches} candidate routes` };
   }

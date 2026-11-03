@@ -26,7 +26,8 @@ export function readClassicString(memory: MappedGuestMemory, address: GuestAddre
 }
 /** SV_ConnectionlessPacket strncpy: peers supply userinfo, so oversized text is cut to the guest buffer rather than refused. */
 export function fitClassicUserinfo(text: string, capacity = 512): string {
-  const end = text.indexOf("\0"), terminated = end < 0 ? text : text.slice(0, end);
+  const end = text.indexOf("\0"),
+    terminated = end < 0 ? text : text.slice(0, end);
   return terminated.slice(0, capacity - 1).replace(/[^\u0000-\u00ff]/g, "?");
 }
 export function writeClassicString(memory: MappedGuestMemory, address: GuestAddress, text: string, capacity: number): undefined {
@@ -45,17 +46,27 @@ export function allocateClassicString(memory: MappedGuestMemory, text: string): 
   writeClassicString(memory, address, text, text.length + 1);
   return address;
 }
-export function classicStringAllocationBytes(text: string): number { return nativeAllocationBytes(text.length + 1); }
+export function classicStringAllocationBytes(text: string): number {
+  return nativeAllocationBytes(text.length + 1);
+}
 export function readClassicVector(memory: MappedGuestMemory, address: GuestAddress): Vec3 {
   return memory.readFloat32Vector(address);
 }
 export function writeClassicVector(memory: MappedGuestMemory, address: GuestAddress, vector: Vec3): undefined {
-  const bytes = new Uint8Array(12), view = new DataView(bytes.buffer);
-  view.setFloat32(0, vector.x, true); view.setFloat32(4, vector.y, true); view.setFloat32(8, vector.z, true);
+  const bytes = new Uint8Array(12),
+    view = new DataView(bytes.buffer);
+  view.setFloat32(0, vector.x, true);
+  view.setFloat32(4, vector.y, true);
+  view.setFloat32(8, vector.z, true);
   return memory.write(address, bytes);
 }
 
-export interface ClassicQ2EdictDescriptor { readonly base: GuestAddress; readonly stride: number; readonly count: number; readonly capacity: number }
+export interface ClassicQ2EdictDescriptor {
+  readonly base: GuestAddress;
+  readonly stride: number;
+  readonly count: number;
+  readonly capacity: number;
+}
 export interface ClassicQ2ActorProjection {
   project(record: RawEntityView): OwnedActor | null;
   address(actor: ActorId): GuestAddress;
@@ -70,14 +81,28 @@ export class ClassicQ2Edicts {
   /** Records stay valid while the descriptor object is unchanged: it is replaced whenever the base, stride or counts move. */
   #records: RawEntityView[] = [];
   #recordsFor: ClassicQ2EdictDescriptor | null = null;
-  retireInputClient(slot: number): void { this.#retiredInputClients.add(slot); }
-  finishInputRetirement(slot: number): void { this.#retiredInputClients.delete(slot); }
-  constructor(readonly memory: MappedGuestMemory, readonly exports: GuestAddress, readonly actors: SessionActorRegistry,
-    readonly provider: ProviderId, readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined,
-    readonly projection?: ClassicQ2ActorProjection) {
+  retireInputClient(slot: number): void {
+    this.#retiredInputClients.add(slot);
+  }
+  finishInputRetirement(slot: number): void {
+    this.#retiredInputClients.delete(slot);
+  }
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly exports: GuestAddress,
+    readonly actors: SessionActorRegistry,
+    readonly provider: ProviderId,
+    readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined,
+    readonly projection?: ClassicQ2ActorProjection,
+  ) {
     memory.check(exports, CLASSIC_Q2_EXPORT_BYTES, "read");
     if (memory.readInt32(exports) !== 3) throw new RangeError("GetGameAPI returned an API version other than 3");
-    this.#fields = { base: memory.offset(exports, 64n), stride: memory.offset(exports, 68n), count: memory.offset(exports, 72n), capacity: memory.offset(exports, 76n) };
+    this.#fields = {
+      base: memory.offset(exports, 64n),
+      stride: memory.offset(exports, 68n),
+      count: memory.offset(exports, 72n),
+      capacity: memory.offset(exports, 76n),
+    };
   }
   descriptor(): ClassicQ2EdictDescriptor {
     const base = this.memory.readPointer(this.#fields.base);
@@ -85,11 +110,18 @@ export class ClassicQ2Edicts {
     const count = this.memory.readInt32(this.#fields.count);
     const capacity = this.memory.readInt32(this.#fields.capacity);
     if (base === null) throw new Error("API 3 edicts are not allocated; Init has not completed");
-    if (stride < CLASSIC_Q2_EDICT_BYTES || stride % 4 !== 0 || count < 0 || capacity < count || capacity > 65536) throw new RangeError("Invalid source API 3 edict descriptor");
+    if (stride < CLASSIC_Q2_EDICT_BYTES || stride % 4 !== 0 || count < 0 || capacity < count || capacity > 65536)
+      throw new RangeError("Invalid source API 3 edict descriptor");
     this.memory.check(base, stride * capacity, "read");
     const previous = this.#descriptor;
-    if (previous !== null && previous.base.byteOffset === base.byteOffset && previous.stride === stride
-      && previous.count === count && previous.capacity === capacity) return previous;
+    if (
+      previous !== null &&
+      previous.base.byteOffset === base.byteOffset &&
+      previous.stride === stride &&
+      previous.count === count &&
+      previous.capacity === capacity
+    )
+      return previous;
     this.#descriptor = { base, stride, count, capacity };
     return this.#descriptor;
   }
@@ -99,19 +131,30 @@ export class ClassicQ2Edicts {
   #at(slot: number, descriptor: ClassicQ2EdictDescriptor): RawEntityView {
     const { base, stride, count } = descriptor;
     if (!Number.isInteger(slot) || slot < 0 || slot >= count) throw new RangeError("API 3 edict slot exceeds num_edicts");
-    if (this.#recordsFor !== descriptor) { this.#records = []; this.#recordsFor = descriptor; }
+    if (this.#recordsFor !== descriptor) {
+      this.#records = [];
+      this.#recordsFor = descriptor;
+    }
     const retained = this.#records[slot];
     if (retained !== undefined) return retained;
     const address = this.memory.offset(base, BigInt(slot * stride));
-    const record: RawEntityView = { module: this.memory.module, slot, address, strideBytes: stride, publicLayout: CLASSIC_Q2_EDICT_LAYOUT,
-      bytes: this.memory.borrow(address, stride), currentActor: () => this.projection === undefined
-        ? this.actors.atSource(this.provider, slot)?.id ?? null : this.projection.project(record)?.id ?? null };
+    const record: RawEntityView = {
+      module: this.memory.module,
+      slot,
+      address,
+      strideBytes: stride,
+      publicLayout: CLASSIC_Q2_EDICT_LAYOUT,
+      bytes: this.memory.borrow(address, stride),
+      currentActor: () =>
+        this.projection === undefined ? (this.actors.atSource(this.provider, slot)?.id ?? null) : (this.projection.project(record)?.id ?? null),
+    };
     this.#records[slot] = record;
     return record;
   }
   fromPointer(address: GuestAddress): RawEntityView {
     if (address.addressSpace !== this.memory.addressSpace) throw new RangeError("Foreign guest edict address space");
-    const descriptor = this.descriptor(), difference = address.byteOffset - descriptor.base.byteOffset;
+    const descriptor = this.descriptor(),
+      difference = address.byteOffset - descriptor.base.byteOffset;
     if (difference < 0n || difference % BigInt(descriptor.stride) !== 0n) throw new RangeError("Pointer does not identify the start of an API 3 edict");
     return this.#at(Number(difference / BigInt(descriptor.stride)), descriptor);
   }
@@ -127,7 +170,14 @@ export class ClassicQ2Edicts {
    * semantic projection). Shared actors the guest does not own — such as
    * selected TS monsters — resolve to false instead of throwing. */
   resolves(actor: ActorId): boolean {
-    if (this.projection !== undefined) { try { this.projection.address(actor); return true; } catch { return false; } }
+    if (this.projection !== undefined) {
+      try {
+        this.projection.address(actor);
+        return true;
+      } catch {
+        return false;
+      }
+    }
     const source = this.actors.sourceOf(actor);
     return source !== null && source.provider === this.provider;
   }
@@ -150,8 +200,12 @@ export class ClassicQ2Edicts {
     }
     if (existing !== null) return existing;
     const actor = this.actors.allocateAtSource(this.provider, record.slot, "q2-native:edict");
-    try { this.bind(record, actor); }
-    catch (error) { this.actors.release(actor); throw error; }
+    try {
+      this.bind(record, actor);
+    } catch (error) {
+      this.actors.release(actor);
+      throw error;
+    }
     return actor;
   }
   retainClient(slot: number): OwnedActor {
@@ -178,7 +232,8 @@ export class ClassicQ2Edicts {
     return undefined;
   }
   clientPrefix(slot: number): DataView | null {
-    const record = this.at(slot), address = this.memory.readPointer(this.memory.offset(record.address, 84n));
+    const record = this.at(slot),
+      address = this.memory.readPointer(this.memory.offset(record.address, 84n));
     return address === null ? null : this.memory.borrow(address, CLASSIC_Q2_CLIENT_PREFIX_BYTES);
   }
   setClientPing(slot: number, ping: number): undefined {

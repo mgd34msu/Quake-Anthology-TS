@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's qcommon/net_chan.c, client/cl_net_chan.c and server/sv_net_chan.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { MAX_MESSAGE_LENGTH, MessageReader, MessageWriter } from "./message.ts";
@@ -35,7 +36,11 @@ export class Netchannel {
   private unsentFragments = false;
   private delivering = false;
 
-  constructor(readonly role: ChannelRole, readonly qport = 0, private readonly transmitQport: () => number = () => qport) {
+  constructor(
+    readonly role: ChannelRole,
+    readonly qport = 0,
+    private readonly transmitQport: () => number = () => qport,
+  ) {
     if (!Number.isInteger(qport) || qport < 0 || qport > 65535) throw new RangeError("qport must be an unsigned short");
   }
   /** A cleared client_t bot channel never passes through Netchan_Setup. */
@@ -44,10 +49,18 @@ export class Netchannel {
     channel.outgoing = 0;
     return channel;
   }
-  get incomingSequence(): number { return this.incoming; }
-  get outgoingSequence(): number { return this.outgoing; }
-  get hasUnsentFragments(): boolean { return this.unsentFragments; }
-  get remainingUnsentBytes(): number { return this.unsentLength - this.unsentStart; }
+  get incomingSequence(): number {
+    return this.incoming;
+  }
+  get outgoingSequence(): number {
+    return this.outgoing;
+  }
+  get hasUnsentFragments(): boolean {
+    return this.unsentFragments;
+  }
+  get remainingUnsentBytes(): number {
+    return this.unsentLength - this.unsentStart;
+  }
 
   /** Netchan_Transmit emits only the first fragment; the owner controls subsequent pacing. */
   beginTransmit(payload: Uint8Array, delivery: ChannelDelivery): undefined {
@@ -68,7 +81,9 @@ export class Netchannel {
     try {
       delivery.send(packet);
       delivery.trace(`${this.role} send ${String(packet.length).padStart(4)} : s=${this.outgoing - 1} ack=${this.incoming}\n`);
-    } finally { this.delivering = false; }
+    } finally {
+      this.delivering = false;
+    }
   }
 
   private assertDeliveryEntry(): void {
@@ -83,7 +98,9 @@ export class Netchannel {
     try {
       delivery.send(packet);
       delivery.trace(`${this.role} send ${String(packet.length).padStart(4)} : s=${this.outgoing} fragment=${this.unsentStart},${length}\n`);
-    } finally { this.delivering = false; }
+    } finally {
+      this.delivering = false;
+    }
     this.unsentStart += length;
     if (this.unsentStart === this.unsentLength && length !== FRAGMENT_SIZE) {
       this.outgoing++;
@@ -94,8 +111,16 @@ export class Netchannel {
 
   /** Convenience for loopback/testing owners that can send all fragments immediately. */
   transmit(payload: Uint8Array): Uint8Array[] {
-    const packets: Uint8Array[] = [], traces: string[] = [];
-    const delivery: ChannelDelivery = { send: packet => { packets.push(packet); }, trace: message => { traces.push(message); } };
+    const packets: Uint8Array[] = [],
+      traces: string[] = [];
+    const delivery: ChannelDelivery = {
+      send: packet => {
+        packets.push(packet);
+      },
+      trace: message => {
+        traces.push(message);
+      },
+    };
     this.beginTransmit(payload, delivery);
     while (this.hasUnsentFragments) this.transmitNextFragment(delivery);
     return packets;
@@ -126,9 +151,11 @@ export class Netchannel {
     const start = fragmented ? view.getInt16(baseHeader, true) : 0;
     const length = fragmented ? view.getInt16(baseHeader + 2, true) : 0;
     if (diagnostics !== null && diagnostics.showPackets) {
-      diagnostics.print(fragmented
-        ? `${this.role} recv ${String(packet.length).padStart(4)} : s=${sequence} fragment=${start},${length}\n`
-        : `${this.role} recv ${String(packet.length).padStart(4)} : s=${sequence}\n`);
+      diagnostics.print(
+        fragmented
+          ? `${this.role} recv ${String(packet.length).padStart(4)} : s=${sequence} fragment=${start},${length}\n`
+          : `${this.role} recv ${String(packet.length).padStart(4)} : s=${sequence}\n`,
+      );
     }
     if (sequence <= this.incoming) {
       if (diagnostics !== null && (diagnostics.showDrop || diagnostics.showPackets))

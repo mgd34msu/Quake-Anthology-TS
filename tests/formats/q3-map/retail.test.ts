@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -20,7 +21,9 @@ test.skipIf(!existsSync(testArchive))("installed Q3 test BSP44 shares render and
   try {
     const entry = archive.findEntries("maps/q3test1.bsp")[0];
     if (entry === undefined) throw new Error("Missing installed maps/q3test1.bsp");
-    const bytes = await archive.readEntry(entry), map = parseQ3Bsp(bytes, "q3test1.bsp"), world = adaptQ3Bsp(map);
+    const bytes = await archive.readEntry(entry),
+      map = parseQ3Bsp(bytes, "q3test1.bsp"),
+      world = adaptQ3Bsp(map);
     const collision = decodedCollisionMap(world, null);
     expect(world.surfaces).toHaveLength(6400);
     expect(world.vertices).toHaveLength(35002);
@@ -30,7 +33,9 @@ test.skipIf(!existsSync(testArchive))("installed Q3 test BSP44 shares render and
     expect(collision.brushes).toHaveLength(map.brushes.length);
     expect(collision.shaders).toEqual(map.shaders);
     expect(map.fogs.map(fog => fog.shader)).toEqual(["textures/sfx/hellfogdense", "textures/sfx/fog_intel"]);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 for (const fixture of fixtures) {

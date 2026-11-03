@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II rerelease rogue/g_rogue_spawn.cpp, g_monster.cpp, m_move.cpp.
  * Copyright (c) ZeniMax Media Inc. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
@@ -27,12 +28,40 @@ export function findRereleaseSpawnPoint(game: Q2GameServices, start: Vec3, bound
   }
   const origin = movementVector(start);
   const result = placement.G_FixStuckObject_Generic(origin, movementVector(bounds.min), movementVector(bounds.max), (from, mins, maxs, end) => {
-    const trace = game.host.trace({ start: vector(from), end: vector(end), bounds: { min: vector(mins), max: vector(maxs) }, ignore: null, mask: monsterSolidMask(game) });
+    const trace = game.host.trace({
+      start: vector(from),
+      end: vector(end),
+      bounds: { min: vector(mins), max: vector(maxs) },
+      ignore: null,
+      mask: monsterSolidMask(game),
+    });
     if (trace.kind !== "q2") throw new Error("Rerelease monster placement requires Q2 trace fields");
-    return { startsolid: trace.startSolid, allsolid: trace.allSolid, fraction: trace.fraction, endpos: movementVector(trace.end),
-      plane: { normal: movementVector(trace.sourcePlane.normal), dist: trace.sourcePlane.distance, type: trace.sourcePlane.type, signbits: trace.sourcePlane.signbits },
-      plane2: trace.secondary === null ? plane() : { normal: movementVector(trace.secondary.plane.normal), dist: trace.secondary.plane.distance, type: trace.secondary.plane.type, signbits: trace.secondary.plane.signbits },
-      surface: trace.surface, surface2: trace.secondary?.surface ?? null, contents: trace.contents, ent: trace.hit.kind === "none" ? null : trace.hit, source: trace };
+    return {
+      startsolid: trace.startSolid,
+      allsolid: trace.allSolid,
+      fraction: trace.fraction,
+      endpos: movementVector(trace.end),
+      plane: {
+        normal: movementVector(trace.sourcePlane.normal),
+        dist: trace.sourcePlane.distance,
+        type: trace.sourcePlane.type,
+        signbits: trace.sourcePlane.signbits,
+      },
+      plane2:
+        trace.secondary === null
+          ? plane()
+          : {
+              normal: movementVector(trace.secondary.plane.normal),
+              dist: trace.secondary.plane.distance,
+              type: trace.secondary.plane.type,
+              signbits: trace.secondary.plane.signbits,
+            },
+      surface: trace.surface,
+      surface2: trace.secondary?.surface ?? null,
+      contents: trace.contents,
+      ent: trace.hit.kind === "none" ? null : trace.hit,
+      source: trace,
+    };
   });
   if (result === StuckResultT.NO_GOOD_POSITION) return null;
   return drop ? dropToFloor(game, vector(origin), bounds) : vector(origin);
@@ -44,7 +73,10 @@ export function checkRereleaseGroundSpawnPoint(game: Q2GameServices, origin: Vec
   let fast = true;
   for (const x of [f(origin.x + bounds.min.x), f(origin.x + bounds.max.x)]) {
     for (const y of [f(origin.y + bounds.min.y), f(origin.y + bounds.max.y)]) {
-      if (game.host.pointContents({ x, y, z: f(bottom - 1) }) !== 1) { fast = false; break; }
+      if (game.host.pointContents({ x, y, z: f(bottom - 1) }) !== 1) {
+        fast = false;
+        break;
+      }
     }
     if (!fast) break;
   }
@@ -52,7 +84,13 @@ export function checkRereleaseGroundSpawnPoint(game: Q2GameServices, origin: Vec
   const mask = monsterSolidMask(game);
   const start = { x: origin.x, y: origin.y, z: bottom };
   const stopZ = f(bottom - 36);
-  const trace = game.host.trace({ start, end: { ...start, z: stopZ }, bounds: { min: { ...bounds.min, z: 0 }, max: { ...bounds.max, z: 0 } }, ignore: null, mask });
+  const trace = game.host.trace({
+    start,
+    end: { ...start, z: stopZ },
+    bounds: { min: { ...bounds.min, z: 0 }, max: { ...bounds.max, z: 0 } },
+    ignore: null,
+    mask,
+  });
   if (trace.fraction === 1) return false;
   const center = { x: f(origin.x + f(f(bounds.min.x + bounds.max.x) * 0.5)), y: f(origin.y + f(f(bounds.min.y + bounds.max.y) * 0.5)), z: bottom };
   const half = { x: f(f(f(bounds.max.x - bounds.min.x) * 0.5) * 0.5), y: f(f(f(bounds.max.y - bounds.min.y) * 0.5) * 0.5), z: 0 };

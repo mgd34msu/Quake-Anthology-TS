@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { MediaClock } from "../../media/types.ts";
 import type { ImageLevel, ImageResourceOperation, RenderImage, RendererImage, RendererResourceOwner, TextureSampling } from "../../contracts/render.ts";
 
@@ -11,13 +12,22 @@ export class SceneImageRegistry {
   private readonly animations = new Map<RendererImage, { readonly update: (milliseconds: number) => void; readonly stop: () => void }>();
   private readonly images = new Map<number, RendererImage>();
 
-  constructor(readonly owner: RendererResourceOwner, private readonly clock: MediaClock = { sample: () => performance.now() }) {}
+  constructor(
+    readonly owner: RendererResourceOwner,
+    private readonly clock: MediaClock = { sample: () => performance.now() },
+  ) {}
 
-  get isClosed(): boolean { return this.closed; }
+  get isClosed(): boolean {
+    return this.closed;
+  }
 
   /** Changes whenever the backend was replaced and image contents were rebuilt from the creation journal alone. */
-  get backendEpoch(): number { return this.lifetime.epoch; }
-  invalidateBackend(): void { this.lifetime.epoch++; }
+  get backendEpoch(): number {
+    return this.lifetime.epoch;
+  }
+  invalidateBackend(): void {
+    this.lifetime.epoch++;
+  }
 
   /** A separately releasable scope within this renderer's image namespace. */
   fork(clock: MediaClock = this.clock): SceneImageRegistry {
@@ -29,12 +39,12 @@ export class SceneImageRegistry {
     return child;
   }
 
-  register(name: string, content: RenderImage, sampling: TextureSampling,
-    source: RendererImage["source"] = { kind: "generated", name }): RendererImage {
+  register(name: string, content: RenderImage, sampling: TextureSampling, source: RendererImage["source"] = { kind: "generated", name }): RendererImage {
     const level = content.levels[0];
     const image = this.allocate(level.width, level.height, source);
     const operation = { kind: "create-image", image, content, sampling } satisfies ImageResourceOperation;
-    this.commit(operation); this.lifetime.operations.push(operation);
+    this.commit(operation);
+    this.lifetime.operations.push(operation);
     return image;
   }
 
@@ -51,10 +61,14 @@ export class SceneImageRegistry {
     if (operation.kind === "create-image") {
       if (this.closed) throw new Error("Scene image registry is closed");
       const image = operation.image;
-      if (!this.allocations.has(image) || image.owner !== this.owner || this.images.has(image.ordinal)) throw new Error("Image allocation is already resident or belongs to another owner");
+      if (!this.allocations.has(image) || image.owner !== this.owner || this.images.has(image.ordinal))
+        throw new Error("Image allocation is already resident or belongs to another owner");
       this.images.set(image.ordinal, image);
     } else if (operation.kind === "release-image") {
-      this.require(operation.image); this.images.delete(operation.image.ordinal); this.allocations.delete(operation.image); this.animations.get(operation.image)?.stop();
+      this.require(operation.image);
+      this.images.delete(operation.image.ordinal);
+      this.allocations.delete(operation.image);
+      this.animations.get(operation.image)?.stop();
     } else if (operation.kind === "update-image") this.require(operation.image);
   }
 
@@ -71,14 +85,18 @@ export class SceneImageRegistry {
     this.lifetime.operations.push({ kind: "release-image", image });
   }
 
-  textureMode(filter: TextureSampling["filter"]): void { this.lifetime.operations.push({ kind: "texture-mode", filter }); }
+  textureMode(filter: TextureSampling["filter"]): void {
+    this.lifetime.operations.push({ kind: "texture-mode", filter });
+  }
 
   require(image: RendererImage): void {
     if (image.owner !== this.owner || this.images.get(image.ordinal) !== image)
       throw new Error("Scene image belongs to another resource owner or has been released");
   }
 
-  isResident(image: RendererImage): boolean { return image.owner === this.owner && this.images.get(image.ordinal) === image; }
+  isResident(image: RendererImage): boolean {
+    return image.owner === this.owner && this.images.get(image.ordinal) === image;
+  }
 
   trackAnimation(image: RendererImage, update: (milliseconds: number) => void, onStop: () => void): () => void {
     this.require(image);
@@ -110,8 +128,9 @@ export class SceneImageRegistry {
   isolatePendingOperations<T>(operation: () => T, collect: (operations: readonly ImageResourceOperation[]) => void): T {
     const previous = this.lifetime.operations;
     this.lifetime.operations = [];
-    try { return operation(); }
-    finally {
+    try {
+      return operation();
+    } finally {
       const reached = this.lifetime.operations;
       this.lifetime.operations = previous;
       collect(reached);

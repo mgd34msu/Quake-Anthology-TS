@@ -53,13 +53,50 @@ export interface SeatPresentationSpec {
 
 /** The one place a seat's menu and HUD controller is constructed: local, replaced and remote worlds all build it here. */
 export function createSeatUi(spec: SeatUiSpec): ApplicationSeatUi {
-  return new ApplicationSeatUi(spec.local, spec.art, spec.input, spec.mutateWindow, spec.simulation, spec.font, spec.audio, spec.quit, spec.command, spec.typography,
-    spec.hostSettings, spec.language, spec.saves, spec.view, spec.llm, spec.guestUi, spec.teamArena, spec.options);
+  return new ApplicationSeatUi(
+    spec.local,
+    spec.art,
+    spec.input,
+    spec.mutateWindow,
+    spec.simulation,
+    spec.font,
+    spec.audio,
+    spec.quit,
+    spec.command,
+    spec.typography,
+    spec.hostSettings,
+    spec.language,
+    spec.saves,
+    spec.view,
+    spec.llm,
+    spec.guestUi,
+    spec.teamArena,
+    spec.options,
+  );
 }
 
 /** The one place a seat's world presentation is constructed: local, replaced and remote worlds all build it here. */
 export function createSeatPresentation(spec: SeatPresentationSpec): WorldSeatPresentation {
-  return new WorldSeatPresentation(spec.local, spec.assets, spec.renderer, spec.simulation, spec.seatCount, spec.font, spec.characters, spec.ui, spec.effects,
-    spec.q3Client, spec.rerelease, spec.worldTextCullFactor, spec.fieldOfView, spec.debugShapes, spec.consoleScale, spec.viewSize, spec.planarShadows,
-    spec.cameraOverride, spec.graphOverlay, spec.nativeQ2);
+  return new WorldSeatPresentation(
+    spec.local,
+    spec.assets,
+    spec.renderer,
+    spec.simulation,
+    spec.seatCount,
+    spec.font,
+    spec.characters,
+    spec.ui,
+    spec.effects,
+    spec.q3Client,
+    spec.rerelease,
+    spec.worldTextCullFactor,
+    spec.fieldOfView,
+    spec.debugShapes,
+    spec.consoleScale,
+    spec.viewSize,
+    spec.planarShadows,
+    spec.cameraOverride,
+    spec.graphOverlay,
+    spec.nativeQ2,
+  );
 }

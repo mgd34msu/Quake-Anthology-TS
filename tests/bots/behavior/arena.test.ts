@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createQ1BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q1-knowledge.ts";
 import { testCorpusRoot } from "../../support/corpus.ts";
 
@@ -39,106 +40,249 @@ import { BotMoveFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 
 const corpus = testCorpusRoot();
 
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native bots continue disk checkpoint after disposing the original session without admission replay", async () => {
-  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);
-  if (launch.kind !== "run") throw new Error("Expected native bot checkpoint fixture");
-  const content = await loadApplicationContent(launch.options), directory = await mkdtemp(resolve(tmpdir(), "bot-save-"));
-  const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
-  const identity = createIdentityOwner("bot-save-original"), session = new EngineSession(identity, { kind: "headless" });
-  const options = { recipe: content.recipe, world: content.world, mounts: content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4, dedicated: true } satisfies Omit<ConstructorParameters<typeof SharedSimulation>[0], "identity">;
-  const simulation = new SharedSimulation({ ...options, identity }); session.attachWorld(simulation);
-  const bots = new ApplicationBots({ session, simulation, files, navigation: await createApplicationBotNavigation({ content, simulation }),
-    leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => undefined,
-    openLog: () => ({ kind: "failed", error: new Error("Fixture does not open logs") }) });
-  let restoredSession: EngineSession | null = null, restoredBots: ApplicationBots | null = null;
-  const step = (session: EngineSession, simulation: SharedSimulation, bots: ApplicationBots) => {
-    const commands = bots.frame(simulation.timeSeconds * 1000 + 50, 50);
-    session.step({ elapsedMilliseconds: 50, commands }); bots.receive(simulation.drainPresentationEvents());
-    return { commands: commands.map(command => ({ ...command, actor: command.actor.slot })), random: simulation.random.checkpoint(),
-      players: simulation.players().map(actor => ({ slot: actor.slot, origin: simulation.playerView(actor).origin, health: simulation.combat.read(actor)?.health })) };
-  };
-  try {
-    bots.consoleCommand(["addbot", "sarge", "3"]); bots.consoleCommand(["addbot", "ranger", "3"]);
-    for (let frame = 0; frame < 80; frame++) step(session, simulation, bots);
-    bots.consoleCommand(["addbot", "visor", "3"]);
-    for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
-    expect(bots.disconnect(2)).toBe(true);
-    for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
-    const actors = simulation.actors.checkpoint(), random = simulation.random.checkpoint();
-    const botImage = bots.checkpoint(), image = simulation.checkpoint();
-    expect(simulation.actors.checkpoint()).toEqual(actors); expect(simulation.random.checkpoint()).toEqual(random);
-    const path = resolve(directory, "native.qts"); await writeSaveImage(path, image);
-    const suffix = Array.from({ length: 20 }, () => step(session, simulation, bots));
-    bots.close(); session.close();
-    const saved = await readSaveImage(path), replacementIdentity = createIdentityOwner("bot-save-replacement");
-    const replacementSession = new EngineSession(replacementIdentity, { kind: "headless" }); restoredSession = replacementSession;
-    const clients = botImage.transport.connections.map(connection => replacementSession.createClient(connection.client.slot));
-    const replacement = new SharedSimulation({ ...options, identity: replacementIdentity, restore: saved, restoredClients: clients.map(client => client.id) });
-    replacementSession.attachWorld(replacement);
-    const botSection = saved.providers.find(provider => provider.schema === "world:bots");
-    if (botSection === undefined) throw new Error("Saved native simulation omitted its bot attachment");
-    const badNavigation = await createApplicationBotNavigation({ content, simulation: replacement });
-    const replacementActors = replacement.actors.checkpoint();
-    expect(() => new ApplicationBots({ session: replacementSession, simulation: replacement, files, navigation: badNavigation,
-      leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => { throw new Error("Rejected bot restore replayed a command"); },
-      openLog: () => { throw new Error("Rejected bot restore opened a log"); },
-      restore: { image: decodeApplicationBotsCheckpoint({ ...botImage, director: { ...botImage.director, assets: "different-mounted-assets" } }),
-        resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null } })).toThrow("Saved bot assets differ");
-    expect(replacement.actors.checkpoint()).toEqual(replacementActors);
-    expect(replacement.random.checkpoint()).toEqual(random);
-    const restored = new ApplicationBots({ session: replacementSession, simulation: replacement, files,
-      navigation: await createApplicationBotNavigation({ content, simulation: replacement }), leafCount: content.world.leaves.length,
-      print: () => undefined, insertConsoleCommand: () => { throw new Error("Bot restore replayed a console command"); },
-      openLog: () => { throw new Error("Bot restore replayed log initialization"); },
-      restore: { image: decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)), resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null } });
-    restoredBots = restored;
-    expect(replacement.random.checkpoint()).toEqual(random);
-    expect(clients).toHaveLength(2);
-    expect(Array.from({ length: 20 }, () => step(replacementSession, replacement, restored))).toEqual(suffix);
-    // A version 1 image recorded the digest that also covered bots/navigation; it must keep loading.
-    await files.prepareLegacyProvenance();
-    const legacyIdentity = createIdentityOwner("bot-save-legacy"), legacySession = new EngineSession(legacyIdentity, { kind: "headless" });
-    const legacyClients = botImage.transport.connections.map(connection => legacySession.createClient(connection.client.slot));
-    const legacy = new SharedSimulation({ ...options, identity: legacyIdentity, restore: saved, restoredClients: legacyClients.map(client => client.id) });
-    legacySession.attachWorld(legacy);
-    const legacyBots = new ApplicationBots({ session: legacySession, simulation: legacy, files, navigation: await createApplicationBotNavigation({ content, simulation: legacy }),
-      leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => { throw new Error("Bot restore replayed a console command"); },
-      openLog: () => { throw new Error("Bot restore replayed log initialization"); },
-      restore: { image: { ...decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)), director: Object.assign({}, botImage.director, { version: 1, assets: files.legacyProvenance() }) },
-        resolveClient: saved => legacyClients.find(client => client.id.slot === saved.slot) ?? null } });
-    try { expect(Array.from({ length: 20 }, () => step(legacySession, legacy, legacyBots))).toEqual(suffix); } finally { legacyBots.close(); legacySession.close(); }
-  } finally {
-    restoredBots?.close(); restoredSession?.close(); bots.close(); session.close(); await content.close(); await rm(directory, { recursive: true, force: true });
-  }
-}, 120000);
+test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))(
+  "native bots continue disk checkpoint after disposing the original session without admission replay",
+  async () => {
+    const launch = parseApplicationCommand([
+      "--content-root",
+      corpus,
+      "--game",
+      "q3-baseq3",
+      "--map",
+      "q3dm1",
+      "--movement",
+      "q3",
+      "--character",
+      "q3",
+      "--mode",
+      "deathmatch",
+      "--dedicated",
+    ]);
+    if (launch.kind !== "run") throw new Error("Expected native bot checkpoint fixture");
+    const content = await loadApplicationContent(launch.options),
+      directory = await mkdtemp(resolve(tmpdir(), "bot-save-"));
+    const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+    const identity = createIdentityOwner("bot-save-original"),
+      session = new EngineSession(identity, { kind: "headless" });
+    const options = {
+      recipe: content.recipe,
+      world: content.world,
+      mounts: content.mounts,
+      mode: "deathmatch",
+      skill: 3,
+      seed: 7,
+      maxClients: 4,
+      dedicated: true,
+    } satisfies Omit<ConstructorParameters<typeof SharedSimulation>[0], "identity">;
+    const simulation = new SharedSimulation({ ...options, identity });
+    session.attachWorld(simulation);
+    const bots = new ApplicationBots({
+      session,
+      simulation,
+      files,
+      navigation: await createApplicationBotNavigation({ content, simulation }),
+      leafCount: content.world.leaves.length,
+      print: () => undefined,
+      insertConsoleCommand: () => undefined,
+      openLog: () => ({ kind: "failed", error: new Error("Fixture does not open logs") }),
+    });
+    let restoredSession: EngineSession | null = null,
+      restoredBots: ApplicationBots | null = null;
+    const step = (session: EngineSession, simulation: SharedSimulation, bots: ApplicationBots) => {
+      const commands = bots.frame(simulation.timeSeconds * 1000 + 50, 50);
+      session.step({ elapsedMilliseconds: 50, commands });
+      bots.receive(simulation.drainPresentationEvents());
+      return {
+        commands: commands.map(command => ({ ...command, actor: command.actor.slot })),
+        random: simulation.random.checkpoint(),
+        players: simulation
+          .players()
+          .map(actor => ({ slot: actor.slot, origin: simulation.playerView(actor).origin, health: simulation.combat.read(actor)?.health })),
+      };
+    };
+    try {
+      bots.consoleCommand(["addbot", "sarge", "3"]);
+      bots.consoleCommand(["addbot", "ranger", "3"]);
+      for (let frame = 0; frame < 80; frame++) step(session, simulation, bots);
+      bots.consoleCommand(["addbot", "visor", "3"]);
+      for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
+      expect(bots.disconnect(2)).toBe(true);
+      for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
+      const actors = simulation.actors.checkpoint(),
+        random = simulation.random.checkpoint();
+      const botImage = bots.checkpoint(),
+        image = simulation.checkpoint();
+      expect(simulation.actors.checkpoint()).toEqual(actors);
+      expect(simulation.random.checkpoint()).toEqual(random);
+      const path = resolve(directory, "native.qts");
+      await writeSaveImage(path, image);
+      const suffix = Array.from({ length: 20 }, () => step(session, simulation, bots));
+      bots.close();
+      session.close();
+      const saved = await readSaveImage(path),
+        replacementIdentity = createIdentityOwner("bot-save-replacement");
+      const replacementSession = new EngineSession(replacementIdentity, { kind: "headless" });
+      restoredSession = replacementSession;
+      const clients = botImage.transport.connections.map(connection => replacementSession.createClient(connection.client.slot));
+      const replacement = new SharedSimulation({
+        ...options,
+        identity: replacementIdentity,
+        restore: saved,
+        restoredClients: clients.map(client => client.id),
+      });
+      replacementSession.attachWorld(replacement);
+      const botSection = saved.providers.find(provider => provider.schema === "world:bots");
+      if (botSection === undefined) throw new Error("Saved native simulation omitted its bot attachment");
+      const badNavigation = await createApplicationBotNavigation({ content, simulation: replacement });
+      const replacementActors = replacement.actors.checkpoint();
+      expect(
+        () =>
+          new ApplicationBots({
+            session: replacementSession,
+            simulation: replacement,
+            files,
+            navigation: badNavigation,
+            leafCount: content.world.leaves.length,
+            print: () => undefined,
+            insertConsoleCommand: () => {
+              throw new Error("Rejected bot restore replayed a command");
+            },
+            openLog: () => {
+              throw new Error("Rejected bot restore opened a log");
+            },
+            restore: {
+              image: decodeApplicationBotsCheckpoint({ ...botImage, director: { ...botImage.director, assets: "different-mounted-assets" } }),
+              resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null,
+            },
+          }),
+      ).toThrow("Saved bot assets differ");
+      expect(replacement.actors.checkpoint()).toEqual(replacementActors);
+      expect(replacement.random.checkpoint()).toEqual(random);
+      const restored = new ApplicationBots({
+        session: replacementSession,
+        simulation: replacement,
+        files,
+        navigation: await createApplicationBotNavigation({ content, simulation: replacement }),
+        leafCount: content.world.leaves.length,
+        print: () => undefined,
+        insertConsoleCommand: () => {
+          throw new Error("Bot restore replayed a console command");
+        },
+        openLog: () => {
+          throw new Error("Bot restore replayed log initialization");
+        },
+        restore: {
+          image: decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)),
+          resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null,
+        },
+      });
+      restoredBots = restored;
+      expect(replacement.random.checkpoint()).toEqual(random);
+      expect(clients).toHaveLength(2);
+      expect(Array.from({ length: 20 }, () => step(replacementSession, replacement, restored))).toEqual(suffix);
+      // A version 1 image recorded the digest that also covered bots/navigation; it must keep loading.
+      await files.prepareLegacyProvenance();
+      const legacyIdentity = createIdentityOwner("bot-save-legacy"),
+        legacySession = new EngineSession(legacyIdentity, { kind: "headless" });
+      const legacyClients = botImage.transport.connections.map(connection => legacySession.createClient(connection.client.slot));
+      const legacy = new SharedSimulation({ ...options, identity: legacyIdentity, restore: saved, restoredClients: legacyClients.map(client => client.id) });
+      legacySession.attachWorld(legacy);
+      const legacyBots = new ApplicationBots({
+        session: legacySession,
+        simulation: legacy,
+        files,
+        navigation: await createApplicationBotNavigation({ content, simulation: legacy }),
+        leafCount: content.world.leaves.length,
+        print: () => undefined,
+        insertConsoleCommand: () => {
+          throw new Error("Bot restore replayed a console command");
+        },
+        openLog: () => {
+          throw new Error("Bot restore replayed log initialization");
+        },
+        restore: {
+          image: {
+            ...decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)),
+            director: Object.assign({}, botImage.director, { version: 1, assets: files.legacyProvenance() }),
+          },
+          resolveClient: saved => legacyClients.find(client => client.id.slot === saved.slot) ?? null,
+        },
+      });
+      try {
+        expect(Array.from({ length: 20 }, () => step(legacySession, legacy, legacyBots))).toEqual(suffix);
+      } finally {
+        legacyBots.close();
+        legacySession.close();
+      }
+    } finally {
+      restoredBots?.close();
+      restoredSession?.close();
+      bots.close();
+      session.close();
+      await content.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  120000,
+);
 
 async function openArena() {
-  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
-    "--movement", "q3", "--character", "q3", "--mode", "singleplayer"]);
+  const launch = parseApplicationCommand([
+    "--content-root",
+    corpus,
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--mode",
+    "singleplayer",
+  ]);
   if (launch.kind !== "run") throw new Error("Expected arena launch options");
-  const content = await loadApplicationContent(launch.options), identity = createIdentityOwner("bot-arena");
-  const simulation = new SharedSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-    mode: "singleplayer", skill: 3, seed: 7, maxClients: 4 });
+  const content = await loadApplicationContent(launch.options),
+    identity = createIdentityOwner("bot-arena");
+  const simulation = new SharedSimulation({
+    identity,
+    recipe: content.recipe,
+    world: content.world,
+    mounts: content.mounts,
+    mode: "singleplayer",
+    skill: 3,
+    seed: 7,
+    maxClients: 4,
+  });
   const session = new EngineSession(identity, { kind: "headless" });
   session.attachWorld(simulation);
-  const humanClient = session.createClient(0), human = simulation.admitPlayer(humanClient.id);
+  const humanClient = session.createClient(0),
+    human = simulation.admitPlayer(humanClient.id);
   const game = simulation.q3Source();
   if (game === null) throw new Error("Real map did not create the Q3 source provider");
   const archive = await openArchive(resolve(corpus, "q3a/baseq3/pak0.pk3"));
   const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
   const navEntry = archive.findEntries("maps/q3dm1.aas")[0];
   if (navEntry === undefined) throw new Error("Retail arena navigation missing");
-  const asset = parseAas(await archive.readEntry(navEntry)), world = navigationWorld(simulation.scene);
+  const asset = parseAas(await archive.readEntry(navEntry)),
+    world = navigationWorld(simulation.scene);
   const graph = navigationFromAsset({ name: "q3dm1", format: "q3-bsp", digest: createContentDigest("0".repeat(64)) }, asset, profile, world);
-  const navigation = new NavigationRuntime(graph, world), consoleCommands: string[] = [], messages: string[] = [];
+  const navigation = new NavigationRuntime(graph, world),
+    consoleCommands: string[] = [],
+    messages: string[] = [];
   const clientNavigation = new Map<number, NavigationRuntime>();
   const forClient = (client: number): NavigationRuntime => {
     let runtime = clientNavigation.get(client);
     if (runtime !== undefined) return runtime;
-    const passActor = game.pool.at(client).actor.id, scene = simulation.scene;
-    const queries = { trace: (query: Parameters<typeof scene.trace>[0]) => scene.trace({ ...query, passActor }),
+    const passActor = game.pool.at(client).actor.id,
+      scene = simulation.scene;
+    const queries = {
+      trace: (query: Parameters<typeof scene.trace>[0]) => scene.trace({ ...query, passActor }),
       pointContents: (query: Parameters<typeof scene.pointContents>[0]) => scene.pointContents({ ...query, passActor }),
-      boxLeaves: scene.boxLeaves.bind(scene), areasConnected: scene.areasConnected.bind(scene), clusterVisible: scene.clusterVisible.bind(scene) };
+      boxLeaves: scene.boxLeaves.bind(scene),
+      areasConnected: scene.areasConnected.bind(scene),
+      clusterVisible: scene.clusterVisible.bind(scene),
+    };
     runtime = new NavigationRuntime(graph, { ...navigationWorld(queries), passActor });
     clientNavigation.set(client, runtime);
     return runtime;
@@ -147,27 +291,70 @@ async function openArena() {
   game.host.cvars.set("g_spSkill", "3", true);
   game.host.cvars.set("bot_nochat", "1", true);
   game.host.cvars.set("bot_challenge", "1", true);
-  const bots = new ApplicationBots({ session, simulation, files, leafCount: content.world.leaves.length,
-    insertConsoleCommand: text => { consoleCommands.push(text); }, print: text => { messages.push(text); },
+  const bots = new ApplicationBots({
+    session,
+    simulation,
+    files,
+    leafCount: content.world.leaves.length,
+    insertConsoleCommand: text => {
+      consoleCommands.push(text);
+    },
+    print: text => {
+      messages.push(text);
+    },
     openLog: () => ({ kind: "failed", error: new Error("Arena check did not enable source logging") }),
-    navigation: { runtime: navigation, forClient,
+    navigation: {
+      runtime: navigation,
+      forClient,
       crouchedBounds: { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 16 } },
       predictClientMovement: query => arenaPrediction(simulation, query),
-      travelWeapon: (_client, mode) => mode === "rocket-jump" ? 5 : mode === "bfg-jump" ? 9 : 10 } });
+      travelWeapon: (_client, mode) => (mode === "rocket-jump" ? 5 : mode === "bfg-jump" ? 9 : 10),
+    },
+  });
   const roster = bots.director.arenaRoster("q3dm1");
   const addCommands = [...consoleCommands];
-    for (const command of consoleCommands.splice(0)) bots.consoleCommand(tokenizeCommand(command, "q3").argv);
+  for (const command of consoleCommands.splice(0)) bots.consoleCommand(tokenizeCommand(command, "q3").argv);
   const botClient = bots.clients()[0];
   if (botClient === undefined) throw new Error("Authored arena bot did not allocate a real session client");
   const botActor = bots.actor(botClient.client.id);
   if (botActor === null) throw new Error("Authored bot has no canonical actor");
-  const entity = game.pool.at(1), player = entity.client;
+  const entity = game.pool.at(1),
+    player = entity.client;
   if (player === null) throw new Error("Bot actor source player state missing");
   const brain = bots.director.roster()[0]?.state;
   if (brain === undefined) throw new Error("Authored bot has no source brain");
   const clock = { ms: 42 * 50 }; // the roster test advances 42 frames before the later sections run
-  return { content, identity, simulation, session, humanClient, human, game, archive, files, graph, bots, forClient, consoleCommands, messages, botClient, botActor, entity, player, brain, roster, addCommands, navigation, clock,
-    close: async () => { bots.close(); session.close(); archive.close(); await content.close(); } };
+  return {
+    content,
+    identity,
+    simulation,
+    session,
+    humanClient,
+    human,
+    game,
+    archive,
+    files,
+    graph,
+    bots,
+    forClient,
+    consoleCommands,
+    messages,
+    botClient,
+    botActor,
+    entity,
+    player,
+    brain,
+    roster,
+    addCommands,
+    navigation,
+    clock,
+    close: async () => {
+      bots.close();
+      session.close();
+      archive.close();
+      await content.close();
+    },
+  };
 }
 type Arena = Awaited<ReturnType<typeof openArena>>;
 
@@ -176,8 +363,12 @@ const arenaFiles = ["q3a/baseq3/pak0.pk3", "q2/baseq2/pak0.pak", "q1/rerelease/i
 // The sections share one world, bot brain, library and director, and run in order like successive frames of one match.
 describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("retail arena roster and source bot brain", () => {
   let arena: Arena;
-  beforeAll(async () => { arena = await openArena(); }, 120000);
-  afterAll(async () => { await arena.close(); });
+  beforeAll(async () => {
+    arena = await openArena();
+  }, 120000);
+  afterAll(async () => {
+    await arena.close();
+  });
   test("authored roster admits a source bot that connects through session frames", async () => {
     const { simulation, session, game, bots, player, brain, roster, addCommands } = arena;
     expect(roster.map(bot => bot.name)).toEqual(["ranger"]);
@@ -194,8 +385,10 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
 
   test("bot transport and director checkpoints round-trip and reject mismatched bindings", async () => {
     const { simulation, bots, botClient } = arena;
-    const originalTransport = bots.checkpointOrchestration(), originalDirector = bots.director.checkpointOrchestration();
-    const savedRandom = simulation.random.checkpoint(), savedPlayers = simulation.players();
+    const originalTransport = bots.checkpointOrchestration(),
+      originalDirector = bots.director.checkpointOrchestration();
+    const savedRandom = simulation.random.checkpoint(),
+      savedPlayers = simulation.players();
     for (let index = 0; index < 70; index++) {
       botClient.reliable.assignAcknowledgement(botClient.reliable.sequence);
       botClient.reliable.add(`print checkpoint-${index}`);
@@ -208,8 +401,13 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
     expect(bots.clients()[0]?.reliable).not.toBe(botClient.reliable);
     expect(simulation.random.checkpoint()).toEqual(savedRandom);
     expect(simulation.players()).toEqual(savedPlayers);
-    const invalidTransport = { ...transportImage, connections: transportImage.connections.map(connection => ({ ...connection,
-      actor: { ...connection.actor, generation: connection.actor.generation + 1 } })) };
+    const invalidTransport = {
+      ...transportImage,
+      connections: transportImage.connections.map(connection => ({
+        ...connection,
+        actor: { ...connection.actor, generation: connection.actor.generation + 1 },
+      })),
+    };
     const activeBots = bots;
     expect(() => activeBots.restoreOrchestration(invalidTransport, resolveClient)).toThrow("Invalid saved bot transport binding");
     expect(bots.checkpointOrchestration()).toEqual(transportImage);
@@ -217,8 +415,11 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
     const changedDirector = { ...originalDirector, sequences: originalDirector.sequences.map(entry => ({ ...entry, next: entry.next + 7 })) };
     bots.director.restoreOrchestration(changedDirector, saved => simulation.actors.resolveSaved(saved));
     expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
-    expect(() => activeBots.director.restoreOrchestration({ ...changedDirector,
-      sequences: [...changedDirector.sequences, ...changedDirector.sequences] }, saved => simulation.actors.resolveSaved(saved))).toThrow("invalid or duplicate actor");
+    expect(() =>
+      activeBots.director.restoreOrchestration({ ...changedDirector, sequences: [...changedDirector.sequences, ...changedDirector.sequences] }, saved =>
+        simulation.actors.resolveSaved(saved),
+      ),
+    ).toThrow("invalid or duplicate actor");
     expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
     bots.restoreOrchestration(originalTransport, resolveClient);
     bots.director.restoreOrchestration(originalDirector, saved => simulation.actors.resolveSaved(saved));
@@ -226,80 +427,109 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
 
   test("Q3 bot item inventory, walking reachability and native weapon activation priority", async () => {
     const { game, graph, bots, player, brain } = arena;
-      const library = bots.director.library, original = bots.director.ai.context;
-      const items = new BotState("baseq3"); items.client = brain.client; items.curPs.copyFrom(player.ps);
-      items.inventory[65] = 1; items.inventory[97] = 13;
-      const schema = statSchema("baseq3");
-      items.curPs.stats.set(schema.health, 35);
-      items.curPs.powerups.set(Powerup.PW_QUAD, 1);
-      for (const model of [BotModelIndex.MEDKIT, BotModelIndex.TELEPORTER, 0]) {
-        items.curPs.stats.set(schema.holdableItem, model);
-        updateQ3BotItemInventory(items);
-        expect(items.inventory[BotInventory.HEALTH]).toBe(35);
-        expect(items.inventory[BotInventory.MEDKIT]).toBe(Number(model === BotModelIndex.MEDKIT));
-        expect(items.inventory[BotInventory.TELEPORTER]).toBe(Number(model === BotModelIndex.TELEPORTER));
-        expect(items.inventory[BotInventory.QUAD]).toBe(1);
-        expect(items.inventory[65]).toBe(1); expect(items.inventory[97]).toBe(13);
-        library.actions.resetInput(items.client);
-        botBattleUseItems(original, items);
-        expect(library.actions.getInput(items.client, 0).actionFlags & BotActionFlag.USE).toBe(model === 0 ? 0 : BotActionFlag.USE);
-      }
-      items.curPs.powerups.set(Powerup.PW_QUAD, 0); updateQ3BotItemInventory(items);
-      expect(items.inventory[BotInventory.QUAD]).toBe(0);
+    const library = bots.director.library,
+      original = bots.director.ai.context;
+    const items = new BotState("baseq3");
+    items.client = brain.client;
+    items.curPs.copyFrom(player.ps);
+    items.inventory[65] = 1;
+    items.inventory[97] = 13;
+    const schema = statSchema("baseq3");
+    items.curPs.stats.set(schema.health, 35);
+    items.curPs.powerups.set(Powerup.PW_QUAD, 1);
+    for (const model of [BotModelIndex.MEDKIT, BotModelIndex.TELEPORTER, 0]) {
+      items.curPs.stats.set(schema.holdableItem, model);
+      updateQ3BotItemInventory(items);
+      expect(items.inventory[BotInventory.HEALTH]).toBe(35);
+      expect(items.inventory[BotInventory.MEDKIT]).toBe(Number(model === BotModelIndex.MEDKIT));
+      expect(items.inventory[BotInventory.TELEPORTER]).toBe(Number(model === BotModelIndex.TELEPORTER));
+      expect(items.inventory[BotInventory.QUAD]).toBe(1);
+      expect(items.inventory[65]).toBe(1);
+      expect(items.inventory[97]).toBe(13);
       library.actions.resetInput(items.client);
-      const walkEdge = graph.edges.find(edge => edge.mode === "walk");
-      if (walkEdge === undefined) throw new Error("Retail arena has no walking reachability");
-      const moveHandle = library.moveStates.allocate(), moveState = library.moveStates.fromHandle(moveHandle);
-      if (moveState === null) throw new Error("Retail movement state allocation failed");
-      try {
-        moveState.lastReachability = walkEdge.id;
-        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
-        moveState.lastReachability = walkEdge.id;
-        expect(moveState.walkProgress?.edge).toBe(walkEdge);
-        moveState.lastReachability = walkEdge.id + 1;
-        expect(moveState.walkProgress).toBeNull();
-        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
-        const moveInput = { origin: brain.origin, velocity: brain.velocity, viewOffset: { x: 0, y: 0, z: brain.curPs.viewheight },
-          entityNum: brain.entityNum, client: brain.client, thinkTime: 0.1, presenceType: 2, viewAngles: brain.viewangles };
-        library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.ONGROUND });
-        expect(moveState.walkProgress?.edge).toBe(walkEdge);
-        library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.TELEPORTED });
-        expect(moveState.walkProgress).toBeNull();
-        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
-        library.moveStates.reset(moveHandle);
-        expect(moveState.walkProgress).toBeNull();
-        expect(moveState.lastReachability).toBe(0);
-      } finally { library.moveStates.free(moveHandle); }
-      const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
-      if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
-      const activation = new BotState("baseq3"); activation.ws = brain.ws;
-      activation.curPs.weaponState = WeaponState.WEAPON_RAISING;
-      const nativeKnowledge = q3BotGame(game, () => undefined).knowledge;
-      expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
-      const priority: readonly (readonly [number, BotInventory, BotInventory])[] = [
-        [2, BotInventory.MACHINEGUN, BotInventory.BULLETS], [3, BotInventory.SHOTGUN, BotInventory.SHELLS],
-        [8, BotInventory.PLASMAGUN, BotInventory.CELLS], [6, BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO],
-        [7, BotInventory.RAILGUN, BotInventory.SLUGS], [5, BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS],
-        [9, BotInventory.BFG10K, BotInventory.BFGAMMO],
-      ];
-      for (const [, weapon, ammo] of priority) {
-        activation.inventory[weapon] = 1; activation.inventory[ammo] = 1;
-      }
-      for (const [selected, weapon] of priority) {
-        expect(nativeKnowledge.activationWeapon(library, activation)).toBe(selected);
-        activation.inventory[weapon] = 0;
-      }
-      activation.inventory[BotInventory.GAUNTLET] = 1;
-      activation.inventory[BotInventory.GRENADELAUNCHER] = 1; activation.inventory[BotInventory.GRENADES] = 20;
-      expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
-      for (const candidate of [
-        { info: { ...gauntlet, number: 7, weaponInventoryIndex: 64 }, melee: true, maximumRange: 60, personalityRole: null, supply: null },
-        { info: { ...gauntlet, number: 8, weaponInventoryIndex: 64, projectileInfo: { ...gauntlet.projectileInfo, gravity: 1 } }, melee: false, maximumRange: null, personalityRole: null, supply: null },
-      ]) {
-        activation.inventory[64] = 1;
-        expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [candidate] }).activationWeapon(library, activation)).toBe(-1);
-      }
-      expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [] }).activationWeapon(library, activation)).toBe(-1);
+      botBattleUseItems(original, items);
+      expect(library.actions.getInput(items.client, 0).actionFlags & BotActionFlag.USE).toBe(model === 0 ? 0 : BotActionFlag.USE);
+    }
+    items.curPs.powerups.set(Powerup.PW_QUAD, 0);
+    updateQ3BotItemInventory(items);
+    expect(items.inventory[BotInventory.QUAD]).toBe(0);
+    library.actions.resetInput(items.client);
+    const walkEdge = graph.edges.find(edge => edge.mode === "walk");
+    if (walkEdge === undefined) throw new Error("Retail arena has no walking reachability");
+    const moveHandle = library.moveStates.allocate(),
+      moveState = library.moveStates.fromHandle(moveHandle);
+    if (moveState === null) throw new Error("Retail movement state allocation failed");
+    try {
+      moveState.lastReachability = walkEdge.id;
+      moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+      moveState.lastReachability = walkEdge.id;
+      expect(moveState.walkProgress?.edge).toBe(walkEdge);
+      moveState.lastReachability = walkEdge.id + 1;
+      expect(moveState.walkProgress).toBeNull();
+      moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+      const moveInput = {
+        origin: brain.origin,
+        velocity: brain.velocity,
+        viewOffset: { x: 0, y: 0, z: brain.curPs.viewheight },
+        entityNum: brain.entityNum,
+        client: brain.client,
+        thinkTime: 0.1,
+        presenceType: 2,
+        viewAngles: brain.viewangles,
+      };
+      library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.ONGROUND });
+      expect(moveState.walkProgress?.edge).toBe(walkEdge);
+      library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.TELEPORTED });
+      expect(moveState.walkProgress).toBeNull();
+      moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+      library.moveStates.reset(moveHandle);
+      expect(moveState.walkProgress).toBeNull();
+      expect(moveState.lastReachability).toBe(0);
+    } finally {
+      library.moveStates.free(moveHandle);
+    }
+    const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
+    if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
+    const activation = new BotState("baseq3");
+    activation.ws = brain.ws;
+    activation.curPs.weaponState = WeaponState.WEAPON_RAISING;
+    const nativeKnowledge = q3BotGame(game, () => undefined).knowledge;
+    expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
+    const priority: readonly (readonly [number, BotInventory, BotInventory])[] = [
+      [2, BotInventory.MACHINEGUN, BotInventory.BULLETS],
+      [3, BotInventory.SHOTGUN, BotInventory.SHELLS],
+      [8, BotInventory.PLASMAGUN, BotInventory.CELLS],
+      [6, BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO],
+      [7, BotInventory.RAILGUN, BotInventory.SLUGS],
+      [5, BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS],
+      [9, BotInventory.BFG10K, BotInventory.BFGAMMO],
+    ];
+    for (const [, weapon, ammo] of priority) {
+      activation.inventory[weapon] = 1;
+      activation.inventory[ammo] = 1;
+    }
+    for (const [selected, weapon] of priority) {
+      expect(nativeKnowledge.activationWeapon(library, activation)).toBe(selected);
+      activation.inventory[weapon] = 0;
+    }
+    activation.inventory[BotInventory.GAUNTLET] = 1;
+    activation.inventory[BotInventory.GRENADELAUNCHER] = 1;
+    activation.inventory[BotInventory.GRENADES] = 20;
+    expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
+    for (const candidate of [
+      { info: { ...gauntlet, number: 7, weaponInventoryIndex: 64 }, melee: true, maximumRange: 60, personalityRole: null, supply: null },
+      {
+        info: { ...gauntlet, number: 8, weaponInventoryIndex: 64, projectileInfo: { ...gauntlet.projectileInfo, gravity: 1 } },
+        melee: false,
+        maximumRange: null,
+        personalityRole: null,
+        supply: null,
+      },
+    ]) {
+      activation.inventory[64] = 1;
+      expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [candidate] }).activationWeapon(library, activation)).toBe(-1);
+    }
+    expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [] }).activationWeapon(library, activation)).toBe(-1);
   }, 60000);
 
   test("Q2 arsenal selection and pickup utility, and attack distance per weapon source", async () => {
@@ -309,63 +539,137 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
     const q2Content = await loadApplicationContent(q2Launch.options);
     let q2Simulation: SharedSimulation | null = null;
     try {
-      q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
-        world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
-      const library = bots.director.library, original = bots.director.ai.context;
+      q2Simulation = new SharedSimulation({
+        identity: createIdentityOwner("bot-attack-distance"),
+        recipe: q2Content.recipe,
+        world: q2Content.world,
+        mounts: q2Content.mounts,
+        mode: "deathmatch",
+        skill: 3,
+        seed: 7,
+        maxClients: 4,
+      });
+      const library = bots.director.library,
+        original = bots.director.ai.context;
       if (q2Simulation !== null) {
         const actor = q2Simulation.admitPlayer(q2Simulation.options.identity.client(0, 1)).actor;
         const owner = q2Simulation.actors.resolveOwned(actor);
         if (owner === null) throw new Error("Q2 activation owner missing");
         const knowledge = createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => actor });
-        const state = new BotState("baseq3"); state.ws = brain.ws; state.curPs.weaponState = WeaponState.WEAPON_RAISING;
-        const select = () => { knowledge.knowledge.updateInventory(state); return knowledge.resolveWeapon(0, knowledge.knowledge.activationWeapon(library, state)); };
+        const state = new BotState("baseq3");
+        state.ws = brain.ws;
+        state.curPs.weaponState = WeaponState.WEAPON_RAISING;
+        const select = () => {
+          knowledge.knowledge.updateInventory(state);
+          return knowledge.resolveWeapon(0, knowledge.knowledge.activationWeapon(library, state));
+        };
         expect(select()).toBe("q2:weapon_blaster");
         q2Simulation.inventory.consume(owner, "q2:weapon_blaster", 1);
-        q2Simulation.inventory.give(owner, "q2:weapon_supershotgun", 1); q2Simulation.inventory.give(owner, "q2:ammo_shells", 1);
+        q2Simulation.inventory.give(owner, "q2:weapon_supershotgun", 1);
+        q2Simulation.inventory.give(owner, "q2:ammo_shells", 1);
         expect(select()).toBeNull();
         q2Simulation.inventory.give(owner, "q2:ammo_shells", 1);
         expect(select()).toBe("q2:weapon_supershotgun");
-        q2Simulation.inventory.give(owner, "q2:weapon_machinegun", 1); q2Simulation.inventory.give(owner, "q2:ammo_bullets", 1);
+        q2Simulation.inventory.give(owner, "q2:weapon_machinegun", 1);
+        q2Simulation.inventory.give(owner, "q2:ammo_bullets", 1);
         expect(select()).toBe("q2:weapon_machinegun");
         expect(state.curPs.weaponState).toBe(WeaponState.WEAPON_RAISING);
         q2Simulation.inventory.give(owner, "q2:weapon_shotgun", 1);
         knowledge.knowledge.updateInventory(state);
-        const utility = (preview: import("../../../src/contracts/pickups.ts").PickupSupplyPreview) => knowledge.knowledge.pickupUtility(library, state, preview);
+        const utility = (preview: import("../../../src/contracts/pickups.ts").PickupSupplyPreview) =>
+          knowledge.knowledge.pickupUtility(library, state, preview);
         expect(utility({ accepted: true, weapons: [], ammo: [] })).toBe(0);
         expect(utility({ accepted: true, weapons: [{ item: "q2:weapon_shotgun", before: 1, given: 1 }], ammo: [] })).toBe(0);
-        const admission = new SharedPickupAdmission({ inventory: q2Simulation.inventory,
-          profile: { id: "test:sequential-supply", weaponOwnership: "all-destinations",
-            ammo: [{ source: "q1:ammo/shells", destinations: ["q2:ammo_shells"] }, { source: "q1:ammo/nails", destinations: ["q2:ammo_shells"] }],
-            weapons: [{ source: "q1:weapon/shotgun", destinations: ["q2:weapon_shotgun"] }] },
-          ammoGranted: () => { throw new Error("Preview mutated ammo"); }, weaponGranted: () => { throw new Error("Preview selected weapon"); } });
+        const admission = new SharedPickupAdmission({
+          inventory: q2Simulation.inventory,
+          profile: {
+            id: "test:sequential-supply",
+            weaponOwnership: "all-destinations",
+            ammo: [
+              { source: "q1:ammo/shells", destinations: ["q2:ammo_shells"] },
+              { source: "q1:ammo/nails", destinations: ["q2:ammo_shells"] },
+            ],
+            weapons: [{ source: "q1:weapon/shotgun", destinations: ["q2:weapon_shotgun"] }],
+          },
+          ammoGranted: () => {
+            throw new Error("Preview mutated ammo");
+          },
+          weaponGranted: () => {
+            throw new Error("Preview selected weapon");
+          },
+        });
         const beforePreview = q2Simulation.inventory.entries(actor);
-        const sequential = admission.preview(actor, { kind: "weapon", offer: { item: "q1:weapon/shotgun",
-          ammo: [{ item: "q1:ammo/shells", amount: 10 }, { item: "q1:ammo/nails", amount: 10 }] } });
+        const sequential = admission.preview(actor, {
+          kind: "weapon",
+          offer: {
+            item: "q1:weapon/shotgun",
+            ammo: [
+              { item: "q1:ammo/shells", amount: 10 },
+              { item: "q1:ammo/nails", amount: 10 },
+            ],
+          },
+        });
         expect(sequential.ammo.map(receipt => receipt.before)).toEqual([2, 12]);
         expect(utility(sequential)).toBe(20);
         expect(q2Simulation.inventory.entries(actor)).toEqual([...beforePreview]);
         expect(utility({ accepted: true, weapons: [], ammo: [{ item: "q2:ammo_cells", before: 0, given: 10 }] })).toBe(0);
-        expect(utility({ accepted: true, weapons: [{ item: "q2:weapon_rocketlauncher", before: 0, given: 1 }], ammo: [{ item: "q2:ammo_rockets", before: 0, given: 5 }] })).toBe(105);
+        expect(
+          utility({
+            accepted: true,
+            weapons: [{ item: "q2:weapon_rocketlauncher", before: 0, given: 1 }],
+            ammo: [{ item: "q2:ammo_rockets", before: 0, given: 5 }],
+          }),
+        ).toBe(105);
         expect(utility({ accepted: false, weapons: [{ item: "q2:weapon_rocketlauncher", before: 0, given: 1 }], ammo: [] })).toBe(0);
-        expect(utility({ accepted: true, weapons: [{ item: "q2:ammo_grenades", before: 0, given: 5 }], ammo: [{ item: "q2:ammo_grenades", before: 0, given: 5 }] })).toBe(0);
-
+        expect(
+          utility({ accepted: true, weapons: [{ item: "q2:ammo_grenades", before: 0, given: 5 }], ammo: [{ item: "q2:ammo_grenades", before: 0, given: 5 }] }),
+        ).toBe(0);
       }
       const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
       if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
       const cases = [
-        ...(q2Simulation === null ? [] : [{ name: "Q2 blaster", active: 1, melee: false, knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge }]),
+        ...(q2Simulation === null
+          ? []
+          : [
+              {
+                name: "Q2 blaster",
+                active: 1,
+                melee: false,
+                knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge,
+              },
+            ]),
         { name: "Q3 gauntlet", active: 1, melee: true, knowledge: q3BotGame(game, () => undefined).knowledge },
         { name: "Q3 machinegun", active: 2, melee: false, knowledge: q3BotGame(game, () => undefined).knowledge },
-        { name: "remapped melee", active: 7, melee: true, knowledge: createBotArsenalKnowledge({ updateInventory: () => undefined,
-          candidates: () => [{ info: { ...gauntlet, number: 7 }, melee: true, maximumRange: 60, personalityRole: null, supply: null }] }) },
+        {
+          name: "remapped melee",
+          active: 7,
+          melee: true,
+          knowledge: createBotArsenalKnowledge({
+            updateInventory: () => undefined,
+            candidates: () => [{ info: { ...gauntlet, number: 7 }, melee: true, maximumRange: 60, personalityRole: null, supply: null }],
+          }),
+        },
       ];
       for (const entry of cases) {
         const directions: number[] = [];
-        const context = new GameAiContext({ ...original.game, knowledge: entry.knowledge, random: { random: () => 0.5, crandom: () => 0 } }, library,
-          { ...original.host, navigation: { ...original.navigation, moveInDirection: (_handle, direction) => { directions.push(direction.x); return true; } } });
+        const context = new GameAiContext({ ...original.game, knowledge: entry.knowledge, random: { random: () => 0.5, crandom: () => 0 } }, library, {
+          ...original.host,
+          navigation: {
+            ...original.navigation,
+            moveInDirection: (_handle, direction) => {
+              directions.push(direction.x);
+              return true;
+            },
+          },
+        });
         const state = new BotState("baseq3");
-        state.character = brain.character; state.ws = brain.ws; state.ms = brain.ms; state.enemy = 0;
-        state.curPs.weapon = entry.active; state.curPs.weaponState = WeaponState.WEAPON_RAISING; state.weaponNum = 9;
+        state.character = brain.character;
+        state.ws = brain.ws;
+        state.ms = brain.ms;
+        state.enemy = 0;
+        state.curPs.weapon = entry.active;
+        state.curPs.weaponState = WeaponState.WEAPON_RAISING;
+        state.weaponNum = 9;
         context.time = 10;
         botChooseWeapon(context, state);
         expect(state.weaponNum).toBe(9);
@@ -378,34 +682,50 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
           expect(state.curPs.weapon).toBe(entry.active);
         }
       }
-    } finally { q2Simulation?.close(); await q2Content.close(); }
+    } finally {
+      q2Simulation?.close();
+      await q2Content.close();
+    }
   }, 120000);
 
   test("Q1 source ownership drives bot weapon choice and pickup utility", async () => {
     const { bots, brain } = arena;
-  const library = bots.director.library;
-      {
-        const q1Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--dedicated"]);
-        if (q1Launch.kind !== "run") throw new Error("Expected Q1 source ownership fixture");
-        const q1Content = await loadApplicationContent(q1Launch.options);
-        const q1Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-q1-supply"), recipe: q1Content.recipe,
-          world: q1Content.world, mounts: q1Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
-        try {
-          const actor = q1Simulation.admitPlayer(q1Simulation.options.identity.client(0, 1)).actor;
-          const owner = q1Simulation.actors.resolveOwned(actor);
-          if (owner === null) throw new Error("Q1 source ownership fixture lost actor");
-          q1Simulation.inventory.consume(owner, "q1:ammo/shells", q1Simulation.inventory.count(actor, "q1:ammo/shells"));
-          const knowledge = createQ1BotKnowledge({ simulation: q1Simulation, actorForClient: () => actor });
-          const state = new BotState("baseq3"); state.ws = brain.ws;
-          knowledge.knowledge.updateInventory(state);
-          const selectedBefore = knowledge.knowledge.chooseWeapon(library, state);
-          expect(knowledge.resolveWeapon(0, selectedBefore)).toBe("q1:weapon/axe");
-          expect(knowledge.knowledge.pickupUtility(library, state, { accepted: true, weapons: [],
-            ammo: [{ item: "q1:ammo/shells", before: 0, given: 10 }] })).toBe(10);
-          expect(knowledge.knowledge.chooseWeapon(library, state)).toBe(selectedBefore);
-          expect(q1Simulation.inventory.count(actor, "q1:ammo/shells")).toBe(0);
-        } finally { q1Simulation.close(); await q1Content.close(); }
+    const library = bots.director.library;
+    {
+      const q1Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--dedicated"]);
+      if (q1Launch.kind !== "run") throw new Error("Expected Q1 source ownership fixture");
+      const q1Content = await loadApplicationContent(q1Launch.options);
+      const q1Simulation = new SharedSimulation({
+        identity: createIdentityOwner("bot-q1-supply"),
+        recipe: q1Content.recipe,
+        world: q1Content.world,
+        mounts: q1Content.mounts,
+        mode: "deathmatch",
+        skill: 3,
+        seed: 7,
+        maxClients: 4,
+      });
+      try {
+        const actor = q1Simulation.admitPlayer(q1Simulation.options.identity.client(0, 1)).actor;
+        const owner = q1Simulation.actors.resolveOwned(actor);
+        if (owner === null) throw new Error("Q1 source ownership fixture lost actor");
+        q1Simulation.inventory.consume(owner, "q1:ammo/shells", q1Simulation.inventory.count(actor, "q1:ammo/shells"));
+        const knowledge = createQ1BotKnowledge({ simulation: q1Simulation, actorForClient: () => actor });
+        const state = new BotState("baseq3");
+        state.ws = brain.ws;
+        knowledge.knowledge.updateInventory(state);
+        const selectedBefore = knowledge.knowledge.chooseWeapon(library, state);
+        expect(knowledge.resolveWeapon(0, selectedBefore)).toBe("q1:weapon/axe");
+        expect(
+          knowledge.knowledge.pickupUtility(library, state, { accepted: true, weapons: [], ammo: [{ item: "q1:ammo/shells", before: 0, given: 10 }] }),
+        ).toBe(10);
+        expect(knowledge.knowledge.chooseWeapon(library, state)).toBe(selectedBefore);
+        expect(q1Simulation.inventory.count(actor, "q1:ammo/shells")).toBe(0);
+      } finally {
+        q1Simulation.close();
+        await q1Content.close();
       }
+    }
   }, 120000);
 
   test("source bot moves, fires and consumes ammo against a human target", async () => {
@@ -416,25 +736,46 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
     expect(player.ps.origin).toEqual(selected.state.origin);
     expect(simulation.bodies.read(entity.actor.id)?.origin).toEqual(selected.state.origin);
     expect(simulation.bodies.linked(entity.actor.id)?.state.origin).toEqual(entity.s.pos.base);
-    expect(game.world.trace({ start: initial, end: initial,
-      shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: 1, mask: 0x2010001 }).solidity).toBe("clear");
-    const target = game.pool.at(0), targetPlayer = target.client;
+    expect(
+      game.world.trace({ start: initial, end: initial, shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: 1, mask: 0x2010001 })
+        .solidity,
+    ).toBe("clear");
+    const target = game.pool.at(0),
+      targetPlayer = target.client;
     if (targetPlayer === null) throw new Error("Human source player state missing");
     let placed = false;
-    for (const displacement of [{ x: 100, y: 0 }, { x: -100, y: 0 }, { x: 0, y: 100 }, { x: 0, y: -100 }]) {
+    for (const displacement of [
+      { x: 100, y: 0 },
+      { x: -100, y: 0 },
+      { x: 0, y: 100 },
+      { x: 0, y: -100 },
+    ]) {
       const end = { x: initial.x + displacement.x, y: initial.y + displacement.y, z: initial.z };
-      const trace = game.world.trace({ start: initial, end, shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: 1, mask: 0x2010001 });
+      const trace = game.world.trace({
+        start: initial,
+        end,
+        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
+        passEntityNum: 1,
+        mask: 0x2010001,
+      });
       if (trace.fraction !== 1 || trace.solidity !== "clear") continue;
-      targetPlayer.ps.origin = end; game.world.link(target); placed = true; break;
+      targetPlayer.ps.origin = end;
+      game.world.link(target);
+      placed = true;
+      break;
     }
     expect(placed).toBe(true);
-    
+
     target.health = 100;
-    let moves = 0, shots = 0, ammoConsumed = 0;
+    let moves = 0,
+      shots = 0,
+      ammoConsumed = 0;
     for (let frame = 1; frame <= 80; frame++) {
       clock.ms += 50;
       const commands = bots.frame(clock.ms, 50);
-      for (const input of commands) { expect(input.actor).toBe(botActor); if (input.command.kind !== "q3") throw new Error("Native source bot command changed dialect");
+      for (const input of commands) {
+        expect(input.actor).toBe(botActor);
+        if (input.command.kind !== "q3") throw new Error("Native source bot command changed dialect");
         if (input.command.forwardMove !== 0 || input.command.rightMove !== 0) moves++;
         if ((input.command.buttons & 1) !== 0) shots++;
       }
@@ -455,10 +796,24 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
     const { simulation, session, game, bots, forClient, botActor, entity, player, clock } = arena;
     const orderOrigin = { ...player.ps.origin };
     let orderPoint: typeof orderOrigin | null = null;
-    for (const displacement of [{ x: 64, y: 0 }, { x: -64, y: 0 }, { x: 0, y: 64 }, { x: 0, y: -64 }]) {
+    for (const displacement of [
+      { x: 64, y: 0 },
+      { x: -64, y: 0 },
+      { x: 0, y: 64 },
+      { x: 0, y: -64 },
+    ]) {
       const end = { x: orderOrigin.x + displacement.x, y: orderOrigin.y + displacement.y, z: orderOrigin.z };
-      const trace = game.world.trace({ start: orderOrigin, end, shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: 1, mask: 0x2010001 });
-      if (trace.fraction === 1 && trace.solidity === "clear" && forClient(1).route({ start: orderOrigin, goal: end }).kind === "route") { orderPoint = end; break; }
+      const trace = game.world.trace({
+        start: orderOrigin,
+        end,
+        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
+        passEntityNum: 1,
+        mask: 0x2010001,
+      });
+      if (trace.fraction === 1 && trace.solidity === "clear" && forClient(1).route({ start: orderOrigin, goal: end }).kind === "route") {
+        orderPoint = end;
+        break;
+      }
     }
     if (orderPoint === null) throw new Error("Retail arena has no clear local scripted goal");
     expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(2);
@@ -506,12 +861,16 @@ describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("r
 
   test("bot goal state survives shutdown and setup for team-goal numbers", async () => {
     const { bots, brain } = arena;
-    const sourceClient = brain.client, settings = { ...brain.settings };
+    const sourceClient = brain.client,
+      settings = { ...brain.settings };
     for (const number of [0x40000000, 37]) {
       const current = bots.director.ai.context.states.get(sourceClient);
       if (current === null || current === undefined) throw new Error("Session test lost real bot state");
-      current.lastGoalTeamGoal.number = number; current.lastGoalTeamGoal.area = 12;
-      current.lastGoalLtgType = 5; current.lastGoalDecisionmaker = 2; current.lastGoalTeammate = 3;
+      current.lastGoalTeamGoal.number = number;
+      current.lastGoalTeamGoal.area = 12;
+      current.lastGoalLtgType = 5;
+      current.lastGoalDecisionmaker = 2;
+      current.lastGoalTeammate = 3;
       expect(bots.director.ai.shutdownClient(sourceClient, true)).toBe(true);
       expect(bots.director.ai.setupClient(sourceClient, settings, true)).toBe(true);
       const restored = bots.director.ai.context.states.get(sourceClient);

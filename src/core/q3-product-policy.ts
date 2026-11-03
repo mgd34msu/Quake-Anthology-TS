@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PRE_RELEASE_DEMO/PRE_RELEASE_TADEMO from id Software files.c, sv_ccmds.c and ui_main.c.
  * Copyright (C) 1999-2005 Id Software. GPL-2.0-or-later. */
 import { CvarFlag, type CvarRegistry } from "./cvars/index.ts";
@@ -8,8 +9,11 @@ export type Q3ProductPolicy =
   | { readonly kind: "prerelease-ta-demo" };
 
 export function q3ProductPolicy(prereleaseDemo: boolean, prereleaseTeamArenaDemo: boolean): Q3ProductPolicy {
-  return prereleaseDemo ? { kind: "prerelease-demo", teamArenaUi: prereleaseTeamArenaDemo ? "demo" : "retail" }
-    : prereleaseTeamArenaDemo ? { kind: "prerelease-ta-demo" } : { kind: "retail" };
+  return prereleaseDemo
+    ? { kind: "prerelease-demo", teamArenaUi: prereleaseTeamArenaDemo ? "demo" : "retail" }
+    : prereleaseTeamArenaDemo
+      ? { kind: "prerelease-ta-demo" }
+      : { kind: "retail" };
 }
 
 /** Call after startup +set values have been applied, before mounting content. */
@@ -19,13 +23,14 @@ export function registerQ3ProductPolicy(cvars: CvarRegistry): Q3ProductPolicy {
   return q3ProductPolicy(demo, teamArena);
 }
 
-export function q3PrereleaseDemo(policy: Q3ProductPolicy): boolean { return policy.kind === "prerelease-demo"; }
+export function q3PrereleaseDemo(policy: Q3ProductPolicy): boolean {
+  return policy.kind === "prerelease-demo";
+}
 export function q3TeamArenaDemo(policy: Q3ProductPolicy): boolean {
   return policy.kind === "prerelease-ta-demo" || (policy.kind === "prerelease-demo" && policy.teamArenaUi === "demo");
 }
 
-export type Q3MountRestriction = { readonly kind: "none" }
-  | { readonly kind: "demo"; readonly directory: "demota"; readonly pakChecksum: 437558517 };
+export type Q3MountRestriction = { readonly kind: "none" } | { readonly kind: "demo"; readonly directory: "demota"; readonly pakChecksum: 437558517 };
 export function q3MountRestriction(policy: Q3ProductPolicy, fsRestrict: boolean): Q3MountRestriction {
   return fsRestrict || q3PrereleaseDemo(policy) ? { kind: "demo", directory: "demota", pakChecksum: 437558517 } : { kind: "none" };
 }
@@ -41,8 +46,15 @@ export function q3TeamArenaCatalogPolicy(policy: Q3ProductPolicy): {
   readonly additionalArenas: boolean;
 } {
   const demo = q3TeamArenaDemo(policy);
-  return { gameInfo: demo ? "demogameinfo.txt" : "gameinfo.txt", teamInfo: demo ? "demoteaminfo.txt" : "teaminfo.txt",
-    additionalTeams: !demo, additionalArenas: !demo };
+  return {
+    gameInfo: demo ? "demogameinfo.txt" : "gameinfo.txt",
+    teamInfo: demo ? "demoteaminfo.txt" : "teaminfo.txt",
+    additionalTeams: !demo,
+    additionalArenas: !demo,
+  };
 }
 
-export interface Q3ApplicationProduct { readonly policy: Q3ProductPolicy; readonly restriction: Q3MountRestriction; }
+export interface Q3ApplicationProduct {
+  readonly policy: Q3ProductPolicy;
+  readonly restriction: Q3MountRestriction;
+}

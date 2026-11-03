@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { sourceMoverBoundsMatch } from "../../../src/bots/navigation/entity-binding.ts";
 test("NAV2 source bounds bind a moving brush at its authored endpoint without proximity guesses", () => {

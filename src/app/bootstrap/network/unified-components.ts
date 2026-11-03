@@ -1,4 +1,12 @@
-import { readNativeFrames, readNativeStates, writeNativeFrames, writeNativeStates, type UnifiedNativeFrame, type UnifiedNativeState } from "./unified-native-components.ts";
+// SPDX-License-Identifier: GPL-2.0-or-later
+import {
+  readNativeFrames,
+  readNativeStates,
+  writeNativeFrames,
+  writeNativeStates,
+  type UnifiedNativeFrame,
+  type UnifiedNativeState,
+} from "./unified-native-components.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import type { ModIdentity } from "../../../contracts/mods.ts";
@@ -43,8 +51,16 @@ export interface UnifiedComponentFrame {
   readonly bindings: QvmSceneContext["actors"];
   readonly scene: Omit<QvmSceneContext, "gameState" | "gameStateRevision" | "commands" | "actors" | "baseline"> | null;
 }
-export interface UnifiedComponentUpdate { readonly revision: number; readonly sources: readonly UnifiedComponentState[]; readonly native?: readonly UnifiedNativeState[]; }
-export interface UnifiedComponentFrames { readonly revision: number; readonly sources: readonly UnifiedComponentFrame[]; readonly native?: readonly UnifiedNativeFrame[]; }
+export interface UnifiedComponentUpdate {
+  readonly revision: number;
+  readonly sources: readonly UnifiedComponentState[];
+  readonly native?: readonly UnifiedNativeState[];
+}
+export interface UnifiedComponentFrames {
+  readonly revision: number;
+  readonly sources: readonly UnifiedComponentFrame[];
+  readonly native?: readonly UnifiedNativeFrame[];
+}
 
 function integer(reader: SaveReader, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
   const value = reader.integer(minimum);
@@ -54,69 +70,143 @@ export function readComponentOwner(reader: SaveReader): PresentationOwner {
   return { provider: namespaced(reader.field("provider")), generation: integer(reader.field("generation"), 1) };
 }
 function bytes(reader: SaveReader, length: number): Uint8Array {
-  const result = reader.bytes(); return result.length === length ? result : reader.fail("invalid original source record extent");
+  const result = reader.bytes();
+  return result.length === length ? result : reader.fail("invalid original source record extent");
 }
-function view(bytes: Uint8Array): DataView { return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
-function encodeRecord(length: number, write: (value: DataView) => void): Uint8Array { const result = new Uint8Array(length); write(view(result)); return result; }
-function writeState(value: SourceGameStateRecord) { return { stringOffsets: Array.from(value.stringOffsets), stringData: value.stringData, dataCount: value.dataCount }; }
+function view(bytes: Uint8Array): DataView {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+function encodeRecord(length: number, write: (value: DataView) => void): Uint8Array {
+  const result = new Uint8Array(length);
+  write(view(result));
+  return result;
+}
+function writeState(value: SourceGameStateRecord) {
+  return { stringOffsets: Array.from(value.stringOffsets), stringData: value.stringData, dataCount: value.dataCount };
+}
 function readState(reader: SaveReader): SourceGameStateRecord {
-  const count = integer(reader.field("dataCount"), 0, 16000), data = bytes(reader.field("stringData"), 16000);
+  const count = integer(reader.field("dataCount"), 0, 16000),
+    data = bytes(reader.field("stringData"), 16000);
   const offsets = reader.field("stringOffsets").list(offset => integer(offset, 0, Math.max(0, count - 1)));
   if (offsets.length !== 1024 || data[0] !== 0) return reader.fail("invalid original gameState_t");
   // One backward pass finds each position's next NUL, so validating 1024 offsets does not rescan the table.
   const nextNul = new Int32Array(data.length + 1).fill(-1);
-  for (let index = data.length - 1; index >= 0; index--) nextNul[index] = data[index] === 0 ? index : nextNul[index + 1] ?? -1;
-  for (const offset of offsets) if (offset !== 0 && ((nextNul[offset] ?? -1) < 0 || (nextNul[offset] ?? -1) >= count)) return reader.fail("unterminated original configstring");
+  for (let index = data.length - 1; index >= 0; index--) nextNul[index] = data[index] === 0 ? index : (nextNul[index + 1] ?? -1);
+  for (const offset of offsets)
+    if (offset !== 0 && ((nextNul[offset] ?? -1) < 0 || (nextNul[offset] ?? -1) >= count)) return reader.fail("unterminated original configstring");
   return { stringOffsets: Int32Array.from(offsets), stringData: data, dataCount: count };
 }
 function readCommands(reader: SaveReader): QvmSceneContext["commands"] {
-  const commands = reader.list(value => ({ sequence: integer(value.field("sequence"), 1, 2147483647), arguments: value.field("arguments").list(argument => {
-    const text = argument.string(); return text.length <= 8192 && !text.includes("\0") ? text : argument.fail("invalid component command argument");
-  }) }));
-  if (commands.length > 64 || commands.some((command, index) => command.arguments.length > 128 || index > 0 && command.sequence !== (commands[index - 1]?.sequence ?? 0) + 1))
+  const commands = reader.list(value => ({
+    sequence: integer(value.field("sequence"), 1, 2147483647),
+    arguments: value.field("arguments").list(argument => {
+      const text = argument.string();
+      return text.length <= 8192 && !text.includes("\0") ? text : argument.fail("invalid component command argument");
+    }),
+  }));
+  if (
+    commands.length > 64 ||
+    commands.some((command, index) => command.arguments.length > 128 || (index > 0 && command.sequence !== (commands[index - 1]?.sequence ?? 0) + 1))
+  )
     return reader.fail("invalid original reliable command window");
   return commands;
 }
 export function writeComponentUpdate(update: UnifiedComponentUpdate) {
-  return { revision: update.revision, native: writeNativeStates(update.native ?? []), sources: update.sources.map(source => ({ ...source, gameState: source.gameState === null ? null : writeState(source.gameState) })) };
+  return {
+    revision: update.revision,
+    native: writeNativeStates(update.native ?? []),
+    sources: update.sources.map(source => ({ ...source, gameState: source.gameState === null ? null : writeState(source.gameState) })),
+  };
 }
 export function readComponentUpdate(reader: SaveReader): UnifiedComponentUpdate {
-  const sources = reader.field("sources").list(source => ({ owner: readComponentOwner(source.field("owner")), identity: readModIdentity(source.field("identity")),
-    generation: integer(source.field("generation"), 0), abi: source.field("abi").choice("q3-modern", "q3-1.16n-base"),
-    runtime: source.field("runtime").choice("qvm-scene", "qvm-player-events"), gameStateRevision: integer(source.field("gameStateRevision"), 0),
-    gameState: source.field("gameState").nullable(readState), commandBase: integer(source.field("commandBase"), 0, 2147483647), commands: readCommands(source.field("commands")) }));
+  const sources = reader.field("sources").list(source => ({
+    owner: readComponentOwner(source.field("owner")),
+    identity: readModIdentity(source.field("identity")),
+    generation: integer(source.field("generation"), 0),
+    abi: source.field("abi").choice("q3-modern", "q3-1.16n-base"),
+    runtime: source.field("runtime").choice("qvm-scene", "qvm-player-events"),
+    gameStateRevision: integer(source.field("gameStateRevision"), 0),
+    gameState: source.field("gameState").nullable(readState),
+    commandBase: integer(source.field("commandBase"), 0, 2147483647),
+    commands: readCommands(source.field("commands")),
+  }));
   if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length) return reader.fail("invalid component owner set");
   const native = readNativeStates(reader.field("native"));
   checkOwners(reader, [...sources, ...native]);
   return { revision: integer(reader.field("revision"), 1), sources, native };
 }
 export function writeComponentFrames(frames: UnifiedComponentFrames) {
-  return { revision: frames.revision, native: writeNativeFrames(frames.native ?? []), sources: frames.sources.map(source => {
-    const playerState = encodeRecord(qvmPlayerStateBytes(source.abi), value => writeSourceQvmPlayerState(value, source.snapshot.playerState, source.abi));
-    return { ...source, viewer: wireActor(source.viewer), snapshot: { serverTime: source.snapshot.serverTime, playerState },
-      bindings: source.bindings.map(binding => ({ ...binding, actor: wireActor(binding.actor) })),
-      scene: source.scene === null ? null : { revision: source.scene.revision, snapshot: { ...source.scene.snapshot, playerState,
-        entities: source.scene.snapshot.entities.map(entity => encodeRecord(qvmEntityStateBytes(source.abi), value => writeSourceQvmEntityState(value, entity, source.abi))) } } };
-  }) };
+  return {
+    revision: frames.revision,
+    native: writeNativeFrames(frames.native ?? []),
+    sources: frames.sources.map(source => {
+      const playerState = encodeRecord(qvmPlayerStateBytes(source.abi), value => writeSourceQvmPlayerState(value, source.snapshot.playerState, source.abi));
+      return {
+        ...source,
+        viewer: wireActor(source.viewer),
+        snapshot: { serverTime: source.snapshot.serverTime, playerState },
+        bindings: source.bindings.map(binding => ({ ...binding, actor: wireActor(binding.actor) })),
+        scene:
+          source.scene === null
+            ? null
+            : {
+                revision: source.scene.revision,
+                snapshot: {
+                  ...source.scene.snapshot,
+                  playerState,
+                  entities: source.scene.snapshot.entities.map(entity =>
+                    encodeRecord(qvmEntityStateBytes(source.abi), value => writeSourceQvmEntityState(value, entity, source.abi)),
+                  ),
+                },
+              },
+      };
+    }),
+  };
 }
 export function readComponentFrames(reader: SaveReader, identity: UnifiedIdentityDecoder): UnifiedComponentFrames {
   const sources = reader.field("sources").list(source => {
-    const abi = source.field("abi").choice("q3-modern", "q3-1.16n-base"), snapshot = source.field("snapshot");
+    const abi = source.field("abi").choice("q3-modern", "q3-1.16n-base"),
+      snapshot = source.field("snapshot");
     const playerState = readSourceQvmPlayerState(view(bytes(snapshot.field("playerState"), qvmPlayerStateBytes(abi))), abi);
     finiteVectors(snapshot.field("playerState"), [playerState.origin, playerState.velocity, playerState.grapplePoint, playerState.viewAngles]);
-    const bindings = source.field("bindings").list(binding => ({ actor: actor(binding.field("actor"), identity), slot: integer(binding.field("slot"), 0, 1023), owned: binding.field("owned").boolean() }));
+    const bindings = source.field("bindings").list(binding => ({
+      actor: actor(binding.field("actor"), identity),
+      slot: integer(binding.field("slot"), 0, 1023),
+      owned: binding.field("owned").boolean(),
+    }));
     if (bindings.length > 1024 || new Set(bindings.map(binding => binding.slot)).size !== bindings.length) return source.fail("duplicate source actor slots");
     const scene = source.field("scene").nullable(value => {
-      const state = value.field("snapshot"), entities = state.field("entities").list(entity => readSourceQvmEntityState(view(bytes(entity, qvmEntityStateBytes(abi))), abi));
-      if (entities.length > 256 || new Set(entities.map(entity => entity.number)).size !== entities.length) return value.fail("invalid visible source entity set");
-      return { revision: integer(value.field("revision"), 0), snapshot: { serverTime: integer(state.field("serverTime"), 0, 2147483647), flags: integer(state.field("flags"), 0, 255),
-        areaMask: bytes(state.field("areaMask"), 32), playerState, entities, serverCommandSequence: integer(state.field("serverCommandSequence"), 0, 2147483647) } };
+      const state = value.field("snapshot"),
+        entities = state.field("entities").list(entity => readSourceQvmEntityState(view(bytes(entity, qvmEntityStateBytes(abi))), abi));
+      if (entities.length > 256 || new Set(entities.map(entity => entity.number)).size !== entities.length)
+        return value.fail("invalid visible source entity set");
+      return {
+        revision: integer(value.field("revision"), 0),
+        snapshot: {
+          serverTime: integer(state.field("serverTime"), 0, 2147483647),
+          flags: integer(state.field("flags"), 0, 255),
+          areaMask: bytes(state.field("areaMask"), 32),
+          playerState,
+          entities,
+          serverCommandSequence: integer(state.field("serverCommandSequence"), 0, 2147483647),
+        },
+      };
     });
-    return { owner: readComponentOwner(source.field("owner")), generation: integer(source.field("generation"), 0), abi, viewer: actor(source.field("viewer"), identity), clientNumber: integer(source.field("clientNumber"), 0, 1023),
-      gameStateRevision: integer(source.field("gameStateRevision"), 0), snapshot: { serverTime: integer(snapshot.field("serverTime"), 0, 2147483647), playerState },
-      weaponPresented: source.field("weaponPresented").boolean(), bindings, scene };
+    return {
+      owner: readComponentOwner(source.field("owner")),
+      generation: integer(source.field("generation"), 0),
+      abi,
+      viewer: actor(source.field("viewer"), identity),
+      clientNumber: integer(source.field("clientNumber"), 0, 1023),
+      gameStateRevision: integer(source.field("gameStateRevision"), 0),
+      snapshot: { serverTime: integer(snapshot.field("serverTime"), 0, 2147483647), playerState },
+      weaponPresented: source.field("weaponPresented").boolean(),
+      bindings,
+      scene,
+    };
   });
-  if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length) return reader.fail("invalid component frame owner set");
+  if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length)
+    return reader.fail("invalid component frame owner set");
   const native = readNativeFrames(reader.field("native"), identity);
   checkOwners(reader, [...sources, ...native]);
   return { revision: integer(reader.field("revision"), 0), sources, ...(reader.field("native").value === undefined ? {} : { native }) };

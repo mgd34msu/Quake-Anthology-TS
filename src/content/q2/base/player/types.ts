@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Player behavior adapted from id Software Quake II p_client.c, p_view.c,
  * p_hud.c and g_cmds.c. GPL-2.0-or-later. */
 import type { ArmorState, AttackProvenance, InventoryEntry, ItemId } from "../../../../contracts/gameplay.ts";
@@ -21,7 +22,15 @@ export interface Q2PlayerMovement {
   readonly animateQ2: boolean;
 }
 export type Q2PlayerMovementChange =
-  | { readonly kind: "spawn" | "teleport"; readonly origin: Vec3; readonly velocity: Vec3; readonly angles: Vec3; readonly commandAngles: Vec3; readonly holdMilliseconds: number; readonly spectator: boolean }
+  | {
+      readonly kind: "spawn" | "teleport";
+      readonly origin: Vec3;
+      readonly velocity: Vec3;
+      readonly angles: Vec3;
+      readonly commandAngles: Vec3;
+      readonly holdMilliseconds: number;
+      readonly spectator: boolean;
+    }
   | { readonly kind: "freeze"; readonly origin: Vec3; readonly angles: Vec3 }
   | { readonly kind: "noclip"; readonly enabled: boolean };
 
@@ -46,14 +55,28 @@ export interface Q2PlayerView {
   /** STAT_HELPICON shows i_help while an unread objective change is pending. */
   readonly helpIcon?: boolean;
 }
-export interface Q2ScoreRow { readonly slot: number; readonly name: string; readonly score: number; readonly ping: number; readonly minutes: number; readonly spectator: boolean; }
+export interface Q2ScoreRow {
+  readonly slot: number;
+  readonly name: string;
+  readonly score: number;
+  readonly ping: number;
+  readonly minutes: number;
+  readonly spectator: boolean;
+}
 export type Q2PlayerEvent =
   | { readonly kind: "print"; readonly target: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string }
   | { readonly kind: "userinfo"; readonly actor: ActorId; readonly slot: number; readonly name: string; readonly skin: string }
   | { readonly kind: "stufftext"; readonly actor: ActorId; readonly text: string }
   | { readonly kind: "view"; readonly actor: ActorId; readonly view: Q2PlayerView }
   | { readonly kind: "scoreboard"; readonly actor: ActorId; readonly rows: readonly Q2ScoreRow[]; readonly killer: ActorId | null; readonly reliable: boolean }
-  | { readonly kind: "inventory"; readonly actor: ActorId; readonly entries: readonly InventoryEntry[]; readonly visible?: boolean; readonly selected?: ItemId | null; readonly labels?: readonly { readonly item: ItemId; readonly name: string }[] }
+  | {
+      readonly kind: "inventory";
+      readonly actor: ActorId;
+      readonly entries: readonly InventoryEntry[];
+      readonly visible?: boolean;
+      readonly selected?: ItemId | null;
+      readonly labels?: readonly { readonly item: ItemId; readonly name: string }[];
+    }
   | { readonly kind: "help"; readonly actor: ActorId; readonly visible: boolean }
   | { readonly kind: "load-menu"; readonly actor: ActorId }
   | { readonly kind: "trail"; readonly actor: ActorId; readonly origin: Vec3; readonly time: number }
@@ -108,10 +131,30 @@ export interface Q2PlayerRules {
   gunOffset: Vec3;
 }
 export function createQ2PlayerRules(changes: Partial<Q2PlayerRules> = {}): Q2PlayerRules {
-  return { password: "", spectatorPassword: "", maxSpectators: 4, cheats: false, timeLimitMinutes: 0, fragLimit: 0,
-    mapList: [], mapListShuffle: false, nextMap: "", spawnPoint: "", floodMessages: 4, floodSeconds: 4, floodWaitSeconds: 10,
-    rollSpeed: 200, rollAngle: 2, runPitch: 0.002, runRoll: 0.005, bobUp: 0.005, bobPitch: 0.002, bobRoll: 0.002,
-    gunOffset: { x: 0, y: 0, z: 0 }, ...changes };
+  return {
+    password: "",
+    spectatorPassword: "",
+    maxSpectators: 4,
+    cheats: false,
+    timeLimitMinutes: 0,
+    fragLimit: 0,
+    mapList: [],
+    mapListShuffle: false,
+    nextMap: "",
+    spawnPoint: "",
+    floodMessages: 4,
+    floodSeconds: 4,
+    floodWaitSeconds: 10,
+    rollSpeed: 200,
+    rollAngle: 2,
+    runPitch: 0.002,
+    runRoll: 0.005,
+    bobUp: 0.005,
+    bobPitch: 0.002,
+    bobRoll: 0.002,
+    gunOffset: { x: 0, y: 0, z: 0 },
+    ...changes,
+  };
 }
 export interface Q2PlayerCarry {
   readonly health: number;
@@ -196,7 +239,10 @@ export class Q2PlayerState {
   coopRespawn: Q2PlayerCarry | null = null;
   floodTimes: number[] = [];
   floodLockUntil = 0;
-  constructor(readonly slot: number, readonly enteredAt: number) {}
+  constructor(
+    readonly slot: number,
+    readonly enteredAt: number,
+  ) {}
 }
 export interface Q2PlayerContext {
   readonly entity: Q2Entity;

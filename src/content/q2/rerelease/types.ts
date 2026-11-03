@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { DebugLine } from "../../../debug/shapes.ts";
 /* Quake II rerelease game DLL extensions, GPL-2.0-or-later. */
 import type { Q2PlayerState } from "../base/player/types.ts";
@@ -7,16 +8,28 @@ import type { Q2Entity, Q2GameServices, Q2LandmarkCarry } from "../foundation/ho
 import type { Q2RereleaseLevelEntry } from "./campaign.ts";
 import type { WorldTextInput } from "../../../text/world.ts";
 
-export interface Q2Fog { readonly density: number; readonly color: Vec3; readonly skyFactor: number; }
-export interface Q2HeightFog {
-  readonly startColor: Vec3; readonly startDistance: number;
-  readonly endColor: Vec3; readonly endDistance: number;
-  readonly falloff: number; readonly density: number;
+export interface Q2Fog {
+  readonly density: number;
+  readonly color: Vec3;
+  readonly skyFactor: number;
 }
-export interface Q2FogState { readonly fog: Q2Fog; readonly heightFog: Q2HeightFog; }
+export interface Q2HeightFog {
+  readonly startColor: Vec3;
+  readonly startDistance: number;
+  readonly endColor: Vec3;
+  readonly endDistance: number;
+  readonly falloff: number;
+  readonly density: number;
+}
+export interface Q2FogState {
+  readonly fog: Q2Fog;
+  readonly heightFog: Q2HeightFog;
+}
 export function createQ2Fog(): Q2FogState {
-  return { fog: { density: 0, color: { x: 0, y: 0, z: 0 }, skyFactor: 0 },
-    heightFog: { startColor: { x: 0, y: 0, z: 0 }, startDistance: 0, endColor: { x: 0, y: 0, z: 0 }, endDistance: 0, falloff: 0, density: 0 } };
+  return {
+    fog: { density: 0, color: { x: 0, y: 0, z: 0 }, skyFactor: 0 },
+    heightFog: { startColor: { x: 0, y: 0, z: 0 }, startDistance: 0, endColor: { x: 0, y: 0, z: 0 }, endDistance: 0, falloff: 0, density: 0 },
+  };
 }
 export type Q2CoopRespawnState = "none" | "in-combat" | "bad-area" | "blocked" | "waiting" | "no-lives";
 export class Q2RereleasePlayerState {
@@ -59,7 +72,10 @@ export class Q2RereleasePlayerState {
   helpIndex = 0;
   helpDrawTime = 0;
   helpMarkerUntil = 0;
-  constructor(readonly seat: number, readonly socialId: string) {}
+  constructor(
+    readonly seat: number,
+    readonly socialId: string,
+  ) {}
 }
 export interface Q2RereleaseOptions {
   coopSquadRespawn: boolean;
@@ -75,22 +91,64 @@ export interface Q2RereleaseOptions {
   autoSaveMinimumTime: number;
 }
 export function createQ2RereleaseOptions(changes: Partial<Q2RereleaseOptions> = {}): Q2RereleaseOptions {
-  return { coopSquadRespawn: true, coopInstancedItems: true, coopLives: false, coopNumLives: 2,
-    deathmatchForceRespawn: false, deathmatchNoFallDamage: false, deathmatchSpawnFarthest: true, deathmatchForceRespawnTime: 0, deathmatchAllowExit: false, coopPlayerCollision: false, autoSaveMinimumTime: 60, ...changes };
+  return {
+    coopSquadRespawn: true,
+    coopInstancedItems: true,
+    coopLives: false,
+    coopNumLives: 2,
+    deathmatchForceRespawn: false,
+    deathmatchNoFallDamage: false,
+    deathmatchSpawnFarthest: true,
+    deathmatchForceRespawnTime: 0,
+    deathmatchAllowExit: false,
+    coopPlayerCollision: false,
+    autoSaveMinimumTime: 60,
+    ...changes,
+  };
 }
 export type Q2RereleaseEvent =
   | { readonly kind: "debug-shapes"; readonly lines: readonly DebugLine[]; readonly lifetimeMilliseconds: number }
   | { readonly kind: "world-text"; readonly text: WorldTextInput; readonly lifetime: number }
-  | { readonly kind: "localized-print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string; readonly args: readonly string[] }
+  | {
+      readonly kind: "localized-print";
+      readonly actor: ActorId | null;
+      readonly level: "low" | "medium" | "high" | "chat";
+      readonly text: string;
+      readonly args: readonly string[];
+    }
   | { readonly kind: "mission-objective"; readonly actor: ActorId; readonly text: string; readonly args: readonly string[]; readonly talkSound: boolean }
   | { readonly kind: "mission-status"; readonly actor: ActorId; readonly iconVisible: boolean }
   | { readonly kind: "screen-blend"; readonly actor: ActorId; readonly blend: Vec4 }
-  | { readonly kind: "help-computer"; readonly actor: ActorId; readonly visible: boolean; readonly primary: string; readonly secondary: string; readonly slowTime: boolean }
+  | {
+      readonly kind: "help-computer";
+      readonly actor: ActorId;
+      readonly visible: boolean;
+      readonly primary: string;
+      readonly secondary: string;
+      readonly slowTime: boolean;
+    }
   | { readonly kind: "fog"; readonly actor: ActorId; readonly value: Q2FogState; readonly transitionMilliseconds: number }
   | { readonly kind: "flashlight"; readonly actor: ActorId; readonly enabled: boolean; readonly hand: Q2PlayerState["hand"] }
-  | { readonly kind: "keyed-poi"; readonly actor: ActorId; readonly key: number; readonly position: Vec3; readonly image: string; readonly duration: number; readonly color: number; readonly flags: number }
+  | {
+      readonly kind: "keyed-poi";
+      readonly actor: ActorId;
+      readonly key: number;
+      readonly position: Vec3;
+      readonly image: string;
+      readonly duration: number;
+      readonly color: number;
+      readonly flags: number;
+    }
   | { readonly kind: "remove-poi"; readonly actor: ActorId; readonly key: number }
-  | { readonly kind: "directional-damage"; readonly actor: ActorId; readonly direction: Vec3; readonly damage: number; readonly health: boolean; readonly armor: boolean; readonly shield: boolean }
+  | {
+      readonly kind: "directional-damage";
+      readonly actor: ActorId;
+      readonly direction: Vec3;
+      readonly damage: number;
+      readonly health: boolean;
+      readonly armor: boolean;
+      readonly shield: boolean;
+    }
   | { readonly kind: "poi"; readonly actor: ActorId; readonly position: Vec3; readonly image: string; readonly duration: number; readonly color: number }
   | { readonly kind: "help-path"; readonly actor: ActorId; readonly first: boolean; readonly position: Vec3; readonly direction: Vec3 }
   | { readonly kind: "coop-respawn"; readonly actor: ActorId; readonly state: Q2CoopRespawnState; readonly lives: number }
@@ -103,7 +161,15 @@ export type Q2RereleaseEvent =
   | { readonly kind: "story"; readonly text: string }
   | { readonly kind: "achievement"; readonly id: string }
   | { readonly kind: "sky"; readonly name: string; readonly rotation: number; readonly autoRotate: boolean; readonly axis: Vec3 }
-  | { readonly kind: "healthbar"; readonly actor: ActorId; readonly slot: number; readonly target: ActorId; readonly name: string; readonly fraction: number; readonly visible: boolean }
+  | {
+      readonly kind: "healthbar";
+      readonly actor: ActorId;
+      readonly slot: number;
+      readonly target: ActorId;
+      readonly name: string;
+      readonly fraction: number;
+      readonly visible: boolean;
+    }
   | { readonly kind: "item-visibility"; readonly actor: ActorId; readonly item: ActorId; readonly visible: boolean };
 
 /** Seat identity, BSP hull clipping and navigation remain owned by their existing engine services. */
@@ -112,7 +178,11 @@ export interface Q2RereleaseHooks {
   lightStyle(style: number): string;
   playerIdentity(actor: ActorId): { readonly seat: number; readonly socialId: string };
   clipTrigger(trigger: Q2Entity, player: ActorId, game: Q2GameServices): boolean;
-  navigation(start: Vec3, goal: Vec3, actor: ActorId | null): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" };
+  navigation(
+    start: Vec3,
+    goal: Vec3,
+    actor: ActorId | null,
+  ): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" };
   monstersSearching(player: ActorId | null): boolean;
   monsterHoldsHealthBar?(monster: ActorId): boolean;
   expansionPowerups?(player: ActorId): { readonly doubleUntil: number; readonly quadFireUntil: number; readonly irUntil: number };
@@ -124,5 +194,9 @@ export interface Q2RereleaseHooks {
   setWorldGravity(gravity: number): undefined;
 }
 
-export function q2IsN64(game: Pick<Q2GameServices, "options">): boolean { return game.options.mapName.startsWith("q64/"); }
-export function q2UsesInstancedItems(options: Q2RereleaseOptions): boolean { return options.coopInstancedItems || options.coopSquadRespawn; }
+export function q2IsN64(game: Pick<Q2GameServices, "options">): boolean {
+  return game.options.mapName.startsWith("q64/");
+}
+export function q2UsesInstancedItems(options: Q2RereleaseOptions): boolean {
+  return options.coopInstancedItems || options.coopSquadRespawn;
+}

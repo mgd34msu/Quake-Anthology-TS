@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { UseParticipant } from "./state.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { BodyState } from "../../../../contracts/world.ts";
@@ -48,10 +49,11 @@ export interface MoverActorAccess {
   release(actor: OwnedActor): undefined;
 }
 /** Time properties must remain live while installed callbacks are scheduled. */
-export type MoverHost = MoverServices & (
-  | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
-  | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: { explodeMissile(entity: GameEntity): void } }
-);
+export type MoverHost = MoverServices &
+  (
+    | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
+    | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: { explodeMissile(entity: GameEntity): void } }
+  );
 interface PushedNative {
   readonly kind: "native";
   readonly entity: GameEntity;
@@ -64,15 +66,24 @@ const EF_MOVER_STOP = 0x400;
 const MOD_CRUSH = 17;
 const f32 = Math.fround;
 
-function baseOrigin(entity: GameEntity, origin: Vec3): void { entity.s.pos = { ...entity.s.pos, base: { ...origin } }; }
-function baseAngles(entity: GameEntity, angles: Vec3): void { entity.s.apos = { ...entity.s.apos, base: { ...angles } }; }
-function angleShort(angle: number): number { return qvmFloatToInt(f32(f32(angle * 65536) / 360)) & 65535; }
+function baseOrigin(entity: GameEntity, origin: Vec3): void {
+  entity.s.pos = { ...entity.s.pos, base: { ...origin } };
+}
+function baseAngles(entity: GameEntity, angles: Vec3): void {
+  entity.s.apos = { ...entity.s.apos, base: { ...angles } };
+}
+function angleShort(angle: number): number {
+  return qvmFloatToInt(f32(f32(angle * 65536) / 360)) & 65535;
+}
 function pushRotation(origin: Vec3, pusherOrigin: Vec3, amove: Vec3): Vec3 {
   const axes = qvmAngleVectors(amove);
   const matrix = [axes.forward, scale3(axes.right, -1), axes.up] satisfies readonly [Vec3, Vec3, Vec3];
   const org = sub3(origin, pusherOrigin);
-  const rotated = vec3(dot3(org, vec3(matrix[0].x, matrix[1].x, matrix[2].x)),
-    dot3(org, vec3(matrix[0].y, matrix[1].y, matrix[2].y)), dot3(org, vec3(matrix[0].z, matrix[1].z, matrix[2].z)));
+  const rotated = vec3(
+    dot3(org, vec3(matrix[0].x, matrix[1].x, matrix[2].x)),
+    dot3(org, vec3(matrix[0].y, matrix[1].y, matrix[2].y)),
+    dot3(org, vec3(matrix[0].z, matrix[1].z, matrix[2].z)),
+  );
   return sub3(rotated, org);
 }
 
@@ -94,19 +105,30 @@ export class MoverRuntime {
   testEntityPosition(entity: GameEntity): DamageParticipant | null {
     this.owned(entity);
     const start = entity.client === null ? entity.s.pos.base : entity.client.ps.origin;
-    const result = this.host.spatial.traceActor({ start, end: start,
+    const result = this.host.spatial.traceActor({
+      start,
+      end: start,
       shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
-      passActor: entity.actor.id, mask: entity.clipmask === 0 ? 1 : entity.clipmask });
-    return result.solidity === "clear" ? null : result.hit.kind === "actor" ? this.host.actors.participant(result.hit.actor)
-      : this.host.combat.entities.at(1022);
+      passActor: entity.actor.id,
+      mask: entity.clipmask === 0 ? 1 : entity.clipmask,
+    });
+    return result.solidity === "clear"
+      ? null
+      : result.hit.kind === "actor"
+        ? this.host.actors.participant(result.hit.actor)
+        : this.host.combat.entities.at(1022);
   }
 
   private tryPushing(check: GameEntity, pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): boolean {
     if ((pusher.s.eFlags & EF_MOVER_STOP) !== 0 && !rides(check, pusher)) return false;
     if (pushed.length >= MAX_GENTITIES) throw new Error("pushed stack exceeds MAX_GENTITIES");
-    const saved: PushedNative = { kind: "native", entity: check,
-      origin: { ...(check.client === null ? check.s.pos.base : check.client.ps.origin) }, angles: { ...check.s.apos.base },
-      view: check.client === null ? { kind: "none" } : { kind: "client", yaw: f32(check.client.ps.deltaAngles.y) } };
+    const saved: PushedNative = {
+      kind: "native",
+      entity: check,
+      origin: { ...(check.client === null ? check.s.pos.base : check.client.ps.origin) },
+      angles: { ...check.s.apos.base },
+      view: check.client === null ? { kind: "none" } : { kind: "client", yaw: f32(check.client.ps.deltaAngles.y) },
+    };
     pushed.push(saved);
     const rotationMove = pushRotation(saved.origin, pusher.r.currentOrigin, amove);
     baseOrigin(check, add3(add3(check.s.pos.base, move), rotationMove));
@@ -143,9 +165,13 @@ export class MoverRuntime {
   private sharedPositionBlocked(check: SharedMoverBody): boolean {
     const body = this.host.actors.observe(check.actor.id);
     if (body === null) return false;
-    const trace = this.host.spatial.traceActor({ start: body.state.origin, end: body.state.origin,
+    const trace = this.host.spatial.traceActor({
+      start: body.state.origin,
+      end: body.state.origin,
       shape: { kind: "box", mins: body.state.bounds.min, maxs: body.state.bounds.max },
-      passActor: check.actor.id, mask: check.clipMask === 0 ? 1 : check.clipMask });
+      passActor: check.actor.id,
+      mask: check.clipMask === 0 ? 1 : check.clipMask,
+    });
     return trace.solidity !== "clear";
   }
 
@@ -156,7 +182,10 @@ export class MoverRuntime {
     pushed.push({ kind: "shared", body: check });
     const rotation = pushRotation(check.state.origin, pusher.r.currentOrigin, amove);
     this.host.actors.write(check.actor, add3(add3(check.state.origin, move), rotation), rider ? check.state.ground : null);
-    if (!this.sharedPositionBlocked(check)) { this.host.actors.link(check.actor); return true; }
+    if (!this.sharedPositionBlocked(check)) {
+      this.host.actors.link(check.actor);
+      return true;
+    }
     this.host.actors.write(check.actor, check.state.origin, rider ? check.state.ground : null);
     if (!this.sharedPositionBlocked(check)) {
       this.host.actors.write(check.actor, check.state.origin, null);
@@ -177,7 +206,8 @@ export class MoverRuntime {
         continue;
       }
       const entity = saved.entity;
-      baseOrigin(entity, saved.origin); baseAngles(entity, saved.angles);
+      baseOrigin(entity, saved.origin);
+      baseAngles(entity, saved.angles);
       if (entity.client !== null) {
         if (saved.view.kind !== "client") throw new Error("pushed entity acquired a client during the transaction");
         entity.client.ps.deltaAngles = { ...entity.client.ps.deltaAngles, y: qvmFloatToInt(saved.view.yaw) };
@@ -204,15 +234,18 @@ export class MoverRuntime {
     let destination: Bounds, total: Bounds;
     if (pusher.r.currentAngles.x !== 0 || pusher.r.currentAngles.y !== 0 || pusher.r.currentAngles.z !== 0 || amove.x !== 0 || amove.y !== 0 || amove.z !== 0) {
       const radius = radiusFromBounds({ min: pusher.r.mins, max: pusher.r.maxs });
-      const extent = vec3(radius, radius, radius), position = add3(pusher.r.currentOrigin, move);
+      const extent = vec3(radius, radius, radius),
+        position = add3(pusher.r.currentOrigin, move);
       destination = { min: sub3(position, extent), max: add3(position, extent) };
       // Source rotating broadphase is centered on the old origin.
       total = { min: sub3(destination.min, move), max: sub3(destination.max, move) };
     } else {
       const bounds = this.bounds(pusher);
       destination = { min: add3(bounds.min, move), max: add3(bounds.max, move) };
-      total = { min: add3(bounds.min, vec3(Math.min(move.x, 0), Math.min(move.y, 0), Math.min(move.z, 0))),
-        max: add3(bounds.max, vec3(Math.max(move.x, 0), Math.max(move.y, 0), Math.max(move.z, 0))) };
+      total = {
+        min: add3(bounds.min, vec3(Math.min(move.x, 0), Math.min(move.y, 0), Math.min(move.z, 0))),
+        max: add3(bounds.max, vec3(Math.max(move.x, 0), Math.max(move.y, 0), Math.max(move.z, 0))),
+      };
     }
     world.unlink(pusher.slot);
     const entities = this.host.spatial.areaActors(total, MAX_GENTITIES);
@@ -228,8 +261,15 @@ export class MoverRuntime {
         const rider = observed.state.ground?.equals(pusher.actor.id) === true;
         if (!rider) {
           const bounds = observed.absoluteBounds;
-          if (bounds.min.x >= destination.max.x || bounds.min.y >= destination.max.y || bounds.min.z >= destination.max.z ||
-            bounds.max.x <= destination.min.x || bounds.max.y <= destination.min.y || bounds.max.z <= destination.min.z) continue;
+          if (
+            bounds.min.x >= destination.max.x ||
+            bounds.min.y >= destination.max.y ||
+            bounds.min.z >= destination.max.z ||
+            bounds.max.x <= destination.min.x ||
+            bounds.max.y <= destination.min.y ||
+            bounds.max.z <= destination.min.z
+          )
+            continue;
           if (!this.sharedPositionBlocked(observed)) continue;
         }
         if (this.tryPushingShared(observed, pusher, move, amove, pushed)) continue;
@@ -247,15 +287,25 @@ export class MoverRuntime {
           check.s.loopSound = 0;
           this.host.combat.entities.addEvent(check, EntityEvent.EV_PROXIMITY_MINE_TRIGGER);
           this.host.missionpack.explodeMissile(check);
-          if (check.activator !== null) { this.host.combat.entities.free(check.activator); check.activator = null; }
+          if (check.activator !== null) {
+            this.host.combat.entities.free(check.activator);
+            check.activator = null;
+          }
         }
         continue;
       }
       if (check.s.eType !== EntityType.ET_ITEM && check.s.eType !== EntityType.ET_PLAYER && !check.physicsObject) continue;
       if (!rides(check, pusher)) {
         const bounds = this.bounds(check);
-        if (bounds.min.x >= destination.max.x || bounds.min.y >= destination.max.y || bounds.min.z >= destination.max.z ||
-          bounds.max.x <= destination.min.x || bounds.max.y <= destination.min.y || bounds.max.z <= destination.min.z) continue;
+        if (
+          bounds.min.x >= destination.max.x ||
+          bounds.min.y >= destination.max.y ||
+          bounds.min.z >= destination.max.z ||
+          bounds.max.x <= destination.min.x ||
+          bounds.max.y <= destination.min.y ||
+          bounds.max.z <= destination.min.z
+        )
+          continue;
         if (this.testEntityPosition(check) === null) continue;
       }
       if (this.tryPushing(check, pusher, move, amove, pushed)) continue;
@@ -310,13 +360,34 @@ export class MoverRuntime {
     entity.moverState = state;
     const previous = entity.s.pos;
     switch (state) {
-      case MoverState.POS1: entity.s.pos = { ...previous, type: TrajectoryType.TR_STATIONARY, time, base: { ...entity.pos1 } }; break;
-      case MoverState.POS2: entity.s.pos = { ...previous, type: TrajectoryType.TR_STATIONARY, time, base: { ...entity.pos2 } }; break;
-      case MoverState.ONE_TO_TWO: entity.s.pos = { ...previous, type: TrajectoryType.TR_LINEAR_STOP, time, base: { ...entity.pos1 },
-        delta: scale3(sub3(entity.pos2, entity.pos1), f32(1000 / f32(previous.duration))) }; break;
-      case MoverState.TWO_TO_ONE: entity.s.pos = { ...previous, type: TrajectoryType.TR_LINEAR_STOP, time, base: { ...entity.pos2 },
-        delta: scale3(sub3(entity.pos1, entity.pos2), f32(1000 / f32(previous.duration))) }; break;
-      default: { const exhaustive: never = state; throw new Error(`Invalid mover state ${exhaustive}`); }
+      case MoverState.POS1:
+        entity.s.pos = { ...previous, type: TrajectoryType.TR_STATIONARY, time, base: { ...entity.pos1 } };
+        break;
+      case MoverState.POS2:
+        entity.s.pos = { ...previous, type: TrajectoryType.TR_STATIONARY, time, base: { ...entity.pos2 } };
+        break;
+      case MoverState.ONE_TO_TWO:
+        entity.s.pos = {
+          ...previous,
+          type: TrajectoryType.TR_LINEAR_STOP,
+          time,
+          base: { ...entity.pos1 },
+          delta: scale3(sub3(entity.pos2, entity.pos1), f32(1000 / f32(previous.duration))),
+        };
+        break;
+      case MoverState.TWO_TO_ONE:
+        entity.s.pos = {
+          ...previous,
+          type: TrajectoryType.TR_LINEAR_STOP,
+          time,
+          base: { ...entity.pos2 },
+          delta: scale3(sub3(entity.pos1, entity.pos2), f32(1000 / f32(previous.duration))),
+        };
+        break;
+      default: {
+        const exhaustive: never = state;
+        throw new Error(`Invalid mover state ${exhaustive}`);
+      }
     }
     entity.r.currentOrigin = evaluateTrajectory(entity.s.pos, this.host.combat.time);
     this.host.world.link(entity);
@@ -355,7 +426,8 @@ export class MoverRuntime {
     this.owned(entity);
     if ((entity.flags & GameFlags.TEAMSLAVE) !== 0) {
       if (entity.teammaster === null) throw new Error("Mover team slave has no team master");
-      this.useBinary(entity.teammaster, other, activator); return;
+      this.useBinary(entity.teammaster, other, activator);
+      return;
     }
     const time = this.host.combat.time;
     entity.activation = activator;
@@ -366,7 +438,8 @@ export class MoverRuntime {
       if (entity.teammaster === null || entity.teammaster === entity) this.host.adjustAreaPortalState(entity, true);
     } else if (entity.moverState === MoverState.POS2) entity.nextthink = qvmFloatToInt(f32(f32(time) + entity.wait));
     else {
-      const total = entity.s.pos.duration, partial = Math.min((time - entity.s.pos.time) | 0, total);
+      const total = entity.s.pos.duration,
+        partial = Math.min((time - entity.s.pos.time) | 0, total);
       const state = entity.moverState === MoverState.TWO_TO_ONE ? MoverState.ONE_TO_TWO : MoverState.TWO_TO_ONE;
       this.matchTeam(entity, state, (time - ((total - partial) | 0)) | 0);
       const sound = state === MoverState.ONE_TO_TWO ? entity.sound1to2 : entity.sound2to1;
@@ -379,7 +452,8 @@ export class MoverRuntime {
     if (entity.model2 !== null) entity.s.modelindex2 = this.host.config.modelIndex(entity.model2);
     const noise = variables.string("noise", "100");
     if (noise.present) entity.s.loopSound = this.host.config.soundIndex(noise.value);
-    const light = variables.float("light", "100"), color = variables.vector("color", "1 1 1");
+    const light = variables.float("light", "100"),
+      color = variables.vector("color", "1 1 1");
     if (light.present || color.present) {
       const component = (value: number): number => Math.min(255, qvmFloatToInt(f32(value * 255)));
       const intensity = Math.min(255, qvmFloatToInt(f32(light.value / 4)));
@@ -392,10 +466,17 @@ export class MoverRuntime {
     entity.s.eType = EntityType.ET_MOVER;
     entity.r.currentOrigin = { ...entity.pos1 };
     this.host.world.link(entity);
-    const move = sub3(entity.pos2, entity.pos1), distance = length3(move);
+    const move = sub3(entity.pos2, entity.pos1),
+      distance = length3(move);
     if (entity.speed === 0) entity.speed = 100;
     const duration = qvmFloatToInt(f32(f32(distance * 1000) / entity.speed));
-    entity.s.pos = { ...entity.s.pos, type: TrajectoryType.TR_STATIONARY, base: { ...entity.pos1 }, delta: scale3(move, entity.speed), duration: Math.max(duration, 1) };
+    entity.s.pos = {
+      ...entity.s.pos,
+      type: TrajectoryType.TR_STATIONARY,
+      base: { ...entity.pos1 },
+      delta: scale3(move, entity.speed),
+      duration: Math.max(duration, 1),
+    };
   }
 
   blockedDoor(entity: GameEntity, other: DamageParticipant): void {
@@ -416,7 +497,10 @@ export class MoverRuntime {
     if (other.client === null) {
       if (other.s.eType === EntityType.ET_ITEM) {
         if (other.item === null) throw new Error("Blocked item has no item definition");
-        if (other.item.type === ItemType.IT_TEAM) { this.host.returnDroppedFlag(other); return; }
+        if (other.item.type === ItemType.IT_TEAM) {
+          this.host.returnDroppedFlag(other);
+          return;
+        }
       }
       this.host.combat.entities.tempEntity(other.s.origin, EntityEvent.EV_ITEM_POP);
       this.host.combat.entities.free(other);
@@ -428,8 +512,14 @@ export class MoverRuntime {
   }
 
   bindSaveCallbacks(): void {
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.mover.reachedBinary.think", self => { this.returnToPos1(self); });
-    this.host.combat.entities.callbacks.use.intern("q3.base.game.mover.initializeBinary.use", (self, other, activator) => { this.useBinary(self, other, activator); });
-    this.host.combat.entities.callbacks.reached.intern("q3.base.game.mover.initializeBinary.reached", self => { this.reachedBinary(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.mover.reachedBinary.think", self => {
+      this.returnToPos1(self);
+    });
+    this.host.combat.entities.callbacks.use.intern("q3.base.game.mover.initializeBinary.use", (self, other, activator) => {
+      this.useBinary(self, other, activator);
+    });
+    this.host.combat.entities.callbacks.reached.intern("q3.base.game.mover.initializeBinary.reached", self => {
+      this.reachedBinary(self);
+    });
   }
 }

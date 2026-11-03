@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
@@ -27,8 +28,7 @@ test.skipIf(!corpusAvailable)("turntable renders installed Q1 colors and Q2/Q3 s
   const mountedFor = async (id: string): Promise<{ readonly product: ContentId; readonly mounts: MountedContent }> => {
     const product = catalog.require(id).id;
     const mounts = await catalog.mountsFor(product);
-    const mounted = await openMountPlan({ id: createMountPlanId("test", id), mounts,
-      defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const mounted = await openMountPlan({ id: createMountPlanId("test", id), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     openedMounts.push(mounted);
     return { product, mounts: mounted };
   };
@@ -69,9 +69,7 @@ test.skipIf(!corpusAvailable)("turntable renders installed Q1 colors and Q2/Q3 s
       const { product, mounts } = await mountedFor("q3-baseq3");
       const scene = await loadCharacterTurntableScene(mounts, { product, ...request });
       let nonOpaque = 0;
-      for (const texture of scene.textures)
-        for (let offset = 3; offset < texture.pixels.length; offset += 4)
-          if (texture.pixels[offset] !== 255) nonOpaque++;
+      for (const texture of scene.textures) for (let offset = 3; offset < texture.pixels.length; offset += 4) if (texture.pixels[offset] !== 255) nonOpaque++;
       expect(nonOpaque).toBe(0);
     }
 
@@ -79,9 +77,14 @@ test.skipIf(!corpusAvailable)("turntable renders installed Q1 colors and Q2/Q3 s
     // files. Those surfaces must resolve through scripts/*.shader instead
     // of falling back to the missing-texture checker.
     const isMissingChecker = (texture: { readonly width: number; readonly height: number; readonly pixels: Uint8Array }): boolean =>
-      texture.width === 16 && texture.height === 16
-      && texture.pixels[0] === 72 && texture.pixels[1] === 72 && texture.pixels[2] === 78
-      && texture.pixels[4] === 38 && texture.pixels[5] === 38 && texture.pixels[6] === 44;
+      texture.width === 16 &&
+      texture.height === 16 &&
+      texture.pixels[0] === 72 &&
+      texture.pixels[1] === 72 &&
+      texture.pixels[2] === 78 &&
+      texture.pixels[4] === 38 &&
+      texture.pixels[5] === 38 &&
+      texture.pixels[6] === 44;
     for (const request of [
       { family: "q3", model: "crash", skin: "", topColor: 0, bottomColor: 0 },
       { family: "q3", model: "hunter", skin: "harpy", topColor: 0, bottomColor: 0 },

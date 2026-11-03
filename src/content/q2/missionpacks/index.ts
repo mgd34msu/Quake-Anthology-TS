@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q2ItemModule } from "../foundation/items.ts";
 import type { Q2Weapons } from "../foundation/weapons/index.ts";
 import type { Q2MissionPack, Q2MissionPackProjectileHooks } from "./types.ts";
@@ -23,9 +24,28 @@ export function registerQ2MissionPackArmory(pack: Q2MissionPack, hooks: Q2Missio
   const items = new Q2MissionPackItems(hooks, pack, hooks.items);
   const packs: readonly Q2MissionPack[] = edition === "rerelease" ? ["xatrix", "rogue"] : [pack];
   for (const selected of packs) {
-    weapons.register(hooks.weapons, selected, edition); items.register(hooks.items, hooks.weapons, selected, projectiles, spheres, doppleganger, edition);
+    weapons.register(hooks.weapons, selected, edition);
+    items.register(hooks.items, hooks.weapons, selected, projectiles, spheres, doppleganger, edition);
   }
-  if (edition === "rerelease") hooks.weapons.setFallbackOrder(["disintegrator", "railgun", "heatbeam", "ionripper", "hyperblaster", "etf_rifle", "chaingun", "machinegun", "supershotgun", "shotgun", "phalanx", "rocketlauncher", "grenadelauncher", "proxlauncher", "chainfist", "blaster"]);
+  if (edition === "rerelease")
+    hooks.weapons.setFallbackOrder([
+      "disintegrator",
+      "railgun",
+      "heatbeam",
+      "ionripper",
+      "hyperblaster",
+      "etf_rifle",
+      "chaingun",
+      "machinegun",
+      "supershotgun",
+      "shotgun",
+      "phalanx",
+      "rocketlauncher",
+      "grenadelauncher",
+      "proxlauncher",
+      "chainfist",
+      "blaster",
+    ]);
   return { projectiles, weapons, spheres, items, doppleganger };
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's client/cl_parse.c, server/sv_snapshot.c and server/sv_client.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { BinaryError } from "../../core/binary/index.ts";
@@ -12,7 +13,16 @@ import type { SourceParseEntities } from "./parse-entities.ts";
 import { readDeltaEntity, readDeltaPlayerState, writeDeltaEntity, writeDeltaPlayerState } from "./state-delta.ts";
 import type { DeltaMessageDiagnostics } from "./state-delta.ts";
 
-export enum ServerOpcode { Nop = 1, Gamestate = 2, Configstring = 3, Baseline = 4, Command = 5, Download = 6, Snapshot = 7, Eof = 8 }
+export enum ServerOpcode {
+  Nop = 1,
+  Gamestate = 2,
+  Configstring = 3,
+  Baseline = 4,
+  Command = 5,
+  Download = 6,
+  Snapshot = 7,
+  Eof = 8,
+}
 const SERVER_OPCODE_NAMES = ["svc_bad", "svc_nop", "svc_gamestate", "svc_configstring", "svc_baseline", "svc_serverCommand", "svc_download", "svc_snapshot"];
 const ENTITY_SENTINEL = 1023;
 const MAX_CONFIGSTRINGS = 1024;
@@ -92,7 +102,8 @@ function showNet(reader: MessageReader, label: string, diagnostics: DeltaMessage
 }
 
 function showPacketEntity(reader: MessageReader, label: "unchanged" | "delta" | "baseline", number: number, diagnostics: DeltaMessageDiagnostics | null): void {
-  if (diagnostics !== null && diagnostics.shownet() === 3) diagnostics.print(`${String(reader.readCount + diagnostics.offset).padStart(3)}:  ${label}: ${number}\n`);
+  if (diagnostics !== null && diagnostics.shownet() === 3)
+    diagnostics.print(`${String(reader.readCount + diagnostics.offset).padStart(3)}:  ${label}: ${number}\n`);
 }
 
 function fail(reader: MessageReader, message: string): never {
@@ -103,12 +114,19 @@ function validateEntities(entities: readonly EntityStateFields[]): void {
   if (entities.length > ENTITY_SENTINEL) throw new RangeError("Too many snapshot entities");
   let previous = -1;
   for (const entity of entities) {
-    if (!Number.isInteger(entity.number) || entity.number <= previous || entity.number >= ENTITY_SENTINEL) throw new RangeError("Snapshot entities must have sorted unique numbers below 1023");
+    if (!Number.isInteger(entity.number) || entity.number <= previous || entity.number >= ENTITY_SENTINEL)
+      throw new RangeError("Snapshot entities must have sorted unique numbers below 1023");
     previous = entity.number;
   }
 }
 
-function readPacketEntities(reader: MessageReader, previous: Snapshot | null, baseline: ServerMessageContext["baseline"], diagnostics: DeltaMessageDiagnostics | null, parseEntities: SourceParseEntities | null): SourceEntityState[] {
+function readPacketEntities(
+  reader: MessageReader,
+  previous: Snapshot | null,
+  baseline: ServerMessageContext["baseline"],
+  diagnostics: DeltaMessageDiagnostics | null,
+  parseEntities: SourceParseEntities | null,
+): SourceEntityState[] {
   const output: SourceEntityState[] = [];
   const oldState = (index: number): EntityStateFields | null => {
     if (previous === null || index >= previous.entities.length) return null;
@@ -160,7 +178,12 @@ function readPacketEntities(reader: MessageReader, previous: Snapshot | null, ba
   return output;
 }
 
-function writePacketEntities(writer: MessageWriter, previous: readonly EntityStateFields[], current: readonly EntityStateFields[], baseline: ServerMessageContext["baseline"]): void {
+function writePacketEntities(
+  writer: MessageWriter,
+  previous: readonly EntityStateFields[],
+  current: readonly EntityStateFields[],
+  baseline: ServerMessageContext["baseline"],
+): void {
   validateEntities(previous);
   validateEntities(current);
   let oldIndex = 0;
@@ -170,7 +193,8 @@ function writePacketEntities(writer: MessageWriter, previous: readonly EntitySta
     const next = current[newIndex];
     if (old !== undefined && next !== undefined && old.number === next.number) {
       writeDeltaEntity(writer, old, next, false);
-      oldIndex++; newIndex++;
+      oldIndex++;
+      newIndex++;
     } else if (next !== undefined && (old === undefined || next.number < old.number)) {
       writeDeltaEntity(writer, baseline(next.number), next, true);
       newIndex++;
@@ -185,7 +209,7 @@ function writePacketEntities(writer: MessageWriter, previous: readonly EntitySta
 function gamestateBaselines(gamestate: Gamestate): ServerMessageContext["baseline"] {
   const entries = new Map<number, EntityStateFields>();
   for (const entry of gamestate.entries) if (entry.kind === "baseline") entries.set(entry.number, entry.entity);
-  return (number) => entries.get(number) ?? null;
+  return number => entries.get(number) ?? null;
 }
 
 function readDownload(reader: MessageReader, publishSize: ((fileSize: number) => number) | null): Download {
@@ -205,7 +229,13 @@ function readDownload(reader: MessageReader, publishSize: ((fileSize: number) =>
 
 type SnapshotHeader = Pick<Snapshot, "serverTime" | "deltaNumber" | "flags">;
 
-function readSnapshot(reader: MessageReader, header: SnapshotHeader, context: ServerMessageContext, diagnostics: DeltaMessageDiagnostics | null, parseEntities: SourceParseEntities | null): Extract<ServerOperation, { kind: "snapshot" }> {
+function readSnapshot(
+  reader: MessageReader,
+  header: SnapshotHeader,
+  context: ServerMessageContext,
+  diagnostics: DeltaMessageDiagnostics | null,
+  parseEntities: SourceParseEntities | null,
+): Extract<ServerOperation, { kind: "snapshot" }> {
   const { serverTime, deltaNumber, flags } = header;
   const { messageNumber, serverCommandSequence } = context;
   const slot = deltaNumber <= 0 ? null : context.history(deltaNumber);
@@ -214,14 +244,24 @@ function readSnapshot(reader: MessageReader, header: SnapshotHeader, context: Se
     if (slot === null) validity = { kind: "invalid", reason: "missing-delta" };
     else if (slot.status === "invalid") validity = { kind: "invalid", reason: "invalid-delta" };
     else if (slot.snapshot.messageNumber !== deltaNumber) validity = { kind: "invalid", reason: "stale-delta" };
-    else if ((((parseEntities === null ? context.parseEntitiesNumber : parseEntities.number) - slot.snapshot.parseEntitiesNumber) | 0) > MAX_PARSE_ENTITIES - 128) validity = { kind: "invalid", reason: "stale-entities" };
+    else if (
+      (((parseEntities === null ? context.parseEntitiesNumber : parseEntities.number) - slot.snapshot.parseEntitiesNumber) | 0) >
+      MAX_PARSE_ENTITIES - 128
+    )
+      validity = { kind: "invalid", reason: "stale-entities" };
   }
   if (validity.kind === "invalid" && diagnostics !== null) {
     switch (validity.reason) {
       case "missing-delta":
-      case "invalid-delta": diagnostics.print("Delta from invalid frame (not supposed to happen!).\n"); break;
-      case "stale-delta": diagnostics.print("Delta frame too old.\n"); break;
-      case "stale-entities": diagnostics.print("Delta parseEntitiesNum too old.\n"); break;
+      case "invalid-delta":
+        diagnostics.print("Delta from invalid frame (not supposed to happen!).\n");
+        break;
+      case "stale-delta":
+        diagnostics.print("Delta frame too old.\n");
+        break;
+      case "stale-entities":
+        diagnostics.print("Delta parseEntitiesNum too old.\n");
+        break;
     }
   }
   const length = reader.readByte();
@@ -232,7 +272,21 @@ function readSnapshot(reader: MessageReader, header: SnapshotHeader, context: Se
   showNet(reader, "packet entities", diagnostics);
   const parseEntitiesNumber = parseEntities === null ? context.parseEntitiesNumber : parseEntities.number;
   const entities = readPacketEntities(reader, slot === null ? null : slot.snapshot, context.baseline, diagnostics, parseEntities);
-  return { kind: "snapshot", validity, snapshot: { messageNumber, serverTime, deltaNumber, flags, serverCommandNumber: serverCommandSequence, parseEntitiesNumber, areaMask, playerState, entities } };
+  return {
+    kind: "snapshot",
+    validity,
+    snapshot: {
+      messageNumber,
+      serverTime,
+      deltaNumber,
+      flags,
+      serverCommandNumber: serverCommandSequence,
+      parseEntitiesNumber,
+      areaMask,
+      playerState,
+      entities,
+    },
+  };
 }
 
 /** Source mutation boundaries, including CL_ClearState before gamestate fields. */
@@ -258,8 +312,14 @@ export class ServerMessageCursor {
   private exhausted = false;
   private snapshotHeader: SnapshotHeader | null = null;
 
-  constructor(bytes: Uint8Array, source = "<server-message>", diagnostics: ServerMessageDiagnostics | null = null, private readonly readOffset = 0, private readonly parseEntities: SourceParseEntities | null = null,
-    private readonly publishDownloadSize: ((fileSize: number) => number) | null = null) {
+  constructor(
+    bytes: Uint8Array,
+    source = "<server-message>",
+    diagnostics: ServerMessageDiagnostics | null = null,
+    private readonly readOffset = 0,
+    private readonly parseEntities: SourceParseEntities | null = null,
+    private readonly publishDownloadSize: ((fileSize: number) => number) | null = null,
+  ) {
     if (!Number.isInteger(readOffset) || readOffset < 0) throw new RangeError("Invalid server message read offset");
     this.reader = new MessageReader(bytes, "bitstream", source);
     this.diagnostics = diagnostics === null ? null : { ...diagnostics, offset: readOffset };
@@ -272,10 +332,9 @@ export class ServerMessageCursor {
       const value = this.reader.readLong();
       if (this.reader.readCount > this.reader.data.length) this.exhausted = true;
       return value;
-    }
-    catch (error) {
-      if (!(error instanceof BinaryError) || (this.reader.bitPosition < this.reader.data.length * 8
-        && this.reader.readCount <= this.reader.data.length)) throw error;
+    } catch (error) {
+      if (!(error instanceof BinaryError) || (this.reader.bitPosition < this.reader.data.length * 8 && this.reader.readCount <= this.reader.data.length))
+        throw error;
       this.exhausted = true;
       return -1;
     }
@@ -300,12 +359,16 @@ export class ServerMessageCursor {
       }
       case "sequence": {
         const sequence = this.sourceLong();
-        this.dataCount = 1; this.phase = "entries";
+        this.dataCount = 1;
+        this.phase = "entries";
         return { kind: "gamestate-sequence", sequence };
       }
       case "entries": {
         const opcode = this.exhausted ? -1 : reader.readByte();
-        if (opcode === ServerOpcode.Eof) { this.phase = "client"; return this.next(context); }
+        if (opcode === ServerOpcode.Eof) {
+          this.phase = "client";
+          return this.next(context);
+        }
         if (opcode === ServerOpcode.Configstring) {
           const index = reader.readShort();
           if (index < 0 || index >= MAX_CONFIGSTRINGS) fail(reader, "Invalid configstring index");
@@ -325,16 +388,22 @@ export class ServerMessageCursor {
         return fail(reader, `Invalid gamestate opcode ${opcode}`);
       }
       case "client": {
-        const number = this.sourceLong(); this.phase = "checksum";
+        const number = this.sourceLong();
+        this.phase = "checksum";
         return { kind: "gamestate-client", number };
       }
       case "checksum": {
-        const checksum = this.sourceLong(); this.phase = "gamestate-end";
+        const checksum = this.sourceLong();
+        this.phase = "gamestate-end";
         return { kind: "gamestate-checksum", checksum };
       }
-      case "gamestate-end": this.phase = "opcode"; return { kind: "gamestate-end" };
-      case "end": return { kind: "end", terminal: this.terminal };
-      case "opcode": break;
+      case "gamestate-end":
+        this.phase = "opcode";
+        return { kind: "gamestate-end" };
+      case "end":
+        return { kind: "end", terminal: this.terminal };
+      case "opcode":
+        break;
     }
     while (true) {
       if (this.exhausted || reader.readCount > reader.data.length) return fail(reader, "CL_ParseServerMessage: read past end of server message");
@@ -350,16 +419,23 @@ export class ServerMessageCursor {
         else showNet(reader, name, this.diagnostics);
       }
       switch (opcode) {
-        case ServerOpcode.Nop: return { kind: "operation", operation: { kind: "nop" } };
+        case ServerOpcode.Nop:
+          return { kind: "operation", operation: { kind: "nop" } };
         case ServerOpcode.Command: {
-          const sequence = reader.readLong(), text = reader.readString();
+          const sequence = reader.readLong(),
+            text = reader.readString();
           if (sequence <= context.serverCommandSequence) break;
           return { kind: "operation", operation: { kind: "command", sequence, text } };
         }
-        case ServerOpcode.Gamestate: this.phase = "sequence"; return { kind: "gamestate-start" };
+        case ServerOpcode.Gamestate:
+          this.phase = "sequence";
+          return { kind: "gamestate-start" };
         case ServerOpcode.Download: {
           const block = readDownload(reader, this.publishDownloadSize);
-          if (block.kind === "error") { this.phase = "end"; this.terminal = "download-error"; }
+          if (block.kind === "error") {
+            this.phase = "end";
+            this.terminal = "download-error";
+          }
           return { kind: "operation", operation: { kind: "download", block } };
         }
         case ServerOpcode.Snapshot: {
@@ -370,7 +446,8 @@ export class ServerMessageCursor {
           this.snapshotHeader = { serverTime, deltaNumber, flags };
           return { kind: "snapshot-header", deltaNumber };
         }
-        default: return fail(reader, `Invalid server opcode ${opcode}`);
+        default:
+          return fail(reader, `Invalid server opcode ${opcode}`);
       }
     }
   }
@@ -379,30 +456,56 @@ export class ServerMessageCursor {
 /** Pure consumer of the same incremental decoder used by the engine session. */
 export function decodeServerMessage(bytes: Uint8Array, context: ServerMessageContext, source = "<server-message>"): ServerMessage {
   const cursor = new ServerMessageCursor(bytes, source);
-  let reliableAcknowledge = 0, commandSequence = context.serverCommandSequence, parseEntitiesNumber = context.parseEntitiesNumber;
-  let baseline = context.baseline, history = context.history;
-  let entries: GamestateEntry[] = [], gamestateSequence = 0, clientNumber = 0, checksumFeed = 0;
+  let reliableAcknowledge = 0,
+    commandSequence = context.serverCommandSequence,
+    parseEntitiesNumber = context.parseEntitiesNumber;
+  let baseline = context.baseline,
+    history = context.history;
+  let entries: GamestateEntry[] = [],
+    gamestateSequence = 0,
+    clientNumber = 0,
+    checksumFeed = 0;
   const operations: ServerOperation[] = [];
   while (true) {
     const step = cursor.next({ ...context, serverCommandSequence: commandSequence, parseEntitiesNumber, baseline, history });
     switch (step.kind) {
-      case "acknowledge": reliableAcknowledge = step.sequence; break;
-      case "gamestate-start": entries = []; parseEntitiesNumber = 0; baseline = () => null; history = () => null; break;
-      case "gamestate-sequence": gamestateSequence = step.sequence; commandSequence = step.sequence; break;
-      case "gamestate-entry": entries.push(step.entry); break;
-      case "gamestate-client": clientNumber = step.number; break;
-      case "gamestate-checksum": checksumFeed = step.checksum; break;
-      case "snapshot-header": break;
+      case "acknowledge":
+        reliableAcknowledge = step.sequence;
+        break;
+      case "gamestate-start":
+        entries = [];
+        parseEntitiesNumber = 0;
+        baseline = () => null;
+        history = () => null;
+        break;
+      case "gamestate-sequence":
+        gamestateSequence = step.sequence;
+        commandSequence = step.sequence;
+        break;
+      case "gamestate-entry":
+        entries.push(step.entry);
+        break;
+      case "gamestate-client":
+        clientNumber = step.number;
+        break;
+      case "gamestate-checksum":
+        checksumFeed = step.checksum;
+        break;
+      case "snapshot-header":
+        break;
       case "gamestate-end": {
         const gamestate: Gamestate = { kind: "gamestate", commandSequence: gamestateSequence, entries, clientNumber, checksumFeed };
-        operations.push(gamestate); baseline = gamestateBaselines(gamestate); break;
+        operations.push(gamestate);
+        baseline = gamestateBaselines(gamestate);
+        break;
       }
       case "operation":
         operations.push(step.operation);
         if (step.operation.kind === "command") commandSequence = step.operation.sequence;
         if (step.operation.kind === "snapshot") parseEntitiesNumber = (parseEntitiesNumber + step.operation.snapshot.entities.length) | 0;
         break;
-      case "end": return { reliableAcknowledge, serverCommandSequence: commandSequence, parseEntitiesNumber, operations, terminal: step.terminal };
+      case "end":
+        return { reliableAcknowledge, serverCommandSequence: commandSequence, parseEntitiesNumber, operations, terminal: step.terminal };
     }
   }
 }
@@ -426,7 +529,8 @@ function writeGamestate(writer: MessageWriter, gamestate: Gamestate): void {
       if (!Number.isInteger(entry.number) || entry.number < 0 || entry.number > ENTITY_SENTINEL) throw new RangeError("Invalid baseline number");
       writer.writeByte(ServerOpcode.Baseline);
       if (entry.entity.number === ENTITY_SENTINEL && entry.number !== ENTITY_SENTINEL) {
-        const removed = new EntityStateRecord<number>(0); removed.number = entry.number;
+        const removed = new EntityStateRecord<number>(0);
+        removed.number = entry.number;
         writeDeltaEntity(writer, removed, null);
       } else {
         if (entry.entity.number !== entry.number) throw new RangeError("Baseline index differs from entity number");
@@ -443,32 +547,50 @@ function writeDownload(writer: MessageWriter, block: Download): void {
   writer.writeByte(ServerOpcode.Download);
   if (block.kind === "error") {
     if (!Number.isInteger(block.fileSize) || block.fileSize < -0x80000000 || block.fileSize >= 0) throw new RangeError("Invalid download error file size");
-    writer.writeShort(0); writer.writeLong(block.fileSize); writer.writeString(block.message);
+    writer.writeShort(0);
+    writer.writeLong(block.fileSize);
+    writer.writeString(block.message);
     return;
   }
   if (block.data.length > MAX_DOWNLOAD_BLOCK) throw new RangeError("Download block exceeds 2048 bytes");
   if (block.kind === "start") {
     if (!Number.isInteger(block.fileSize) || block.fileSize < 0 || block.fileSize > 0x7fffffff) throw new RangeError("Invalid download file size");
-    writer.writeShort(0); writer.writeLong(block.fileSize);
+    writer.writeShort(0);
+    writer.writeLong(block.fileSize);
   } else {
-    if (!Number.isInteger(block.number) || block.number === 0 || block.number < -32768 || block.number > 32767) throw new RangeError("Invalid download block number");
+    if (!Number.isInteger(block.number) || block.number === 0 || block.number < -32768 || block.number > 32767)
+      throw new RangeError("Invalid download block number");
     writer.writeShort(block.number);
   }
   writer.writeShort(block.data.length);
   writer.writeData(block.data);
 }
 
-function writeSnapshot(writer: MessageWriter, snapshot: Snapshot, context: ServerMessageContext, baseline: ServerMessageContext["baseline"], history: ServerMessageContext["history"]): void {
+function writeSnapshot(
+  writer: MessageWriter,
+  snapshot: Snapshot,
+  context: ServerMessageContext,
+  baseline: ServerMessageContext["baseline"],
+  history: ServerMessageContext["history"],
+): void {
   if (snapshot.messageNumber !== context.messageNumber) throw new RangeError("Snapshot message number differs from envelope");
   if (snapshot.playerState.product !== context.product) throw new RangeError("Snapshot product differs from envelope");
-  if (!Number.isInteger(snapshot.messageNumber) || snapshot.messageNumber < -0x80000000 || snapshot.messageNumber > 0x7fffffff
-    || !Number.isInteger(snapshot.deltaNumber) || snapshot.deltaNumber < -0x80000000 || snapshot.deltaNumber > 0x7fffffff) {
+  if (
+    !Number.isInteger(snapshot.messageNumber) ||
+    snapshot.messageNumber < -0x80000000 ||
+    snapshot.messageNumber > 0x7fffffff ||
+    !Number.isInteger(snapshot.deltaNumber) ||
+    snapshot.deltaNumber < -0x80000000 ||
+    snapshot.deltaNumber > 0x7fffffff
+  ) {
     throw new RangeError("Snapshot sequence fields must be int32");
   }
   const distance = snapshot.deltaNumber <= 0 ? 0 : (snapshot.messageNumber - snapshot.deltaNumber) | 0;
-  if (!Number.isInteger(distance) || distance < 0 || distance > 255 || (distance === 0 && snapshot.deltaNumber > 0)) throw new RangeError("Invalid snapshot delta distance");
+  if (!Number.isInteger(distance) || distance < 0 || distance > 255 || (distance === 0 && snapshot.deltaNumber > 0))
+    throw new RangeError("Invalid snapshot delta distance");
   const old = distance === 0 ? null : history(snapshot.deltaNumber);
-  if (distance !== 0 && (old === null || old.status !== "valid" || old.snapshot.messageNumber !== snapshot.deltaNumber)) throw new RangeError("Missing valid snapshot baseline for encoding");
+  if (distance !== 0 && (old === null || old.status !== "valid" || old.snapshot.messageNumber !== snapshot.deltaNumber))
+    throw new RangeError("Missing valid snapshot baseline for encoding");
   if (snapshot.areaMask.length > MAX_AREA_BYTES) throw new RangeError("Snapshot area mask exceeds 32 bytes");
   if (!Number.isInteger(snapshot.flags) || snapshot.flags < 0 || snapshot.flags > 255) throw new RangeError("Invalid snapshot flags");
   writer.writeByte(ServerOpcode.Snapshot);
@@ -482,7 +604,12 @@ function writeSnapshot(writer: MessageWriter, snapshot: Snapshot, context: Serve
 }
 
 /** Writes an unfinished server envelope; the network owner appends EOF and handles overflow. */
-export function writeServerMessage(writer: MessageWriter, reliableAcknowledge: number, operations: readonly ServerOperation[], context: ServerMessageContext): void {
+export function writeServerMessage(
+  writer: MessageWriter,
+  reliableAcknowledge: number,
+  operations: readonly ServerOperation[],
+  context: ServerMessageContext,
+): void {
   writer.writeLong(reliableAcknowledge);
   let baseline = context.baseline;
   let history = context.history;
@@ -490,10 +617,14 @@ export function writeServerMessage(writer: MessageWriter, reliableAcknowledge: n
   for (const operation of operations) {
     if (downloadError) throw new RangeError("Operations cannot follow a terminal download error");
     switch (operation.kind) {
-      case "nop": writer.writeByte(ServerOpcode.Nop); break;
+      case "nop":
+        writer.writeByte(ServerOpcode.Nop);
+        break;
       case "command":
         if (operation.text.length >= 1024) throw new RangeError("Server command exceeds MAX_STRING_CHARS");
-        writer.writeByte(ServerOpcode.Command); writer.writeLong(operation.sequence); writer.writeString(operation.text);
+        writer.writeByte(ServerOpcode.Command);
+        writer.writeLong(operation.sequence);
+        writer.writeString(operation.text);
         break;
       case "gamestate":
         writeGamestate(writer, operation);
@@ -512,7 +643,12 @@ export function writeServerMessage(writer: MessageWriter, reliableAcknowledge: n
   }
 }
 
-export function encodeServerMessage(reliableAcknowledge: number, operations: readonly ServerOperation[], context: ServerMessageContext, sourceState: SourceMessageState | null = null): Uint8Array {
+export function encodeServerMessage(
+  reliableAcknowledge: number,
+  operations: readonly ServerOperation[],
+  context: ServerMessageContext,
+  sourceState: SourceMessageState | null = null,
+): Uint8Array {
   const writer = new MessageWriter("bitstream", MAX_MESSAGE_LENGTH, sourceState);
   writeServerMessage(writer, reliableAcknowledge, operations, context);
   writer.writeByte(ServerOpcode.Eof);

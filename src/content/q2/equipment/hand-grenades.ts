@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Q2Edition, Q2GameServices } from "../foundation/host.ts";
@@ -18,8 +19,8 @@ export interface HandGrenadeLoadout {
   readonly infiniteAmmo: boolean;
 }
 
-export interface HandGrenadeEquipmentInput extends Pick<Q2WeaponInput,
-  "angles" | "gravity" | "quadUntil" | "doubleUntil" | "quadFireUntil" | "haste" | "noStackDouble" | "playersCollide"> {
+export interface HandGrenadeEquipmentInput
+  extends Pick<Q2WeaponInput, "angles" | "gravity" | "quadUntil" | "doubleUntil" | "quadFireUntil" | "haste" | "noStackDouble" | "playersCollide"> {
   readonly pressed: boolean;
   readonly held: boolean;
   readonly released: boolean;
@@ -39,7 +40,8 @@ export interface HandGrenadesCheckpoint {
   readonly actors: readonly { readonly actor: SavedActorId; readonly state: HandGrenadeEquipmentState }[];
 }
 
-type HandEffect = { readonly kind: "sound"; readonly event: Parameters<HandActionHost["sound"]>[0] }
+type HandEffect =
+  | { readonly kind: "sound"; readonly event: Parameters<HandActionHost["sound"]>[0] }
   | { readonly kind: "emit"; readonly spec: HandProjectileSpec }
   | { readonly kind: "ammo" };
 
@@ -48,8 +50,14 @@ function reserved(action: HandAction): boolean {
 }
 
 function checkLoadout(config: HandGrenadeLoadout): undefined {
-  if (!Number.isSafeInteger(config.capacity) || config.capacity < 0 || !Number.isSafeInteger(config.initialAmmo)
-    || config.initialAmmo < 0 || config.initialAmmo > config.capacity) throw new RangeError("Hand grenade allowance must be whole ammunition within capacity");
+  if (
+    !Number.isSafeInteger(config.capacity) ||
+    config.capacity < 0 ||
+    !Number.isSafeInteger(config.initialAmmo) ||
+    config.initialAmmo < 0 ||
+    config.initialAmmo > config.capacity
+  )
+    throw new RangeError("Hand grenade allowance must be whole ammunition within capacity");
   return undefined;
 }
 
@@ -58,9 +66,15 @@ export class Q2HandGrenadeEquipment {
   private readonly states = new Map<ActorId, HandGrenadeEquipmentState>();
   private activeSteps = 0;
 
-  constructor(readonly game: Q2GameServices, readonly ballistics: Q2Ballistics) {
+  constructor(
+    readonly game: Q2GameServices,
+    readonly ballistics: Q2Ballistics,
+  ) {
     game.sourceCallbacks.register(ballistics.callbacks);
-    game.host.actors.onRelease(actor => { this.states.delete(actor.id); return undefined; });
+    game.host.actors.onRelease(actor => {
+      this.states.delete(actor.id);
+      return undefined;
+    });
   }
 
   configure(actor: ActorId, config: HandGrenadeLoadout): undefined {
@@ -88,15 +102,21 @@ export class Q2HandGrenadeEquipment {
     const current = this.states.get(actor);
     if (current === undefined) return undefined;
     const owner = this.game.host.actors.resolveOwned(actor);
-    if (owner === null || input.lifecycle === "removed") { this.states.delete(actor); return undefined; }
-    const now = this.game.host.now(), config = current.config, effects: HandEffect[] = [];
+    if (owner === null || input.lifecycle === "removed") {
+      this.states.delete(actor);
+      return undefined;
+    }
+    const now = this.game.host.now(),
+      config = current.config,
+      effects: HandEffect[] = [];
     const lifecycle = input.lifecycle === "alive" && (this.game.host.combat.read(actor)?.health ?? 0) <= 0 ? "dead" : input.lifecycle;
     const host: HandActionHost = {
       firingInterval: seconds => this.ballistics.hooks.firingInterval?.(actor, seconds) ?? seconds,
       reserve: () => {
         if (config.infiniteAmmo) return true;
         if (!this.game.host.inventory.consume(owner, HAND_GRENADE_AMMO, 1)) return false;
-        effects.push({ kind: "ammo" }); return true;
+        effects.push({ kind: "ammo" });
+        return true;
       },
       consume: () => undefined,
       refund: () => {
@@ -104,17 +124,36 @@ export class Q2HandGrenadeEquipment {
         const entry = this.game.host.inventory.entries(actor).find(candidate => candidate.item === HAND_GRENADE_AMMO);
         if (entry === undefined) throw new Error("Reserved hand grenade lost its canonical inventory entry");
         this.game.host.inventory.configure(owner, { ...entry, count: entry.count + 1 });
-        effects.push({ kind: "ammo" }); return undefined;
+        effects.push({ kind: "ammo" });
+        return undefined;
       },
-      emit: spec => { effects.push({ kind: "emit", spec }); return undefined; },
-      sound: event => { effects.push({ kind: "sound", event }); return undefined; },
+      emit: spec => {
+        effects.push({ kind: "emit", spec });
+        return undefined;
+      },
+      sound: event => {
+        effects.push({ kind: "sound", event });
+        return undefined;
+      },
     };
     this.activeSteps++;
     try {
-      const action = stepHandAction(current.action, { now, edition: this.game.options.edition, enabled: config.enabled,
-        pressed: input.pressed, held: input.held, released: input.released, lifecycle, haste: input.haste, quadFire: input.quadFireUntil > now,
-        throw: { angles: input.angles, gravity: input.gravity, project: input.project,
-          damageMultiplier: 1 } }, host);
+      const action = stepHandAction(
+        current.action,
+        {
+          now,
+          edition: this.game.options.edition,
+          enabled: config.enabled,
+          pressed: input.pressed,
+          held: input.held,
+          released: input.released,
+          lifecycle,
+          haste: input.haste,
+          quadFire: input.quadFireUntil > now,
+          throw: { angles: input.angles, gravity: input.gravity, project: input.project, damageMultiplier: 1 },
+        },
+        host,
+      );
       if (this.states.get(actor) !== current || !this.game.host.actors.isLive(actor)) return undefined;
       const next: HandGrenadeEquipmentState = { config, action };
       this.states.set(actor, next);
@@ -123,7 +162,9 @@ export class Q2HandGrenadeEquipment {
       for (const effect of effects) {
         if (this.states.get(actor) !== next || !this.game.host.actors.isLive(actor)) break;
         switch (effect.kind) {
-          case "ammo": this.ballistics.hooks.ammoChanged(actor, HAND_GRENADE_AMMO); break;
+          case "ammo":
+            this.ballistics.hooks.ammoChanged(actor, HAND_GRENADE_AMMO);
+            break;
           case "emit": {
             const damage = effect.spec.damage * q2WeaponDamageMultiplier(actor, input, now, this.ballistics.hooks);
             if (this.states.get(actor) !== next || !this.game.host.actors.isLive(actor)) break;
@@ -133,21 +174,34 @@ export class Q2HandGrenadeEquipment {
           case "sound": {
             const body = this.game.host.bodies.read(actor);
             if (body === null) throw new Error("Hand grenade owner lost its shared body before removal");
-            this.game.host.emit({ kind: "sound", actor, origin: body.origin,
-              path: effect.event === "cock" ? "weapons/hgrena1b.wav" : "weapons/hgrenc1b.wav", channel: 1, volume: 1, attenuation: 1, reliable: false,
-              loop: effect.event === "cock" ? "once" : effect.event === "cook-start" ? "start" : "stop" });
+            this.game.host.emit({
+              kind: "sound",
+              actor,
+              origin: body.origin,
+              path: effect.event === "cock" ? "weapons/hgrena1b.wav" : "weapons/hgrenc1b.wav",
+              channel: 1,
+              volume: 1,
+              attenuation: 1,
+              reliable: false,
+              loop: effect.event === "cock" ? "once" : effect.event === "cook-start" ? "start" : "stop",
+            });
             break;
           }
         }
       }
-    } finally { this.activeSteps--; }
+    } finally {
+      this.activeSteps--;
+    }
     return undefined;
   }
 
   capture(): HandGrenadesCheckpoint {
     if (this.activeSteps !== 0) throw new Error("Hand grenade saves require a completed action boundary");
-    return { version: 1, edition: this.game.options.edition,
-      actors: [...this.states].map(([actor, state]) => ({ actor: { slot: actor.slot, generation: actor.generation }, state: structuredClone(state) })) };
+    return {
+      version: 1,
+      edition: this.game.options.edition,
+      actors: [...this.states].map(([actor, state]) => ({ actor: { slot: actor.slot, generation: actor.generation }, state: structuredClone(state) })),
+    };
   }
 
   /** Restore shared actors and the already debited inventory first. No action effects are replayed. */
@@ -162,7 +216,8 @@ export class Q2HandGrenadeEquipment {
         throw new Error("Hand grenade checkpoint owner has no restored shared actor, body or inventory");
       }
       if (restored.has(owner.id)) throw new Error("Duplicate hand grenade checkpoint owner");
-      if (!this.game.host.inventory.entries(owner.id).some(item => item.item === HAND_GRENADE_AMMO)) throw new Error("Hand grenade checkpoint has no canonical ammo entry");
+      if (!this.game.host.inventory.entries(owner.id).some(item => item.item === HAND_GRENADE_AMMO))
+        throw new Error("Hand grenade checkpoint has no canonical ammo entry");
       restored.set(owner.id, structuredClone(entry.state));
     }
     this.states.clear();

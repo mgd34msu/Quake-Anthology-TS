@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ArchiveFormat } from "../../contracts/content.ts";
 
 interface EntryMetadata {
@@ -42,15 +43,18 @@ export interface MemoryArchiveHandle extends ArchiveHandle {
 }
 
 export class ArchiveError extends Error {
-  constructor(readonly source: string, readonly offset: number, message: string) {
+  constructor(
+    readonly source: string,
+    readonly offset: number,
+    message: string,
+  ) {
     super(`${source}:${offset}: ${message}`);
     this.name = "ArchiveError";
   }
 }
 
 export function checkRange(source: string, size: number, offset: number, length: number): void {
-  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)
-    || offset < 0 || length < 0 || offset > size - length) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset > size - length) {
     throw new ArchiveError(source, offset, `range of ${length} bytes exceeds ${size}-byte source`);
   }
 }

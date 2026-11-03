@@ -8,8 +8,10 @@ import { defaultUiSkin } from "../../../src/ui/common/skin.ts";
 import { registerModMenu, type ModMenuRow, type ModMenuService } from "../../../src/ui/mods/menu.ts";
 
 test("mod menu combines source games, toggles independently, scrolls, searches and explains unavailable choices", () => {
-  const owner = createIdentityOwner("mod-menu"), seat = owner.seat(0);
-  const enabled = new Set<string>(), changes: { readonly id: string; readonly enabled: boolean }[] = [];
+  const owner = createIdentityOwner("mod-menu"),
+    seat = owner.seat(0);
+  const enabled = new Set<string>(),
+    changes: { readonly id: string; readonly enabled: boolean }[] = [];
   let refreshes = 0;
   const available = [
     { id: "q1:weather", title: "Storm effects", source: "Quake", unavailable: null },
@@ -20,18 +22,49 @@ test("mod menu combines source games, toggles independently, scrolls, searches a
   ] satisfies readonly Omit<ModMenuRow, "enabled">[];
   const service: ModMenuService = {
     rows: () => available.map(row => ({ ...row, enabled: enabled.has(row.id) })),
-    setEnabled: (id, value) => { changes.push({ id, enabled: value }); if (value) enabled.add(id); else enabled.delete(id); },
-    refresh: () => { refreshes++; }, status: () => "",
+    setEnabled: (id, value) => {
+      changes.push({ id, enabled: value });
+      if (value) enabled.add(id);
+      else enabled.delete(id);
+    },
+    refresh: () => {
+      refreshes++;
+    },
+    status: () => "",
   };
-  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin("resource:test:font"),
-    bindings: () => [], focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  const ui = new NativeUiController({
+    seat,
+    now: () => 0,
+    skin: () => defaultUiSkin("resource:test:font"),
+    bindings: () => [],
+    focus: () => undefined,
+    sound: () => undefined,
+    executeScript: () => undefined,
+  });
   const menu = registerModMenu(ui, service);
   const provider = { provider: "ui:test", content: "q1:rerelease:id1:retail" } satisfies UiDrawContext["binding"]["presentation"]["hud"];
-  const context: UiDrawContext = { binding: { seat, client: owner.client(0, 0), viewport: { x: 0, y: 0, width: 640, height: 480 },
-    safeArea: { x: 0, y: 0, width: 640, height: 480 }, hudScale: 1,
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 0 };
-  const text = (): readonly string[] => ui.draw(context).flatMap(command => command.kind === "text" ? [command.text.trim()] : []);
-  const key = (code: number): void => { ui.input({ kind: "key", seat, code, down: true, repeat: false, timeMilliseconds: 0 }); };
+  const context: UiDrawContext = {
+    binding: {
+      seat,
+      client: owner.client(0, 0),
+      viewport: { x: 0, y: 0, width: 640, height: 480 },
+      safeArea: { x: 0, y: 0, width: 640, height: 480 },
+      hudScale: 1,
+      presentation: {
+        doppler: { kind: "source" },
+        environment: { kind: "audio-content" },
+        assets: provider.content,
+        hud: provider,
+        effects: provider,
+        audio: provider,
+      },
+    },
+    timeMilliseconds: 0,
+  };
+  const text = (): readonly string[] => ui.draw(context).flatMap(command => (command.kind === "text" ? [command.text.trim()] : []));
+  const key = (code: number): void => {
+    ui.input({ kind: "key", seat, code, down: true, repeat: false, timeMilliseconds: 0 });
+  };
   const click = (x: number, y: number): void => {
     ui.input({ kind: "mouse-motion", seat, position: { x, y }, delta: { x: 0, y: 0 }, timeMilliseconds: 0 });
     ui.input({ kind: "mouse-button", seat, button: 1, down: true, timeMilliseconds: 0 });
@@ -40,11 +73,13 @@ test("mod menu combines source games, toggles independently, scrolls, searches a
   ui.openMenu(menu.root);
   expect(refreshes).toBe(1);
   expect(text()).toContain("Disabled");
-  key(KeyCode.Tab); key(KeyCode.Enter);
+  key(KeyCode.Tab);
+  key(KeyCode.Enter);
   expect(text()).toContain("Disable");
   key(KeyCode.Down);
   expect(changes).toEqual([{ id: "q1:weather", enabled: true }]);
-  key(KeyCode.Tab); key(KeyCode.Enter);
+  key(KeyCode.Tab);
+  key(KeyCode.Enter);
   expect([...enabled]).toEqual(["q1:weather", "q2:monsters"]);
   expect(text().filter(label => label === "Enabled")).toHaveLength(2);
   click(60, 150);
@@ -53,7 +88,8 @@ test("mod menu combines source games, toggles independently, scrolls, searches a
   expect(text()).toContain("Expansion enemies");
   expect(text()).toContain("Unavailable");
   expect(text()).toContain("Requires installed expansion content.");
-  key(KeyCode.Enter); click(60, 350);
+  key(KeyCode.Enter);
+  click(60, 350);
   expect(changes).toHaveLength(3);
   click(400, 92);
   ui.input({ kind: "text", seat, text: "rerelease expansion", timeMilliseconds: 0 });

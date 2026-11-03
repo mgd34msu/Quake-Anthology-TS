@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Translated vector and angle routines from Quake III Arena's q_math.c and
  * q_shared.h. Copyright (C) 1999-2005 Id Software, Inc.
@@ -10,7 +11,7 @@ import { createNumericOperations, Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, qvmFloatTo
 export type { Vec2, Vec3, Vec4, MutableVec3, Bounds, Plane, Axis, AngleVectors, Mat4 } from "../contracts/math.ts";
 
 /** The unqualified helpers retain the Q3 donor's operation sequence. */
-const DEGREES_TO_RADIANS = Math.PI * 2 / 360;
+const DEGREES_TO_RADIANS = (Math.PI * 2) / 360;
 
 export function vec2(x: number, y: number): Vec2 {
   return { x: Math.fround(x), y: Math.fround(y) };
@@ -208,11 +209,7 @@ export function colorBytes3(red: number, green: number, blue: number, storage: D
 }
 
 export function lerp3(from: Vec3, to: Vec3, fraction: number): Vec3 {
-  return vec3(
-    from.x + fraction * (to.x - from.x),
-    from.y + fraction * (to.y - from.y),
-    from.z + fraction * (to.z - from.z),
-  );
+  return vec3(from.x + fraction * (to.x - from.x), from.y + fraction * (to.y - from.y), from.z + fraction * (to.z - from.z));
 }
 
 /** Allocation-free lerp3 for caller-owned scratch; output may alias an input. */
@@ -317,7 +314,7 @@ function dotComponents(ax: number, ay: number, az: number, bx: number, by: numbe
  */
 export type AngleMathRule = "float" | "vm" | "donor" | "q1" | "native" | "bot";
 
-const VM_ANGLE_RADIANS = Math.fround(Math.PI * 2 / 360);
+const VM_ANGLE_RADIANS = Math.fround((Math.PI * 2) / 360);
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -348,22 +345,45 @@ export function angleVectorsRuleInto(forward: MutableVec3, right: MutableVec3, u
   let pitch: number;
   let roll: number;
   if (rule === "donor") {
-    yaw = angles.y * DEGREES_TO_RADIANS; pitch = angles.x * DEGREES_TO_RADIANS; roll = angles.z * DEGREES_TO_RADIANS;
+    yaw = angles.y * DEGREES_TO_RADIANS;
+    pitch = angles.x * DEGREES_TO_RADIANS;
+    roll = angles.z * DEGREES_TO_RADIANS;
   } else if (rule === "bot") {
-    yaw = angles.y * DEG_TO_RAD; pitch = angles.x * DEG_TO_RAD; roll = angles.z * DEG_TO_RAD;
+    yaw = angles.y * DEG_TO_RAD;
+    pitch = angles.x * DEG_TO_RAD;
+    roll = angles.z * DEG_TO_RAD;
   } else {
-    yaw = angles.y * Math.PI / 180; pitch = angles.x * Math.PI / 180; roll = angles.z * Math.PI / 180;
+    yaw = (angles.y * Math.PI) / 180;
+    pitch = (angles.x * Math.PI) / 180;
+    roll = (angles.z * Math.PI) / 180;
   }
-  const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
+  const sy = Math.sin(yaw),
+    cy = Math.cos(yaw),
+    sp = Math.sin(pitch),
+    cp = Math.cos(pitch),
+    sr = Math.sin(roll),
+    cr = Math.cos(roll);
   if (rule === "donor" || rule === "q1") {
-    forward.x = Math.fround(cp * cy); forward.y = Math.fround(cp * sy); forward.z = Math.fround(-sp);
-    right.x = Math.fround(-sr * sp * cy + cr * sy); right.y = Math.fround(-sr * sp * sy - cr * cy); right.z = Math.fround(-sr * cp);
-    up.x = Math.fround(cr * sp * cy + sr * sy); up.y = Math.fround(cr * sp * sy - sr * cy); up.z = Math.fround(cr * cp);
+    forward.x = Math.fround(cp * cy);
+    forward.y = Math.fround(cp * sy);
+    forward.z = Math.fround(-sp);
+    right.x = Math.fround(-sr * sp * cy + cr * sy);
+    right.y = Math.fround(-sr * sp * sy - cr * cy);
+    right.z = Math.fround(-sr * cp);
+    up.x = Math.fround(cr * sp * cy + sr * sy);
+    up.y = Math.fround(cr * sp * sy - sr * cy);
+    up.z = Math.fround(cr * cp);
     return;
   }
-  forward.x = cp * cy; forward.y = cp * sy; forward.z = -sp;
-  right.x = -sr * sp * cy + cr * sy; right.y = -sr * sp * sy - cr * cy; right.z = -sr * cp;
-  up.x = cr * sp * cy + sr * sy; up.y = cr * sp * sy - sr * cy; up.z = cr * cp;
+  forward.x = cp * cy;
+  forward.y = cp * sy;
+  forward.z = -sp;
+  right.x = -sr * sp * cy + cr * sy;
+  right.y = -sr * sp * sy - cr * cy;
+  right.z = -sr * cp;
+  up.x = cr * sp * cy + sr * sy;
+  up.y = cr * sp * sy - sr * cy;
+  up.z = cr * cp;
 }
 
 export function angleVectorsRule(angles: Vec3, rule: AngleMathRule): AngleVectors {
@@ -408,20 +428,20 @@ export type VectorToAnglesRule = "float" | "native" | "native-ai" | "bot" | "bot
 export function vectorToAnglesRule(value: Vec3, rule: VectorToAnglesRule): Vec3 {
   if (rule === "native") {
     if (value.x === 0 && value.y === 0) return { x: value.z > 0 ? -90 : -270, y: 0, z: 0 };
-    let yaw = Math.atan2(value.y, value.x) * 180 / Math.PI;
+    let yaw = (Math.atan2(value.y, value.x) * 180) / Math.PI;
     if (yaw < 0) yaw += 360;
-    let pitch = Math.atan2(value.z, Math.hypot(value.x, value.y)) * 180 / Math.PI;
+    let pitch = (Math.atan2(value.z, Math.hypot(value.x, value.y)) * 180) / Math.PI;
     if (pitch < 0) pitch += 360;
     return { x: -pitch, y: yaw, z: 0 };
   }
   if (rule === "native-ai") {
-    const yaw = value.x === 0 && value.y === 0 ? 0 : Math.atan2(value.y, value.x) * 180 / Math.PI;
-    const pitch = Math.atan2(value.z, Math.hypot(value.x, value.y)) * 180 / Math.PI;
+    const yaw = value.x === 0 && value.y === 0 ? 0 : (Math.atan2(value.y, value.x) * 180) / Math.PI;
+    const pitch = (Math.atan2(value.z, Math.hypot(value.x, value.y)) * 180) / Math.PI;
     return { x: -pitch, y: yaw < 0 ? yaw + 360 : yaw, z: 0 };
   }
   if (rule === "bot") {
     if (value.x === 0 && value.y === 0) return { x: value.z > 0 ? -90 : 90, y: 0, z: 0 };
-    const yaw = ((Math.atan2(value.y, value.x) * RAD_TO_DEG % 360) + 360) % 360;
+    const yaw = (((Math.atan2(value.y, value.x) * RAD_TO_DEG) % 360) + 360) % 360;
     const forward = Math.sqrt(value.x * value.x + value.y * value.y);
     return { x: -Math.atan2(value.z, forward) * RAD_TO_DEG, y: yaw, z: 0 };
   }
@@ -432,10 +452,10 @@ export function vectorToAnglesRule(value: Vec3, rule: VectorToAnglesRule): Vec3 
       yaw = 0;
       pitch = value.z > 0 ? 90 : 270;
     } else {
-      yaw = value.x !== 0 ? Math.fround(Math.atan2(value.y, value.x) * 180 / Math.PI) : value.y > 0 ? 90 : 270;
+      yaw = value.x !== 0 ? Math.fround((Math.atan2(value.y, value.x) * 180) / Math.PI) : value.y > 0 ? 90 : 270;
       if (yaw < 0) yaw = Math.fround(yaw + 360);
       const forward = Math.fround(Math.sqrt(Math.fround(Math.fround(value.x * value.x) + Math.fround(value.y * value.y))));
-      pitch = Math.fround(Math.atan2(value.z, forward) * 180 / Math.PI);
+      pitch = Math.fround((Math.atan2(value.z, forward) * 180) / Math.PI);
       if (pitch < 0) pitch = Math.fround(pitch + 360);
     }
     return vec3(-pitch, yaw, 0);
@@ -486,7 +506,7 @@ export function angleMod(angle: number): number {
 
 /** Q2 compiled-gameplay anglemod grouping: truncating scaled multiply first. */
 export function angleModScaled(angle: number): number {
-  return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536;
+  return ((Math.trunc((angle * 65536) / 360) & 65535) * 360) / 65536;
 }
 
 /** AngleMod's QVM MULF4 precedes truncation and the unsigned angle16 mask. */
@@ -621,22 +641,13 @@ export function rotatePointAroundVectorRuleInto(out: MutableVec3, direction: Vec
   const vertical = { x: 0, y: 0, z: 0 };
   perpendicularVectorInto(radial, forward);
   cross3Into(vertical, radial, forward);
-  const radians = rule === "vm"
-    ? Math.fround(Math.fround(Math.fround(degrees) * Math.fround(Math.PI)) / 180)
-    : Math.fround(Math.fround(degrees) * Math.PI / 180);
+  const radians =
+    rule === "vm" ? Math.fround(Math.fround(Math.fround(degrees) * Math.fround(Math.PI)) / 180) : Math.fround((Math.fround(degrees) * Math.PI) / 180);
   const cosine = Math.fround(Math.cos(radians));
   const sine = Math.fround(Math.sin(radians));
-  const basis: readonly number[] = [
-    radial.x, vertical.x, forward.x,
-    radial.y, vertical.y, forward.y,
-    radial.z, vertical.z, forward.z,
-  ];
+  const basis: readonly number[] = [radial.x, vertical.x, forward.x, radial.y, vertical.y, forward.y, radial.z, vertical.z, forward.z];
   const zRotation: readonly number[] = [cosine, sine, 0, -sine, cosine, 0, 0, 0, 1];
-  const inverse: readonly number[] = [
-    radial.x, radial.y, radial.z,
-    vertical.x, vertical.y, vertical.z,
-    forward.x, forward.y, forward.z,
-  ];
+  const inverse: readonly number[] = [radial.x, radial.y, radial.z, vertical.x, vertical.y, vertical.z, forward.x, forward.y, forward.z];
   const temporary: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   const rotation: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   multiplyMat3Into(temporary, basis, zRotation);
@@ -662,11 +673,7 @@ export function qvmRotatePointAroundVector(direction: Vec3, point: Vec3, degrees
 }
 
 /** The rotation direction must be normalized, matching q_math.c. */
-export function rotatePointAroundVector(
-  direction: Vec3,
-  point: Vec3,
-  degrees: number,
-): Vec3 {
+export function rotatePointAroundVector(direction: Vec3, point: Vec3, degrees: number): Vec3 {
   const out = { x: 0, y: 0, z: 0 };
   rotatePointAroundVectorInto(out, direction, point, degrees);
   return out;
@@ -741,14 +748,24 @@ export function boxOnPlaneSide(bounds: Bounds, plane: Plane): number {
   const nx = plane.normal.x;
   const ny = plane.normal.y;
   const nz = plane.normal.z;
-  const frontDistance = dotComponents(nx, ny, nz,
-    Math.fround(nx < 0 ? bounds.min.x : bounds.max.x),
-    Math.fround(ny < 0 ? bounds.min.y : bounds.max.y),
-    Math.fround(nz < 0 ? bounds.min.z : bounds.max.z)) - plane.distance;
-  const backDistance = dotComponents(nx, ny, nz,
-    Math.fround(nx < 0 ? bounds.max.x : bounds.min.x),
-    Math.fround(ny < 0 ? bounds.max.y : bounds.min.y),
-    Math.fround(nz < 0 ? bounds.max.z : bounds.min.z)) - plane.distance;
+  const frontDistance =
+    dotComponents(
+      nx,
+      ny,
+      nz,
+      Math.fround(nx < 0 ? bounds.min.x : bounds.max.x),
+      Math.fround(ny < 0 ? bounds.min.y : bounds.max.y),
+      Math.fround(nz < 0 ? bounds.min.z : bounds.max.z),
+    ) - plane.distance;
+  const backDistance =
+    dotComponents(
+      nx,
+      ny,
+      nz,
+      Math.fround(nx < 0 ? bounds.max.x : bounds.min.x),
+      Math.fround(ny < 0 ? bounds.max.y : bounds.min.y),
+      Math.fround(nz < 0 ? bounds.max.z : bounds.min.z),
+    ) - plane.distance;
   let sides = 0;
   if (frontDistance >= 0) {
     sides = 1;
@@ -760,12 +777,7 @@ export function boxOnPlaneSide(bounds: Bounds, plane: Plane): number {
 }
 
 export function identityMat4(): Mat4 {
-  return [
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1,
-  ];
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 }
 
 export function multiplyMat4(a: Mat4, b: Mat4): Mat4 {
@@ -790,20 +802,10 @@ export function multiplyMat4(a: Mat4, b: Mat4): Mat4 {
 }
 
 /** Builds a right-handed OpenGL perspective matrix with NDC depth [-1, 1]. */
-export function perspectiveMat4(
-  verticalFieldOfViewDegrees: number,
-  aspectRatio: number,
-  near: number,
-  far: number,
-): Mat4 {
-  const focalLength = 1 / Math.tan(verticalFieldOfViewDegrees * DEGREES_TO_RADIANS / 2);
+export function perspectiveMat4(verticalFieldOfViewDegrees: number, aspectRatio: number, near: number, far: number): Mat4 {
+  const focalLength = 1 / Math.tan((verticalFieldOfViewDegrees * DEGREES_TO_RADIANS) / 2);
   const depthScale = 1 / (near - far);
-  return [
-    focalLength / aspectRatio, 0, 0, 0,
-    0, focalLength, 0, 0,
-    0, 0, (far + near) * depthScale, -1,
-    0, 0, 2 * far * near * depthScale, 0,
-  ];
+  return [focalLength / aspectRatio, 0, 0, 0, 0, focalLength, 0, 0, 0, 0, (far + near) * depthScale, -1, 0, 0, 2 * far * near * depthScale, 0];
 }
 
 /** Builds a right-handed world-to-view matrix. */
@@ -832,12 +834,22 @@ export function lookAtMat4(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
   const cameraUpY = Math.fround(Math.fround(backwardZ * rightX) - Math.fround(backwardX * rightZ));
   const cameraUpZ = Math.fround(Math.fround(backwardX * rightY) - Math.fround(backwardY * rightX));
   return [
-    rightX, cameraUpX, backwardX, 0,
-    rightY, cameraUpY, backwardY, 0,
-    rightZ, cameraUpZ, backwardZ, 0,
+    rightX,
+    cameraUpX,
+    backwardX,
+    0,
+    rightY,
+    cameraUpY,
+    backwardY,
+    0,
+    rightZ,
+    cameraUpZ,
+    backwardZ,
+    0,
     -dotComponents(rightX, rightY, rightZ, eye.x, eye.y, eye.z),
     -dotComponents(cameraUpX, cameraUpY, cameraUpZ, eye.x, eye.y, eye.z),
-    -dotComponents(backwardX, backwardY, backwardZ, eye.x, eye.y, eye.z), 1,
+    -dotComponents(backwardX, backwardY, backwardZ, eye.x, eye.y, eye.z),
+    1,
   ];
 }
 
@@ -861,12 +873,24 @@ export class Float32VectorView implements MutableVec3 {
     this.view = new DataView(data.buffer, data.byteOffset + byteOffset, 12);
   }
 
-  get x(): number { return this.view.getFloat32(0, true); }
-  set x(value: number) { this.view.setFloat32(0, value, true); }
-  get y(): number { return this.view.getFloat32(4, true); }
-  set y(value: number) { this.view.setFloat32(4, value, true); }
-  get z(): number { return this.view.getFloat32(8, true); }
-  set z(value: number) { this.view.setFloat32(8, value, true); }
+  get x(): number {
+    return this.view.getFloat32(0, true);
+  }
+  set x(value: number) {
+    this.view.setFloat32(0, value, true);
+  }
+  get y(): number {
+    return this.view.getFloat32(4, true);
+  }
+  set y(value: number) {
+    this.view.setFloat32(4, value, true);
+  }
+  get z(): number {
+    return this.view.getFloat32(8, true);
+  }
+  set z(value: number) {
+    this.view.setFloat32(8, value, true);
+  }
 }
 
 /**
@@ -933,7 +957,9 @@ export function createMutableVectorMath(operations: NumericOperations, zeroLengt
     output.z = operations.store(operations.subtract(operations.multiply(a.x, b.y), operations.multiply(a.y, b.x)));
   }
 
-  function VectorLength(input: Vec3): number { return operations.squareRoot(DotProduct(input, input)); }
+  function VectorLength(input: Vec3): number {
+    return operations.squareRoot(DotProduct(input, input));
+  }
 
   function VectorNormalize(input: MutableVec3): number {
     const length = VectorLength(input);
@@ -961,9 +987,13 @@ export function createMutableVectorMath(operations: NumericOperations, zeroLengt
     output.z = operations.store(-input.z);
   }
 
-  function VectorInverse(input: MutableVec3): void { VectorNegate(input, input); }
+  function VectorInverse(input: MutableVec3): void {
+    VectorNegate(input, input);
+  }
 
-  function VectorCompare(a: Vec3, b: Vec3): number { return a.x === b.x && a.y === b.y && a.z === b.z ? 1 : 0; }
+  function VectorCompare(a: Vec3, b: Vec3): number {
+    return a.x === b.x && a.y === b.y && a.z === b.z ? 1 : 0;
+  }
 
   function ProjectPointOnPlane(output: MutableVec3, point: Vec3, normal: Vec3): void {
     const inverse = operations.divide(1, DotProduct(normal, normal));
@@ -1004,10 +1034,26 @@ export function createMutableVectorMath(operations: NumericOperations, zeroLengt
   }
 
   return {
-    operations, DotProduct, VectorSet, VectorCopy, VectorAdd, VectorSubtract,
-    VectorScale, VectorMA, CrossProduct, VectorLength, VectorNormalize,
-    VectorNormalize2, VectorClear, VectorNegate, VectorInverse, VectorCompare,
-    ProjectPointOnPlane, PerpendicularVector, ClearBounds, AddPointToBounds,
+    operations,
+    DotProduct,
+    VectorSet,
+    VectorCopy,
+    VectorAdd,
+    VectorSubtract,
+    VectorScale,
+    VectorMA,
+    CrossProduct,
+    VectorLength,
+    VectorNormalize,
+    VectorNormalize2,
+    VectorClear,
+    VectorNegate,
+    VectorInverse,
+    VectorCompare,
+    ProjectPointOnPlane,
+    PerpendicularVector,
+    ClearBounds,
+    AddPointToBounds,
   };
 }
 
@@ -1034,7 +1080,11 @@ export function donorAngleVectors(angles: Vec3, forward: MutableVec3 | null, rig
 export type MutableMat3 = readonly [MutableVec3, MutableVec3, MutableVec3];
 
 export function donorConcatRotations(first: Mat3, second: Mat3, output: MutableMat3): void {
-  for (const [row, target] of [[first[0], output[0]], [first[1], output[1]], [first[2], output[2]]] satisfies [Vec3, MutableVec3][]) {
+  for (const [row, target] of [
+    [first[0], output[0]],
+    [first[1], output[1]],
+    [first[2], output[2]],
+  ] satisfies [Vec3, MutableVec3][]) {
     target.x = Math.fround(row.x * second[0].x + row.y * second[1].x + row.z * second[2].x);
     target.y = Math.fround(row.x * second[0].y + row.y * second[1].y + row.z * second[2].y);
     target.z = Math.fround(row.x * second[0].z + row.y * second[1].z + row.z * second[2].z);
@@ -1047,13 +1097,10 @@ export function donorRotatePointAroundVector(output: MutableVec3, direction: Vec
   const vertical = mutableVec3();
   q1DonorMath.PerpendicularVector(radial, direction);
   q1DonorMath.CrossProduct(radial, forward, vertical);
-  const basis: Mat3 = [
-    vec3(radial.x, vertical.x, forward.x),
-    vec3(radial.y, vertical.y, forward.y),
-    vec3(radial.z, vertical.z, forward.z),
-  ];
-  const radians = degrees * Math.PI / 180;
-  const cosine = Math.cos(radians), sine = Math.sin(radians);
+  const basis: Mat3 = [vec3(radial.x, vertical.x, forward.x), vec3(radial.y, vertical.y, forward.y), vec3(radial.z, vertical.z, forward.z)];
+  const radians = (degrees * Math.PI) / 180;
+  const cosine = Math.cos(radians),
+    sine = Math.sin(radians);
   const rotation: Mat3 = [vec3(cosine, sine, 0), vec3(-sine, cosine, 0), vec3(0, 0, 1)];
   const temporary: MutableMat3 = [mutableVec3(), mutableVec3(), mutableVec3()];
   const result: MutableMat3 = [mutableVec3(), mutableVec3(), mutableVec3()];

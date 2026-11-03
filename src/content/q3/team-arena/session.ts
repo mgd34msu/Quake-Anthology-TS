@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Session persistence translated from id Software's code/game/g_session.c,
  * with its required TeamCount/PickTeam dependency from g_client.c.
@@ -98,11 +99,7 @@ function clientAt(world: Pick<SessionWorldState, "clients" | "maxClients">, clie
   return client;
 }
 
-export function teamCount(
-  world: Pick<SessionWorldState, "clients" | "maxClients">,
-  ignoreClientNum: number,
-  team: Team,
-): number {
+export function teamCount(world: Pick<SessionWorldState, "clients" | "maxClients">, ignoreClientNum: number, team: Team): number {
   let count = 0;
   for (let index = 0; index < world.maxClients; index++) {
     if (index === ignoreClientNum) continue;
@@ -113,10 +110,7 @@ export function teamCount(
   return count;
 }
 
-export function pickTeam(
-  world: Pick<SessionWorldState, "clients" | "maxClients" | "teamScores">,
-  ignoreClientNum: number,
-): Team {
+export function pickTeam(world: Pick<SessionWorldState, "clients" | "maxClients" | "teamScores">, ignoreClientNum: number): Team {
   const blueCount = teamCount(world, ignoreClientNum, Team.TEAM_BLUE);
   const redCount = teamCount(world, ignoreClientNum, Team.TEAM_RED);
   if (blueCount > redCount) return Team.TEAM_RED;
@@ -140,15 +134,11 @@ export class GameSessionManager {
 
   writeClient(clientNum: number): void {
     const session = clientAt(this.world, clientNum).sess;
-    const value = gameFormat("%i %i %i %i %i %i %i", [
-      session.sessionTeam,
-      session.spectatorTime,
-      session.spectatorState,
-      session.spectatorClient,
-      session.wins,
-      session.losses,
-      session.teamLeader,
-    ], MAX_STRING_CHARS);
+    const value = gameFormat(
+      "%i %i %i %i %i %i %i",
+      [session.sessionTeam, session.spectatorTime, session.spectatorState, session.spectatorClient, session.wins, session.losses, session.teamLeader],
+      MAX_STRING_CHARS,
+    );
     this.services.cvars.set(`session${clientNum}`, value);
   }
 
@@ -194,9 +184,8 @@ export class GameSessionManager {
         case GameType.GT_FFA:
         case GameType.GT_SINGLE_PLAYER:
         default:
-          session.sessionTeam = this.world.maxGameClients > 0
-            && this.world.numNonSpectatorClients >= this.world.maxGameClients
-            ? Team.TEAM_SPECTATOR : Team.TEAM_FREE;
+          session.sessionTeam =
+            this.world.maxGameClients > 0 && this.world.numNonSpectatorClients >= this.world.maxGameClients ? Team.TEAM_SPECTATOR : Team.TEAM_FREE;
           break;
       }
     }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 import { applySourceDamageModifier } from "../../../world/gameplay/damage-modifier.ts";
 import type { AttackProvenance, DamageOutcome, ItemId } from "../../../contracts/gameplay.ts";
@@ -14,7 +15,11 @@ import type { SavedActorId } from "../../../contracts/session.ts";
 import type { AuthoredTarget } from "../../monsters/authored.ts";
 
 const MASK_SOLID = 3;
-const delayedUse: Q2Think = (entity, game) => { game.useTargets(entity, entity.activator); game.remove(entity); return undefined; };
+const delayedUse: Q2Think = (entity, game) => {
+  game.useTargets(entity, entity.activator);
+  game.remove(entity);
+  return undefined;
+};
 
 /** One provider's actors and source callbacks; the session still owns the frame and all mutation authorities. */
 export class Q2EntityServices implements Q2GameServices {
@@ -32,7 +37,11 @@ export class Q2EntityServices implements Q2GameServices {
   currentActor: ActorId | null = null;
   protected readonly unsupported = new Set<Q2Entity>();
 
-  constructor(readonly host: Q2FoundationHost, readonly options: Q2GameOptions, private readonly modules: readonly Q2SpawnModule[]) {
+  constructor(
+    readonly host: Q2FoundationHost,
+    readonly options: Q2GameOptions,
+    private readonly modules: readonly Q2SpawnModule[],
+  ) {
     this.nextSourceSlot = options.maxClients + 1;
     this.sourceCallbacks.register({ think: { Think_Delay: delayedUse, G_FreeEdict: freeQ2Entity }, die: { G_FreeEdict: freeQ2Entity } });
     for (const module of modules) if (module.callbacks !== undefined) this.sourceCallbacks.register(module.callbacks);
@@ -41,16 +50,22 @@ export class Q2EntityServices implements Q2GameServices {
       if (entity !== undefined) this.unsupported.delete(entity);
       const slot = this.sourceSlots.get(actor.id);
       if (slot !== undefined && slot > options.maxClients) this.freedSlots.set(slot, host.now());
-      this.sourceSlots.delete(actor.id); this.entities.delete(actor.id); this.authoredTargets.delete(actor.id);
+      this.sourceSlots.delete(actor.id);
+      this.entities.delete(actor.id);
+      this.authoredTargets.delete(actor.id);
       return undefined;
     });
   }
 
-  markDodgeable(entity: Q2Entity): undefined { this.dodgeCandidates.add(entity); return undefined; }
+  markDodgeable(entity: Q2Entity): undefined {
+    this.dodgeCandidates.add(entity);
+    return undefined;
+  }
 
   /** Live projectiles monsters may dodge, without scanning every entity; stale members are dropped as they are found. */
   dodgeables(): Iterable<Q2Entity> {
-    for (const entity of this.dodgeCandidates) if (this.entities.get(entity.actor.id) !== entity || !entity.projectile || !entity.dodgeable) this.dodgeCandidates.delete(entity);
+    for (const entity of this.dodgeCandidates)
+      if (this.entities.get(entity.actor.id) !== entity || !entity.projectile || !entity.dodgeable) this.dodgeCandidates.delete(entity);
     return this.dodgeCandidates;
   }
 
@@ -67,45 +82,115 @@ export class Q2EntityServices implements Q2GameServices {
     if (this.currentActor !== null) throw new Error("Q2 source saves require a completed callback boundary");
     const entities: Q2EntityCheckpoint[] = [];
     for (const entity of this.entities.values()) {
-      const { actor, spawn, activator, enemy, owner, goal, teamMaster, teamChain, chain, beam, beam2, proboscus, lastAttack, think, prethink, postthink, use, touch, pain, die, blocked, ...values } = entity;
-      entities.push({ actor: { slot: actor.id.slot, generation: actor.id.generation }, sourceSlot: this.sourceSlots.get(actor.id) ?? null,
-        spawn: { classname: spawn.classname, ordinal: spawn.ordinal, values: [...spawn.values].map(([key, value]) => ({ key, value })) }, values: structuredClone(values),
-        links: { activator: saveQ2Actor(activator), enemy: saveQ2Actor(enemy), owner: saveQ2Actor(owner), goal: saveQ2Actor(goal),
-          teamMaster: saveQ2Actor(teamMaster), teamChain: saveQ2Actor(teamChain), chain: saveQ2Actor(chain), beam: saveQ2Actor(beam), beam2: saveQ2Actor(beam2), proboscus: saveQ2Actor(proboscus) },
+      const {
+        actor,
+        spawn,
+        activator,
+        enemy,
+        owner,
+        goal,
+        teamMaster,
+        teamChain,
+        chain,
+        beam,
+        beam2,
+        proboscus,
+        lastAttack,
+        think,
+        prethink,
+        postthink,
+        use,
+        touch,
+        pain,
+        die,
+        blocked,
+        ...values
+      } = entity;
+      entities.push({
+        actor: { slot: actor.id.slot, generation: actor.id.generation },
+        sourceSlot: this.sourceSlots.get(actor.id) ?? null,
+        spawn: { classname: spawn.classname, ordinal: spawn.ordinal, values: [...spawn.values].map(([key, value]) => ({ key, value })) },
+        values: structuredClone(values),
+        links: {
+          activator: saveQ2Actor(activator),
+          enemy: saveQ2Actor(enemy),
+          owner: saveQ2Actor(owner),
+          goal: saveQ2Actor(goal),
+          teamMaster: saveQ2Actor(teamMaster),
+          teamChain: saveQ2Actor(teamChain),
+          chain: saveQ2Actor(chain),
+          beam: saveQ2Actor(beam),
+          beam2: saveQ2Actor(beam2),
+          proboscus: saveQ2Actor(proboscus),
+        },
         lastAttack: lastAttack === null ? null : saveQ2Attack(lastAttack),
-        callbacks: { think: this.sourceCallbacks.think.name(think), prethink: this.sourceCallbacks.think.name(prethink), postthink: this.sourceCallbacks.think.name(postthink), use: this.sourceCallbacks.use.name(use),
-          touch: this.sourceCallbacks.touch.name(touch), pain: this.sourceCallbacks.pain.name(pain), die: this.sourceCallbacks.die.name(die), blocked: this.sourceCallbacks.blocked.name(blocked) } });
+        callbacks: {
+          think: this.sourceCallbacks.think.name(think),
+          prethink: this.sourceCallbacks.think.name(prethink),
+          postthink: this.sourceCallbacks.think.name(postthink),
+          use: this.sourceCallbacks.use.name(use),
+          touch: this.sourceCallbacks.touch.name(touch),
+          pain: this.sourceCallbacks.pain.name(pain),
+          die: this.sourceCallbacks.die.name(die),
+          blocked: this.sourceCallbacks.blocked.name(blocked),
+        },
+      });
     }
-    return { version: 1, nextSourceSlot: this.nextSourceSlot, sequence: this.sequence, counters: { ...this.counters },
-      freedSlots: [...this.freedSlots].map(([slot, time]) => ({ slot, time })), entities };
+    return {
+      version: 1,
+      nextSourceSlot: this.nextSourceSlot,
+      sequence: this.sequence,
+      counters: { ...this.counters },
+      freedSlots: [...this.freedSlots].map(([slot, time]) => ({ slot, time })),
+      entities,
+    };
   }
 
   /** Shared lifetimes and authority tables are restored first; no spawn callback runs here. */
   restore(checkpoint: Q2FoundationCheckpoint): undefined {
     if (this.currentActor !== null) throw new Error("Q2 source restore requires a completed callback boundary");
-    this.entities.clear(); this.sourceSlots.clear(); this.freedSlots.clear(); this.unsupported.clear(); this.dodgeCandidates.clear();
-    this.nextSourceSlot = checkpoint.nextSourceSlot; this.sequence = checkpoint.sequence;
+    this.entities.clear();
+    this.sourceSlots.clear();
+    this.freedSlots.clear();
+    this.unsupported.clear();
+    this.dodgeCandidates.clear();
+    this.nextSourceSlot = checkpoint.nextSourceSlot;
+    this.sequence = checkpoint.sequence;
     Object.assign(this.counters, checkpoint.counters);
     for (const entry of checkpoint.freedSlots) this.freedSlots.set(entry.slot, entry.time);
-    const reference = (saved: SavedActorId | null): ActorId | null => saved === null ? null : this.host.actors.referenceSaved(saved);
+    const reference = (saved: SavedActorId | null): ActorId | null => (saved === null ? null : this.host.actors.referenceSaved(saved));
     for (const saved of checkpoint.entities) {
       const actor = restoreQ2Actor(this, saved.actor);
       if (saved.sourceSlot !== null) {
         const source = this.host.actors.sourceOf(actor.id);
-        if (source === null || source.provider !== this.options.provider || source.slot !== saved.sourceSlot) throw new Error("Q2 checkpoint source slot disagrees with the shared registry");
+        if (source === null || source.provider !== this.options.provider || source.slot !== saved.sourceSlot)
+          throw new Error("Q2 checkpoint source slot disagrees with the shared registry");
       }
-      const entity = new Q2Entity(actor, { classname: saved.spawn.classname, ordinal: saved.spawn.ordinal,
-        values: new Map(saved.spawn.values.map(field => [field.key, field.value])) });
+      const entity = new Q2Entity(actor, {
+        classname: saved.spawn.classname,
+        ordinal: saved.spawn.ordinal,
+        values: new Map(saved.spawn.values.map(field => [field.key, field.value])),
+      });
       Object.assign(entity, structuredClone(saved.values));
-      entity.activator = reference(saved.links.activator); entity.enemy = reference(saved.links.enemy); entity.owner = reference(saved.links.owner);
-      entity.goal = reference(saved.links.goal); entity.teamMaster = reference(saved.links.teamMaster); entity.teamChain = reference(saved.links.teamChain); entity.chain = reference(saved.links.chain);
-      entity.beam = reference(saved.links.beam); entity.beam2 = reference(saved.links.beam2);
+      entity.activator = reference(saved.links.activator);
+      entity.enemy = reference(saved.links.enemy);
+      entity.owner = reference(saved.links.owner);
+      entity.goal = reference(saved.links.goal);
+      entity.teamMaster = reference(saved.links.teamMaster);
+      entity.teamChain = reference(saved.links.teamChain);
+      entity.chain = reference(saved.links.chain);
+      entity.beam = reference(saved.links.beam);
+      entity.beam2 = reference(saved.links.beam2);
       entity.proboscus = reference(saved.links.proboscus);
       entity.lastAttack = saved.lastAttack === null ? null : restoreQ2Attack(saved.lastAttack, actor => this.host.actors.referenceSaved(actor));
-      entity.think = this.sourceCallbacks.think.resolve(saved.callbacks.think); entity.prethink = this.sourceCallbacks.think.resolve(saved.callbacks.prethink);
+      entity.think = this.sourceCallbacks.think.resolve(saved.callbacks.think);
+      entity.prethink = this.sourceCallbacks.think.resolve(saved.callbacks.prethink);
       entity.postthink = this.sourceCallbacks.think.resolve(saved.callbacks.postthink);
-      entity.use = this.sourceCallbacks.use.resolve(saved.callbacks.use); entity.touch = this.sourceCallbacks.touch.resolve(saved.callbacks.touch);
-      entity.pain = this.sourceCallbacks.pain.resolve(saved.callbacks.pain); entity.die = this.sourceCallbacks.die.resolve(saved.callbacks.die); entity.blocked = this.sourceCallbacks.blocked.resolve(saved.callbacks.blocked);
+      entity.use = this.sourceCallbacks.use.resolve(saved.callbacks.use);
+      entity.touch = this.sourceCallbacks.touch.resolve(saved.callbacks.touch);
+      entity.pain = this.sourceCallbacks.pain.resolve(saved.callbacks.pain);
+      entity.die = this.sourceCallbacks.die.resolve(saved.callbacks.die);
+      entity.blocked = this.sourceCallbacks.blocked.resolve(saved.callbacks.blocked);
       this.entities.set(actor.id, entity);
       if (entity.projectile && entity.dodgeable) this.dodgeCandidates.add(entity);
       if (saved.sourceSlot !== null) this.sourceSlots.set(actor.id, saved.sourceSlot);
@@ -133,7 +218,8 @@ export class Q2EntityServices implements Q2GameServices {
 
   itemName(classname: string): string | null {
     for (const module of this.modules) {
-      const name = module.itemName?.(classname); if (name !== undefined && name !== null) return name;
+      const name = module.itemName?.(classname);
+      if (name !== undefined && name !== null) return name;
     }
     return null;
   }
@@ -144,7 +230,8 @@ export class Q2EntityServices implements Q2GameServices {
     const existing = this.entities.get(actor.id);
     if (existing !== undefined) return existing;
     const entity = this.attach(actor, { classname: "player", ordinal: -1, values: new Map<string, string>() });
-    entity.maxHealth = 100; entity.viewHeight = 22;
+    entity.maxHealth = 100;
+    entity.viewHeight = 22;
     return entity;
   }
 
@@ -157,7 +244,7 @@ export class Q2EntityServices implements Q2GameServices {
     for (const [candidate, freed] of this.freedSlots) {
       if ((freed < 2 || this.host.now() - freed > 0.5) && (reusable === undefined || candidate < reusable)) reusable = candidate;
     }
-    const slot = fields.classname === "worldspawn" ? 0 : reusable ?? this.nextSourceSlot++;
+    const slot = fields.classname === "worldspawn" ? 0 : (reusable ?? this.nextSourceSlot++);
     this.freedSlots.delete(slot);
     const actor = this.host.actors.allocateAtSource(this.options.provider, slot, definition);
     this.sourceSlots.set(actor.id, slot);
@@ -173,12 +260,20 @@ export class Q2EntityServices implements Q2GameServices {
     if (this.host.bodies.read(actor.id) === null) throw new Error("Q2 entity attachment requires an existing shared body");
     const entity = new Q2Entity(actor, fields);
     entity.spawnflags = integerField(fields, "spawnflags") & ~(this.options.edition === "rerelease" ? 0xff00 : 0x1f00);
-    entity.delay = numberField(fields, "delay"); entity.wait = numberField(fields, "wait");
-    entity.speed = numberField(fields, "speed"); entity.accel = numberField(fields, "accel"); entity.decel = numberField(fields, "decel");
-    entity.damage = integerField(fields, "dmg"); entity.count = integerField(fields, "count"); entity.maxHealth = integerField(fields, "health");
-    entity.noise = fields.values.get("noise") ?? ""; entity.map = fields.values.get("map") ?? "";
-    entity.volume = numberField(fields, "volume"); entity.attenuation = numberField(fields, "attenuation");
-    entity.random = numberField(fields, "random"); entity.style = integerField(fields, "style");
+    entity.delay = numberField(fields, "delay");
+    entity.wait = numberField(fields, "wait");
+    entity.speed = numberField(fields, "speed");
+    entity.accel = numberField(fields, "accel");
+    entity.decel = numberField(fields, "decel");
+    entity.damage = integerField(fields, "dmg");
+    entity.count = integerField(fields, "count");
+    entity.maxHealth = integerField(fields, "health");
+    entity.noise = fields.values.get("noise") ?? "";
+    entity.map = fields.values.get("map") ?? "";
+    entity.volume = numberField(fields, "volume");
+    entity.attenuation = numberField(fields, "attenuation");
+    entity.random = numberField(fields, "random");
+    entity.style = integerField(fields, "style");
     this.entities.set(actor.id, entity);
     this.bindCallbacks(entity);
     this.host.registerEntity?.(entity, this);
@@ -187,12 +282,13 @@ export class Q2EntityServices implements Q2GameServices {
 
   private bindCallbacks(entity: Q2Entity): undefined {
     return this.host.callbacks.bind(entity.actor, {
-      think: () => this.invoke(entity.actor.id, () => {
-        const callback = entity.think;
-        entity.nextThink = null;
-        if (callback !== null) callback(entity, this);
-        return undefined;
-      }),
+      think: () =>
+        this.invoke(entity.actor.id, () => {
+          const callback = entity.think;
+          entity.nextThink = null;
+          if (callback !== null) callback(entity, this);
+          return undefined;
+        }),
       use: (_self, other, activator) => entity.use?.(entity, this, other, activator),
       touch: contact => entity.touch?.(entity, this, contact),
       pain: reaction => entity.pain?.(entity, this, reaction),
@@ -203,11 +299,17 @@ export class Q2EntityServices implements Q2GameServices {
   private invoke(actor: ActorId, callback: () => undefined): undefined {
     const previous = this.currentActor;
     this.currentActor = actor;
-    try { return callback(); } finally { this.currentActor = previous; }
+    try {
+      return callback();
+    } finally {
+      this.currentActor = previous;
+    }
   }
 
   /** Keep level.current_entity scoped around the session's existing entity physics step. */
-  runActor(actor: ActorId, callback: () => undefined): undefined { return this.invoke(actor, callback); }
+  runActor(actor: ActorId, callback: () => undefined): undefined {
+    return this.invoke(actor, callback);
+  }
 
   applyProjectileBehavior(actor: ActorId, seconds: number): void {
     const entity = this.entity(actor);
@@ -220,7 +322,8 @@ export class Q2EntityServices implements Q2GameServices {
 
   projectTrajectory(entity: Q2Entity, update: WeaponTrajectoryUpdate): void {
     this.sourceCallbacks.projectTrajectory(entity, update);
-    this.move(entity, update); this.motion(entity, entity.motion);
+    this.move(entity, update);
+    this.motion(entity, entity.motion);
   }
 
   prePhysics(actor: ActorId): undefined {
@@ -237,7 +340,8 @@ export class Q2EntityServices implements Q2GameServices {
     if (!this.host.actors.isLive(entity.actor.id)) return undefined;
     this.host.bodies.unlink(entity.actor);
     const source = this.host.actors.sourceOf(entity.actor.id);
-    if (entity.classname === "bodyque" || source !== null && source.provider === this.options.provider && source.slot <= this.options.maxClients) return undefined;
+    if (entity.classname === "bodyque" || (source !== null && source.provider === this.options.provider && source.slot <= this.options.maxClients))
+      return undefined;
     this.cancel(entity);
     this.host.emit({ kind: "visibility", actor: entity.actor.id, visible: false });
     return this.host.actors.release(entity.actor);
@@ -245,23 +349,30 @@ export class Q2EntityServices implements Q2GameServices {
 
   entity(actor: ActorId | null): Q2Entity | null {
     const owner = actor === null ? null : this.host.actors.resolveOwned(actor);
-    return owner === null ? null : this.entities.get(owner.id) ?? null;
+    return owner === null ? null : (this.entities.get(owner.id) ?? null);
   }
   weaponTarget(actor: ActorId): Q2WeaponTarget | null {
     if (!this.host.actors.isLive(actor)) return null;
     if (this.host.weaponTarget !== undefined) return this.host.weaponTarget(actor);
     const entity = this.entity(actor);
-    return entity === null ? null : { solid: entity.solid, laserImmune: entity.laserImmune,
-      damageableTarget: entity.damageableTarget, bfgExplobox: entity.classname === "misc_explobox" };
+    return entity === null
+      ? null
+      : { solid: entity.solid, laserImmune: entity.laserImmune, damageableTarget: entity.damageableTarget, bfgExplobox: entity.classname === "misc_explobox" };
   }
 
   monsterTarget(actor: ActorId | null) {
     if (actor === null) return null;
     if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);
     const entity = this.entity(actor);
-    return entity === null ? null : { viewHeight: entity.viewHeight,
-      notarget: (entity.flags & (32 | (this.options.edition === "rerelease" ? 0x1008000 : 0))) !== 0,
-      invisible: false, lightLevel: entity.lightLevel, hostileUntil: null };
+    return entity === null
+      ? null
+      : {
+          viewHeight: entity.viewHeight,
+          notarget: (entity.flags & (32 | (this.options.edition === "rerelease" ? 0x1008000 : 0))) !== 0,
+          invisible: false,
+          lightLevel: entity.lightLevel,
+          hostileUntil: null,
+        };
   }
 
   body(entity: Pick<Q2Entity, "actor">): BodyState {
@@ -276,7 +387,9 @@ export class Q2EntityServices implements Q2GameServices {
     return undefined;
   }
 
-  link(entity: Q2Entity): undefined { return this.host.bodies.link(entity.actor); }
+  link(entity: Q2Entity): undefined {
+    return this.host.bodies.link(entity.actor);
+  }
 
   solid(entity: Q2Entity, solid: Q2Entity["solid"]): undefined {
     entity.solid = solid;
@@ -288,14 +401,22 @@ export class Q2EntityServices implements Q2GameServices {
 
   motion(entity: Q2Entity, kind: Q2Motion["kind"]): undefined {
     entity.motion = kind;
-    return this.host.setMotion({ actor: entity.actor, kind, velocity: this.body(entity).velocity, angularVelocity: entity.angularVelocity, gravity: entity.gravity, gravityVector: entity.gravityVector, clipMask: entity.clipMask, owner: entity.owner });
+    return this.host.setMotion({
+      actor: entity.actor,
+      kind,
+      velocity: this.body(entity).velocity,
+      angularVelocity: entity.angularVelocity,
+      gravity: entity.gravity,
+      gravityVector: entity.gravityVector,
+      clipMask: entity.clipMask,
+      owner: entity.owner,
+    });
   }
 
   schedule(entity: Q2Entity, delaySeconds: number, think: Q2Think): undefined {
     entity.think = think;
-    entity.nextThink = this.options.edition === "rerelease"
-      ? (Math.round(this.host.now() * 1000) + Math.round(delaySeconds * 1000)) / 1000
-      : this.host.now() + delaySeconds;
+    entity.nextThink =
+      this.options.edition === "rerelease" ? (Math.round(this.host.now() * 1000) + Math.round(delaySeconds * 1000)) / 1000 : this.host.now() + delaySeconds;
     return this.host.schedule(entity.actor, entity.nextThink);
   }
 
@@ -307,11 +428,13 @@ export class Q2EntityServices implements Q2GameServices {
 
   targets(name: string): readonly Q2Entity[] {
     if (name === "") return [];
-    return [...this.entities.values()].filter(entity => entity.targetname === name).sort((a, b) => {
-      const first = this.host.actors.sourceOf(a.actor.id)?.slot ?? a.actor.id.slot;
-      const second = this.host.actors.sourceOf(b.actor.id)?.slot ?? b.actor.id.slot;
-      return first - second;
-    });
+    return [...this.entities.values()]
+      .filter(entity => entity.targetname === name)
+      .sort((a, b) => {
+        const first = this.host.actors.sourceOf(a.actor.id)?.slot ?? a.actor.id.slot;
+        const second = this.host.actors.sourceOf(b.actor.id)?.slot ?? b.actor.id.slot;
+        return first - second;
+      });
   }
 
   pickTarget(name: string): Q2Entity | null {
@@ -330,12 +453,16 @@ export class Q2EntityServices implements Q2GameServices {
   /** The live target with the lowest source slot above `after`, without sorting every match. */
   private nextTargetActor(name: string, after: number): AuthoredTarget | undefined {
     if (name === "") return undefined;
-    let best: AuthoredTarget | undefined, bestSlot = Infinity;
+    let best: AuthoredTarget | undefined,
+      bestSlot = Infinity;
     for (const group of [this.entities.values(), this.authoredTargets.values()]) {
       for (const candidate of group) {
         if (candidate.targetname !== name || !this.host.actors.isLive(candidate.actor.id)) continue;
         const slot = this.host.actors.sourceOf(candidate.actor.id)?.slot ?? candidate.actor.id.slot;
-        if (slot > after && slot < bestSlot) { best = candidate; bestSlot = slot; }
+        if (slot > after && slot < bestSlot) {
+          best = candidate;
+          bestSlot = slot;
+        }
       }
     }
     return best;
@@ -345,29 +472,49 @@ export class Q2EntityServices implements Q2GameServices {
   private noiseIndex(entity: AuthoredTarget): string {
     if (!(entity instanceof Q2Entity)) return "misc/talk1.wav";
     switch (entity.classname) {
-      case "target_secret": case "target_goal": return entity.spawn.values.get("noise") ?? "misc/secret.wav";
-      case "trigger_once": case "trigger_multiple": {
+      case "target_secret":
+      case "target_goal":
+        return entity.spawn.values.get("noise") ?? "misc/secret.wav";
+      case "trigger_once":
+      case "trigger_multiple": {
         const sounds = integerField(entity.spawn, "sounds");
         return sounds === 1 ? "misc/secret.wav" : sounds === 2 ? "misc/talk.wav" : sounds === 3 ? "misc/trigger1.wav" : "misc/talk1.wav";
       }
-      default: return "misc/talk1.wav";
+      default:
+        return "misc/talk1.wav";
     }
   }
 
   useTargets(entity: AuthoredTarget, activator: ActorId | null, ignoreDelay = false): undefined {
     if (entity.delay !== 0 && !ignoreDelay) {
       const delayed = this.create("DelayedUse");
-      delayed.activator = activator; delayed.message = entity.message; delayed.target = entity.target; delayed.killtarget = entity.killtarget;
+      delayed.activator = activator;
+      delayed.message = entity.message;
+      delayed.target = entity.target;
+      delayed.killtarget = entity.killtarget;
       return this.schedule(delayed, entity.delay, delayedUse);
     }
     if (entity.message !== "" && activator !== null && !this.host.isMonster(activator)) {
       this.host.emit({ kind: "centerprint", actor: activator, text: entity.message });
       const body = this.host.bodies.read(activator);
-      if (body !== null) this.host.emit({ kind: "sound", actor: activator, origin: body.origin, path: this.noiseIndex(entity), channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" });
+      if (body !== null)
+        this.host.emit({
+          kind: "sound",
+          actor: activator,
+          origin: body.origin,
+          path: this.noiseIndex(entity),
+          channel: 0,
+          volume: 1,
+          attenuation: 1,
+          reliable: false,
+          loop: "once",
+        });
     }
     for (const target of this.targetActors(entity.killtarget)) {
       const native = this.entity(target.actor.id);
-      if (native === null) { if (this.host.actors.isLive(target.actor.id)) this.host.actors.release(target.actor); } else this.remove(native);
+      if (native === null) {
+        if (this.host.actors.isLive(target.actor.id)) this.host.actors.release(target.actor);
+      } else this.remove(native);
       if (!this.host.actors.isLive(entity.actor.id)) return undefined;
     }
     // Resolve each next slot after callbacks: nested spawns and removals retain G_Find traversal behavior.
@@ -386,24 +533,72 @@ export class Q2EntityServices implements Q2GameServices {
   }
 
   show(entity: Q2Entity): undefined {
-    this.host.emit({ kind: "model", actor: entity.actor.id, path: entity.model, attachedModels: [entity.model2, entity.model3, entity.model4], frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale, alpha: entity.alpha, skin: entity.skin, effects: entity.effects, renderFlags: entity.renderFlags });
+    this.host.emit({
+      kind: "model",
+      actor: entity.actor.id,
+      path: entity.model,
+      attachedModels: [entity.model2, entity.model3, entity.model4],
+      frame: entity.frame,
+      oldFrame: entity.oldFrame,
+      scale: entity.scale,
+      alpha: entity.alpha,
+      skin: entity.skin,
+      effects: entity.effects,
+      renderFlags: entity.renderFlags,
+    });
     return this.host.emit({ kind: "visibility", actor: entity.actor.id, visible: entity.visible });
   }
 
   sound(entity: Pick<Q2Entity, "actor">, path: string, channel = 2, volume = 1, attenuation = 1): undefined {
-    return this.host.emit({ kind: "sound", actor: entity.actor.id, origin: this.body(entity).origin, path, channel, volume, attenuation, reliable: false, loop: "once" });
+    return this.host.emit({
+      kind: "sound",
+      actor: entity.actor.id,
+      origin: this.body(entity).origin,
+      path,
+      channel,
+      volume,
+      attenuation,
+      reliable: false,
+      loop: "once",
+    });
   }
 
   attack(inflictor: Q2Entity | ActorId, attacker: ActorId | null, meansOfDeath: number, flags: number, weapon: ItemId | null): AttackProvenance {
-    return { sequence: this.sequence++, time: { kind: "seconds", value: this.host.now() }, attacker, inflictor: inflictor instanceof Q2Entity ? inflictor.actor.id : inflictor, weapon,
-      weaponProvider: this.options.provider, combatProvider: this.options.combatProvider, inventoryProvider: this.options.inventoryProvider,
-      movementProvider: this.options.movementProvider, damagePowerupOwner: this.options.damagePowerupOwner ?? this.options.provider, cause: { kind: "q2", meansOfDeath, damageFlags: flags } };
+    return {
+      sequence: this.sequence++,
+      time: { kind: "seconds", value: this.host.now() },
+      attacker,
+      inflictor: inflictor instanceof Q2Entity ? inflictor.actor.id : inflictor,
+      weapon,
+      weaponProvider: this.options.provider,
+      combatProvider: this.options.combatProvider,
+      inventoryProvider: this.options.inventoryProvider,
+      movementProvider: this.options.movementProvider,
+      damagePowerupOwner: this.options.damagePowerupOwner ?? this.options.provider,
+      cause: { kind: "q2", meansOfDeath, damageFlags: flags },
+    };
   }
 
-  damage(target: ActorId, inflictor: Q2Entity | ActorId, attacker: ActorId | null, amount: number, knockback: number, direction: Vec3,
-    point: Vec3, normal: Vec3, meansOfDeath: number, flags = 0, weapon: ItemId | null = null): DamageOutcome {
-    return this.host.combat.apply(applySourceDamageModifier({ attack: this.attack(inflictor, attacker, meansOfDeath, flags, weapon), target,
-      amount, knockback, direction, point, normal, delivery: "direct" }, this.options.sourceDamageModifier, actor => this.host.actors.isLive(actor)));
+  damage(
+    target: ActorId,
+    inflictor: Q2Entity | ActorId,
+    attacker: ActorId | null,
+    amount: number,
+    knockback: number,
+    direction: Vec3,
+    point: Vec3,
+    normal: Vec3,
+    meansOfDeath: number,
+    flags = 0,
+    weapon: ItemId | null = null,
+  ): DamageOutcome {
+    return this.host.combat.apply(
+      applySourceDamageModifier(
+        { attack: this.attack(inflictor, attacker, meansOfDeath, flags, weapon), target, amount, knockback, direction, point, normal, delivery: "direct" },
+        this.options.sourceDamageModifier,
+        actor => this.host.actors.isLive(actor),
+      ),
+    );
   }
 
   canDamage(target: ActorId, inflictor: Pick<Q2Entity, "actor">): boolean {
@@ -413,26 +608,56 @@ export class Q2EntityServices implements Q2GameServices {
     const entity = this.entity(target);
     const destination = entity?.motion === "push" ? add(body.origin, scale(add(body.bounds.min, body.bounds.max), 0.5)) : body.origin;
     const trace = this.host.trace({ start: source, end: destination, bounds: null, ignore: inflictor.actor.id, mask: MASK_SOLID });
-    if (trace.fraction === 1 || trace.hit.kind === "actor" && trace.hit.actor.equals(target)) return true;
+    if (trace.fraction === 1 || (trace.hit.kind === "actor" && trace.hit.actor.equals(target))) return true;
     if (entity?.motion === "push") return false;
-    for (const offset of [{ x: 15, y: 15, z: 0 }, { x: 15, y: -15, z: 0 }, { x: -15, y: 15, z: 0 }, { x: -15, y: -15, z: 0 }]) {
-      if (this.host.trace({ start: source, end: add(destination, offset), bounds: null, ignore: inflictor.actor.id, mask: MASK_SOLID }).fraction === 1) return true;
+    for (const offset of [
+      { x: 15, y: 15, z: 0 },
+      { x: 15, y: -15, z: 0 },
+      { x: -15, y: 15, z: 0 },
+      { x: -15, y: -15, z: 0 },
+    ]) {
+      if (this.host.trace({ start: source, end: add(destination, offset), bounds: null, ignore: inflictor.actor.id, mask: MASK_SOLID }).fraction === 1)
+        return true;
     }
     return false;
   }
 
-  radiusDamage(inflictor: Q2Entity, attacker: ActorId | null, damage: number, ignore: ActorId | null, radius: number, meansOfDeath: number, damageFlags = 0, weapon: ItemId | null = null): undefined {
+  radiusDamage(
+    inflictor: Q2Entity,
+    attacker: ActorId | null,
+    damage: number,
+    ignore: ActorId | null,
+    radius: number,
+    meansOfDeath: number,
+    damageFlags = 0,
+    weapon: ItemId | null = null,
+  ): undefined {
     const origin = this.body(inflictor).origin;
     for (const target of this.host.nearby(origin, radius)) {
       if (ignore !== null && ignore.equals(target)) continue;
-      const state = this.host.combat.read(target), body = this.host.bodies.read(target);
+      const state = this.host.combat.read(target),
+        body = this.host.bodies.read(target);
       if (state === null || !state.canTakeDamage || body === null) continue;
       const center = add(body.origin, scale(add(body.bounds.min, body.bounds.max), 0.5));
       let points = damage - 0.5 * length(subtract(center, origin));
       if (attacker !== null && target.equals(attacker)) points *= 0.5;
       if (points <= 0 || !this.canDamage(target, inflictor)) continue;
-      this.host.combat.apply(applySourceDamageModifier({ attack: this.attack(inflictor, attacker, meansOfDeath, damageFlags | 1, weapon), target,
-        amount: Math.trunc(points), knockback: Math.trunc(points), direction: subtract(body.origin, origin), point: origin, normal: zero, delivery: "radius" }, this.options.sourceDamageModifier, actor => this.host.actors.isLive(actor)));
+      this.host.combat.apply(
+        applySourceDamageModifier(
+          {
+            attack: this.attack(inflictor, attacker, meansOfDeath, damageFlags | 1, weapon),
+            target,
+            amount: Math.trunc(points),
+            knockback: Math.trunc(points),
+            direction: subtract(body.origin, origin),
+            point: origin,
+            normal: zero,
+            delivery: "radius",
+          },
+          this.options.sourceDamageModifier,
+          actor => this.host.actors.isLive(actor),
+        ),
+      );
     }
     return undefined;
   }

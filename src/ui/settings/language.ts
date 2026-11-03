@@ -1,11 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 import type { SettingCvars } from "./index.ts";
-function name(seat: number): string { return `ui_seat${seat + 1}_language`; }
+function name(seat: number): string {
+  return `ui_seat${seat + 1}_language`;
+}
 export function registerLanguageSettings(cvars: CvarRegistry): void {
   for (let seat = 0; seat < 4; seat++) {
     const key = name(seat);
     cvars.register(key, "english", CvarFlag.Archive);
-    cvars.bindValue(key, { validate: value => /^[a-z]+$/.test(value) ? null : "Expected a lowercase language name", changed: () => {} });
+    cvars.bindValue(key, { validate: value => (/^[a-z]+$/.test(value) ? null : "Expected a lowercase language name"), changed: () => {} });
   }
 }
 export function readSeatLanguage(cvars: SettingCvars, seat: number): string {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q2SpawnModule } from "../../foundation/host.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -25,21 +26,73 @@ import { tankCommanderDefinition, tankDefinition } from "./tank.ts";
 
 /** Original base gameplay definitions; rerelease providers explicitly replace changed species. */
 export function q2ClassicBaseMonsterDefinitions(monsters: Q2Monsters): readonly Q2MonsterDefinition[] {
-  return [berserkDefinition, brainDefinition, chickDefinition, flipperDefinition, floaterDefinition, flyerDefinition, gladiatorDefinition, gunnerDefinition, hoverDefinition,
-    createMedicDefinition(monsters), createMutantDefinition(monsters), parasiteDefinition, supertankDefinition, tankDefinition, tankCommanderDefinition, boss2Definition,
-    createJorgDefinition(monsters), withMakronSpawnCallbacks(makronDefinition, monsters), actorDefinition, insaneDefinition].map(definition => withBossExplosionCallbacks(definition, monsters));
+  return [
+    berserkDefinition,
+    brainDefinition,
+    chickDefinition,
+    flipperDefinition,
+    floaterDefinition,
+    flyerDefinition,
+    gladiatorDefinition,
+    gunnerDefinition,
+    hoverDefinition,
+    createMedicDefinition(monsters),
+    createMutantDefinition(monsters),
+    parasiteDefinition,
+    supertankDefinition,
+    tankDefinition,
+    tankCommanderDefinition,
+    boss2Definition,
+    createJorgDefinition(monsters),
+    withMakronSpawnCallbacks(makronDefinition, monsters),
+    actorDefinition,
+    insaneDefinition,
+  ].map(definition => withBossExplosionCallbacks(definition, monsters));
 }
 
 /** Soldier and infantry remain registered by the permanent foundation provider. */
 export function registerQ2ClassicBaseMonsters(monsters: Q2Monsters): Q2SpawnModule {
   for (const definition of q2ClassicBaseMonsterDefinitions(monsters)) monsters.register(definition);
   const targets = createActorTargetModule(monsters);
-  return { get callbacks() {
-    const core = monsters.callbacks, boss = q2Boss3StandModule.callbacks, actor = targets.callbacks;
-    return { ...core, think: { ...core.think, ...boss?.think }, use: { ...core.use, ...boss?.use, ...actor?.use }, touch: { ...core.touch, ...actor?.touch } };
-  }, spawn(entity, game) { return q2Boss3StandModule.spawn(entity, game) || targets.spawn(entity, game) || monsters.spawn(entity, game); } };
+  return {
+    get callbacks() {
+      const core = monsters.callbacks,
+        boss = q2Boss3StandModule.callbacks,
+        actor = targets.callbacks;
+      return {
+        ...core,
+        think: { ...core.think, ...boss?.think },
+        use: { ...core.use, ...boss?.use, ...actor?.use },
+        touch: { ...core.touch, ...actor?.touch },
+      };
+    },
+    spawn(entity, game) {
+      return q2Boss3StandModule.spawn(entity, game) || targets.spawn(entity, game) || monsters.spawn(entity, game);
+    },
+  };
 }
 
-export { actorDefinition, createActorTargetModule, berserkDefinition, boss2Definition, q2Boss3StandModule, brainDefinition, chickDefinition, flipperDefinition, floaterDefinition,
-  flyerDefinition, gladiatorDefinition, gunnerDefinition, hoverDefinition, insaneDefinition, createJorgDefinition, makronDefinition, createMedicDefinition, createMutantDefinition,
-  parasiteDefinition, supertankDefinition, tankDefinition, tankCommanderDefinition };
+export {
+  actorDefinition,
+  createActorTargetModule,
+  berserkDefinition,
+  boss2Definition,
+  q2Boss3StandModule,
+  brainDefinition,
+  chickDefinition,
+  flipperDefinition,
+  floaterDefinition,
+  flyerDefinition,
+  gladiatorDefinition,
+  gunnerDefinition,
+  hoverDefinition,
+  insaneDefinition,
+  createJorgDefinition,
+  makronDefinition,
+  createMedicDefinition,
+  createMutantDefinition,
+  parasiteDefinition,
+  supertankDefinition,
+  tankDefinition,
+  tankCommanderDefinition,
+};

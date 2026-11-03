@@ -12,14 +12,22 @@ export class ProjectionSlots extends Map<ActorId, number> {
     return this;
   }
   override delete(actor: ActorId): boolean {
-    const slot = super.get(actor), removed = super.delete(actor);
+    const slot = super.get(actor),
+      removed = super.delete(actor);
     if (slot !== undefined) this.reindex(slot, actor);
     return removed;
   }
-  override clear(): void { super.clear(); this.bySlot.clear(); }
+  override clear(): void {
+    super.clear();
+    this.bySlot.clear();
+  }
   private reindex(slot: number, actor: ActorId): void {
     if (this.bySlot.get(slot) !== actor) return;
     this.bySlot.delete(slot);
-    for (const [other, index] of this) if (index === slot) { this.bySlot.set(slot, other); break; }
+    for (const [other, index] of this)
+      if (index === slot) {
+        this.bySlot.set(slot, other);
+        break;
+      }
   }
 }

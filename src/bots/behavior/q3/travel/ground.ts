@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Ground and air travel from id Software's botlib/be_ai_move.c, lines 1345-2081
  * and 2910-2965. Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
  * Active native botlib branches use float32 stores and double literal promotion. */
@@ -9,14 +10,19 @@ import { BotMoveFlag, BotMoveResult, BotMoveResultFlag } from "../movement-state
 import type { BotMoveState } from "../movement-state.ts";
 
 const f = Math.fround;
-function horizontal(from: Vec3, to: Vec3): Vec3 { return vec3(to.x - from.x, to.y - from.y, 0); }
-function ma(origin: Vec3, distance: number, direction: Vec3): Vec3 { return add3(origin, scale3(direction, distance)); }
+function horizontal(from: Vec3, to: Vec3): Vec3 {
+  return vec3(to.x - from.x, to.y - from.y, 0);
+}
+function ma(origin: Vec3, distance: number, direction: Vec3): Vec3 {
+  return add3(origin, scale3(direction, distance));
+}
 function centeredRandom(context: BotTravelContext): number {
   return 2.0 * (f((context.host.random.nextInt() & 0x7fff) / 0x7fff) - 0.5);
 }
 export function travelWalk(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
   const result = new BotMoveResult();
-  let direction = horizontal(state.origin, reach.start), distance = length3(direction);
+  let direction = horizontal(state.origin, reach.start),
+    distance = length3(direction);
   direction = normalize3(direction);
   const waypoint = reach.graphEdge.source.kind !== "aas";
   if (!waypoint) context.checkBlocked(state, direction, true, result);
@@ -41,15 +47,18 @@ export function travelWalk(context: BotTravelContext, state: BotMoveState, reach
 }
 
 export function finishTravelWalk(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = horizontal(state.origin, reach.end);
-  const distance = Math.min(length3(direction), 100), normalized = normalize3(direction);
+  const result = new BotMoveResult(),
+    direction = horizontal(state.origin, reach.end);
+  const distance = Math.min(length3(direction), 100),
+    normalized = normalize3(direction);
   context.actions.move(state.client, normalized, f(400 - f(400 - f(3 * distance))));
   result.moveDirection = normalized;
   return result;
 }
 
 export function travelCrouch(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = normalize3(horizontal(state.origin, reach.end));
+  const result = new BotMoveResult(),
+    direction = normalize3(horizontal(state.origin, reach.end));
   context.checkBlocked(state, direction, true, result);
   context.actions.crouch(state.client);
   context.actions.move(state.client, direction, 400);
@@ -58,8 +67,10 @@ export function travelCrouch(context: BotTravelContext, state: BotMoveState, rea
 }
 
 export function travelBarrierJump(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), horizontalDirection = horizontal(state.origin, reach.start);
-  const distance = length3(horizontalDirection), direction = normalize3(horizontalDirection);
+  const result = new BotMoveResult(),
+    horizontalDirection = horizontal(state.origin, reach.start);
+  const distance = length3(horizontalDirection),
+    direction = normalize3(horizontalDirection);
   context.checkBlocked(state, direction, true, result);
   if (distance < 9) context.actions.jump(state.client);
   else context.actions.move(state.client, direction, f(360 - f(360 - f(6 * Math.min(distance, 60)))));
@@ -79,7 +90,8 @@ export function finishTravelBarrierJump(context: BotTravelContext, state: BotMov
 }
 
 export function travelSwim(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = normalize3(sub3(reach.start, state.origin));
+  const result = new BotMoveResult(),
+    direction = normalize3(sub3(reach.start, state.origin));
   context.checkBlocked(state, direction, true, result);
   context.actions.move(state.client, direction, 400);
   result.moveDirection = direction;
@@ -89,7 +101,8 @@ export function travelSwim(context: BotTravelContext, state: BotMoveState, reach
 }
 
 export function travelWaterJump(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), offset = sub3(reach.end, state.origin);
+  const result = new BotMoveResult(),
+    offset = sub3(reach.end, state.origin);
   const horizontalDistance = length3(vec3(offset.x, offset.y, 0));
   const direction = normalize3(vec3(offset.x, offset.y, offset.z + (15 + centeredRandom(context) * 40)));
   context.actions.moveForward(state.client);
@@ -120,8 +133,10 @@ export function travelWalkOffLedge(context: BotTravelContext, state: BotMoveStat
   const result = new BotMoveResult();
   context.checkBlocked(state, normalize3(sub3(reach.start, state.origin)), true, result);
   const reachDistance = length3(horizontal(reach.start, reach.end));
-  const startDirection = horizontal(state.origin, reach.start), distance = length3(startDirection);
-  let direction = normalize3(startDirection), speed: number;
+  const startDirection = horizontal(state.origin, reach.start),
+    distance = length3(startDirection);
+  let direction = normalize3(startDirection),
+    speed: number;
   if (distance < 48) {
     direction = normalize3(horizontal(state.origin, reach.end));
     if (reachDistance < 20) speed = 100;
@@ -137,9 +152,11 @@ export function travelWalkOffLedge(context: BotTravelContext, state: BotMoveStat
 }
 
 export function finishTravelWalkOffLedge(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = sub3(reach.end, state.origin);
+  const result = new BotMoveResult(),
+    direction = sub3(reach.end, state.origin);
   context.checkBlocked(state, direction, true, result);
-  const horizontalDirection = horizontal(state.origin, reach.end), distance = length3(horizontalDirection);
+  const horizontalDirection = horizontal(state.origin, reach.end),
+    distance = length3(horizontalDirection);
   const end = distance > 16 ? ma(reach.end, 16, normalize3(horizontalDirection)) : reach.end;
   const control = context.airControl(state, end);
   const moveDirection = control.controlled ? control.direction : normalize3(vec3(direction.x, direction.y, 0));
@@ -163,8 +180,10 @@ export function travelJump(context: BotTravelContext, state: BotMoveState, reach
     }
     if (scanDistance < 80) runStart = ma(reach.start, scanDistance, direction);
   }
-  const fromStart = horizontal(reach.start, state.origin), fromRunStart = horizontal(runStart, state.origin);
-  const startDistance = length3(fromStart), runDistance = length3(fromRunStart);
+  const fromStart = horizontal(reach.start, state.origin),
+    fromRunStart = horizontal(runStart, state.origin);
+  const startDistance = length3(fromStart),
+    runDistance = length3(fromRunStart);
   if (dot3(normalize3(fromStart), normalize3(fromRunStart)) < -0.8 || runDistance < 5) {
     direction = normalize3(horizontal(state.origin, reach.end));
     if (startDistance < 24) context.actions.jump(state.client);
@@ -182,7 +201,9 @@ export function travelJump(context: BotTravelContext, state: BotMoveState, reach
 export function finishTravelJump(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
   const result = new BotMoveResult();
   if (state.jumpReach === 0) return result;
-  const offset = horizontal(state.origin, reach.end), distance = length3(offset), direction = normalize3(offset);
+  const offset = horizontal(state.origin, reach.end),
+    distance = length3(offset),
+    direction = normalize3(offset);
   if (dot3(direction, normalize3(horizontal(reach.start, reach.end))) < -0.5 && distance < 24) return result;
   context.actions.move(state.client, direction, 800);
   result.moveDirection = direction;
@@ -190,7 +211,8 @@ export function finishTravelJump(context: BotTravelContext, state: BotMoveState,
 }
 
 export function travelLadder(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = normalize3(sub3(reach.end, state.origin));
+  const result = new BotMoveResult(),
+    direction = normalize3(sub3(reach.end, state.origin));
   result.idealViewAngles = context.vectorToAngles(vec3(direction.x, direction.y, 3 * direction.z));
   context.actions.move(state.client, vec3(0, 0, 0), 0);
   context.actions.moveForward(state.client);
@@ -203,7 +225,8 @@ export function travelTeleport(context: BotTravelContext, state: BotMoveState, r
   const result = new BotMoveResult();
   if ((state.moveFlags & BotMoveFlag.TELEPORTED) !== 0) return result;
   const offset = (state.moveFlags & BotMoveFlag.SWIMMING) !== 0 ? sub3(reach.start, state.origin) : horizontal(state.origin, reach.start);
-  const distance = length3(offset), direction = normalize3(offset);
+  const distance = length3(offset),
+    direction = normalize3(offset);
   context.checkBlocked(state, direction, true, result);
   context.actions.move(state.client, direction, distance < 30 ? 200 : 400);
   if ((state.moveFlags & BotMoveFlag.SWIMMING) !== 0) result.flags |= BotMoveResultFlag.SWIMVIEW;
@@ -212,7 +235,8 @@ export function travelTeleport(context: BotTravelContext, state: BotMoveState, r
 }
 
 export function travelJumpPad(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), direction = normalize3(horizontal(state.origin, reach.start));
+  const result = new BotMoveResult(),
+    direction = normalize3(horizontal(state.origin, reach.start));
   context.checkBlocked(state, direction, true, result);
   context.actions.move(state.client, direction, 400);
   result.moveDirection = direction;
@@ -220,7 +244,8 @@ export function travelJumpPad(context: BotTravelContext, state: BotMoveState, re
 }
 
 export function finishTravelJumpPad(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), control = context.airControl(state, reach.end);
+  const result = new BotMoveResult(),
+    control = context.airControl(state, reach.end);
   const direction = control.controlled ? control.direction : normalize3(horizontal(state.origin, reach.end));
   context.checkBlocked(state, direction, true, result);
   context.actions.move(state.client, direction, control.controlled ? control.speed : 400);

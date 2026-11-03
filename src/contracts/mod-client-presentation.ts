@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Source client output is opt-in; retaining a stat does not grant display ownership. */
 export interface QcModClientPresentation {
   readonly hud: "none" | "replace-vitals";

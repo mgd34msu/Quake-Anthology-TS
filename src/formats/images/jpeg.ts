@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /**
  * TypeScript translation of IJG jdmarker.c, jdhuff.c, jdphuff.c, jdcoefct.c,
  * jdinput.c, jdmainct.c, jdapimin.c, jddctmgr.c, jidctflt.c,
@@ -20,17 +21,19 @@ export interface JpegImage {
 
 /** A defined IJG error_exit message, dispatched as ERR_FATAL by the renderer. */
 export class JpegSourceError extends BinaryError {
-  constructor(source: string, offset: number, readonly sourceMessage: string) {
+  constructor(
+    source: string,
+    offset: number,
+    readonly sourceMessage: string,
+  ) {
     super(source, offset, `JPEG: ${sourceMessage}`);
     this.name = "JpegSourceError";
   }
 }
 
 const naturalOrder = [
-  0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
-  12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
-  35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
-  58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+  0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22,
+  15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 function at(values: ArrayLike<number>, index: number): number {
@@ -55,7 +58,11 @@ class Input {
   discardedBytes = 0;
   fabricatedBytes = 0;
   scans = 0;
-  constructor(readonly bytes: Uint8Array, readonly source: string, readonly warnings: Warnings) {}
+  constructor(
+    readonly bytes: Uint8Array,
+    readonly source: string,
+    readonly warnings: Warnings,
+  ) {}
   fail(message: string): never {
     throw new BinaryError(this.source, this.offset, `JPEG: ${message}`);
   }
@@ -68,13 +75,23 @@ class Input {
     this.offset++;
     return value;
   }
-  word(): number { return this.byte() * 256 + this.byte(); }
+  word(): number {
+    return this.byte() * 256 + this.byte();
+  }
   private nextMarker(): void {
     while (true) {
       let marker = this.byte();
-      while (marker !== 255) { this.discardedBytes++; marker = this.byte(); }
-      do { marker = this.byte(); } while (marker === 255);
-      if (marker === 0) { this.discardedBytes += 2; continue; }
+      while (marker !== 255) {
+        this.discardedBytes++;
+        marker = this.byte();
+      }
+      do {
+        marker = this.byte();
+      } while (marker === 255);
+      if (marker === 0) {
+        this.discardedBytes += 2;
+        continue;
+      }
       if (this.discardedBytes !== 0) {
         this.warnings.emit(`Corrupt JPEG data: ${this.discardedBytes} extraneous bytes before marker 0x${marker.toString(16).padStart(2, "0")}`);
         this.discardedBytes = 0;
@@ -91,7 +108,10 @@ class Input {
   }
   restart(desired: number): void {
     if (this.unreadMarker === 0) this.nextMarker();
-    if (this.unreadMarker === 208 + desired) { this.unreadMarker = 0; return; }
+    if (this.unreadMarker === 208 + desired) {
+      this.unreadMarker = 0;
+      return;
+    }
     this.warnings.emit(`Corrupt JPEG data: found marker 0x${this.unreadMarker.toString(16).padStart(2, "0")} instead of RST${desired}`);
     // jdmarker.c jpeg_resync_to_restart: retain nearby future markers,
     // search past stale markers, and consume distant restart markers.
@@ -101,7 +121,10 @@ class Input {
         this.nextMarker();
       } else if (marker < 208 || marker > 215 || marker === 208 + ((desired + 1) & 7) || marker === 208 + ((desired + 2) & 7)) {
         return;
-      } else { this.unreadMarker = 0; return; }
+      } else {
+        this.unreadMarker = 0;
+        return;
+      }
     }
   }
   skip(size: number): void {
@@ -123,7 +146,10 @@ function lookaheadFor(table: ReadonlyMap<number, number>): Uint16Array {
   for (let look = 0; look < 256; look++) {
     for (let length = 1; length <= 8; length++) {
       const value = table.get((1 << length) + (look >>> (8 - length)));
-      if (value !== undefined) { result[look] = (length << 8) | value; break; }
+      if (value !== undefined) {
+        result[look] = (length << 8) | value;
+        break;
+      }
     }
   }
   lookaheads.set(table, result);
@@ -151,7 +177,10 @@ class Entropy {
         if (next === 255) {
           let following = this.input.byte();
           while (following === 255) following = this.input.byte();
-          if (following !== 0) { this.input.unreadMarker = following; continue; }
+          if (following !== 0) {
+            this.input.unreadMarker = following;
+            continue;
+          }
         }
       }
       this.value = (this.value << 8) | next;
@@ -183,7 +212,10 @@ class Entropy {
     let minimum = 1;
     if (this.remaining >= 8) {
       const hit = lookaheadFor(table)[(this.value >>> (this.remaining - 8)) & 255] ?? 0;
-      if (hit !== 0) { this.remaining -= hit >> 8; return hit & 255; }
+      if (hit !== 0) {
+        this.remaining -= hit >> 8;
+        return hit & 255;
+      }
       minimum = 9;
     }
     let code = (1 << minimum) + this.bits(minimum);
@@ -301,14 +333,19 @@ function prepareFrame(input: Input, header: FrameHeader, buffered: boolean): Fra
   const components = descriptors.map(descriptor => {
     const stride = columns * descriptor.h * 8;
     return {
-      ...descriptor, width: Math.ceil(width * descriptor.h / maxH),
-      height: Math.ceil(height * descriptor.v / maxV), stride,
+      ...descriptor,
+      width: Math.ceil((width * descriptor.h) / maxH),
+      height: Math.ceil((height * descriptor.v) / maxV),
+      stride,
       pixels: new Uint8Array(buffered ? stride * rows * descriptor.v * 8 : 0),
       outputSamples: buffered ? null : new Uint8Array(width * height),
-      progression: buffered ? {
-        coefficients: new Int16Array(stride * rows * descriptor.v * 8),
-        bits: new Int8Array(64).fill(-1), table: null,
-      } : null,
+      progression: buffered
+        ? {
+            coefficients: new Int16Array(stride * rows * descriptor.v * 8),
+            bits: new Int8Array(64).fill(-1),
+            table: null,
+          }
+        : null,
     };
   });
   return { width, height, maxH, maxV, columns, rows, components, progressive };
@@ -326,7 +363,9 @@ function readScanHeader(input: Input, frame: { readonly components: readonly { r
     for (const member of members) if (member.id === id) member.selector = selector;
     members.push({ id, selector });
   }
-  const start = input.byte(), end = input.byte(), approximation = input.byte();
+  const start = input.byte(),
+    end = input.byte(),
+    approximation = input.byte();
   return { members, start, end, approximation };
 }
 
@@ -398,7 +437,7 @@ function readArithmeticTables(input: Input): void {
     const value = input.byte();
     remaining -= 2;
     if (index >= 32) input.sourceFail(`Bogus DAC index ${index}`);
-    if (index < 16 && (value & 15) > (value >> 4)) input.sourceFail(`Bogus DAC value 0x${value.toString(16)}`);
+    if (index < 16 && (value & 15) > value >> 4) input.sourceFail(`Bogus DAC value 0x${value.toString(16)}`);
   }
 }
 
@@ -435,11 +474,13 @@ function descale(value: number, bits: number): number {
   return Math.floor((value + 2 ** (bits - 1)) / 2 ** bits);
 }
 
-function clamp(value: number): number { return Math.min(255, Math.max(0, value)); }
+function clamp(value: number): number {
+  return Math.min(255, Math.max(0, value));
+}
 
 // jddctmgr.c start_pass: double-precision AA&N scaling, stored as FAST_FLOAT.
 function floatMultipliers(quantizer: Uint16Array): Float32Array {
-  const scales = [1, 1.387039845, 1.306562965, 1.175875602, 1, 0.785694958, 0.541196100, 0.275899379];
+  const scales = [1, 1.387039845, 1.306562965, 1.175875602, 1, 0.785694958, 0.5411961, 0.275899379];
   return Float32Array.from(quantizer, (value, index) => value * at(scales, Math.floor(index / 8)) * at(scales, index % 8));
 }
 
@@ -470,8 +511,8 @@ function inversePass(values: Float32Array, start: number, step: number, output: 
   const tmp7 = f(z11 + z13);
   const odd11 = f(f(z11 - z13) * f(1.414213562));
   const z5 = f(f(z10 + z12) * f(1.847759065));
-  const odd10 = f(f(f(1.082392200) * z12) - z5);
-  const odd12 = f(f(f(-2.613125930) * z10) + z5);
+  const odd10 = f(f(f(1.0823922) * z12) - z5);
+  const odd12 = f(f(f(-2.61312593) * z10) + z5);
   const tmp6 = f(odd12 - tmp7);
   const tmp5 = f(odd11 - tmp6);
   const tmp4 = f(odd10 + tmp5);
@@ -559,9 +600,12 @@ class OnePassRows {
   private which: 0 | 1 = 0;
   private outputRow = 0;
 
-  constructor(private readonly input: Input, private readonly frame: Frame, private readonly colorSpace: ColorSpace) {
-    this.context = frame.components.some(component => frame.maxH === component.h * 2
-      && frame.maxV === component.v * 2 && component.width > 2);
+  constructor(
+    private readonly input: Input,
+    private readonly frame: Frame,
+    private readonly colorSpace: ColorSpace,
+  ) {
+    this.context = frame.components.some(component => frame.maxH === component.h * 2 && frame.maxV === component.v * 2 && component.width > 2);
     this.planes = frame.components.map(component => {
       const v = component.v;
       const stride = Math.ceil(component.width / 8) * 8;
@@ -628,7 +672,8 @@ class OnePassRows {
       const plane = this.plane(index);
       const output = component.outputSamples;
       if (output === null) throw new Error("JPEG one-pass component lacks output samples");
-      const h = frame.maxH / component.h, v = frame.maxV / component.v;
+      const h = frame.maxH / component.h,
+        v = frame.maxV / component.v;
       if (h === 1 && v === 1) continue;
       // Non-fullsize methods upsample every row before output cropping.
       for (let y = 0; y < frame.maxV; y++) {
@@ -711,7 +756,16 @@ class OnePassRows {
   }
 }
 
-function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers: ReadonlyMap<number, Uint16Array>, huffman: ReadonlyMap<number, HuffmanTable>, restartInterval: number, buffered: boolean, colorSpace: ColorSpace): void {
+function readScan(
+  input: Input,
+  scanHeader: ScanHeader,
+  frame: Frame,
+  quantizers: ReadonlyMap<number, Uint16Array>,
+  huffman: ReadonlyMap<number, HuffmanTable>,
+  restartInterval: number,
+  buffered: boolean,
+  colorSpace: ColorSpace,
+): void {
   const count = scanHeader.members.length;
   const { start, end, approximation } = scanHeader;
   const members: { component: Component; selector: number }[] = [];
@@ -721,7 +775,8 @@ function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers
     members.push({ component, selector });
   }
   // jdinput.c per_scan_setup limits interleaved MCU membership, not the frame.
-  if (count > 1 && members.reduce((blocks, member) => blocks + member.component.h * member.component.v, 0) > 10) input.sourceFail("Sampling factors too large for interleaved scan");
+  if (count > 1 && members.reduce((blocks, member) => blocks + member.component.h * member.component.v, 0) > 10)
+    input.sourceFail("Sampling factors too large for interleaved scan");
   const prepared = members.map(({ component, selector }) => {
     const storage = component.progression;
     if (storage !== null && storage.table !== null) {
@@ -768,7 +823,8 @@ function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers
         for (let x = 0; x < h; x++) {
           const block = blocks[blockIndex++];
           if (block === undefined) throw new Error("JPEG MCU exceeds block storage");
-          const blockColumn = column * h + x, blockRow = row * v + y;
+          const blockColumn = column * h + x,
+            blockRow = row * v + y;
           decodeBlock(entropy, scan, blockColumn, blockRow, block);
           if (strip !== null && blockColumn * 8 < scan.component.width && blockRow * 8 < scan.component.height) {
             pending.push({ index, column: blockColumn, row: single === undefined ? y : row % scan.component.v, block });
@@ -789,8 +845,20 @@ function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers
 
 // jdphuff.c decode_mcu_AC_first. EOB runs count blocks, including the block
 // containing the symbol; restart boundaries reset both this count and DCs.
-function progressiveAcFirst(entropy: Entropy, table: ReadonlyMap<number, number>, coefficients: Int16Array, offset: number, start: number, end: number, low: number, eob: { remaining: number }): void {
-  if (eob.remaining > 0) { eob.remaining--; return; }
+function progressiveAcFirst(
+  entropy: Entropy,
+  table: ReadonlyMap<number, number>,
+  coefficients: Int16Array,
+  offset: number,
+  start: number,
+  end: number,
+  low: number,
+  eob: { remaining: number },
+): void {
+  if (eob.remaining > 0) {
+    eob.remaining--;
+    return;
+  }
   let index = start;
   while (index <= end) {
     const symbol = entropy.symbol(table);
@@ -816,7 +884,16 @@ function refineCoefficient(entropy: Entropy, coefficients: Int16Array, index: nu
 
 // jdphuff.c decode_mcu_AC_refine: zero runs skip only zero coefficients.
 // Existing nonzero coefficients consume correction bits even during EOB runs.
-function progressiveAcRefine(entropy: Entropy, table: ReadonlyMap<number, number>, coefficients: Int16Array, offset: number, start: number, end: number, low: number, eob: { remaining: number }): void {
+function progressiveAcRefine(
+  entropy: Entropy,
+  table: ReadonlyMap<number, number>,
+  coefficients: Int16Array,
+  offset: number,
+  start: number,
+  end: number,
+  low: number,
+  eob: { remaining: number },
+): void {
   const bit = 1 << low;
   let index = start;
   if (eob.remaining === 0) {
@@ -851,7 +928,14 @@ function progressiveAcRefine(entropy: Entropy, table: ReadonlyMap<number, number
   }
 }
 
-function readProgressiveScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers: ReadonlyMap<number, Uint16Array>, huffman: ReadonlyMap<number, HuffmanTable>, restartInterval: number): void {
+function readProgressiveScan(
+  input: Input,
+  scanHeader: ScanHeader,
+  frame: Frame,
+  quantizers: ReadonlyMap<number, Uint16Array>,
+  huffman: ReadonlyMap<number, HuffmanTable>,
+  restartInterval: number,
+): void {
   const count = scanHeader.members.length;
   const { start, end, approximation } = scanHeader;
   const members: { component: Component; state: Progression; selector: number }[] = [];
@@ -864,15 +948,16 @@ function readProgressiveScan(input: Input, scanHeader: ScanHeader, frame: Frame,
   }
   const high = approximation >> 4;
   const low = approximation & 15;
-  if (count > 1 && members.reduce((blocks, member) => blocks + member.component.h * member.component.v, 0) > 10) input.sourceFail("Sampling factors too large for interleaved scan");
+  if (count > 1 && members.reduce((blocks, member) => blocks + member.component.h * member.component.v, 0) > 10)
+    input.sourceFail("Sampling factors too large for interleaved scan");
   for (const { component, state } of members) {
     if (state.table !== null) continue;
     const quantizer = quantizers.get(component.quantizer);
     if (quantizer === undefined) input.sourceFail(`Quantization table 0x${component.quantizer.toString(16).padStart(2, "0")} was not defined`);
     state.table = { quantizer, multipliers: floatMultipliers(quantizer) };
   }
-  if ((start === 0 ? end !== 0 : start > end || end > 63 || count !== 1)
-      || (high !== 0 && low !== high - 1) || low > 13) input.sourceFail(`Invalid progressive parameters Ss=${start} Se=${end} Ah=${high} Al=${low}`);
+  if ((start === 0 ? end !== 0 : start > end || end > 63 || count !== 1) || (high !== 0 && low !== high - 1) || low > 13)
+    input.sourceFail(`Invalid progressive parameters Ss=${start} Se=${end} Ah=${high} Al=${low}`);
   const entropy = new Entropy(input);
   const eob = { remaining: 0 };
   for (const { component, state } of members) {
@@ -935,8 +1020,8 @@ function readProgressiveScan(input: Input, scanHeader: ScanHeader, frame: Frame,
 function smoothProgressiveBlock(component: Component, state: Progression, quantizer: Uint16Array, column: number, row: number, coefficients: Int16Array): void {
   const columns = Math.ceil(component.width / 8);
   const rows = Math.ceil(component.height / 8);
-  const dc = (x: number, y: number): number => at(state.coefficients,
-    (Math.min(rows - 1, Math.max(0, y)) * (component.stride / 8) + Math.min(columns - 1, Math.max(0, x))) * 64);
+  const dc = (x: number, y: number): number =>
+    at(state.coefficients, (Math.min(rows - 1, Math.max(0, y)) * (component.stride / 8) + Math.min(columns - 1, Math.max(0, x))) * 64);
   const q00 = at(quantizer, 0);
   const center = dc(column, row);
   const above = dc(column, row - 1);
@@ -968,12 +1053,14 @@ function finishBuffered(input: Input, frame: Frame): void {
   const coefficients = new Int16Array(64);
   // jdcoefct.c smoothing_ok checks the first six zigzag quantizers across
   // every component before enabling its division-based prediction pass.
-  const smoothingSafe = frame.progressive && frame.components.every(component => {
-    const state = component.progression;
-    if (state === null || state.table === null || at(state.bits, 0) < 0) return false;
-    const quantizer = state.table.quantizer;
-    return naturalOrder.slice(0, 6).every(index => at(quantizer, index) !== 0);
-  });
+  const smoothingSafe =
+    frame.progressive &&
+    frame.components.every(component => {
+      const state = component.progression;
+      if (state === null || state.table === null || at(state.bits, 0) < 0) return false;
+      const quantizer = state.table.quantizer;
+      return naturalOrder.slice(0, 6).every(index => at(quantizer, index) !== 0);
+    });
   for (const component of frame.components) {
     const state = component.progression;
     if (state === null) input.fail("buffered frame without coefficient storage");
@@ -1085,11 +1172,14 @@ export function decodeJpeg(bytes: Uint8Array, source = "<jpeg>", print: (text: s
   const input = new Input(bytes, source, new Warnings(print));
   const first = input.byte();
   const second = input.byte();
-  if (first !== 255 || second !== 216) input.sourceFail(`Not a JPEG file: starts with 0x${first.toString(16).padStart(2, "0")} 0x${second.toString(16).padStart(2, "0")}`);
+  if (first !== 255 || second !== 216)
+    input.sourceFail(`Not a JPEG file: starts with 0x${first.toString(16).padStart(2, "0")} 0x${second.toString(16).padStart(2, "0")}`);
   const quantizers = new Map<number, Uint16Array>();
   const huffman = new Map<number, HuffmanTable>();
-  let state: { readonly kind: "header"; readonly header: FrameHeader }
-    | { readonly kind: "ready"; readonly frame: Frame; readonly colorSpace: ColorSpace; readonly multipleScans: boolean } | undefined;
+  let state:
+    | { readonly kind: "header"; readonly header: FrameHeader }
+    | { readonly kind: "ready"; readonly frame: Frame; readonly colorSpace: ColorSpace; readonly multipleScans: boolean }
+    | undefined;
   let restartInterval = 0;
   let adobeTransform: number | undefined;
   let jfif = false;
@@ -1104,21 +1194,29 @@ export function decodeJpeg(bytes: Uint8Array, source = "<jpeg>", print: (text: s
     }
     if (marker === 216) input.sourceFail("Invalid JPEG file structure: two SOI markers");
     if (marker === 1 || (marker >= 208 && marker <= 215)) continue;
-    if ([195, 197, 198, 199, 200, 203, 205, 206, 207].includes(marker)) input.sourceFail(`Unsupported JPEG process: SOF type 0x${marker.toString(16).padStart(2, "0")}`);
+    if ([195, 197, 198, 199, 200, 203, 205, 206, 207].includes(marker))
+      input.sourceFail(`Unsupported JPEG process: SOF type 0x${marker.toString(16).padStart(2, "0")}`);
     if (marker === 218 && state === undefined) input.sourceFail("Invalid JPEG file structure: SOS before SOF");
-    if (![192, 193, 194, 196, 201, 202, 204, 218, 219, 220, 221, 254].includes(marker)
-        && (marker < 224 || marker > 239)) input.sourceFail(`Unsupported marker type 0x${marker.toString(16).padStart(2, "0")}`);
-    if (marker === 219) { readQuantizers(input, quantizers); continue; }
-    if (marker === 196) { readHuffman(input, huffman); continue; }
-    if (marker === 204) { readArithmeticTables(input); continue; }
+    if (![192, 193, 194, 196, 201, 202, 204, 218, 219, 220, 221, 254].includes(marker) && (marker < 224 || marker > 239))
+      input.sourceFail(`Unsupported marker type 0x${marker.toString(16).padStart(2, "0")}`);
+    if (marker === 219) {
+      readQuantizers(input, quantizers);
+      continue;
+    }
+    if (marker === 196) {
+      readHuffman(input, huffman);
+      continue;
+    }
+    if (marker === 204) {
+      readArithmeticTables(input);
+      continue;
+    }
     if (marker === 192 || marker === 193 || marker === 194 || marker === 201 || marker === 202) {
       state = { kind: "header", header: readFrame(input, marker === 194 || marker === 202, marker === 201 || marker === 202, state !== undefined) };
-    }
-    else if (marker === 221) {
+    } else if (marker === 221) {
       if (input.word() !== 4) input.sourceFail("Bogus marker length");
       restartInterval = input.word();
-    }
-    else if (marker === 218) {
+    } else if (marker === 218) {
       if (state === undefined) return input.sourceFail("Invalid JPEG file structure: SOS before SOF");
       if (++input.scans > 256) input.sourceFail("Too many scans");
       const scanHeader = readScanHeader(input, state.kind === "header" ? state.header : state.frame);

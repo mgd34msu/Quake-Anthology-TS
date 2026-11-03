@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import type { ActorId } from "../../../src/contracts/identity.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
@@ -7,90 +8,177 @@ import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../
 import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
-interface Vec { readonly x: number; readonly y: number; readonly z: number }
+interface Vec {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
 type Simulation = import("../../../src/app/bootstrap/simulation/runtime.ts").SharedSimulation;
 function recordByActor(sim: Simulation, actor: ActorId) {
   return sim.q3Source()?.records.byActor(actor) ?? null;
 }
 
 interface Case {
-  readonly family: string; readonly movement: string; readonly character: string; readonly weapons: string; readonly body: string;
-  readonly enemies?: string; readonly botCharacter: "q1" | "q2" | "q3"; readonly botBody: string | null;
+  readonly family: string;
+  readonly movement: string;
+  readonly character: string;
+  readonly weapons: string;
+  readonly body: string;
+  readonly enemies?: string;
+  readonly botCharacter: "q1" | "q2" | "q3";
+  readonly botBody: string | null;
 }
 const cases: readonly Case[] = [
   { family: "q1", movement: "q1", character: "q1", weapons: "q1-classic-id1", body: "progs/player.mdl", botCharacter: "q3", botBody: null },
   { family: "q2", movement: "q2", character: "q2", weapons: "q2-classic-baseq2", body: "players/male/tris.md2", botCharacter: "q3", botBody: null },
-  { family: "q1", movement: "q1", character: "q1", weapons: "q1-classic-id1", body: "progs/player.mdl",
-    enemies: "q2-classic-baseq2", botCharacter: "q2", botBody: "players/male/tris.md2" },
+  {
+    family: "q1",
+    movement: "q1",
+    character: "q1",
+    weapons: "q1-classic-id1",
+    body: "progs/player.mdl",
+    enemies: "q2-classic-baseq2",
+    botCharacter: "q2",
+    botBody: "players/male/tris.md2",
+  },
 ];
 
-for (const row of cases) test(`${row.family} character, movement and weapons run in a Q3 world through Application`, async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm1", "--movement", row.movement,
-    "--character", row.character, "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
-  if (parsed.kind !== "run") throw new Error("Missing launch");
-  const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
-  const preset = applicationPreset(catalog, parsed.options);
-  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id),
-    weapons: { kind: "selected", value: [{ provider: `${row.family}:official`, content: catalog.require(row.weapons).id }] },
-    ...(row.enemies === undefined ? {} : { enemies: { kind: "selected", value: { kind: "players",
-      character: { provider: "q2:character", content: catalog.require(row.enemies).id } } } }) } });
-  const prints: string[] = [];
-  const app = await Application.open(parsed.options, { print: text => { prints.push(text); } }, recipe);
-  try {
-    for (let index = 0; index < 12; index++) await app.step(50);
-    const local = app.localPlayers[0];
-    if (local === undefined) throw new Error("Missing local player");
-    const presentations = app.simulation.presentations().filter(entry => entry.actor.equals(local.actor));
-    expect(presentations.some(entry => !entry.viewWeapon && entry.path === row.body)).toBe(true);
-    const gun = presentations.find(entry => entry.viewWeapon && entry.family === row.family);
-    expect(gun).toBeDefined();
-    expect(gun?.viewOrigin).toBeDefined();
-    expect(gun?.viewAngles).toBeDefined();
-    // Strafe through render frames that do not align with fixed ticks; the
-    // authored gun must stay usable (scene re-anchors it to the final eye).
-    const strafe = (down: boolean): void => { app.input({ seat: local.seat.id, kind: "key", code: 100, down,
-      repeat: false, timeMilliseconds: performance.now() }); };
-    strafe(true);
-    for (let index = 0; index < 12; index++) await app.step(16);
-    strafe(false);
-    expect(app.simulation.presentations().some(entry => entry.viewWeapon && entry.actor.equals(local.actor) && entry.viewOrigin !== undefined)).toBe(true);
-    expect(app.simulation.playerUi(local.actor).activeWeapon?.startsWith(`${row.family}:`)).toBe(true);
-    const source = app.simulation.q3Source();
-    if (source === null) throw new Error("Missing Q3 source");
-    const config = source.sourceState().configstrings.find(entry => entry.index === 544)?.value ?? "";
-    expect(config).toContain("model\\sarge/default");
-    expect(config).not.toContain("model\\player/default");
-    expect(config).not.toContain("model\\male/default");
-    // Single-player Q3 arenas are bot matches: the authored arena roster
-    // (Ranger on q3dm1) must actually enter, even with foreign weapons.
-    for (let index = 0; index < 300 && !prints.some(text => text.includes("Ranger^7 entered the game")); index++) await app.step(50);
-    expect(app.simulation.players().length).toBeGreaterThan(1);
-    expect(prints.join("")).toContain("Ranger^7 entered the game");
-    const bot = app.simulation.players().find(actor => !actor.equals(local.actor));
-    if (bot === undefined) throw new Error("Missing bot player");
-    expect(app.simulation.movementPlayer(bot)?.character).toBe(row.botCharacter);
-    const botBodies = app.simulation.presentations().filter(entry => entry.actor.equals(bot) && !entry.viewWeapon);
-    if (row.botBody === null) expect(botBodies.some(entry => entry.path === row.body)).toBe(false);
-    else expect(botBodies.some(entry => entry.path === row.botBody)).toBe(true);
-    expect(prints.join("")).not.toContain("Failed to load model file");
-  } finally { await app.close(); }
-}, 120000);
+for (const row of cases)
+  test(`${row.family} character, movement and weapons run in a Q3 world through Application`, async () => {
+    const parsed = parseApplicationCommand([
+      "--content-root",
+      testCorpusRoot(),
+      "--game",
+      "q3-baseq3",
+      "--map",
+      "q3dm1",
+      "--movement",
+      row.movement,
+      "--character",
+      row.character,
+      "--mode",
+      "singleplayer",
+      "--renderer",
+      "cpu",
+      "--hidden",
+      "--width",
+      "320",
+      "--height",
+      "240",
+    ]);
+    if (parsed.kind !== "run") throw new Error("Missing launch");
+    const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
+    const preset = applicationPreset(catalog, parsed.options);
+    const recipe = await resolveLaunch({
+      catalog,
+      preset,
+      choice: {
+        ...presetChoice(preset.id),
+        weapons: { kind: "selected", value: [{ provider: `${row.family}:official`, content: catalog.require(row.weapons).id }] },
+        ...(row.enemies === undefined
+          ? {}
+          : { enemies: { kind: "selected", value: { kind: "players", character: { provider: "q2:character", content: catalog.require(row.enemies).id } } } }),
+      },
+    });
+    const prints: string[] = [];
+    const app = await Application.open(
+      parsed.options,
+      {
+        print: text => {
+          prints.push(text);
+        },
+      },
+      recipe,
+    );
+    try {
+      for (let index = 0; index < 12; index++) await app.step(50);
+      const local = app.localPlayers[0];
+      if (local === undefined) throw new Error("Missing local player");
+      const presentations = app.simulation.presentations().filter(entry => entry.actor.equals(local.actor));
+      expect(presentations.some(entry => !entry.viewWeapon && entry.path === row.body)).toBe(true);
+      const gun = presentations.find(entry => entry.viewWeapon && entry.family === row.family);
+      expect(gun).toBeDefined();
+      expect(gun?.viewOrigin).toBeDefined();
+      expect(gun?.viewAngles).toBeDefined();
+      // Strafe through render frames that do not align with fixed ticks; the
+      // authored gun must stay usable (scene re-anchors it to the final eye).
+      const strafe = (down: boolean): void => {
+        app.input({ seat: local.seat.id, kind: "key", code: 100, down, repeat: false, timeMilliseconds: performance.now() });
+      };
+      strafe(true);
+      for (let index = 0; index < 12; index++) await app.step(16);
+      strafe(false);
+      expect(app.simulation.presentations().some(entry => entry.viewWeapon && entry.actor.equals(local.actor) && entry.viewOrigin !== undefined)).toBe(true);
+      expect(app.simulation.playerUi(local.actor).activeWeapon?.startsWith(`${row.family}:`)).toBe(true);
+      const source = app.simulation.q3Source();
+      if (source === null) throw new Error("Missing Q3 source");
+      const config = source.sourceState().configstrings.find(entry => entry.index === 544)?.value ?? "";
+      expect(config).toContain("model\\sarge/default");
+      expect(config).not.toContain("model\\player/default");
+      expect(config).not.toContain("model\\male/default");
+      // Single-player Q3 arenas are bot matches: the authored arena roster
+      // (Ranger on q3dm1) must actually enter, even with foreign weapons.
+      for (let index = 0; index < 300 && !prints.some(text => text.includes("Ranger^7 entered the game")); index++) await app.step(50);
+      expect(app.simulation.players().length).toBeGreaterThan(1);
+      expect(prints.join("")).toContain("Ranger^7 entered the game");
+      const bot = app.simulation.players().find(actor => !actor.equals(local.actor));
+      if (bot === undefined) throw new Error("Missing bot player");
+      expect(app.simulation.movementPlayer(bot)?.character).toBe(row.botCharacter);
+      const botBodies = app.simulation.presentations().filter(entry => entry.actor.equals(bot) && !entry.viewWeapon);
+      if (row.botBody === null) expect(botBodies.some(entry => entry.path === row.body)).toBe(false);
+      else expect(botBodies.some(entry => entry.path === row.botBody)).toBe(true);
+      expect(prints.join("")).not.toContain("Failed to load model file");
+    } finally {
+      await app.close();
+    }
+  }, 120000);
 
 test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects weapon 0", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm0", "--movement", "q1",
-    "--character", "q1", "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm0",
+    "--movement",
+    "q1",
+    "--character",
+    "q1",
+    "--mode",
+    "singleplayer",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
   const preset = applicationPreset(catalog, parsed.options);
-  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id),
-    weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } } });
+  const recipe = await resolveLaunch({
+    catalog,
+    preset,
+    choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } },
+  });
   const prints: string[] = [];
-  const app = await Application.open(parsed.options, { print: text => { prints.push(text); } }, recipe);
+  const app = await Application.open(
+    parsed.options,
+    {
+      print: text => {
+        prints.push(text);
+      },
+    },
+    recipe,
+  );
   try {
     const local = app.localPlayers[0];
     if (local === undefined) throw new Error("Missing local player");
-    const key = (code: number, down: boolean): void => { app.input({ seat: local.seat.id, kind: "key", code, down,
-      repeat: false, timeMilliseconds: performance.now() }); };
+    const key = (code: number, down: boolean): void => {
+      app.input({ seat: local.seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() });
+    };
     for (let index = 0; index < 20; index++) await app.step(50);
     key(119, true); // W / +forward: leave the spawn wall first
     for (let index = 0; index < 40; index++) await app.step(50);
@@ -102,7 +190,7 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
     key(115, false);
     const afterBack = app.simulation.playerView(local.actor);
     if (afterBack === null) throw new Error("Missing local view after +back");
-    const yaw = before.angles.y * Math.PI / 180;
+    const yaw = (before.angles.y * Math.PI) / 180;
     const backward = -(afterBack.origin.x - before.origin.x) * Math.cos(yaw) - (afterBack.origin.y - before.origin.y) * Math.sin(yaw);
     expect(backward).toBeGreaterThan(50);
     // Soak bot combat in the reported setup (Crash on q3dm0): keep putting the
@@ -115,11 +203,16 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
       const bot = app.simulation.players().find(actor => !actor.equals(local.actor));
       const view = app.simulation.playerView(local.actor);
       if (bot !== undefined && view !== null && index % 100 === 99) {
-        const radians = view.angles.y * Math.PI / 180;
-        app.simulation.diagnostics().movePlayer(bot, { kind: "teleport",
+        const radians = (view.angles.y * Math.PI) / 180;
+        app.simulation.diagnostics().movePlayer(bot, {
+          kind: "teleport",
           origin: { x: view.origin.x + Math.cos(radians) * 300, y: view.origin.y + Math.sin(radians) * 300, z: view.origin.z },
-          angles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
-          commandAngles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, holdMilliseconds: 0, spectator: false });
+          angles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 },
+          velocity: { x: 0, y: 0, z: 0 },
+          commandAngles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 },
+          holdMilliseconds: 0,
+          spectator: false,
+        });
       }
     }
     // The bot must aim at the player, not a wall: place the local player at a
@@ -133,53 +226,109 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
     if (game === null) throw new Error("Missing Q3 source game");
     const botEntity = recordByActor(app.simulation, bot);
     if (botEntity === null) throw new Error("Missing bot entity");
-    const botBounds = botEntity.r, botNumber = botEntity.s.number;
+    const botBounds = botEntity.r,
+      botNumber = botEntity.s.number;
     let placed: { x: number; y: number; z: number } | null = null;
-    for (const offset of [{ x: 120, y: 0 }, { x: -120, y: 0 }, { x: 0, y: 120 }, { x: 0, y: -120 }]) {
+    for (const offset of [
+      { x: 120, y: 0 },
+      { x: -120, y: 0 },
+      { x: 0, y: 120 },
+      { x: 0, y: -120 },
+    ]) {
       const end = { x: botView.origin.x + offset.x, y: botView.origin.y + offset.y, z: botView.origin.z };
-      const trace = game.world.trace({ start: botView.origin, end, shape: { kind: "box", mins: botBounds.mins, maxs: botBounds.maxs },
-        passEntityNum: botNumber, mask: 0x2010001 });
-      if (trace.fraction === 1 && trace.solidity === "clear") { placed = end; break; }
+      const trace = game.world.trace({
+        start: botView.origin,
+        end,
+        shape: { kind: "box", mins: botBounds.mins, maxs: botBounds.maxs },
+        passEntityNum: botNumber,
+        mask: 0x2010001,
+      });
+      if (trace.fraction === 1 && trace.solidity === "clear") {
+        placed = end;
+        break;
+      }
     }
     if (placed === null) throw new Error("No trace-clear placement near bot");
-    const faceYaw = (Math.atan2(botView.origin.y - placed.y, botView.origin.x - placed.x) * 180 / Math.PI + 360) % 360;
-    app.simulation.diagnostics().movePlayer(local.actor, { kind: "teleport", origin: placed,
-      angles: { x: 0, y: faceYaw, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
-      commandAngles: { x: 0, y: faceYaw, z: 0 }, holdMilliseconds: 0, spectator: false });
+    const faceYaw = ((Math.atan2(botView.origin.y - placed.y, botView.origin.x - placed.x) * 180) / Math.PI + 360) % 360;
+    app.simulation.diagnostics().movePlayer(local.actor, {
+      kind: "teleport",
+      origin: placed,
+      angles: { x: 0, y: faceYaw, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      commandAngles: { x: 0, y: faceYaw, z: 0 },
+      holdMilliseconds: 0,
+      spectator: false,
+    });
     let damaged = false;
     for (let index = 0; index < 600 && !damaged; index++) {
       await app.step(50);
       damaged = app.simulation.playerUi(local.actor).health < 100;
     }
     expect(damaged).toBe(true);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm0", "--movement", "q1",
-    "--character", "q1", "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm0",
+    "--movement",
+    "q1",
+    "--character",
+    "q1",
+    "--mode",
+    "singleplayer",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
   const preset = applicationPreset(catalog, parsed.options);
-  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id),
-    weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } } });
+  const recipe = await resolveLaunch({
+    catalog,
+    preset,
+    choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } },
+  });
   const app = await Application.open(parsed.options, { print: () => undefined }, recipe);
   try {
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     // Internal simulation seams, following the trace-placement test above.
     const sim = app.simulation;
     for (let index = 0; index < 300 && sim.players().length < 2; index++) await app.step(50);
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing arena bot");
-    sim.diagnostics().grantArsenal(local.actor, "weapons"); sim.diagnostics().grantArsenal(local.actor, "ammo");
+    sim.diagnostics().grantArsenal(local.actor, "weapons");
+    sim.diagnostics().grantArsenal(local.actor, "ammo");
     const game = sim.diagnostics().q1Services();
     if (game === null) throw new Error("Missing selected Q1 arsenal");
     const host = game.host;
     const health = (): number => sim.combat.read(bot)?.health ?? 0;
-    const teleport = (actor: ActorId, origin: Vec): void => { sim.diagnostics().movePlayer(actor, { kind: "teleport", origin,
-      angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, commandAngles: { x: 0, y: 0, z: 0 }, holdMilliseconds: 0, spectator: false }); };
+    const teleport = (actor: ActorId, origin: Vec): void => {
+      sim.diagnostics().movePlayer(actor, {
+        kind: "teleport",
+        origin,
+        angles: { x: 0, y: 0, z: 0 },
+        velocity: { x: 0, y: 0, z: 0 },
+        commandAngles: { x: 0, y: 0, z: 0 },
+        holdMilliseconds: 0,
+        spectator: false,
+      });
+    };
     sim.diagnostics().selectArsenalWeapon(local.actor, "q1:weapon/lightning");
-    teleport(bot, { x: -1152, y: -1245, z: 30 }); teleport(local.actor, { x: -1222, y: -1245, z: 30 });
+    teleport(bot, { x: -1152, y: -1245, z: 30 });
+    teleport(local.actor, { x: -1222, y: -1245, z: 30 });
     for (let index = 0; index < 20; index++) await app.step(50);
     const settledRecord = recordByActor(sim, bot);
     const settled = settledRecord === null ? undefined : settledRecord.s.pos.base;
@@ -195,14 +344,27 @@ test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
     if (record === null) throw new Error("Missing bot record");
     const recordBase = record.s.pos.base;
     const recordBounds = record.r;
-    const me = sim.bodies.read(local.actor); if (me === null) throw new Error("Missing local body");
+    const me = sim.bodies.read(local.actor);
+    if (me === null) throw new Error("Missing local body");
     const eye = { x: me.origin.x, y: me.origin.y, z: me.origin.z + 16 };
     const center = { x: recordBase.x, y: recordBase.y, z: recordBase.z + (recordBounds.mins.z + recordBounds.maxs.z) / 2 };
     const beyond = { x: eye.x + (center.x - eye.x) * 2, y: eye.y + (center.y - eye.y) * 2, z: eye.z + (center.z - eye.z) * 2 };
-    const trace = host.trace({ start: eye, end: beyond, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, ignore: local.actor, monsters: true });
+    const trace = host.trace({
+      start: eye,
+      end: beyond,
+      bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+      ignore: local.actor,
+      monsters: true,
+    });
     expect(trace.actor?.equals(bot)).toBe(true);
-    const pitch = -Math.atan2(center.z - eye.z, Math.hypot(center.x - eye.x, center.y - eye.y)) * 180 / Math.PI;
-    app.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: 160, y: 120 }, delta: { x: 0, y: Math.round(pitch / 0.066) }, timeMilliseconds: performance.now() });
+    const pitch = (-Math.atan2(center.z - eye.z, Math.hypot(center.x - eye.x, center.y - eye.y)) * 180) / Math.PI;
+    app.input({
+      seat: local.seat.id,
+      kind: "mouse-motion",
+      position: { x: 160, y: 120 },
+      delta: { x: 0, y: Math.round(pitch / 0.066) },
+      timeMilliseconds: performance.now(),
+    });
     for (let index = 0; index < 4; index++) await app.step(50);
     const viewPitch = game.player(local.actor)?.viewAngles.x ?? 0;
     expect(Math.abs(viewPitch - pitch)).toBeLessThan(3);
@@ -215,5 +377,7 @@ test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
     expect(sim.combat.read(bot)?.canTakeDamage).toBe(false);
     const gibbed = recordByActor(sim, bot);
     expect(gibbed === null ? null : gibbed.r.contents).toBe(0);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 180000);

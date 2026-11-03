@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { registerPlayerUserinfo, applyCharacterAppearance } from "./player-userinfo.ts";
 import { applySelectedBindingDefaults, applyStartupVariables, inheritedBindingBaseline, noteBindingCommand, startupCommandPhases } from "./startup-commands.ts";
 import { applyQ3MapLaunch } from "./q3-map-command.ts";
@@ -43,7 +44,13 @@ import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./con
 import { createStartupScriptReader } from "./startup-config.ts";
 import { TeamArenaLaunchOverrides } from "./team-arena-skirmish.ts";
 
-export interface ConfigurationCommandRequest { readonly target: "application"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source: CommandContext; }
+export interface ConfigurationCommandRequest {
+  readonly target: "application";
+  readonly name: string;
+  readonly arguments_: readonly string[];
+  readonly seat: SeatId | null;
+  readonly source: CommandContext;
+}
 
 export interface PreparedProfileConfiguration {
   readonly source: CvarRegistry;
@@ -57,7 +64,13 @@ export interface PreparedProfileConfiguration {
   readonly options: ApplicationOptions;
   readonly maxClients: number;
   readonly requests: readonly ConfigurationCommandRequest[];
-  readonly bindingChoices: readonly { readonly id: SeatId; readonly overriddenKeys: readonly string[]; readonly allBindingsChosen: boolean; readonly selectedBindings: readonly InputBinding[]; readonly authoredBindings: readonly InputBinding[] | null }[];
+  readonly bindingChoices: readonly {
+    readonly id: SeatId;
+    readonly overriddenKeys: readonly string[];
+    readonly allBindingsChosen: boolean;
+    readonly selectedBindings: readonly InputBinding[];
+    readonly authoredBindings: readonly InputBinding[] | null;
+  }[];
   publishContinuation(owner: PreparedStartup): void;
   applyBindingDefaults(seat: SeatId, defaults: readonly InputBinding[]): void;
   forwardCommands(forward: (request: ConfigurationCommandRequest) => void): void;
@@ -65,7 +78,15 @@ export interface PreparedProfileConfiguration {
 
 export async function prepareProfileConfiguration(args: {
   readonly prepared: PreparedStartup;
-  readonly clientSource?: { readonly inputState: "fresh" | "retained"; readonly startupCommands?: readonly string[]; readonly cvars: CvarRegistry; readonly archive: string | null; readonly seatCvars?: ReadonlyMap<SeatId, CvarRegistry>; readonly seatArchives?: ReadonlyMap<SeatId, readonly CvarArchiveEntry[]>; route(base: CommandCvarRouting): CommandCvarRouting };
+  readonly clientSource?: {
+    readonly inputState: "fresh" | "retained";
+    readonly startupCommands?: readonly string[];
+    readonly cvars: CvarRegistry;
+    readonly archive: string | null;
+    readonly seatCvars?: ReadonlyMap<SeatId, CvarRegistry>;
+    readonly seatArchives?: ReadonlyMap<SeatId, readonly CvarArchiveEntry[]>;
+    route(base: CommandCvarRouting): CommandCvarRouting;
+  };
   readonly seats: readonly { readonly seat: SessionSeat; readonly input: SeatInput; readonly selectedBindings?: readonly InputBinding[] }[];
   readonly options: ApplicationOptions;
   readonly content: ApplicationConfigurationContent;
@@ -78,103 +99,210 @@ export async function prepareProfileConfiguration(args: {
 }): Promise<PreparedProfileConfiguration> {
   const { prepared, content, settings, shared, host } = args;
   const options = content.q3Product === undefined ? args.options : { ...args.options, q3Product: content.q3Product };
-  const dialect = configurationDialect(content), movementDialect = configurationMovementDialect(content);
+  const dialect = configurationDialect(content),
+    movementDialect = configurationMovementDialect(content);
   const phases = args.clientSource?.startupCommands === undefined ? null : startupCommandPhases(args.clientSource.startupCommands, dialect);
-  const source = args.clientSource?.cvars ?? createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
+  const source =
+    args.clientSource?.cvars ?? createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
   registerGtvCvars(source);
   if (source.dialect !== dialect) throw new Error("Configuration source dialect differs from its selected product");
   const movement = new CvarRegistry({ dialect: movementDialect, context: prepared.movement.context, print: host.print });
-  const fallback = args.clientSource?.cvars ?? (movementDialect === dialect ? movement : new CvarRegistry({ dialect, context: prepared.commands.context, print: host.print }));
-  const seats = await Promise.all(args.seats.map(async ({ seat, input }) => {
-    if (!input.seat.equals(seat.id)) throw new Error("Configuration input belongs to another seat");
-    const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
-    const cvars = args.clientSource?.seatCvars?.get(seat.id) ?? args.clientSource?.cvars ?? new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
-    if (args.clientSource !== undefined && (cvars.dialect !== dialect || cvars.context.origin.kind !== "local-seat" || !cvars.context.origin.seat.equals(seat.id) || !cvars.context.origin.client.equals(seat.client.id)))
-      throw new Error("Client configuration requires its actual primary seat cvar owner");
-    if (args.clientSource === undefined) { registerPlayerUserinfo(cvars, seat.id.index, options.character === "q2" ? options.characterModel : "male"); applyCharacterAppearance(cvars, options); }
-    if (args.clientSource === undefined && dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
-    const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
-    registerRunCvar(mouse.cvars, movementDialect);
-    const [profile, archive, mouseArchive] = await Promise.all([
-      settings.loadSeat(`input/seat-${seat.id.index + 1}.json`),
-      loadCvarArchive(configurationStore(options, content, content.selection.engineBehavior.content), ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(seat.id.index)], dialect),
-      loadCvarArchive(settings, ["input", dialect, String(seat.id.index)], dialect),
-    ]);
-    return { id: seat.id, context, cvars, mouse, input, profile, archive, mouseArchive };
-  }));
+  const fallback =
+    args.clientSource?.cvars ?? (movementDialect === dialect ? movement : new CvarRegistry({ dialect, context: prepared.commands.context, print: host.print }));
+  const seats = await Promise.all(
+    args.seats.map(async ({ seat, input }) => {
+      if (!input.seat.equals(seat.id)) throw new Error("Configuration input belongs to another seat");
+      const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
+      const cvars =
+        args.clientSource?.seatCvars?.get(seat.id) ??
+        args.clientSource?.cvars ??
+        new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
+      if (
+        args.clientSource !== undefined &&
+        (cvars.dialect !== dialect ||
+          cvars.context.origin.kind !== "local-seat" ||
+          !cvars.context.origin.seat.equals(seat.id) ||
+          !cvars.context.origin.client.equals(seat.client.id))
+      )
+        throw new Error("Client configuration requires its actual primary seat cvar owner");
+      if (args.clientSource === undefined) {
+        registerPlayerUserinfo(cvars, seat.id.index, options.character === "q2" ? options.characterModel : "male");
+        applyCharacterAppearance(cvars, options);
+      }
+      if (args.clientSource === undefined && dialect === "q3")
+        initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
+      const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
+      registerRunCvar(mouse.cvars, movementDialect);
+      const [profile, archive, mouseArchive] = await Promise.all([
+        settings.loadSeat(`input/seat-${seat.id.index + 1}.json`),
+        loadCvarArchive(
+          configurationStore(options, content, content.selection.engineBehavior.content),
+          ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(seat.id.index)],
+          dialect,
+        ),
+        loadCvarArchive(settings, ["input", dialect, String(seat.id.index)], dialect),
+      ]);
+      return { id: seat.id, context, cvars, mouse, input, profile, archive, mouseArchive };
+    }),
+  );
   const [movementArchive, fallbackArchive] = await Promise.all([
-    loadCvarArchive(settings, ["movement", movementDialect], movementDialect), loadCvarArchive(settings, ["fallback", dialect], dialect),
+    loadCvarArchive(settings, ["movement", movementDialect], movementDialect),
+    loadCvarArchive(settings, ["fallback", dialect], dialect),
   ]);
-  const sharedArchive = [...shared.archiveEntries(), ...(args.clientSource?.inputState === "fresh"
-    ? await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot)) : [])];
-  const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => dialect,
-    server: () => args.clientSource === undefined ? { cvars: source, sharedNames: source.snapshots().map(variable => variable.name) } : null,
+  const sharedArchive = [
+    ...shared.archiveEntries(),
+    ...(args.clientSource?.inputState === "fresh" ? await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot)) : []),
+  ];
+  const routing = new ApplicationConsoleRouting({
+    fallback,
+    sourceDialect: () => dialect,
+    server: () => (args.clientSource === undefined ? { cvars: source, sharedNames: source.snapshots().map(variable => variable.name) } : null),
     seat: id => seats.find(seat => seat.id.equals(id))?.cvars ?? null,
     input: id => seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null,
-    movement: () => movement, shared: () => published?.sharedCvars ?? shared });
-  const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
-    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
-    mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
-    mountedResource: name => content.mounts.open(name),
-    mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
-    mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
+    movement: () => movement,
+    shared: () => published?.sharedCvars ?? shared,
+  });
+  const scripts = new ConsoleScriptFiles(
+    {
+      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+      consoleRoot: consoleConfigRoot(options.userContentRoot),
+      settings,
+      mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
+      mountedResource: name => content.mounts.open(name),
+      mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
+      mounted: name => content.mounts.open(name).then(resource => resource?.bytes),
+    },
+    () => content.close(),
+  );
   const read = configurationScriptReader(content, options, scripts);
   const requests: ConfigurationCommandRequest[] = [];
-  let forward = (request: ConfigurationCommandRequest): void => { requests.push(request); };
+  let forward = (request: ConfigurationCommandRequest): void => {
+    requests.push(request);
+  };
   let stopped = false;
   let published: PreparedStartup | undefined;
   const dispatch = (name: string, args_: readonly string[], sourceContext: CommandContext): undefined => {
-    let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
+    let origin = sourceContext.origin;
+    while (origin.kind === "script") origin = origin.caller;
     stopped = true;
     forward({ target: "application", name, arguments_: args_, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });
     return undefined;
   };
   let active: StartupConfig | null = null;
   try {
-    const program = prepared.prepareClientCommands({ ...(phases === null ? {} : { startupCommandText: phases.stuffed }), dialect, context: prepared.commands.context, cvars: fallback, cvarRouting: args.clientSource?.route(routing) ?? routing,
-      readScript: (name, context) => active?.readScript(name, context) ?? scripts.read(name, context),
-      onScriptComplete: event => active?.onScriptComplete(event), print: host.print,
-      allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
-      forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
-    }, seats);
-    for (const name of [...(dialect === "q3" ? q3ProductMapCommands(options.q3Product?.policy ?? { kind: "retail" }) : ["map"]), "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
-      "mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "cinematic", "cinematicpause", "stopcinematic", "record", "rerecord", "stop", "stoprecord", "mvdrecord", "mvdstop", "serverrecord", "serverstop", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
+    const program = prepared.prepareClientCommands(
+      {
+        ...(phases === null ? {} : { startupCommandText: phases.stuffed }),
+        dialect,
+        context: prepared.commands.context,
+        cvars: fallback,
+        cvarRouting: args.clientSource?.route(routing) ?? routing,
+        readScript: (name, context) => active?.readScript(name, context) ?? scripts.read(name, context),
+        onScriptComplete: event => active?.onScriptComplete(event),
+        print: host.print,
+        allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
+        forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
+      },
+      seats,
+    );
+    for (const name of [
+      ...(dialect === "q3" ? q3ProductMapCommands(options.q3Product?.policy ?? { kind: "retail" }) : ["map"]),
+      "save",
+      "load",
+      "weapnext",
+      "weapprev",
+      "use",
+      "weapon",
+      "say",
+      "say_team",
+      "connect",
+      "disconnect",
+      "quit",
+      "mvdconnect",
+      "mvdisconnect",
+      "in_restart",
+      "midiinfo",
+      "local_join",
+      "local_drop",
+      "downloadstatus",
+      "stopdownload",
+      "retrydownload",
+      "demopause",
+      "cinematic",
+      "cinematicpause",
+      "stopcinematic",
+      "record",
+      "rerecord",
+      "stop",
+      "stoprecord",
+      "mvdrecord",
+      "mvdstop",
+      "serverrecord",
+      "serverstop",
+      "playdemo",
+      "demo",
+      "demomap",
+      "startdemos",
+      "demos",
+      "stopdemo",
+      ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : []),
+    ])
       program.commands.register(name, command => dispatch(name, command.args, command.source));
     registerQ1ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     registerQ2ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     const product = content.catalog.product(content.selection.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
-    const bindingChoices = new Map<SeatId, { authored: readonly InputBinding[] | null; overridden: Set<string>; all: boolean; selected: readonly InputBinding[] }>(seats.map((seat, index) => [seat.id, { authored: null, overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) }]));
+    const bindingChoices = new Map<
+      SeatId,
+      { authored: readonly InputBinding[] | null; overridden: Set<string>; all: boolean; selected: readonly InputBinding[] }
+    >(
+      seats.map((seat, index) => [
+        seat.id,
+        { authored: null, overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) },
+      ]),
+    );
     const currentCommands = () => published?.commands ?? program.commands;
     const currentSeat = (id: SeatId) => {
       const seat = (published?.seats ?? seats).find(seat => seat.id.equals(id));
       if (seat === undefined) throw new Error("Configuration seat has retired");
       return seat;
     };
-    const currentBindings = (id: SeatId) => published === undefined ? program.input(id) : currentSeat(id).input;
+    const currentBindings = (id: SeatId) => (published === undefined ? program.input(id) : currentSeat(id).input);
     const retainedConfigurations = seats.map(seat => {
-      const prior = args.clientSource?.inputState === "fresh" ? undefined
-        : prepared.seats.find(previous => previous.id.equals(seat.id) && previous.input === seat.input);
-      return prior === undefined ? undefined : { bindings: prior.input.bindings, mouse: prior.mouse.read(), run: prior.mouse.cvars.find("cl_run")?.value,
-        allBindingsChosen: prior.allBindingsChosen, overriddenKeys: [...prior.overriddenKeys],
-        selectedBindings: prior.selectedBindings ?? defaultBindings(0, prepared.movement.dialect) };
+      const prior =
+        args.clientSource?.inputState === "fresh" ? undefined : prepared.seats.find(previous => previous.id.equals(seat.id) && previous.input === seat.input);
+      return prior === undefined
+        ? undefined
+        : {
+            bindings: prior.input.bindings,
+            mouse: prior.mouse.read(),
+            run: prior.mouse.cvars.find("cl_run")?.value,
+            allBindingsChosen: prior.allBindingsChosen,
+            overriddenKeys: [...prior.overriddenKeys],
+            selectedBindings: prior.selectedBindings ?? defaultBindings(0, prepared.movement.dialect),
+          };
     });
     const publishChoices = (id: SeatId): void => {
-      const seat = published?.seats.find(seat => seat.id.equals(id)), choices = bindingChoices.get(id);
+      const seat = published?.seats.find(seat => seat.id.equals(id)),
+        choices = bindingChoices.get(id);
       if (seat === undefined || choices === undefined) return;
-      seat.allBindingsChosen = choices.all; seat.selectedBindings = choices.selected; seat.authoredBindings = choices.authored;
+      seat.allBindingsChosen = choices.all;
+      seat.selectedBindings = choices.selected;
+      seat.authoredBindings = choices.authored;
       for (const key of choices.overridden) seat.overriddenKeys.add(key);
     };
     const applyBindingDefaults = (id: SeatId, defaults: readonly InputBinding[]): void => {
-      const choices = bindingChoices.get(id), bindings = currentBindings(id);
+      const choices = bindingChoices.get(id),
+        bindings = currentBindings(id);
       if (choices === undefined || bindings === null) throw new Error("Profile defaults belong to another seat");
       choices.selected = defaults;
       publishChoices(id);
-      if (!choices.all) for (const binding of defaults)
-        if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
+      if (!choices.all) for (const binding of defaults) if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
     };
     const launchContext = seats[0]?.context ?? prepared.commands.context;
-    const applyVariables = (): void => { applyStartupVariables(phases?.variables ?? [], (name, context) => routing.owner(name, context), launchContext); };
+    const applyVariables = (): void => {
+      applyStartupVariables(phases?.variables ?? [], (name, context) => routing.owner(name, context), launchContext);
+    };
     async function* run(): AsyncGenerator<void, void, void> {
       if (phases !== null) {
         applyVariables();
@@ -195,23 +323,36 @@ export async function prepareProfileConfiguration(args: {
         if (index !== 0) {
           applyBindingDefaults(seat.id, defaults);
           const primary = seats[0];
-          const inherited = primary === undefined ? [] : bindingChoices.get(primary.id)?.authored ?? [];
+          const inherited = primary === undefined ? [] : (bindingChoices.get(primary.id)?.authored ?? []);
           choices.authored = inheritedBindingBaseline(inherited, defaults);
         }
         if (index === 0) bindings().unbindAll();
-        active = new StartupConfig({ ...(phases === null ? {} : { safeMode: phases.safe }), dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
-          scope: index === 0 ? "source" : "seat", read: (name, context, scope) => published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope),
+        active = new StartupConfig({
+          ...(phases === null ? {} : { safeMode: phases.safe }),
+          dialect,
+          context: seat.context,
+          hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
+          scope: index === 0 ? "source" : "seat",
+          read: (name, context, scope) => (published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope)),
           applySelectedDefaults: () => {
             choices.authored = applySelectedBindingDefaults(bindings(), defaults);
             collectingBindings = true;
             publishChoices(seat.id);
           },
           applyArchive: () => {
-            if (index === 0) { if (args.clientSource === undefined) (published?.source ?? source).applyArchive(args.sourceArchive); (published?.movement ?? movement).applyArchive(movementArchive); (published?.fallback ?? fallback).applyArchive(fallbackArchive); (published === undefined ? shared : published.sharedCvars)?.applyArchive(sharedArchive); }
-            currentSeat(seat.id).cvars.applyArchive(seat.archive); currentSeat(seat.id).mouse.cvars.applyArchive(seat.mouseArchive);
-            if (args.clientSource !== undefined) currentSeat(seat.id).cvars.applyArchive(args.clientSource.seatArchives?.get(seat.id) ?? (index === 0 ? args.sourceArchive : []));
+            if (index === 0) {
+              if (args.clientSource === undefined) (published?.source ?? source).applyArchive(args.sourceArchive);
+              (published?.movement ?? movement).applyArchive(movementArchive);
+              (published?.fallback ?? fallback).applyArchive(fallbackArchive);
+              (published === undefined ? shared : published.sharedCvars)?.applyArchive(sharedArchive);
+            }
+            currentSeat(seat.id).cvars.applyArchive(seat.archive);
+            currentSeat(seat.id).mouse.cvars.applyArchive(seat.mouseArchive);
+            if (args.clientSource !== undefined)
+              currentSeat(seat.id).cvars.applyArchive(args.clientSource.seatArchives?.get(seat.id) ?? (index === 0 ? args.sourceArchive : []));
             if (retained !== undefined) {
-              bindings().unbindAll(); for (const binding of retained.bindings) bindings().bind(binding);
+              bindings().unbindAll();
+              for (const binding of retained.bindings) bindings().bind(binding);
               choices.all = retained.allBindingsChosen;
               for (const key of retained.overriddenKeys) choices.overridden.add(key);
               const expected = new Map(retained.selectedBindings.map(binding => [physicalInputKey(binding.input), binding.target]));
@@ -221,29 +362,50 @@ export async function prepareProfileConfiguration(args: {
               currentSeat(seat.id).mouse.write(retained.mouse);
               if (retained.run !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", retained.run, "archive");
             } else if (seat.profile !== null) {
-              bindings().unbindAll(); for (const binding of seat.profile.bindings) bindings().bind(binding);
+              bindings().unbindAll();
+              for (const binding of seat.profile.bindings) bindings().bind(binding);
               choices.all = true;
               currentSeat(seat.id).mouse.write(seat.profile.mouse);
-              if (seat.profile.alwaysRun !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
+              if (seat.profile.alwaysRun !== undefined)
+                currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
             }
             if (index === 0 && args.clientSource?.archive !== undefined && args.clientSource.archive !== null)
-              currentCommands().insert(archiveDataText(args.clientSource.archive, name => currentCommands().exists(name)), { ...seat.context, origin: { kind: "script", name: "client.cfg", caller: seat.context.origin } });
+              currentCommands().insert(
+                archiveDataText(args.clientSource.archive, name => currentCommands().exists(name)),
+                { ...seat.context, origin: { kind: "script", name: "client.cfg", caller: seat.context.origin } },
+              );
             collectingBindings = true;
-          }, applyLaunchOptions: () => {},
-          replayStartupVariables: () => { if (index === 0 && phases !== null) { applyVariables(); currentCommands().insert(phases.early, launchContext); } },
+          },
+          applyLaunchOptions: () => {},
+          replayStartupVariables: () => {
+            if (index === 0 && phases !== null) {
+              applyVariables();
+              currentCommands().insert(phases.early, launchContext);
+            }
+          },
         });
-        while (!await active.executeFrame({
-          append: (text, context) => currentCommands().appendPreparation(text, context, dialect),
-          executeScriptsAsync: (afterDispatch, shouldContinue) => currentCommands().executeScriptsAsync(afterDispatch, shouldContinue),
-        }, async () => {
-          if (!collectingBindings) return;
-          noteBindingCommand(currentCommands().tokenizedArguments, choices);
-          publishChoices(seat.id);
-        }, () => published === undefined ? !stopped : published.configurationCanContinue)) yield;
+        while (
+          !(await active.executeFrame(
+            {
+              append: (text, context) => currentCommands().appendPreparation(text, context, dialect),
+              executeScriptsAsync: (afterDispatch, shouldContinue) => currentCommands().executeScriptsAsync(afterDispatch, shouldContinue),
+            },
+            async () => {
+              if (!collectingBindings) return;
+              noteBindingCommand(currentCommands().tokenizedArguments, choices);
+              publishChoices(seat.id);
+            },
+            () => (published === undefined ? !stopped : published.configurationCanContinue),
+          ))
+        )
+          yield;
         active = null;
       }
       if (phases !== null && dialect !== "q1-netquake" && dialect !== "q1-quakeworld") currentCommands().appendPreparation(phases.late, launchContext, dialect);
-      while (!currentCommands().preparationComplete) { yield; await currentCommands().advanceProgramFrame(); }
+      while (!currentCommands().preparationComplete) {
+        yield;
+        await currentCommands().advanceProgramFrame();
+      }
     }
     const continuation = run();
     const complete = await program.preparePrefix(async () => {
@@ -256,33 +418,80 @@ export async function prepareProfileConfiguration(args: {
     const launch = args.clientSource !== undefined || options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     launch?.apply(source, seats);
     if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(source, options.q3MapLaunch);
-    const resolved = args.clientSource === undefined ? resolveStartupRules(options, source, options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
-      serverDefinitionsForSelection(content.selection), launch === null && options.q3MapLaunch === undefined) : { options, maxClients: args.defaultCapacity };
-    return { source, movement, fallback, seats, program, routing, scripts, read, ...resolved, requests, applyBindingDefaults,
+    const resolved =
+      args.clientSource === undefined
+        ? resolveStartupRules(
+            options,
+            source,
+            options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
+            serverDefinitionsForSelection(content.selection),
+            launch === null && options.q3MapLaunch === undefined,
+          )
+        : { options, maxClients: args.defaultCapacity };
+    return {
+      source,
+      movement,
+      fallback,
+      seats,
+      program,
+      routing,
+      scripts,
+      read,
+      ...resolved,
+      requests,
+      applyBindingDefaults,
       publishContinuation: owner => {
         if (owner !== prepared) throw new Error("Configuration continuation belongs to another client");
         if (published !== undefined) throw new Error("Configuration continuation already published");
         published = owner;
-        if (!complete) owner.adoptConfigurationContinuation({
-          get active() { return active; },
-          advance: async current => {
-            if (current !== owner) throw new Error("Configuration continuation belongs to another client");
-            return (await continuation.next()).done === true;
-          },
-        });
+        if (!complete)
+          owner.adoptConfigurationContinuation({
+            get active() {
+              return active;
+            },
+            advance: async current => {
+              if (current !== owner) throw new Error("Configuration continuation belongs to another client");
+              return (await continuation.next()).done === true;
+            },
+          });
       },
-      get bindingChoices() { return [...bindingChoices].map(([id, choices]) => ({ id, overriddenKeys: [...choices.overridden], allBindingsChosen: choices.all, selectedBindings: choices.selected, authoredBindings: choices.authored })); },
-      forwardCommands: handler => { forward = handler; } };
+      get bindingChoices() {
+        return [...bindingChoices].map(([id, choices]) => ({
+          id,
+          overriddenKeys: [...choices.overridden],
+          allBindingsChosen: choices.all,
+          selectedBindings: choices.selected,
+          authoredBindings: choices.authored,
+        }));
+      },
+      forwardCommands: handler => {
+        forward = handler;
+      },
+    };
   } catch (error) {
     routing.close();
-    try { await scripts.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Profile configuration and cleanup failed"); }
+    try {
+      await scripts.close();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Profile configuration and cleanup failed");
+    }
     throw error;
   }
 }
 
-export async function openInitialConfigurationContent(options: ApplicationOptions, recipe?: ExecutableRecipe, installedCatalog?: InstalledCatalog): Promise<ApplicationConfigurationContent> {
-  let catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
-    addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), discoverMods: applicationDiscoversMods(options, recipe) });
+export async function openInitialConfigurationContent(
+  options: ApplicationOptions,
+  recipe?: ExecutableRecipe,
+  installedCatalog?: InstalledCatalog,
+): Promise<ApplicationConfigurationContent> {
+  let catalog =
+    installedCatalog ??
+    (await discoverInstalledContent({
+      corpusRoot: options.corpusRoot,
+      userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+      addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(),
+      discoverMods: applicationDiscoversMods(options, recipe),
+    }));
   const product = await prepareQ3ApplicationProduct(catalog, recipe?.map.entities.content ?? options.product, options);
   catalog = product.catalog;
   if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };
@@ -293,7 +502,15 @@ export async function openInitialConfigurationContent(options: ApplicationOption
 
 export function configurationDialect(content: ApplicationConfigurationContent): CommandDialect {
   const source = content.catalog.product(content.selection.engineBehavior.content).expectation;
-  return source.family === "q1" ? source.edition === "quakeworld" ? "q1-quakeworld" : "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
+  return source.family === "q1"
+    ? source.edition === "quakeworld"
+      ? "q1-quakeworld"
+      : "q1-netquake"
+    : source.family === "q2"
+      ? source.edition === "rerelease"
+        ? "q2-rerelease"
+        : "q2-classic"
+      : "q3";
 }
 
 function configurationMovementDialect(content: ApplicationConfigurationContent): CommandDialect {
@@ -302,8 +519,11 @@ function configurationMovementDialect(content: ApplicationConfigurationContent):
   return timing.clock.kind;
 }
 
-export function legacyConfigurationOptions(options: ApplicationOptions, catalog: InstalledCatalog,
-  reference: ContentId): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig"> {
+export function legacyConfigurationOptions(
+  options: ApplicationOptions,
+  catalog: InstalledCatalog,
+  reference: ContentId,
+): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig"> {
   const selected = catalog.product(reference);
   if (selected.expectation.family !== "q1" || selected.expectation.edition === "quakeworld") return {};
   const sharedRoot = options.userContentRoot ?? defaultUserContentRoot();
@@ -313,61 +533,123 @@ export function legacyConfigurationOptions(options: ApplicationOptions, catalog:
 }
 
 /** Console scripts for a loaded world: user files plus the scripts its source product mounts; the mounts stay retained while the scripts live. */
-export function sourceConsoleScripts(content: Pick<LoadedApplicationContent, "mounts" | "catalog" | "recipe" | "retainMainMounts">, options: ApplicationOptions, settings: ConfigStore): ConsoleScriptFiles {
-  const mounts = content.mounts, release = content.retainMainMounts();
-  return new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
-    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
-    mountedScript: sourceScriptReader(content.catalog, mounts, content.recipe.engineBehavior.content),
-    mountedResource: name => mounts.open(name),
-    mountedFiles: (directory, extension) => mounts.listFiles(directory, extension),
-    mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { release(); });
+export function sourceConsoleScripts(
+  content: Pick<LoadedApplicationContent, "mounts" | "catalog" | "recipe" | "retainMainMounts">,
+  options: ApplicationOptions,
+  settings: ConfigStore,
+): ConsoleScriptFiles {
+  const mounts = content.mounts,
+    release = content.retainMainMounts();
+  return new ConsoleScriptFiles(
+    {
+      ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
+      consoleRoot: consoleConfigRoot(options.userContentRoot),
+      settings,
+      mountedScript: sourceScriptReader(content.catalog, mounts, content.recipe.engineBehavior.content),
+      mountedResource: name => mounts.open(name),
+      mountedFiles: (directory, extension) => mounts.listFiles(directory, extension),
+      mounted: name => mounts.open(name).then(resource => resource?.bytes),
+    },
+    async () => {
+      release();
+    },
+  );
 }
 
 export function configurationStore(options: ApplicationOptions, content: ApplicationConfigurationContent, reference: ContentId): ConfigStore {
   const product = content.catalog.product(reference);
-  return new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  return new ConfigStore(
+    product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory),
+  );
 }
 
-function configurationScriptReader(content: ApplicationConfigurationContent, options: ApplicationOptions, scripts: ConsoleScriptFiles): ReturnType<typeof createStartupScriptReader> {
+function configurationScriptReader(
+  content: ApplicationConfigurationContent,
+  options: ApplicationOptions,
+  scripts: ConsoleScriptFiles,
+): ReturnType<typeof createStartupScriptReader> {
   const product = content.catalog.product(content.selection.engineBehavior.content);
   const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
-  const roots = (selected: typeof product): readonly string[] => [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== undefined && root !== null);
-  return createStartupScriptReader({ mounted: name => scripts.readMountedScript(name), user: (name, source) => scripts.read(name, source),
-    baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
+  const roots = (selected: typeof product): readonly string[] =>
+    [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== undefined && root !== null);
+  return createStartupScriptReader({
+    mounted: name => scripts.readMountedScript(name),
+    user: (name, source) => scripts.read(name, source),
+    baseLooseRoots: roots(base),
+    gameLooseRoots: roots(product),
+    seatRoot: consoleConfigRoot(options.userContentRoot),
+  });
 }
 
 /** Created outside the preparing function: the closure outlives it, and that function's scope also holds the caller's loading state (AUDIT-001). */
 function hostPrinter(host: Pick<ApplicationHost, "print">): (text: string) => void {
-  return text => { host.print(text); };
+  return text => {
+    host.print(text);
+  };
 }
 
-export async function prepareInitialConfiguration(options: ApplicationOptions, content: ApplicationConfigurationContent,
-  session: EngineSession, identity: IdentityOwner, localSeats: Map<ClientId, SessionSeat>, settings: ConfigStore,
-  host: Pick<ApplicationHost, "print">, sourceArchive: readonly CvarArchiveEntry[], defaultCapacity: number, nextFrame: () => Promise<void>,
-  onPrepared?: (prepared: PreparedStartup) => void): Promise<{
-    readonly prepared: PreparedStartup; readonly image: ApplicationImageSettings | null; readonly options: ApplicationOptions;
-    readonly maxClients: number; readonly requests: readonly ConfigurationCommandRequest[]; readonly scripts: ConsoleScriptFiles;
-  }> {
+export async function prepareInitialConfiguration(
+  options: ApplicationOptions,
+  content: ApplicationConfigurationContent,
+  session: EngineSession,
+  identity: IdentityOwner,
+  localSeats: Map<ClientId, SessionSeat>,
+  settings: ConfigStore,
+  host: Pick<ApplicationHost, "print">,
+  sourceArchive: readonly CvarArchiveEntry[],
+  defaultCapacity: number,
+  nextFrame: () => Promise<void>,
+  onPrepared?: (prepared: PreparedStartup) => void,
+): Promise<{
+  readonly prepared: PreparedStartup;
+  readonly image: ApplicationImageSettings | null;
+  readonly options: ApplicationOptions;
+  readonly maxClients: number;
+  readonly requests: readonly ConfigurationCommandRequest[];
+  readonly scripts: ConsoleScriptFiles;
+}> {
   if (content.q3Product !== undefined) options = { ...options, q3Product: content.q3Product };
-  const dialect = configurationDialect(content), movement = configurationMovementDialect(content);
+  const dialect = configurationDialect(content),
+    movement = configurationMovementDialect(content);
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
   const campaign = sourceProgramProduct(content.catalog, content.selection.source.content).expectation.campaign;
-  const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match,
-    rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard") }, dialect, context, defaultCapacity, hostPrinter(host));
+  const source = createStartupSource(
+    options,
+    {
+      source: content.selection.source,
+      match: content.selection.match,
+      rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard"),
+    },
+    dialect,
+    context,
+    defaultCapacity,
+    hostPrinter(host),
+  );
   registerGtvCvars(source);
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: hostPrinter(host) });
-  const image = await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
+  const image = await ApplicationImageSettings.open({
+    deferPersistence: true,
+    context,
+    dialect,
     ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),
     audioOutputFormat: (await loadAudioSettings(settings, hostPrinter(host))).outputFormat ?? defaultAudioOutputFormat,
-    ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: hostPrinter(host) });
-  const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
-    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
-    mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
-    mountedResource: name => content.mounts.open(name),
-    mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
-    mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
+    ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
+    print: hostPrinter(host),
+  });
+  const scripts = new ConsoleScriptFiles(
+    {
+      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+      consoleRoot: consoleConfigRoot(options.userContentRoot),
+      settings,
+      mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
+      mountedResource: name => content.mounts.open(name),
+      mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
+      mounted: name => content.mounts.open(name).then(resource => resource?.bytes),
+    },
+    () => content.close(),
+  );
   try {
-    const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];
+    const sharedArchive = [...(image?.persistedEntries ?? []), ...(await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot)))];
     if (image?.cvars.find("volume") !== undefined) {
       const audio = await loadAudioSettings(settings, hostPrinter(host));
       if (audio.outputFormat !== undefined) {
@@ -392,24 +674,46 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
       const local = client === null ? null : session.createSeat(index, client);
       if (client !== null && local !== null) localSeats.set(client.id, local);
       const id = local?.id ?? identity.seat(index);
-      const seatContext: CommandContext = local === null ? context : { session: session.session, origin: { kind: "local-seat", seat: id, client: local.client.id } };
+      const seatContext: CommandContext =
+        local === null ? context : { session: session.session, origin: { kind: "local-seat", seat: id, client: local.client.id } };
       const cvars = new CvarRegistry({ dialect, context: seatContext, print: hostPrinter(host), cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
-      registerPlayerUserinfo(cvars, index, options.character === "q2" ? options.characterModel : "male"); applyCharacterAppearance(cvars, options);
+      registerPlayerUserinfo(cvars, index, options.character === "q2" ? options.characterModel : "male");
+      applyCharacterAppearance(cvars, options);
       if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
       const mouse = new MouseSettings(new CvarRegistry({ dialect, context: seatContext, print: hostPrinter(host) }));
-      seats.push({ context: seatContext, id, cvars, mouse,
+      seats.push({
+        context: seatContext,
+        id,
+        cvars,
+        mouse,
         profile: options.dedicated ? null : await settings.loadSeat(`input/seat-${index + 1}.json`),
-        archive: options.dedicated ? [] : await loadCvarArchive(configurationStore(options, content, content.selection.engineBehavior.content), ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(index)], dialect),
-        mouseArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["input", dialect, String(index)], dialect) });
+        archive: options.dedicated
+          ? []
+          : await loadCvarArchive(
+              configurationStore(options, content, content.selection.engineBehavior.content),
+              ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(index)],
+              dialect,
+            ),
+        mouseArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["input", dialect, String(index)], dialect),
+      });
     }
     const requests: ConfigurationCommandRequest[] = [];
-    const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], ...(options.q3Product === undefined ? {} : { q3Policy: options.q3Product.policy }), dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
-      sharedNames: source.snapshots().map(variable => variable.name), print: hostPrinter(host),
+    const prepared = new PreparedStartup(source, inputCvars, scripts, {
+      startupCommands: options.startupCommands ?? [],
+      ...(options.q3Product === undefined ? {} : { q3Policy: options.q3Product.policy }),
+      dialect,
+      movementDialect: movement,
+      seats,
+      shared: image?.cvars ?? null,
+      sharedNames: source.snapshots().map(variable => variable.name),
+      print: hostPrinter(host),
       forward: (name, args, sourceContext) => {
-        let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
+        let origin = sourceContext.origin;
+        while (origin.kind === "script") origin = origin.caller;
         requests.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });
         return undefined;
-      } });
+      },
+    });
     const product = content.catalog.product(content.selection.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
     const teamArenaLaunch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
@@ -417,16 +721,24 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     onPrepared?.(prepared);
     // Closures stored on the prepared startup share this scope; the caller's callback must not outlive the call through it.
     onPrepared = undefined;
-    await prepared.execute({ nextFrame, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
+    await prepared.execute({
+      nextFrame,
+      hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
       read: configurationScriptReader(content, options, scripts),
-      sourceArchive, sharedArchive,
+      sourceArchive,
+      sharedArchive,
       movementArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["movement", movement], movement),
       fallbackArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["fallback", dialect], dialect),
       applyLaunchOptions: () => {
         teamArenaLaunch?.apply(prepared.source, prepared.seats);
         if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(prepared.source, options.q3MapLaunch);
-        resolved = resolveStartupRules(options, prepared.source, options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
-          serverDefinitionsForSelection(content.selection), options.teamArenaSkirmish === undefined && options.q3MapLaunch === undefined);
+        resolved = resolveStartupRules(
+          options,
+          prepared.source,
+          options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
+          serverDefinitionsForSelection(content.selection),
+          options.teamArenaSkirmish === undefined && options.q3MapLaunch === undefined,
+        );
         if (options.teamArenaSkirmish !== undefined) resolved = { ...resolved, options: { ...resolved.options, mode: options.mode } };
         if (options.renderWorker !== undefined) image?.cvars.set("r_smp", options.renderWorker ? "1" : "0", true);
         if (options.displayOverrides?.width !== undefined) image?.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
@@ -437,8 +749,16 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     return { prepared, image, ...resolved, requests, scripts };
   } catch (error) {
     const errors: unknown[] = [error];
-    try { await image?.close(); } catch (cleanup) { errors.push(cleanup); }
-    try { await scripts.close(); } catch (cleanup) { errors.push(cleanup); }
+    try {
+      await image?.close();
+    } catch (cleanup) {
+      errors.push(cleanup);
+    }
+    try {
+      await scripts.close();
+    } catch (cleanup) {
+      errors.push(cleanup);
+    }
     if (errors.length > 1) throw new AggregateError(errors, "Initial configuration and cleanup failed");
     throw error;
   }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentDigest, ResolvedResourceReference } from "../../contracts/content.ts";
 import type { NativePrimaryWeaponProfile } from "./native-primary-weapons.ts";
 import type { NativePrimaryPlayerProfile } from "./native-primary-player.ts";
@@ -16,20 +17,35 @@ import { classicPrimaryWorldProfile, type ClassicPrimaryWorldProfile } from "./c
 import { rereleasePrimaryWorldProfile, type RereleasePrimaryWorldProfile } from "./rerelease/world-profile.ts";
 
 interface NativePrimaryServices {
-  readonly weapons: NativePrimaryWeaponProfile; readonly player: NativePrimaryPlayerProfile;
-  readonly commands: NativePrimaryCommandProfile; readonly inventory: NativePrimaryInventoryProfile;
-  readonly drop: NativePrimaryDropProfile; readonly pickups: NativePickupProfile;
+  readonly weapons: NativePrimaryWeaponProfile;
+  readonly player: NativePrimaryPlayerProfile;
+  readonly commands: NativePrimaryCommandProfile;
+  readonly inventory: NativePrimaryInventoryProfile;
+  readonly drop: NativePrimaryDropProfile;
+  readonly pickups: NativePickupProfile;
 }
-export type NativePrimaryProfile = NativePrimaryServices & (
-  | { readonly edition: "classic"; readonly world: ClassicPrimaryWorldProfile }
-  | { readonly edition: "rerelease"; readonly world: RereleasePrimaryWorldProfile }
-);
-export interface NativePrimaryDeclaration<P extends NativePrimaryProfile = NativePrimaryProfile> { readonly declaration: ResolvedResourceReference; readonly profile: P; }
+export type NativePrimaryProfile = NativePrimaryServices &
+  (
+    | { readonly edition: "classic"; readonly world: ClassicPrimaryWorldProfile }
+    | { readonly edition: "rerelease"; readonly world: RereleasePrimaryWorldProfile }
+  );
+export interface NativePrimaryDeclaration<P extends NativePrimaryProfile = NativePrimaryProfile> {
+  readonly declaration: ResolvedResourceReference;
+  readonly profile: P;
+}
 export function builtinNativePrimary(digest: ContentDigest, edition: NativePrimaryProfile["edition"]): NativePrimaryProfile | null {
-  const weapons = nativePrimaryWeaponProfile(digest), player = nativePrimaryPlayerProfile(digest), commands = nativePrimaryCommandProfile(digest),
-    inventory = nativePrimaryInventoryProfile(digest), drop = nativePrimaryDropProfile(digest), pickups = edition === "classic" ? classicPickupProfile(digest) : rereleasePickupProfile(digest);
+  const weapons = nativePrimaryWeaponProfile(digest),
+    player = nativePrimaryPlayerProfile(digest),
+    commands = nativePrimaryCommandProfile(digest),
+    inventory = nativePrimaryInventoryProfile(digest),
+    drop = nativePrimaryDropProfile(digest),
+    pickups = edition === "classic" ? classicPickupProfile(digest) : rereleasePickupProfile(digest);
   if (weapons === null || player === null || commands === null || inventory === null || drop === null || pickups === null) return null;
   const common = { weapons, player, commands, inventory, drop, pickups };
-  if (edition === "classic") { const world = classicPrimaryWorldProfile(digest); return world === null ? null : { ...common, edition, world }; }
-  const world = rereleasePrimaryWorldProfile(digest); return world === null ? null : { ...common, edition, world };
+  if (edition === "classic") {
+    const world = classicPrimaryWorldProfile(digest);
+    return world === null ? null : { ...common, edition, world };
+  }
+  const world = rereleasePrimaryWorldProfile(digest);
+  return world === null ? null : { ...common, edition, world };
 }

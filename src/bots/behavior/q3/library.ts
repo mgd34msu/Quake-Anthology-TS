@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Botlib behavior composition; the shared session owns actors, navigation and movement. GPL-2.0-or-later. */
 import { ScriptGlobalDefines } from "../../../content/legacy-script/preprocessor.ts";
 import type { BotSourceFiles } from "../assets.ts";
@@ -48,57 +49,126 @@ export class BotLibrary {
   private closed = false;
 
   constructor(readonly options: SourceBotLibraryOptions) {
-    const variables = this.variables, print = options.print, memory = this.memory;
+    const variables = this.variables,
+      print = options.print,
+      memory = this.memory;
     const reloadCharacters = (): boolean => variables.getValue("bot_reloadcharacters") !== 0;
     this.globals = new ScriptGlobalDefines(diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message), memory);
     this.sources = new BotScriptSources(options.files, this.globals, print, text => print(1, text), memory);
-    this.log = new BotLog({ variables, globals: this.logGlobals, print, openFile: options.openLog,
-      ...(options.resumeLog === undefined ? {} : { resumeFile: options.resumeLog }) });
+    this.log = new BotLog({
+      variables,
+      globals: this.logGlobals,
+      print,
+      openFile: options.openLog,
+      ...(options.resumeLog === undefined ? {} : { resumeFile: options.resumeLog }),
+    });
     this.weights = new WeightConfigStore(this.sources, { memory, reloadCharacters, print });
-    this.characters = new BotCharacterLibrary(this.sources, { memory, log: this.log, reloadCharacters,
-      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message) });
-    this.weapons = new WeaponAi({ resolver: this.sources, weights: this.weights }, { memory,
-      maxWeaponInfo: () => this.capacity("max_weaponinfo"), maxProjectileInfo: () => this.capacity("max_projectileinfo"),
-      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message) });
-    this.goals = new BotGoalLibrary({ memory, resolver: this.sources, weightStore: this.weights, log: this.log,
-      random: options.random, clock: () => this.time(), gameType: () => variables.value("g_gametype", "0"),
+    this.characters = new BotCharacterLibrary(this.sources, {
+      memory,
+      log: this.log,
+      reloadCharacters,
+      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message),
+    });
+    this.weapons = new WeaponAi(
+      { resolver: this.sources, weights: this.weights },
+      {
+        memory,
+        maxWeaponInfo: () => this.capacity("max_weaponinfo"),
+        maxProjectileInfo: () => this.capacity("max_projectileinfo"),
+        report: diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message),
+      },
+    );
+    this.goals = new BotGoalLibrary({
+      memory,
+      resolver: this.sources,
+      weightStore: this.weights,
+      log: this.log,
+      random: options.random,
+      clock: () => this.time(),
+      gameType: () => variables.value("g_gametype", "0"),
       maxItemInfo: { get: () => variables.value("max_iteminfo", "256"), set: value => variables.set("max_iteminfo", String(value)) },
-      maxLevelItems: () => variables.value("max_levelitems", "256"), droppedWeight: () => variables.value("droppedweight", "1000"),
+      maxLevelItems: () => variables.value("max_levelitems", "256"),
+      droppedWeight: () => variables.value("droppedweight", "1000"),
       developer: () => variables.getValue("bot_developer") !== 0,
-      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : diagnostic.severity === "error" ? 3 : 1, diagnostic.message) });
-    const commands = { *clientCommand(client: number, command: string) { options.clientCommand(client, command); return undefined; } };
+      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : diagnostic.severity === "error" ? 3 : 1, diagnostic.message),
+    });
+    const commands = {
+      *clientCommand(client: number, command: string) {
+        options.clientCommand(client, command);
+        return undefined;
+      },
+    };
     this.actions = new BotActionBuffer(null, commands, memory);
-    this.chat = new BotChatLibrary(this.sources, { random: options.random, time: () => this.time(), clientCommand: commands.clientCommand,
-      report: diagnostic => print(diagnostic.severity === "warning" ? 2 : diagnostic.severity === "error" || diagnostic.severity === "fatal" ? 3 : 1, diagnostic.message) },
-    { log: this.log, maxMessages: () => variables.value("max_messages", "1024"),
-      get synonymFile() { return variables.string("synfile", "syn.c"); },
-      get randomFile() { return variables.string("rndfile", "rnd.c"); },
-      get matchFile() { return variables.string("matchfile", "match.c"); },
-      get replyFile() { return variables.string("rchatfile", "rchat.c"); },
-      noChat: () => variables.value("nochat", "0") !== 0, reloadCharacters,
-      testInitialChats: () => variables.getValue("bot_testichat") !== 0,
-      testReplyChats: () => variables.getValue("bot_testrchat") !== 0,
-      developer: () => variables.getValue("bot_developer") !== 0 }, memory);
-    this.moveStates = new BotMoveStateStore({ time: () => this.time(), print,
-      libVar: (name, value) => variables.getOrCreate(name, value) }, memory);
+    this.chat = new BotChatLibrary(
+      this.sources,
+      {
+        random: options.random,
+        time: () => this.time(),
+        clientCommand: commands.clientCommand,
+        report: diagnostic =>
+          print(diagnostic.severity === "warning" ? 2 : diagnostic.severity === "error" || diagnostic.severity === "fatal" ? 3 : 1, diagnostic.message),
+      },
+      {
+        log: this.log,
+        maxMessages: () => variables.value("max_messages", "1024"),
+        get synonymFile() {
+          return variables.string("synfile", "syn.c");
+        },
+        get randomFile() {
+          return variables.string("rndfile", "rnd.c");
+        },
+        get matchFile() {
+          return variables.string("matchfile", "match.c");
+        },
+        get replyFile() {
+          return variables.string("rchatfile", "rchat.c");
+        },
+        noChat: () => variables.value("nochat", "0") !== 0,
+        reloadCharacters,
+        testInitialChats: () => variables.getValue("bot_testichat") !== 0,
+        testReplyChats: () => variables.getValue("bot_testrchat") !== 0,
+        developer: () => variables.getValue("bot_developer") !== 0,
+      },
+      memory,
+    );
+    this.moveStates = new BotMoveStateStore({ time: () => this.time(), print, libVar: (name, value) => variables.getOrCreate(name, value) }, memory);
   }
 
-  get debugBuild(): boolean { return this.options.debug; }
+  get debugBuild(): boolean {
+    return this.options.debug;
+  }
   captureSaveState(memory: import("../library/memory.ts").BotMemoryCapture) {
     if (this.closed) throw new Error("Cannot checkpoint a closed bot library");
-    return { version: 1, initialized: this.initialized, debug: this.options.debug, time: this.logGlobals.time,
-      variables: this.variables.checkpoint(memory), sources: this.sources.captureSaveState(memory),
-      characters: this.characters.checkpoint(memory), actions: this.actions.checkpoint(memory), chat: this.chat.checkpoint(memory),
-      weights: this.weights.checkpoint(memory), weapons: this.weapons.checkpoint(memory), goals: this.goals.checkpoint(memory),
-      movement: this.moveStates.checkpoint(memory, this.variables), log: this.log.captureSaveState() };
+    return {
+      version: 1,
+      initialized: this.initialized,
+      debug: this.options.debug,
+      time: this.logGlobals.time,
+      variables: this.variables.checkpoint(memory),
+      sources: this.sources.captureSaveState(memory),
+      characters: this.characters.checkpoint(memory),
+      actions: this.actions.checkpoint(memory),
+      chat: this.chat.checkpoint(memory),
+      weights: this.weights.checkpoint(memory),
+      weapons: this.weapons.checkpoint(memory),
+      goals: this.goals.checkpoint(memory),
+      movement: this.moveStates.checkpoint(memory, this.variables),
+      log: this.log.captureSaveState(),
+    };
   }
-  restoreSaveState(value: unknown, memory: import("../library/memory.ts").BotMemoryRestore,
-    world: GoalWorld | null, actor: (saved: import("../../../contracts/session.ts").SavedActorId) => import("../../../contracts/identity.ts").ActorId,
-    edge: (client: number, id: number) => import("../../navigation/types.ts").NavigationEdge | null): void {
+  restoreSaveState(
+    value: unknown,
+    memory: import("../library/memory.ts").BotMemoryRestore,
+    world: GoalWorld | null,
+    actor: (saved: import("../../../contracts/session.ts").SavedActorId) => import("../../../contracts/identity.ts").ActorId,
+    edge: (client: number, id: number) => import("../../navigation/types.ts").NavigationEdge | null,
+  ): void {
     if (this.initialized || this.closed) throw new Error("Bot library restoration requires a fresh owner");
-    const reader = new SaveReader(value, "bot.library"); reader.field("version").literal(1);
+    const reader = new SaveReader(value, "bot.library");
+    reader.field("version").literal(1);
     if (reader.field("debug").boolean() !== this.options.debug) throw new Error("Saved bot library debug profile differs");
-    const initialized = reader.field("initialized").boolean(), time = reader.field("time").finite();
+    const initialized = reader.field("initialized").boolean(),
+      time = reader.field("time").finite();
     this.variables.restore(reader.field("variables").value, memory);
     this.sources.restoreSaveState(reader.field("sources").value, memory);
     this.weights.restore(reader.field("weights").value, memory);
@@ -109,12 +179,18 @@ export class BotLibrary {
     this.goals.restore(reader.field("goals").value, memory, world, actor);
     this.moveStates.restore(reader.field("movement").value, memory, this.variables, edge);
     this.log.restoreSaveState(reader.field("log").value);
-    this.logGlobals.time = time; this.initialized = initialized;
+    this.logGlobals.time = time;
+    this.initialized = initialized;
   }
-  time(): number { return this.logGlobals.time; }
+  time(): number {
+    return this.logGlobals.time;
+  }
   private capacity(name: string): number {
     const value = Math.trunc(this.variables.value(name, "32"));
-    if (value < 1) { this.variables.set(name, "32"); return 32; }
+    if (value < 1) {
+      this.variables.set(name, "32");
+      return 32;
+    }
     return value;
   }
   setup(): number {
@@ -148,11 +224,21 @@ export class BotLibrary {
   }
   shutdown(): number {
     if (this.closed) return 0;
-    this.chat.shutdown(); this.moveStates.shutdown(); this.goals.shutdown(); this.weapons.shutdown();
-    this.weights.shutdown(); this.characters.shutdown(); this.actions.shutdown();
-    this.variables.clear(); this.globals.clear(); this.log.shutdown(); this.sources.checkOpenSourceHandles();
+    this.chat.shutdown();
+    this.moveStates.shutdown();
+    this.goals.shutdown();
+    this.weapons.shutdown();
+    this.weights.shutdown();
+    this.characters.shutdown();
+    this.actions.shutdown();
+    this.variables.clear();
+    this.globals.clear();
+    this.log.shutdown();
+    this.sources.checkOpenSourceHandles();
     this.sources.disposeResources();
-    this.memory.dispose(); this.closed = true; this.initialized = false;
+    this.memory.dispose();
+    this.closed = true;
+    this.initialized = false;
     return 0;
   }
 }

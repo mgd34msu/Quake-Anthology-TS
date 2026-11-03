@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Policy-clean access to simulation internals in tests: every reflected
 // value is bound to unknown and validated before use, never asserted.
 

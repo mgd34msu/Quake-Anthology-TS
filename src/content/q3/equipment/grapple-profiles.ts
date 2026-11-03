@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QvmModuleOptions } from "../../../compat/qvm/module.ts";
 import { lrctfGrappleProfile } from "./lrctf-grapple-profile.ts";
 import { threewaveGrappleProfile } from "./threewave-grapple-profile.ts";

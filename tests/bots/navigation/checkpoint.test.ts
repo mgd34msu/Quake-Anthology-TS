@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { NavigationRuntime } from "../../../src/bots/navigation/runtime.ts";
 import type { NavigationGraph } from "../../../src/bots/navigation/types.ts";
@@ -12,13 +13,40 @@ function fixture() {
   const world = navigationWorld(createSceneQueries(decodeQ3World(q3Fixture())));
   const origin = { x: 0, y: 0, z: 0 };
   const graph: NavigationGraph = {
-    map: { name: "checkpoint", format: "q3-bsp", digest: createContentDigest("0".repeat(64)) }, profile,
-    asset: null, clusters: [[1]], rejected: [],
-    nodes: [{ id: 1, origin, bounds: { min: origin, max: origin }, radius: 1, contents: 0, flags: 0, presence: 0,
-      sourceCluster: null, source: { kind: "constructed", surface: null, leaf: null } }],
-    edges: [{ id: 2, from: 1, to: 1, start: origin, end: origin, mode: "walk", travelSeconds: 1,
-      sourceTravelType: 0, sourceFlags: 0, hint: null, entity: null,
-      source: { kind: "constructed", surface: null, leaf: null } }],
+    map: { name: "checkpoint", format: "q3-bsp", digest: createContentDigest("0".repeat(64)) },
+    profile,
+    asset: null,
+    clusters: [[1]],
+    rejected: [],
+    nodes: [
+      {
+        id: 1,
+        origin,
+        bounds: { min: origin, max: origin },
+        radius: 1,
+        contents: 0,
+        flags: 0,
+        presence: 0,
+        sourceCluster: null,
+        source: { kind: "constructed", surface: null, leaf: null },
+      },
+    ],
+    edges: [
+      {
+        id: 2,
+        from: 1,
+        to: 1,
+        start: origin,
+        end: origin,
+        mode: "walk",
+        travelSeconds: 1,
+        sourceTravelType: 0,
+        sourceFlags: 0,
+        hint: null,
+        entity: null,
+        source: { kind: "constructed", surface: null, leaf: null },
+      },
+    ],
   };
   return { world, graph, runtime: new NavigationRuntime(graph, world) };
 }
@@ -49,7 +77,13 @@ test("navigation rejects malformed references and durations before mutating live
   const before = runtime.checkpoint();
   const malformed: readonly unknown[] = [
     { ...before, blocked: [{ id: 999, reason: "missing" }] },
-    { ...before, enabled: [{ id: 1, enabled: true }, { id: 1, enabled: false }] },
+    {
+      ...before,
+      enabled: [
+        { id: 1, enabled: true },
+        { id: 1, enabled: false },
+      ],
+    },
     { ...before, admissionSeconds: [{ id: 2, seconds: -1 }] },
     { ...before, admissionSeconds: [{ id: 2, seconds: Infinity }] },
     { ...before, generation: 1.5 },

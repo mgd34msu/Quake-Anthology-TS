@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Observations and commands from the common the reference port
 // rerelease brain. The selected game supplies observations of its admitted
 // actor; SharedBotPopulation passes the resulting command to that actor's

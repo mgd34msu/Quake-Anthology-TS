@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Library variables translated from id Software's botlib/l_libvar.c.
@@ -9,7 +10,8 @@ import type { BotMemoryAllocation } from "./memory.ts";
 
 function sameName(name: Uint8Array, readByte: (index: number) => number): boolean {
   for (let index = 0; index < 99999; index++) {
-    const a = name[index], b = readByte(index);
+    const a = name[index],
+      b = readByte(index);
     if (a === undefined || !Number.isInteger(b) || b < 0 || b > 255) throw new RangeError("Source name read requires an allocated byte");
     const left = a >= 97 && a <= 122 ? a - 32 : a;
     const right = b >= 97 && b <= 122 ? b - 32 : b;
@@ -106,53 +108,82 @@ export class BotLibVars {
   constructor(private readonly memory = new BotMemory()) {}
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { nextPointer: this.nextPointer, head: this.head,
+    return {
+      nextPointer: this.nextPointer,
+      head: this.head,
       records: [...this.records].map(([pointer, record]) => ({ pointer, allocation: memory.reference(record.allocation) })),
-      strings: [...this.strings].map(([pointer, string]) => ({ pointer, allocation: memory.reference(string.allocation), offset: string.offset })) };
+      strings: [...this.strings].map(([pointer, string]) => ({ pointer, allocation: memory.reference(string.allocation), offset: string.offset })),
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.variables"), image = { nextPointer: reader.field("nextPointer").integer(1), head: reader.field("head").integer(0),
-      records: reader.field("records").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
-      strings: reader.field("strings").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0), offset: entry.field("offset").integer(0) })) };
-    if (this.records.size !== 0 || this.strings.size !== 0 || !Number.isSafeInteger(image.nextPointer)
-      || image.nextPointer < 1 || image.nextPointer > 0x100000000) throw new Error("Invalid bot library variable restoration");
-    const records = new Map<number, VariableRecord>(), strings = new Map<number, StringPointer>();
+    const reader = new SaveReader(value, "bot.variables"),
+      image = {
+        nextPointer: reader.field("nextPointer").integer(1),
+        head: reader.field("head").integer(0),
+        records: reader.field("records").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
+        strings: reader.field("strings").list(entry => ({
+          pointer: entry.field("pointer").integer(1),
+          allocation: entry.field("allocation").integer(0),
+          offset: entry.field("offset").integer(0),
+        })),
+      };
+    if (
+      this.records.size !== 0 ||
+      this.strings.size !== 0 ||
+      !Number.isSafeInteger(image.nextPointer) ||
+      image.nextPointer < 1 ||
+      image.nextPointer > 0x100000000
+    )
+      throw new Error("Invalid bot library variable restoration");
+    const records = new Map<number, VariableRecord>(),
+      strings = new Map<number, StringPointer>();
     const pointers = new Set<number>();
     const admit = (pointer: number): void => {
-      if (!Number.isSafeInteger(pointer) || pointer < 1 || pointer >= image.nextPointer || pointers.has(pointer)) throw new Error("Invalid saved bot variable pointer");
+      if (!Number.isSafeInteger(pointer) || pointer < 1 || pointer >= image.nextPointer || pointers.has(pointer))
+        throw new Error("Invalid saved bot variable pointer");
       pointers.add(pointer);
     };
     for (const entry of image.strings) {
       admit(entry.pointer);
       const allocation = memory.allocation(entry.allocation);
-      if (!Number.isSafeInteger(entry.offset) || entry.offset < 0 || entry.offset >= allocation.bytes.length
-        || !allocation.bytes.subarray(entry.offset).includes(0)) throw new Error("Invalid saved bot variable string");
+      if (
+        !Number.isSafeInteger(entry.offset) ||
+        entry.offset < 0 ||
+        entry.offset >= allocation.bytes.length ||
+        !allocation.bytes.subarray(entry.offset).includes(0)
+      )
+        throw new Error("Invalid saved bot variable string");
       strings.set(entry.pointer, { allocation, offset: entry.offset });
     }
     for (const entry of image.records) {
       admit(entry.pointer);
       const allocation = memory.allocation(entry.allocation);
       if (allocation.bytes.length < RECORD_BYTES + 1) throw new Error("Saved bot variable record is truncated");
-      const record = this.bind(allocation), view = recordView(record);
+      const record = this.bind(allocation),
+        view = recordView(record);
       if (!strings.has(view.getUint32(0, true)) || !strings.has(view.getUint32(4, true))) throw new Error("Saved bot variable string reference is missing");
       records.set(entry.pointer, record);
     }
     const visited = new Set<number>();
-    for (let pointer = image.head; pointer !== 0;) {
+    for (let pointer = image.head; pointer !== 0; ) {
       const record = records.get(pointer);
       if (record === undefined || visited.has(pointer)) throw new Error("Invalid saved bot variable list");
-      visited.add(pointer); pointer = recordView(record).getUint32(20, true);
+      visited.add(pointer);
+      pointer = recordView(record).getUint32(20, true);
     }
     if (visited.size !== records.size) throw new Error("Saved bot variable list has unreachable records");
     for (const [pointer, record] of records) this.records.set(pointer, record);
     for (const [pointer, string] of strings) this.strings.set(pointer, string);
-    this.head = image.head; this.nextPointer = image.nextPointer;
+    this.head = image.head;
+    this.nextPointer = image.nextPointer;
   }
   reference(variable: Pick<BotLibVar, "string" | "value">): number {
     for (const [pointer, record] of this.records) if (record.value === variable) return pointer;
     throw new Error("Bot library variable reference belongs to another owner");
   }
-  resolve(pointer: number): BotLibVar { return this.record(pointer).value; }
+  resolve(pointer: number): BotLibVar {
+    return this.record(pointer).value;
+  }
 
   private pointer(): number {
     if (this.nextPointer > 0xffffffff) throw new RangeError("Bot library variable pointer IDs exhausted");
@@ -181,22 +212,37 @@ export class BotLibVars {
 
   private bind(allocation: BotMemoryAllocation): VariableRecord {
     const owner = this;
-    const record: VariableRecord = { allocation, value: {
-      get name(): string { return owner.readString(recordView(record).getUint32(0, true)); },
-      get string(): string { return owner.readString(recordView(record).getUint32(4, true)); },
-      get flags(): number { return recordView(record).getInt32(8, true); },
-      get modified(): boolean { return recordView(record).getInt32(12, true) !== 0; },
-      get value(): number { return recordView(record).getFloat32(16, true); },
-    } };
+    const record: VariableRecord = {
+      allocation,
+      value: {
+        get name(): string {
+          return owner.readString(recordView(record).getUint32(0, true));
+        },
+        get string(): string {
+          return owner.readString(recordView(record).getUint32(4, true));
+        },
+        get flags(): number {
+          return recordView(record).getInt32(8, true);
+        },
+        get modified(): boolean {
+          return recordView(record).getInt32(12, true) !== 0;
+        },
+        get value(): number {
+          return recordView(record).getFloat32(16, true);
+        },
+      },
+    };
     return record;
   }
 
   private allocate(name: string): VariableRecord {
-    const pointer = this.pointer(), namePointer = this.pointer();
+    const pointer = this.pointer(),
+      namePointer = this.pointer();
     const allocation = this.memory.allocate(RECORD_BYTES + name.length + 1, "heap", false);
     allocation.bytes.fill(0, 0, RECORD_BYTES);
     writeText(allocation.bytes, RECORD_BYTES, name);
-    const record = this.bind(allocation), view = recordView(record);
+    const record = this.bind(allocation),
+      view = recordView(record);
     view.setUint32(0, namePointer, true);
     view.setUint32(20, this.head, true);
     this.strings.set(namePointer, { allocation, offset: RECORD_BYTES });
@@ -228,7 +274,7 @@ export class BotLibVars {
 
   get(name: string): BotLibVar | null {
     const visible = byteCString(name);
-    return this.getByNameBytes(index => index < visible.length ? visible.charCodeAt(index) : 0)?.value ?? null;
+    return this.getByNameBytes(index => (index < visible.length ? visible.charCodeAt(index) : 0))?.value ?? null;
   }
 
   getString(name: string): string {
@@ -243,7 +289,7 @@ export class BotLibVars {
   private getByNameBytes(readByte: ((index: number) => number) | null): VariableRecord | null {
     if (readByte === null) return null;
     // LibVarAlloc prepends new variables; updating an existing variable leaves its position alone.
-    for (let pointer = this.head; pointer !== 0;) {
+    for (let pointer = this.head; pointer !== 0; ) {
       const variable = this.record(pointer);
       if (sameName(variable.allocation.bytes.subarray(RECORD_BYTES), readByte)) return variable;
       pointer = recordView(variable).getUint32(20, true);
@@ -278,16 +324,14 @@ export class BotLibVars {
     const visibleName = byteCString(name);
     const text = byteCString(value);
     const numericValue = parseValue(text);
-    const existing = this.getByNameBytes(index => index < visibleName.length ? visibleName.charCodeAt(index) : 0);
+    const existing = this.getByNameBytes(index => (index < visibleName.length ? visibleName.charCodeAt(index) : 0));
     if (existing !== null) this.freeString(existing);
     const variable = existing ?? this.allocate(visibleName);
     this.assign(variable, text, numericValue);
   }
 
   /** LibVarSet consumes a full borrowed name only when LibVarAlloc needs a new variable. */
-  setByNameBytes(
-    readByte: ((index: number) => number) | null, readName: () => string, readValue: () => string,
-  ): void {
+  setByNameBytes(readByte: ((index: number) => number) | null, readName: () => string, readValue: () => string): void {
     const existing = this.getByNameBytes(readByte);
     const name = existing === null ? readName() : existing.value.name;
     this.set(name, readValue());
@@ -299,7 +343,7 @@ export class BotLibVars {
 
   setNotModified(name: string): void {
     const visible = byteCString(name);
-    const variable = this.getByNameBytes(index => index < visible.length ? visible.charCodeAt(index) : 0);
+    const variable = this.getByNameBytes(index => (index < visible.length ? visible.charCodeAt(index) : 0));
     if (variable !== null) recordView(variable).setInt32(12, 0, true);
   }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software game/q_shared.h:pc_token_t, botlib/l_precomp.c:PC_ReadTokenHandle
 // and botlib/l_script.c:StripDoubleQuotes. Copyright (C) 1999-2005 Id Software, Inc.
 // GPL-2.0-or-later.
@@ -9,12 +10,18 @@ export const QVM_SCRIPT_TOKEN_BYTES = 1040;
 
 function tokenType(token: ScriptToken): number {
   switch (token.kind) {
-    case "primitive": return 0;
-    case "string": return 1;
-    case "literal": return 2;
-    case "number": return 3;
-    case "name": return 4;
-    case "punctuation": return 5;
+    case "primitive":
+      return 0;
+    case "string":
+      return 1;
+    case "literal":
+      return 2;
+    case "number":
+      return 3;
+    case "name":
+      return 4;
+    case "punctuation":
+      return 5;
   }
 }
 
@@ -34,8 +41,7 @@ function stringLength(text: string): number {
  */
 export function writeQvmScriptToken(view: DataView, value: ScriptTokenRecord | SourceTokenMemory): void {
   if (view.byteLength < QVM_SCRIPT_TOKEN_BYTES) {
-    throw new BinaryError("QVM pc_token_t", 0,
-      `record requires ${QVM_SCRIPT_TOKEN_BYTES} bytes, received ${view.byteLength}`);
+    throw new BinaryError("QVM pc_token_t", 0, `record requires ${QVM_SCRIPT_TOKEN_BYTES} bytes, received ${view.byteLength}`);
   }
   const text = value instanceof SourceTokenMemory ? value.string : value.token.text;
   const length = stringLength(text);

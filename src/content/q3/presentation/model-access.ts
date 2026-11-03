@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Axis, Bounds, Vec3 } from "../../../contracts/math.ts";
 import { interpolateMd3Tags } from "../../../formats/q3-model/md3.ts";
 import { sampleMd5Pose } from "../../../formats/q3-model/md5.ts";
@@ -12,13 +13,21 @@ export function modelBounds(source: SceneModel): Bounds {
   if (model.kind === "brush-model") return model.world.models[model.model]?.bounds ?? ZERO;
   return model.frames[0]?.bounds ?? ZERO;
 }
-export function lerpModelTag(source: SceneModel, name: string, start: number, end: number, fraction: number): { readonly origin: Vec3; readonly axes: Axis } | null {
+export function lerpModelTag(
+  source: SceneModel,
+  name: string,
+  start: number,
+  end: number,
+  fraction: number,
+): { readonly origin: Vec3; readonly axes: Axis } | null {
   if (source.kind !== "model") return null;
   const model = source.model;
   if (model.kind === "q3-md3") {
     const first = model.tags[Math.min(start, model.frames.length - 1)]?.find(tag => tag.name === name);
     const second = model.tags[Math.min(end, model.frames.length - 1)]?.find(tag => tag.name === name);
-    return first === undefined || second === undefined ? null : interpolateMd3Tags({ ...first, axes: first.axis }, { ...second, axes: second.axis }, name, fraction);
+    return first === undefined || second === undefined
+      ? null
+      : interpolateMd3Tags({ ...first, axes: first.axis }, { ...second, axes: second.axis }, name, fraction);
   }
   if (model.kind === "md5") {
     const index = model.joints.findIndex(joint => joint.name === name);

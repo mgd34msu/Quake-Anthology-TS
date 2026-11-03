@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { movementBounds } from "../body-shape.ts";
 import { q3InvulnerabilityPose } from "./postures.ts";
 // Ported from id Software's code/game/bg_pmove.c.
@@ -16,8 +17,10 @@ import type { Q3Motion, Q3Command, Q3MotionOptions, Q3MotionResult, Q3MovementTr
 const ALL_TIMES = F.TIME_WATERJUMP | F.TIME_LAND | F.TIME_KNOCKBACK;
 export function dropQ3MovementTimers(state: { pmTime: number; pmFlags: number }, milliseconds: number): void {
   if (state.pmTime) {
-    if (milliseconds >= state.pmTime) { state.pmFlags &= ~ALL_TIMES; state.pmTime = 0; }
-    else state.pmTime -= milliseconds;
+    if (milliseconds >= state.pmTime) {
+      state.pmFlags &= ~ALL_TIMES;
+      state.pmTime = 0;
+    } else state.pmTime -= milliseconds;
   }
 }
 const MASK_WATER = 32 | 16 | 8;
@@ -27,18 +30,18 @@ const SURF_LADDER = 8;
 const SURF_NODAMAGE = 1;
 const SURF_METALSTEPS = 0x1000;
 const SURF_NOSTEPS = 0x2000;
-const zeroBounds: Bounds = { min: vec3(0,0,0), max: vec3(0,0,0) };
+const zeroBounds: Bounds = { min: vec3(0, 0, 0), max: vec3(0, 0, 0) };
 /** x87 fistp / C rint semantics used by the source engine's Sys_SnapVector. */
 function snap(value: number): number {
   const floor = Math.floor(value);
   const fraction = value - floor;
-  return fraction < 0.5 ? floor : fraction > 0.5 ? floor + 1 : (floor % 2 === 0 ? floor : floor + 1);
+  return fraction < 0.5 ? floor : fraction > 0.5 ? floor + 1 : floor % 2 === 0 ? floor : floor + 1;
 }
 
 export function updateViewAngles(ps: Q3Motion, cmd: Q3Command): void {
-  const value = q3ViewAngles(cmd.angles, ps.deltaAngles, ps.viewangles, ps.health, ps.pmType,
-    [MoveType.PM_INTERMISSION, MoveType.PM_SPINTERMISSION]);
-  ps.viewangles = value.angles; ps.deltaAngles = value.delta;
+  const value = q3ViewAngles(cmd.angles, ps.deltaAngles, ps.viewangles, ps.health, ps.pmType, [MoveType.PM_INTERMISSION, MoveType.PM_SPINTERMISSION]);
+  ps.viewangles = value.angles;
+  ps.deltaAngles = value.delta;
 }
 
 class MoveStep implements SlideMoveContext {
@@ -61,19 +64,24 @@ class MoveStep implements SlideMoveContext {
   readonly mask: number;
   readonly trace: Q3MovementTraceFunction;
 
-  constructor(readonly state: Q3Motion, readonly cmd: Q3Command,
-    readonly options: Q3MotionOptions) {
+  constructor(
+    readonly state: Q3Motion,
+    readonly cmd: Q3Command,
+    readonly options: Q3MotionOptions,
+  ) {
     this.bounds = options.currentBounds ?? options.standingBounds;
     this.msec = Math.max(1, Math.min(200, cmd.serverTime - state.commandTime));
     this.frameTime = Math.fround(this.msec * Math.fround(0.001));
     this.previousOrigin = state.origin;
     this.previousVelocity = state.velocity;
-    const mask = options.traceMask ?? (1 | 0x10000 | CONTENTS_BODY);
+    const mask = options.traceMask ?? 1 | 0x10000 | CONTENTS_BODY;
     this.mask = state.health <= 0 ? mask & ~CONTENTS_BODY : mask;
     this.trace = options.trace;
   }
 
-  event(event: number): void { this.options.event(event); }
+  event(event: number): void {
+    this.options.event(event);
+  }
   debug(message: string): void {
     const diagnostics = this.options.diagnostics;
     if (diagnostics !== undefined && diagnostics.level !== 0) {
@@ -82,15 +90,21 @@ class MoveStep implements SlideMoveContext {
   }
   touch(trace: TraceResult): void {
     const hit = trace.hit;
-    if (hit.kind !== "actor" || this.contacts.length >= 32 || this.contacts.some(previous =>
-      previous.hit.kind === "actor" && sameActor(previous.hit.actor, hit.actor))) return;
+    if (
+      hit.kind !== "actor" ||
+      this.contacts.length >= 32 ||
+      this.contacts.some(previous => previous.hit.kind === "actor" && sameActor(previous.hit.actor, hit.actor))
+    )
+      return;
     this.contacts.push(trace);
     this.options.contact(trace);
   }
   private test(start: Vec3, end: Vec3): TraceResult {
     return this.trace(start, end, this.bounds, this.state.actor, this.mask);
   }
-  private contents(point: Vec3): number { return this.options.pointContents(point, this.state.actor); }
+  private contents(point: Vec3): number {
+    return this.options.pointContents(point, this.state.actor);
+  }
 
   private legs(animation: A, force = false): void {
     this.options.animation({ kind: "legs", animation, force });
@@ -108,10 +122,13 @@ class MoveStep implements SlideMoveContext {
     const ps = this.state;
     const velocity = ps.velocity;
     const speed = Math.fround(length3(this.walking ? vec3(velocity.x, velocity.y, 0) : velocity));
-    if (speed < 1) { ps.velocity = vec3(0, 0, velocity.z); return; }
+    if (speed < 1) {
+      ps.velocity = vec3(0, 0, velocity.z);
+      return;
+    }
     let drop = 0;
-    if (this.waterlevel <= 1 && this.walking && !(this.groundSurfaceFlags & SURF_SLICK) &&
-      !(ps.pmFlags & F.TIME_KNOCKBACK)) drop = Math.fround(Math.fround(Math.max(speed, 100) * 6) * this.frameTime);
+    if (this.waterlevel <= 1 && this.walking && !(this.groundSurfaceFlags & SURF_SLICK) && !(ps.pmFlags & F.TIME_KNOCKBACK))
+      drop = Math.fround(Math.fround(Math.max(speed, 100) * 6) * this.frameTime);
     if (this.waterlevel) drop = Math.fround(drop + Math.fround(Math.fround(speed * this.waterlevel) * this.frameTime));
     if (ps.flight) drop = Math.fround(drop + Math.fround(Math.fround(speed * 3) * this.frameTime));
     if (ps.pmType === MoveType.PM_SPECTATOR) drop = Math.fround(drop + Math.fround(Math.fround(speed * 5) * this.frameTime));
@@ -134,15 +151,17 @@ class MoveStep implements SlideMoveContext {
   private movementDirection(): void {
     const f = this.cmd.forwardmove;
     const r = this.cmd.rightmove;
-    if (f || r) this.state.movementDir = f > 0 ? (r < 0 ? 1 : r > 0 ? 7 : 0) :
-      f < 0 ? (r < 0 ? 3 : r > 0 ? 5 : 4) : r < 0 ? 2 : 6;
+    if (f || r) this.state.movementDir = f > 0 ? (r < 0 ? 1 : r > 0 ? 7 : 0) : f < 0 ? (r < 0 ? 3 : r > 0 ? 5 : 4) : r < 0 ? 2 : 6;
     else if (this.state.movementDir === 2) this.state.movementDir = 1;
     else if (this.state.movementDir === 6) this.state.movementDir = 7;
   }
   private checkJump(): boolean {
     const ps = this.state;
     if (ps.pmFlags & F.RESPAWNED || this.cmd.upmove < 10) return false;
-    if (ps.pmFlags & F.JUMP_HELD) { this.cmd.upmove = 0; return false; }
+    if (ps.pmFlags & F.JUMP_HELD) {
+      this.cmd.upmove = 0;
+      return false;
+    }
     this.groundNormal = null;
     this.walking = false;
     ps.pmFlags |= F.JUMP_HELD;
@@ -157,8 +176,7 @@ class MoveStep implements SlideMoveContext {
     if (ps.pmTime !== 0 || this.waterlevel !== 2) return false;
     const flat = normalize3(vec3(this.forward.x, this.forward.y, 0));
     const point = add3(ps.origin, scale3(flat, 30));
-    if (!(this.contents(vec3(point.x, point.y, point.z + 4)) & 1) ||
-      this.contents(vec3(point.x, point.y, point.z + 20)) !== 0) return false;
+    if (!(this.contents(vec3(point.x, point.y, point.z + 4)) & 1) || this.contents(vec3(point.x, point.y, point.z + 20)) !== 0) return false;
     const velocity = scale3(this.forward, 200);
     ps.velocity = vec3(velocity.x, velocity.y, 350);
     ps.pmFlags |= F.TIME_WATERJUMP;
@@ -169,17 +187,25 @@ class MoveStep implements SlideMoveContext {
     stepSlideMove(this, true);
     const ps = this.state;
     ps.velocity = vec3(ps.velocity.x, ps.velocity.y, ps.velocity.z - Math.fround(ps.gravity * this.frameTime));
-    if (ps.velocity.z < 0) { ps.pmFlags &= ~ALL_TIMES; ps.pmTime = 0; }
+    if (ps.velocity.z < 0) {
+      ps.pmFlags &= ~ALL_TIMES;
+      ps.pmTime = 0;
+    }
   }
   private wishVelocity(scale: number): Vec3 {
-    const component = (forward: number, right: number): number => Math.fround(
-      Math.fround(Math.fround(scale * forward) * this.cmd.forwardmove) +
-      Math.fround(Math.fround(scale * right) * this.cmd.rightmove));
-    return vec3(component(this.forward.x, this.right.x), component(this.forward.y, this.right.y),
-      component(this.forward.z, this.right.z) + Math.fround(scale * this.cmd.upmove));
+    const component = (forward: number, right: number): number =>
+      Math.fround(Math.fround(Math.fround(scale * forward) * this.cmd.forwardmove) + Math.fround(Math.fround(scale * right) * this.cmd.rightmove));
+    return vec3(
+      component(this.forward.x, this.right.x),
+      component(this.forward.y, this.right.y),
+      component(this.forward.z, this.right.z) + Math.fround(scale * this.cmd.upmove),
+    );
   }
   private waterMove(): void {
-    if (this.checkWaterJump()) { this.waterJumpMove(); return; }
+    if (this.checkWaterJump()) {
+      this.waterJumpMove();
+      return;
+    }
     this.friction();
     const scale = this.commandScale();
     const wish = scale === 0 ? vec3(0, 0, -60) : this.wishVelocity(scale);
@@ -218,9 +244,13 @@ class MoveStep implements SlideMoveContext {
     if (trace.fraction < 1 && trace.kind === "q3" && (trace.surfaceFlags & SURF_LADDER) !== 0) this.ladder = true;
   }
   private ladderMove(): void {
-    if (this.walking && this.checkJump()) { this.airMove(); return; }
+    if (this.walking && this.checkJump()) {
+      this.airMove();
+      return;
+    }
     this.friction();
-    const ps = this.state, cmd = this.cmd;
+    const ps = this.state,
+      cmd = this.cmd;
     const wish = this.wishVelocity(this.commandScale());
     let wishZ = wish.z;
     if (Math.abs(ps.velocity.z) <= 200) {
@@ -232,7 +262,8 @@ class MoveStep implements SlideMoveContext {
     const wishVel = vec3(wish.x, wish.y, Math.fround(wishZ));
     this.accelerate(normalize3(wishVel), Math.fround(length3(wishVel)), 10);
     if (wishVel.z === 0) {
-      if (ps.velocity.z > 0) ps.velocity = vec3(ps.velocity.x, ps.velocity.y, Math.max(0, Math.fround(ps.velocity.z - Math.fround(ps.gravity * this.frameTime))));
+      if (ps.velocity.z > 0)
+        ps.velocity = vec3(ps.velocity.x, ps.velocity.y, Math.max(0, Math.fround(ps.velocity.z - Math.fround(ps.gravity * this.frameTime))));
       else ps.velocity = vec3(ps.velocity.x, ps.velocity.y, Math.min(0, Math.fround(ps.velocity.z + Math.fround(ps.gravity * this.frameTime))));
     }
     stepSlideMove(this, false);
@@ -244,8 +275,15 @@ class MoveStep implements SlideMoveContext {
   private walkMove(): void {
     const normal = this.groundNormal;
     if (normal === null) throw new Error("Walking requires a ground plane");
-    if (this.waterlevel > 2 && dot3(this.forward, normal) > 0) { this.waterMove(); return; }
-    if (this.checkJump()) { if (this.waterlevel > 1) this.waterMove(); else this.airMove(); return; }
+    if (this.waterlevel > 2 && dot3(this.forward, normal) > 0) {
+      this.waterMove();
+      return;
+    }
+    if (this.checkJump()) {
+      if (this.waterlevel > 1) this.waterMove();
+      else this.airMove();
+      return;
+    }
     this.friction();
     const ps = this.state;
     const scale = this.commandScale();
@@ -271,15 +309,16 @@ class MoveStep implements SlideMoveContext {
     const ps = this.state;
     ps.viewheight = this.options.postures.standingViewHeight;
     const speed = Math.fround(length3(ps.velocity));
-    ps.velocity = speed < 1 ? vec3(0, 0, 0) : scale3(ps.velocity,
-      Math.fround(Math.max(0, Math.fround(speed - Math.fround(Math.fround(Math.max(100, speed) * 9) * this.frameTime))) / speed));
+    ps.velocity =
+      speed < 1
+        ? vec3(0, 0, 0)
+        : scale3(ps.velocity, Math.fround(Math.max(0, Math.fround(speed - Math.fround(Math.fround(Math.max(100, speed) * 9) * this.frameTime))) / speed));
     const wish = this.wishVelocity(1);
     this.accelerate(normalize3(wish), Math.fround(Math.fround(length3(wish)) * this.commandScale()), 10);
     ps.origin = add3(ps.origin, scale3(ps.velocity, this.frameTime));
   }
   private footstepForSurface(): number {
-    return this.groundSurfaceFlags & SURF_NOSTEPS ? 0 :
-      this.groundSurfaceFlags & SURF_METALSTEPS ? EntityEvent.EV_FOOTSTEP_METAL : EntityEvent.EV_FOOTSTEP;
+    return this.groundSurfaceFlags & SURF_NOSTEPS ? 0 : this.groundSurfaceFlags & SURF_METALSTEPS ? EntityEvent.EV_FOOTSTEP_METAL : EntityEvent.EV_FOOTSTEP;
   }
   private crashLand(): void {
     const ps = this.state;
@@ -287,7 +326,7 @@ class MoveStep implements SlideMoveContext {
     this.options.animation({ kind: "legs-timer", milliseconds: 130 });
     const dist = Math.fround(ps.origin.z - this.previousOrigin.z);
     const velocity = this.previousVelocity.z;
-    const acceleration = Math.fround((-ps.gravity) | 0);
+    const acceleration = Math.fround(-ps.gravity | 0);
     const a = Math.fround(acceleration / 2);
     const discriminant = Math.fround(Math.fround(velocity * velocity) - Math.fround(Math.fround(4 * a) * -dist));
     if (discriminant < 0) return;
@@ -301,8 +340,9 @@ class MoveStep implements SlideMoveContext {
     if (delta < 1) return;
     if (!(this.groundSurfaceFlags & SURF_NODAMAGE)) {
       if (delta > 60) this.event(EntityEvent.EV_FALL_FAR);
-      else if (delta > 40) { if (ps.health > 0) this.event(EntityEvent.EV_FALL_MEDIUM); }
-      else if (delta > 7) this.event(EntityEvent.EV_FALL_SHORT);
+      else if (delta > 40) {
+        if (ps.health > 0) this.event(EntityEvent.EV_FALL_MEDIUM);
+      } else if (delta > 7) this.event(EntityEvent.EV_FALL_SHORT);
       else this.event(this.footstepForSurface());
     }
     ps.bobCycle = 0;
@@ -326,9 +366,12 @@ class MoveStep implements SlideMoveContext {
           }
         }
       }
-      if (!corrected) { this.leaveGround(); return; }
+      if (!corrected) {
+        this.leaveGround();
+        return;
+      }
     }
-    this.groundSurfaceFlags = trace.kind === "q3" ? trace.surfaceFlags : trace.kind === "q2" ? trace.surface?.flags ?? 0 : 0;
+    this.groundSurfaceFlags = trace.kind === "q3" ? trace.surfaceFlags : trace.kind === "q2" ? (trace.surface?.flags ?? 0) : 0;
     if (trace.fraction === 1) {
       if (ps.ground.kind !== "none") {
         this.debug("lift");
@@ -338,23 +381,36 @@ class MoveStep implements SlideMoveContext {
       return;
     }
     // An unresolved all-solid trace has no normal in the collision contract.
-    if (trace.contact.kind !== "plane") { this.leaveGround(); return; }
+    if (trace.contact.kind !== "plane") {
+      this.leaveGround();
+      return;
+    }
     const normal = trace.contact.plane.normal;
     if (ps.velocity.z > 0 && dot3(ps.velocity, normal) > 10) {
       this.debug("kickoff");
-      this.jumpAnimation(); this.leaveGround(); return;
+      this.jumpAnimation();
+      this.leaveGround();
+      return;
     }
     this.groundNormal = normal;
     if (normal.z < Math.fround(0.7)) {
       this.debug("steep");
-      ps.ground = { kind: "none" }; this.walking = false; return;
+      ps.ground = { kind: "none" };
+      this.walking = false;
+      return;
     }
     this.walking = true;
-    if (ps.pmFlags & F.TIME_WATERJUMP) { ps.pmFlags &= ~(F.TIME_WATERJUMP | F.TIME_LAND); ps.pmTime = 0; }
+    if (ps.pmFlags & F.TIME_WATERJUMP) {
+      ps.pmFlags &= ~(F.TIME_WATERJUMP | F.TIME_LAND);
+      ps.pmTime = 0;
+    }
     if (ps.ground.kind === "none") {
       this.debug("Land");
       this.crashLand();
-      if (this.previousVelocity.z < -200) { ps.pmFlags |= F.TIME_LAND; ps.pmTime = 250; }
+      if (this.previousVelocity.z < -200) {
+        ps.pmFlags |= F.TIME_LAND;
+        ps.pmTime = 250;
+      }
     }
     ps.ground = trace.hit;
     this.touch(trace);
@@ -381,7 +437,8 @@ class MoveStep implements SlideMoveContext {
   private checkDuck(): void {
     const ps = this.state;
     const standingBounds = this.options.standingBounds;
-    const previousBounds = this.bounds, previousDuck = ps.pmFlags & F.DUCKED;
+    const previousBounds = this.bounds,
+      previousDuck = ps.pmFlags & F.DUCKED;
     const postures = this.options.postures;
     if (ps.invulnerable || this.options.pose !== undefined) {
       const pose = this.options.pose ?? q3InvulnerabilityPose((ps.pmFlags & F.INVULEXPAND) !== 0, postures);
@@ -406,12 +463,18 @@ class MoveStep implements SlideMoveContext {
     const requested = this.options.bodyBounds ?? this.bounds;
     // id applies the posture hull unconditionally and leaves overlap to PM_CorrectAllSolid; only a hull supplied by a
     // client output (a foreign body shape) keeps the shared expansion test.
-    const accepted = this.options.bodyBounds === undefined ? requested : movementBounds(previousBounds, requested, bounds => {
-      const trace = this.options.trace(ps.origin, ps.origin, bounds, ps.actor, this.mask);
-      return !trace.allSolid;
-    });
+    const accepted =
+      this.options.bodyBounds === undefined
+        ? requested
+        : movementBounds(previousBounds, requested, bounds => {
+            const trace = this.options.trace(ps.origin, ps.origin, bounds, ps.actor, this.mask);
+            return !trace.allSolid;
+          });
     this.bounds = accepted;
-    if (accepted !== requested) { ps.pmFlags = (ps.pmFlags & ~F.DUCKED) | previousDuck; ps.viewheight = previousDuck ? postures.crouched.viewHeight : postures.standingViewHeight; }
+    if (accepted !== requested) {
+      ps.pmFlags = (ps.pmFlags & ~F.DUCKED) | previousDuck;
+      ps.viewheight = previousDuck ? postures.crouched.viewHeight : postures.standingViewHeight;
+    }
   }
   private footsteps(): void {
     const ps = this.state;
@@ -424,16 +487,26 @@ class MoveStep implements SlideMoveContext {
       return;
     }
     if (!this.cmd.forwardmove && !this.cmd.rightmove) {
-      if (this.xyspeed < 5) { ps.bobCycle = 0; this.legs(ps.pmFlags & F.DUCKED ? A.LEGS_IDLECR : A.LEGS_IDLE); }
+      if (this.xyspeed < 5) {
+        ps.bobCycle = 0;
+        this.legs(ps.pmFlags & F.DUCKED ? A.LEGS_IDLECR : A.LEGS_IDLE);
+      }
       return;
     }
     let bob: number;
     let footstep = false;
     const backwards = ps.pmFlags & F.BACKWARDS_RUN;
-    if (ps.pmFlags & F.DUCKED) { bob = 0.5; this.legs(backwards ? A.LEGS_BACKCR : A.LEGS_WALKCR); }
-    else if (!(this.cmd.buttons & B.WALKING)) {
-      bob = 0.4; footstep = true; this.legs(backwards ? A.LEGS_BACK : A.LEGS_RUN);
-    } else { bob = 0.3; this.legs(backwards ? A.LEGS_BACKWALK : A.LEGS_WALK); }
+    if (ps.pmFlags & F.DUCKED) {
+      bob = 0.5;
+      this.legs(backwards ? A.LEGS_BACKCR : A.LEGS_WALKCR);
+    } else if (!(this.cmd.buttons & B.WALKING)) {
+      bob = 0.4;
+      footstep = true;
+      this.legs(backwards ? A.LEGS_BACK : A.LEGS_RUN);
+    } else {
+      bob = 0.3;
+      this.legs(backwards ? A.LEGS_BACKWALK : A.LEGS_WALK);
+    }
     const old = ps.bobCycle;
     ps.bobCycle = Math.trunc(Math.fround(Math.fround(old) + Math.fround(Math.fround(bob) * this.msec))) & 255;
     if (((old + 64) ^ (ps.bobCycle + 64)) & 128) {
@@ -458,11 +531,17 @@ class MoveStep implements SlideMoveContext {
     const diagnostics = this.options.diagnostics;
     if (diagnostics !== undefined) diagnostics.count = (diagnostics.count + 1) | 0;
     if (Math.abs(cmd.forwardmove) > 64 || Math.abs(cmd.rightmove) > 64) cmd.buttons &= ~B.WALKING;
-    if (cmd.buttons & B.TALK) ps.eFlags |= 0x1000; else ps.eFlags &= ~0x1000;
-    if (!(ps.pmFlags & F.RESPAWNED) && ps.pmType !== MoveType.PM_INTERMISSION &&
-      (cmd.buttons & B.ATTACK) && this.options.firing()) ps.eFlags |= 0x100; else ps.eFlags &= ~0x100;
+    if (cmd.buttons & B.TALK) ps.eFlags |= 0x1000;
+    else ps.eFlags &= ~0x1000;
+    if (!(ps.pmFlags & F.RESPAWNED) && ps.pmType !== MoveType.PM_INTERMISSION && cmd.buttons & B.ATTACK && this.options.firing()) ps.eFlags |= 0x100;
+    else ps.eFlags &= ~0x100;
     if (ps.health > 0 && !(cmd.buttons & (B.ATTACK | B.USE_HOLDABLE))) ps.pmFlags &= ~F.RESPAWNED;
-    if (cmd.buttons & B.TALK) { cmd.buttons = B.TALK; cmd.forwardmove = 0; cmd.rightmove = 0; cmd.upmove = 0; }
+    if (cmd.buttons & B.TALK) {
+      cmd.buttons = B.TALK;
+      cmd.forwardmove = 0;
+      cmd.rightmove = 0;
+      cmd.upmove = 0;
+    }
     ps.commandTime = cmd.serverTime;
     updateViewAngles(ps, cmd);
     const axes = qvmAngleVectors(ps.viewangles);
@@ -471,9 +550,22 @@ class MoveStep implements SlideMoveContext {
     if (cmd.upmove < 10) ps.pmFlags &= ~F.JUMP_HELD;
     if (cmd.forwardmove < 0) ps.pmFlags |= F.BACKWARDS_RUN;
     else if (cmd.forwardmove > 0 || (!cmd.forwardmove && cmd.rightmove)) ps.pmFlags &= ~F.BACKWARDS_RUN;
-    if (ps.pmType >= MoveType.PM_DEAD) { cmd.forwardmove = 0; cmd.rightmove = 0; cmd.upmove = 0; }
-    if (ps.pmType === MoveType.PM_SPECTATOR) { this.checkDuck(); this.flyMove(); this.dropTimers(); return; }
-    if (ps.pmType === MoveType.PM_NOCLIP) { this.noclipMove(); this.dropTimers(); return; }
+    if (ps.pmType >= MoveType.PM_DEAD) {
+      cmd.forwardmove = 0;
+      cmd.rightmove = 0;
+      cmd.upmove = 0;
+    }
+    if (ps.pmType === MoveType.PM_SPECTATOR) {
+      this.checkDuck();
+      this.flyMove();
+      this.dropTimers();
+      return;
+    }
+    if (ps.pmType === MoveType.PM_NOCLIP) {
+      this.noclipMove();
+      this.dropTimers();
+      return;
+    }
     if (ps.pmType === MoveType.PM_FREEZE || ps.pmType === MoveType.PM_INTERMISSION || ps.pmType === MoveType.PM_SPINTERMISSION) return;
     this.setWaterLevel();
     const previousWaterlevel = this.waterlevel;
@@ -485,12 +577,16 @@ class MoveStep implements SlideMoveContext {
       ps.velocity = speed <= 0 ? vec3(0, 0, 0) : scale3(normalize3(ps.velocity), speed);
     }
     this.dropTimers();
-    if (this.options.pose !== undefined || ps.product === "missionpack" && ps.invulnerable) {
-      cmd.forwardmove = 0; cmd.rightmove = 0; cmd.upmove = 0;
+    if (this.options.pose !== undefined || (ps.product === "missionpack" && ps.invulnerable)) {
+      cmd.forwardmove = 0;
+      cmd.rightmove = 0;
+      cmd.upmove = 0;
       ps.velocity = vec3(0, 0, 0);
     } else if (ps.flight) this.flyMove();
-    else if (ps.pmFlags & F.GRAPPLE_PULL) { this.grappleMove(); this.airMove(); }
-    else if (ps.pmFlags & F.TIME_WATERJUMP) this.waterJumpMove();
+    else if (ps.pmFlags & F.GRAPPLE_PULL) {
+      this.grappleMove();
+      this.airMove();
+    } else if (ps.pmFlags & F.TIME_WATERJUMP) this.waterJumpMove();
     else if (this.waterlevel > 1) this.waterMove();
     else if (this.ladder) this.ladderMove();
     else if (this.walking) this.walkMove();
@@ -529,8 +625,7 @@ export function movePlayer(state: Q3Motion, command: Q3Command, options: Q3Motio
     const step = new MoveStep(state, cmd, options);
     if (substep > 1) step.bounds = result.bounds;
     step.run();
-    result = { contacts: step.contacts, bounds: step.bounds,
-      waterlevel: step.waterlevel, watertype: step.watertype, xyspeed: step.xyspeed };
+    result = { contacts: step.contacts, bounds: step.bounds, waterlevel: step.waterlevel, watertype: step.watertype, xyspeed: step.xyspeed };
     if (options.endStep?.(state) === false) break;
     if (state.pmFlags & F.JUMP_HELD) cmd.upmove = 20;
   }

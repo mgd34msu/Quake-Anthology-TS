@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
@@ -30,16 +31,24 @@ test("checkpoint callbacks retain loaded artifact identity across source VMs", (
 });
 
 test("a save cannot replace a native entrypoint or calling convention", () => {
-  const fire: WeaponBehaviorCallback = { kind: "native-artifact", module, imageOffset: 0xef900n,
-    abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } };
+  const fire: WeaponBehaviorCallback = {
+    kind: "native-artifact",
+    module,
+    imageOffset: 0xef900n,
+    abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
+  };
   const loaded = definition(fire);
   const moved = { ...loaded, fire: { ...fire, imageOffset: fire.imageOffset + 1n } };
   expect(sameWeaponBehavior(loaded, moved)).toBe(false);
   expect(() => restored(moved, loaded)).toThrow("native weapon entry differs");
-  const changedAbi: WeaponBehaviorDefinition = { ...loaded, fire: { ...fire,
-    abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } } };
+  const changedAbi: WeaponBehaviorDefinition = {
+    ...loaded,
+    fire: { ...fire, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } },
+  };
   expect(sameWeaponBehavior(loaded, changedAbi)).toBe(false);
   expect(() => restored(changedAbi, loaded)).toThrow("callback ABI differs");
-  expect(() => restored({ ...loaded, fire: { ...fire, kind: "native-guest", address: 0x12345678n } }, loaded)).toThrow("behavior.fire.kind: expected native-artifact");
+  expect(() => restored({ ...loaded, fire: { ...fire, kind: "native-guest", address: 0x12345678n } }, loaded)).toThrow(
+    "behavior.fire.kind: expected native-artifact",
+  );
   expect(() => restored({ ...loaded, activate: fire }, loaded)).toThrow("unexpected activation callback");
 });

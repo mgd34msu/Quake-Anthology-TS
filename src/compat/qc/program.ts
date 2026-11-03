@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake pr_comp.h and pr_edict.c, id Software. GPL-2.0-or-later. */
 import { BinaryReader } from "../../core/binary/index.ts";
 import { createHash } from "node:crypto";
@@ -6,19 +7,88 @@ import type { ContentDigest } from "../../contracts/content.ts";
 import type { QuakeCApiIdentity } from "../../contracts/execution.ts";
 
 export enum QcOpcode {
-  Done, MulF, MulV, MulFV, MulVF, DivF, AddF, AddV, SubF, SubV,
-  EqF, EqV, EqS, EqE, EqFn, NeF, NeV, NeS, NeE, NeFn, Le, Ge, Lt, Gt,
-  LoadF, LoadV, LoadS, LoadEnt, LoadFld, LoadFn, Address,
-  StoreF, StoreV, StoreS, StoreEnt, StoreFld, StoreFn,
-  StorePF, StorePV, StorePS, StorePEnt, StorePFld, StorePFn,
-  Return, NotF, NotV, NotS, NotEnt, NotFn, If, IfNot,
-  Call0, Call1, Call2, Call3, Call4, Call5, Call6, Call7, Call8,
-  State, Goto, And, Or, BitAnd, BitOr,
+  Done,
+  MulF,
+  MulV,
+  MulFV,
+  MulVF,
+  DivF,
+  AddF,
+  AddV,
+  SubF,
+  SubV,
+  EqF,
+  EqV,
+  EqS,
+  EqE,
+  EqFn,
+  NeF,
+  NeV,
+  NeS,
+  NeE,
+  NeFn,
+  Le,
+  Ge,
+  Lt,
+  Gt,
+  LoadF,
+  LoadV,
+  LoadS,
+  LoadEnt,
+  LoadFld,
+  LoadFn,
+  Address,
+  StoreF,
+  StoreV,
+  StoreS,
+  StoreEnt,
+  StoreFld,
+  StoreFn,
+  StorePF,
+  StorePV,
+  StorePS,
+  StorePEnt,
+  StorePFld,
+  StorePFn,
+  Return,
+  NotF,
+  NotV,
+  NotS,
+  NotEnt,
+  NotFn,
+  If,
+  IfNot,
+  Call0,
+  Call1,
+  Call2,
+  Call3,
+  Call4,
+  Call5,
+  Call6,
+  Call7,
+  Call8,
+  State,
+  Goto,
+  And,
+  Or,
+  BitAnd,
+  BitOr,
 }
 export type QcValueType = "void" | "string" | "float" | "vector" | "entity" | "field" | "function" | "pointer" | "opaque";
 const valueTypes: readonly QcValueType[] = ["void", "string", "float", "vector", "entity", "field", "function", "pointer"];
-export interface QcDefinition { readonly type: QcValueType; readonly nativeType: number; readonly save: boolean; readonly offset: number; readonly name: string; }
-export interface QcStatement { readonly opcode: QcOpcode; readonly a: number; readonly b: number; readonly c: number; }
+export interface QcDefinition {
+  readonly type: QcValueType;
+  readonly nativeType: number;
+  readonly save: boolean;
+  readonly offset: number;
+  readonly name: string;
+}
+export interface QcStatement {
+  readonly opcode: QcOpcode;
+  readonly a: number;
+  readonly b: number;
+  readonly c: number;
+}
 export interface QcFunction {
   readonly index: number;
   readonly firstStatement: number;
@@ -30,7 +100,13 @@ export interface QcFunction {
   readonly namedBuiltin: boolean;
 }
 export class QcProgramError extends Error {
-  constructor(message: string, readonly source = "progs.dat") { super(`${source}: ${message}`); this.name = "QcProgramError"; }
+  constructor(
+    message: string,
+    readonly source = "progs.dat",
+  ) {
+    super(`${source}: ${message}`);
+    this.name = "QcProgramError";
+  }
 }
 export function qcByteString(bytes: Uint8Array, offset: number): string {
   if (!Number.isInteger(offset) || offset < 0 || offset >= bytes.length) throw new QcProgramError(`invalid string offset ${offset}`);
@@ -71,9 +147,14 @@ export class QcProgram {
   private sortedStarts: readonly number[] | null = null;
   /** Statement index one past the function: the next function's first statement, or the end of the program. */
   functionEnd(fn: { readonly firstStatement: number }): number {
-    const starts = this.sortedStarts ??= [...new Set(this.functions.map(other => other.firstStatement))].sort((a, b) => a - b);
-    let low = 0, high = starts.length;
-    while (low < high) { const middle = low + high >> 1; if ((starts[middle] ?? 0) > fn.firstStatement) high = middle; else low = middle + 1; }
+    const starts = (this.sortedStarts ??= [...new Set(this.functions.map(other => other.firstStatement))].sort((a, b) => a - b));
+    let low = 0,
+      high = starts.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((starts[middle] ?? 0) > fn.firstStatement) high = middle;
+      else low = middle + 1;
+    }
     return starts[low] ?? this.statements.length;
   }
   functionNamed(name: string): QcFunction {
@@ -86,12 +167,14 @@ function crc16(bytes: Uint8Array): number {
   let crc = 0xffff;
   for (const byte of bytes) {
     crc ^= byte << 8;
-    for (let bit = 0; bit < 8; bit++) crc = (crc & 0x8000) !== 0 ? (crc << 1 ^ 0x1021) & 0xffff : crc << 1 & 0xffff;
+    for (let bit = 0; bit < 8; bit++) crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
   }
   return crc;
 }
 /** Version 6 operands are words; branch displacements are signed 16-bit values. */
-export function signedQcBranch(word: number): number { return word << 16 >> 16; }
+export function signedQcBranch(word: number): number {
+  return (word << 16) >> 16;
+}
 export function loadQcProgram(bytes: Uint8Array, expectedApi?: QuakeCApiIdentity, source = "progs.dat"): QcProgram {
   const reader = new BinaryReader(bytes, source);
   const version = reader.i32();
@@ -165,12 +248,35 @@ export function loadQcProgram(bytes: Uint8Array, expectedApi?: QuakeCApiIdentity
     }
     // Original retail qcc emits functions whose parameter words exceed `locals`.
     // PR_EnterFunction saves exactly `locals`, then writes parameters separately.
-    if (firstStatement >= statements.length || firstStatement > 0 && parameterStart + parameterSizes.reduce((sum, size) => sum + size, 0) > initialGlobals.length / 4) {
+    if (
+      firstStatement >= statements.length ||
+      (firstStatement > 0 && parameterStart + parameterSizes.reduce((sum, size) => sum + size, 0) > initialGlobals.length / 4)
+    ) {
       throw new QcProgramError(`invalid entry point for ${name}`, source);
     }
-    functions.push({ index: functions.length, firstStatement, parameterStart, localWords, name, file, parameterSizes,
-      namedBuiltin: functions.length > 0 && firstStatement === 0 && parameterStart === 0 && localWords === 0 });
+    functions.push({
+      index: functions.length,
+      firstStatement,
+      parameterStart,
+      localWords,
+      name,
+      file,
+      parameterSizes,
+      namedBuiltin: functions.length > 0 && firstStatement === 0 && parameterStart === 0 && localWords === 0,
+    });
   }
   if (functions.length === 0 || statements.length === 0) throw new QcProgramError("empty function/statement table", source);
-  return new QcProgram(source, api, statements, globals, fields, functions, strings, initialGlobals, entityFieldWords, crc16(bytes), createContentDigest(createHash("sha256").update(bytes).digest("hex")));
+  return new QcProgram(
+    source,
+    api,
+    statements,
+    globals,
+    fields,
+    functions,
+    strings,
+    initialGlobals,
+    entityFieldWords,
+    crc16(bytes),
+    createContentDigest(createHash("sha256").update(bytes).digest("hex")),
+  );
 }

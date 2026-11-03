@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 export const PROTOCOL_VERSION = 15;
 export const U_MOREBITS = 1 << 0;
@@ -38,47 +39,47 @@ export const DEFAULT_SOUND_PACKET_ATTENUATION = 1.0;
 export const GAME_COOP = 0;
 export const GAME_DEATHMATCH = 1;
 export enum SvcOpsT {
-    svc_bad = 0,
-    svc_nop = 1,
-    svc_disconnect = 2,
-    svc_updatestat = 3,// [byte] [long]
-    svc_version = 4,// [long] server version
-    svc_setview = 5,// [short] entity number
-    svc_sound = 6,// <see code>
-    svc_time = 7,// [float] server time
-    svc_print = 8,// [string] null terminated string
-    svc_stufftext = 9,// [string] stuffed into client's console buffer
-    svc_setangle = 10,// [angle3] set the view angle to this absolute value
-    svc_serverinfo = 11,// [long] version
-    svc_lightstyle = 12,// [byte] [string]
-    svc_updatename = 13,// [byte] [string]
-    svc_updatefrags = 14,// [byte] [short]
-    svc_clientdata = 15,// <shortbits + data>
-    svc_stopsound = 16,// <see code>
-    svc_updatecolors = 17,// [byte] [byte]
-    svc_particle = 18,// [vec3] <variable>
-    svc_damage = 19,
-    svc_spawnstatic = 20,
-    svc_spawnbaseline = 22,
-    svc_temp_entity = 23,
-    svc_setpause = 24,// [byte] on / off
-    svc_signonnum = 25,// [byte]  used for the signon sequence
-    svc_centerprint = 26,// [string] to put in center of the screen
-    svc_killedmonster = 27,
-    svc_foundsecret = 28,
-    svc_spawnstaticsound = 29,// [coord3] [byte] samp [byte] vol [byte] aten
-    svc_intermission = 30,// [string] music
-    svc_finale = 31,// [string] music [string] text
-    svc_cdtrack = 32,// [byte] track [byte] looptrack
-    svc_sellscreen = 33,
-    svc_cutscene = 34
+  svc_bad = 0,
+  svc_nop = 1,
+  svc_disconnect = 2,
+  svc_updatestat = 3, // [byte] [long]
+  svc_version = 4, // [long] server version
+  svc_setview = 5, // [short] entity number
+  svc_sound = 6, // <see code>
+  svc_time = 7, // [float] server time
+  svc_print = 8, // [string] null terminated string
+  svc_stufftext = 9, // [string] stuffed into client's console buffer
+  svc_setangle = 10, // [angle3] set the view angle to this absolute value
+  svc_serverinfo = 11, // [long] version
+  svc_lightstyle = 12, // [byte] [string]
+  svc_updatename = 13, // [byte] [string]
+  svc_updatefrags = 14, // [byte] [short]
+  svc_clientdata = 15, // <shortbits + data>
+  svc_stopsound = 16, // <see code>
+  svc_updatecolors = 17, // [byte] [byte]
+  svc_particle = 18, // [vec3] <variable>
+  svc_damage = 19,
+  svc_spawnstatic = 20,
+  svc_spawnbaseline = 22,
+  svc_temp_entity = 23,
+  svc_setpause = 24, // [byte] on / off
+  svc_signonnum = 25, // [byte]  used for the signon sequence
+  svc_centerprint = 26, // [string] to put in center of the screen
+  svc_killedmonster = 27,
+  svc_foundsecret = 28,
+  svc_spawnstaticsound = 29, // [coord3] [byte] samp [byte] vol [byte] aten
+  svc_intermission = 30, // [string] music
+  svc_finale = 31, // [string] music [string] text
+  svc_cdtrack = 32, // [byte] track [byte] looptrack
+  svc_sellscreen = 33,
+  svc_cutscene = 34,
 }
 export enum ClcOpsT {
-    clc_bad = 0,
-    clc_nop = 1,
-    clc_disconnect = 2,
-    clc_move = 3,// [usercmd_t]
-    clc_stringcmd = 4
+  clc_bad = 0,
+  clc_nop = 1,
+  clc_disconnect = 2,
+  clc_move = 3, // [usercmd_t]
+  clc_stringcmd = 4,
 }
 export const TE_SPIKE = 0;
 export const TE_SUPERSPIKE = 1;
@@ -138,26 +139,25 @@ export const ENTALPHA_DEFAULT = 0; // entity's alpha is "default" (i.e. water ob
 export const ENTALPHA_ZERO = 1; // entity is invisible (lowest possible alpha)
 export const ENTALPHA_ONE = 255; // entity is fully opaque (highest possible alpha)
 export function ENTALPHA_ENCODE(a: number): number {
-    if (a === 0)
-        return ENTALPHA_DEFAULT;
-    const v = a * 254 + 1;
-    return Q_rint(v < 1 ? 1 : v > 255 ? 255 : v);
+  if (a === 0) return ENTALPHA_DEFAULT;
+  const v = a * 254 + 1;
+  return Q_rint(v < 1 ? 1 : v > 255 ? 255 : v);
 }
 export function ENTALPHA_DECODE(a: number): number {
-    return a === ENTALPHA_DEFAULT ? 1.0 : (a - 1) / 254;
+  return a === ENTALPHA_DEFAULT ? 1.0 : (a - 1) / 254;
 }
 export function ENTALPHA_TOSAVE(a: number): number {
-    return a === ENTALPHA_DEFAULT ? 0.0 : a === ENTALPHA_ZERO ? -1.0 : (a - 1) / 254;
+  return a === ENTALPHA_DEFAULT ? 0.0 : a === ENTALPHA_ZERO ? -1.0 : (a - 1) / 254;
 }
 export const ENTSCALE_DEFAULT = 16; // equivalent to float 1.0 due to byte packing
 export function ENTSCALE_ENCODE(a: number): number {
-    return a ? a * ENTSCALE_DEFAULT : ENTSCALE_DEFAULT;
+  return a ? a * ENTSCALE_DEFAULT : ENTSCALE_DEFAULT;
 }
 export function ENTSCALE_DECODE(a: number): number {
-    return a / ENTSCALE_DEFAULT;
+  return a / ENTSCALE_DEFAULT;
 }
 export function Q_rint(x: number): number {
-    return x > 0 ? Math.trunc(x + 0.5) : Math.trunc(x - 0.5);
+  return x > 0 ? Math.trunc(x + 0.5) : Math.trunc(x - 0.5);
 }
 export const svc_skybox = 37; // [string] name
 export const svc_bf = 40;

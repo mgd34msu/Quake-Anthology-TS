@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Original Rogue changes to the base species. ZeniMax Media, GPL-2.0-or-later. */
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
 import { angleVectorsRule } from "../../../../core/math.ts";
@@ -34,7 +35,8 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
     return context.setMove("brain_move_duck");
   }
   const brain: Q2MonsterDefinition = {
-    ...brainDefinition, moves: brainMoves,
+    ...brainDefinition,
+    moves: brainMoves,
     pain(context) {
       damagedSkin(context);
       if (context.game.host.now() < context.state.painTime) return undefined;
@@ -46,22 +48,35 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
       if (context.state.ducked) rogueDuckUp(context);
       return undefined;
     },
-    dodge(context, attacker, eta, trace) { return rogueMonsterDodge(context, monsters, attacker, eta, trace, brainDuck, null); },
-    duck(context, eta) { brainDuck(context, eta); return true; },
+    dodge(context, attacker, eta, trace) {
+      return rogueMonsterDodge(context, monsters, attacker, eta, trace, brainDuck, null);
+    },
+    duck(context, eta) {
+      brainDuck(context, eta);
+      return true;
+    },
     callbacks: { ...brainDefinition.callbacks, monster_duck_down: rogueDuckDown, monster_duck_hold: rogueDuckHold, monster_duck_up: rogueDuckUp },
   };
   const floater: Q2MonsterDefinition = {
-    ...floaterDefinition, moves: floatMoves.filter(move => move.name !== "floater_move_activate"), blocked: shotBlocked,
+    ...floaterDefinition,
+    moves: floatMoves.filter(move => move.name !== "floater_move_activate"),
+    blocked: shotBlocked,
     attack(context) {
-      const skill = context.game.options.skill, chance = skill === 0 ? 0 : 1 - 0.5 / skill;
-      if (context.game.host.random() > chance) { context.state.attackState = "straight"; return context.setMove("floater_move_attack1"); }
+      const skill = context.game.options.skill,
+        chance = skill === 0 ? 0 : 1 - 0.5 / skill;
+      if (context.game.host.random() > chance) {
+        context.state.attackState = "straight";
+        return context.setMove("floater_move_attack1");
+      }
       if (context.game.host.random() <= 0.5) context.state.lefty = !context.state.lefty;
       context.state.attackState = "sliding";
       return context.setMove("floater_move_attack1a");
     },
-    callbacks: { ...floaterDefinition.callbacks,
+    callbacks: {
+      ...floaterDefinition.callbacks,
       floater_fire_blaster(context) {
-        const aim = shot(context, 82); if (aim === null) return undefined;
+        const aim = shot(context, 82);
+        if (aim === null) return undefined;
         const effect = context.entity.frame === floatFrame.attak104 || context.entity.frame === floatFrame.attak107 ? 64 : 0;
         context.weapons.fireBlaster(context.entity, context.game, aim.start, aim.direction, 1, 1000, effect);
         return monsterFlash(context, 82, aim.start, aim.direction);
@@ -69,54 +84,87 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
     },
   };
   function bossRockets(context: MonsterContext, predictive: boolean): undefined {
-    const { entity, game } = context, enemy = enemyBody(context);
+    const { entity, game } = context,
+      enemy = enemyBody(context);
     if (enemy === null) return undefined;
     const right = angleVectorsRule(game.body(entity).angles, "native").right;
     if (predictive) game.host.diagnostic("predictive fire");
     for (let index = 0; index < 4; index++) {
-      const flash = 78 + index, start = projectFlash(context, muzzleOffset(game.options.edition, flash));
-      const direction = predictive ? normalize(subtract(add(enemy.origin, scale(enemy.velocity, length(subtract(enemy.origin, start)) / 750 - 0.3 + index * 0.15)), start))
-        : normalize(add(normalize(subtract({ ...enemy.origin, z: enemy.origin.z - (index === 0 || index === 3 ? 15 : 0) }, start)), scale(right, recordAt([0.4, 0.025, -0.025, -0.4], index))));
+      const flash = 78 + index,
+        start = projectFlash(context, muzzleOffset(game.options.edition, flash));
+      const direction = predictive
+        ? normalize(subtract(add(enemy.origin, scale(enemy.velocity, length(subtract(enemy.origin, start)) / 750 - 0.3 + index * 0.15)), start))
+        : normalize(
+            add(
+              normalize(subtract({ ...enemy.origin, z: enemy.origin.z - (index === 0 || index === 3 ? 15 : 0) }, start)),
+              scale(right, recordAt([0.4, 0.025, -0.025, -0.4], index)),
+            ),
+          );
       context.weapons.fireRocket(entity, game, start, direction, 50, predictive ? 750 : 500, 70, 50);
       monsterFlash(context, flash, start, direction);
     }
     return undefined;
   }
   function bossBullet(context: MonsterContext, right: boolean): undefined {
-    const aim = shot(context, right ? 133 : 73, right ? 0.2 : -0.2); if (aim === null) return undefined;
+    const aim = shot(context, right ? 133 : 73, right ? 0.2 : -0.2);
+    if (aim === null) return undefined;
     context.weapons.fireBullet(context.entity, context.game, aim.start, aim.direction, 6, 4, 900, 500, 0);
     return monsterFlash(context, right ? 133 : 73, aim.start, aim.direction);
   }
   // Rogue's m_boss2.c changed these distances ("normally all 8's"; rocket frame 12 "was -20").
-  const rogueBoss2Distances: Readonly<Record<string, number>> = { boss2_move_walk: 10, boss2_move_run: 10,
-    boss2_move_attack_pre_mg: 2, boss2_move_attack_mg: 2, boss2_move_attack_post_mg: 2, boss2_move_attack_rocket: 2 };
+  const rogueBoss2Distances: Readonly<Record<string, number>> = {
+    boss2_move_walk: 10,
+    boss2_move_run: 10,
+    boss2_move_attack_pre_mg: 2,
+    boss2_move_attack_mg: 2,
+    boss2_move_attack_post_mg: 2,
+    boss2_move_attack_rocket: 2,
+  };
   const boss2: Q2MonsterDefinition = {
-    ...boss2Definition, yawSpeed: 50,
+    ...boss2Definition,
+    yawSpeed: 50,
     moves: boss2Definition.moves.map(table => {
       const distance = rogueBoss2Distances[table.name];
-      return distance === undefined ? table : { ...table, frames: table.frames.map((frame, index) =>
-        ({ ...frame, distance: table.name === "boss2_move_attack_rocket" && index === 12 ? -5 : distance })) };
+      return distance === undefined
+        ? table
+        : {
+            ...table,
+            frames: table.frames.map((frame, index) => ({ ...frame, distance: table.name === "boss2_move_attack_rocket" && index === 12 ? -5 : distance })),
+          };
     }),
     checkAttack: context => bossCheckAttack(context, true, true),
-    callbacks: { ...boss2Definition.callbacks,
+    callbacks: {
+      ...boss2Definition.callbacks,
       Boss2PredictiveRocket: context => bossRockets(context, true),
-      Boss2Rocket: context => bossRockets(context, context.entity.enemy !== null && context.game.host.isPlayer(context.entity.enemy) && context.game.host.random() < 0.9),
-      boss2_firebullet_right: context => bossBullet(context, true), boss2_firebullet_left: context => bossBullet(context, false),
-      Boss2MachineGun(context) { bossBullet(context, false); return bossBullet(context, true); },
+      Boss2Rocket: context =>
+        bossRockets(context, context.entity.enemy !== null && context.game.host.isPlayer(context.entity.enemy) && context.game.host.random() < 0.9),
+      boss2_firebullet_right: context => bossBullet(context, true),
+      boss2_firebullet_left: context => bossBullet(context, false),
+      Boss2MachineGun(context) {
+        bossBullet(context, false);
+        return bossBullet(context, true);
+      },
     },
   };
   const supertank: Q2MonsterDefinition = {
-    ...supertankDefinition, blocked,
-    initialize(context) { context.state.ignoreShots = true; return undefined; },
-    callbacks: { ...supertankDefinition.callbacks,
+    ...supertankDefinition,
+    blocked,
+    initialize(context) {
+      context.state.ignoreShots = true;
+      return undefined;
+    },
+    callbacks: {
+      ...supertankDefinition.callbacks,
       supertankRocket(context) {
         const flash = context.entity.frame === supertankFrame.attak2_8 ? 70 : context.entity.frame === supertankFrame.attak2_11 ? 71 : 72;
-        const aim = shot(context, flash); if (aim === null) return undefined;
+        const aim = shot(context, flash);
+        if (aim === null) return undefined;
         context.weapons.fireRocket(context.entity, context.game, aim.start, aim.direction, 50, 500, 70, 50);
         return monsterFlash(context, flash, aim.start, aim.direction);
       },
       supertankMachineGun(context) {
-        const eye = enemyEye(context); if (eye === null) return undefined;
+        const eye = enemyEye(context);
+        if (eye === null) return undefined;
         const flash = 64 + context.entity.frame - supertankFrame.attak1_1;
         const start = projectFlash(context, muzzleOffset(context.game.options.edition, flash), { x: 0, y: context.game.body(context.entity).angles.y, z: 0 });
         const direction = normalize(subtract(eye, start));
@@ -126,7 +174,34 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
     },
   };
   const jorg = createJorgDefinition(monsters);
-  return [...createRogueSoldierDefinitions(monsters, source), createRogueInfantryDefinition(monsters, source), brain, floater, { ...gladiatorDefinition, blocked }, withBossExplosionCallbacks(boss2, monsters), withBossExplosionCallbacks(supertank, monsters),
-    withBossExplosionCallbacks({ ...jorg, initialize(context) { jorg.initialize?.(context); context.state.ignoreShots = true; return undefined; } }, monsters),
-    withMakronSpawnCallbacks({ ...makronDefinition, initialize(context) { context.state.ignoreShots = true; return undefined; } }, monsters)];
+  return [
+    ...createRogueSoldierDefinitions(monsters, source),
+    createRogueInfantryDefinition(monsters, source),
+    brain,
+    floater,
+    { ...gladiatorDefinition, blocked },
+    withBossExplosionCallbacks(boss2, monsters),
+    withBossExplosionCallbacks(supertank, monsters),
+    withBossExplosionCallbacks(
+      {
+        ...jorg,
+        initialize(context) {
+          jorg.initialize?.(context);
+          context.state.ignoreShots = true;
+          return undefined;
+        },
+      },
+      monsters,
+    ),
+    withMakronSpawnCallbacks(
+      {
+        ...makronDefinition,
+        initialize(context) {
+          context.state.ignoreShots = true;
+          return undefined;
+        },
+      },
+      monsters,
+    ),
+  ];
 }

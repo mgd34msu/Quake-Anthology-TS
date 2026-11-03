@@ -29,8 +29,18 @@ export interface WindowsRuntimeOptions {
   readonly processId?: number;
   readonly threadId?: number;
 }
-export interface WindowsImportCoverage { readonly library: string; readonly name: string; readonly supported: boolean; readonly reached: number; readonly failed: number; readonly lastFailure: string | null; }
-export interface WindowsInitializeOptions { readonly context: GuestCallContext; readonly instructionBudget: number; }
+export interface WindowsImportCoverage {
+  readonly library: string;
+  readonly name: string;
+  readonly supported: boolean;
+  readonly reached: number;
+  readonly failed: number;
+  readonly lastFailure: string | null;
+}
+export interface WindowsInitializeOptions {
+  readonly context: GuestCallContext;
+  readonly instructionBudget: number;
+}
 export type WindowsImportImplementation = (context: GuestCallContext, args: readonly GuestCallValue[]) => GuestCallResult;
 export interface WindowsServiceHost {
   readonly memory: MappedGuestMemory;
@@ -55,7 +65,14 @@ export interface WindowsServiceHost {
   free(address: GuestAddress | null, heap?: bigint): boolean;
   allocationSize(address: GuestAddress, heap?: bigint): number | null;
   destroyHeap(heap: bigint): void;
-  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[], convention?: "system"): GuestCallResult;
+  invoke(
+    context: GuestCallContext,
+    target: GuestAddress,
+    parameters: readonly GuestStorage[],
+    result: GuestStorage | "void",
+    args: readonly GuestCallValue[],
+    convention?: "system",
+  ): GuestCallResult;
   resolveAddress(library: string, name: string): GuestAddress | null;
   libraryHandle(library: string): GuestAddress | null;
   loadLibrary(library: string): GuestAddress | null;
@@ -63,7 +80,12 @@ export interface WindowsServiceHost {
   libraryName(handle: GuestAddress): string | null;
 }
 export class UnsupportedWindowsImport extends Error {
-  constructor(readonly library: string, readonly symbol: string, readonly context: GuestCallContext, readonly detail = "runtime service is not implemented") {
+  constructor(
+    readonly library: string,
+    readonly symbol: string,
+    readonly context: GuestCallContext,
+    readonly detail = "runtime service is not implemented",
+  ) {
     super(`Unsupported Windows guest import ${library}!${symbol}: ${detail}`);
     this.name = "UnsupportedWindowsImport";
   }

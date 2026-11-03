@@ -4,12 +4,22 @@ import { checkedNumber, elfFileOffset, ElfError } from "./parse.ts";
 import type { ElfInspection } from "./parse.ts";
 import { elfAddress } from "./relocate.ts";
 
-interface Cursor { position: number; }
-interface Cie { readonly encoding: number; readonly augmentation: boolean; }
+interface Cursor {
+  position: number;
+}
+interface Cie {
+  readonly encoding: number;
+  readonly augmentation: boolean;
+}
 
 class DwarfReader {
   readonly view: DataView;
-  constructor(readonly bytes: Uint8Array, readonly address: bigint, readonly pointerBytes: 4 | 8, readonly dataRelativeBase: bigint | null = null) {
+  constructor(
+    readonly bytes: Uint8Array,
+    readonly address: bigint,
+    readonly pointerBytes: 4 | 8,
+    readonly dataRelativeBase: bigint | null = null,
+  ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
   require(cursor: Cursor, bytes: number, end = this.bytes.length): number {
@@ -18,9 +28,15 @@ class DwarfReader {
     cursor.position += bytes;
     return offset;
   }
-  byte(cursor: Cursor): number { return this.view.getUint8(this.require(cursor, 1)); }
-  u32(cursor: Cursor): number { return this.view.getUint32(this.require(cursor, 4), true); }
-  u64(cursor: Cursor): bigint { return this.view.getBigUint64(this.require(cursor, 8), true); }
+  byte(cursor: Cursor): number {
+    return this.view.getUint8(this.require(cursor, 1));
+  }
+  u32(cursor: Cursor): number {
+    return this.view.getUint32(this.require(cursor, 4), true);
+  }
+  u64(cursor: Cursor): bigint {
+    return this.view.getBigUint64(this.require(cursor, 8), true);
+  }
   leb(cursor: Cursor, signed: boolean): bigint {
     let value = 0n;
     for (let shift = 0n; shift < 70n; shift += 7n) {
@@ -34,30 +50,55 @@ class DwarfReader {
     if (encoding === 0xff) throw new ElfError("omitted DWARF pointer used as an address");
     if ((encoding & 0x70) === 0x50) {
       const absolute = this.address + BigInt(cursor.position);
-      cursor.position += Number((BigInt(this.pointerBytes) - absolute % BigInt(this.pointerBytes)) % BigInt(this.pointerBytes));
+      cursor.position += Number((BigInt(this.pointerBytes) - (absolute % BigInt(this.pointerBytes))) % BigInt(this.pointerBytes));
     }
     const address = this.address + BigInt(cursor.position);
     let value: bigint;
     switch (encoding & 15) {
-      case 0: value = this.pointerBytes === 8 ? this.u64(cursor) : BigInt(this.u32(cursor)); break;
-      case 1: value = this.leb(cursor, false); break;
-      case 2: value = BigInt(this.view.getUint16(this.require(cursor, 2), true)); break;
-      case 3: value = BigInt(this.u32(cursor)); break;
-      case 4: value = this.u64(cursor); break;
-      case 9: value = this.leb(cursor, true); break;
-      case 10: value = BigInt(this.view.getInt16(this.require(cursor, 2), true)); break;
-      case 11: value = BigInt(this.view.getInt32(this.require(cursor, 4), true)); break;
-      case 12: value = this.view.getBigInt64(this.require(cursor, 8), true); break;
-      default: throw new ElfError(`unsupported DWARF pointer encoding 0x${encoding.toString(16)}`);
+      case 0:
+        value = this.pointerBytes === 8 ? this.u64(cursor) : BigInt(this.u32(cursor));
+        break;
+      case 1:
+        value = this.leb(cursor, false);
+        break;
+      case 2:
+        value = BigInt(this.view.getUint16(this.require(cursor, 2), true));
+        break;
+      case 3:
+        value = BigInt(this.u32(cursor));
+        break;
+      case 4:
+        value = this.u64(cursor);
+        break;
+      case 9:
+        value = this.leb(cursor, true);
+        break;
+      case 10:
+        value = BigInt(this.view.getInt16(this.require(cursor, 2), true));
+        break;
+      case 11:
+        value = BigInt(this.view.getInt32(this.require(cursor, 4), true));
+        break;
+      case 12:
+        value = this.view.getBigInt64(this.require(cursor, 8), true);
+        break;
+      default:
+        throw new ElfError(`unsupported DWARF pointer encoding 0x${encoding.toString(16)}`);
     }
     if (relative) {
       switch (encoding & 0x70) {
-        case 0: case 0x50: break;
-        case 0x10: value += address; break;
+        case 0:
+        case 0x50:
+          break;
+        case 0x10:
+          value += address;
+          break;
         case 0x30:
           if (this.dataRelativeBase === null) throw new ElfError("DWARF data-relative pointer requires an explicit base");
-          value += this.dataRelativeBase; break;
-        default: throw new ElfError(`unsupported DWARF relative pointer base 0x${encoding.toString(16)}`);
+          value += this.dataRelativeBase;
+          break;
+        default:
+          throw new ElfError(`unsupported DWARF relative pointer base 0x${encoding.toString(16)}`);
       }
     }
     return value;
@@ -70,7 +111,9 @@ export function readElfUnwind(elf: ElfInspection, source: Uint8Array, memory: Ma
   const sections = elf.sections.filter(section => section.name === ".eh_frame" || section.name === ".debug_frame");
   for (const section of sections) {
     const allocated = (section.flags & 2n) !== 0n;
-    const bytes = allocated ? memory.copy(elfAddress(memory, loadBias + section.address), section.size) : source.slice(section.offset, section.offset + section.size);
+    const bytes = allocated
+      ? memory.copy(elfAddress(memory, loadBias + section.address), section.size)
+      : source.slice(section.offset, section.offset + section.size);
     regions.push(...readFrames(bytes, allocated ? loadBias + section.address : section.address, elf, memory, loadBias, section.name === ".debug_frame"));
   }
   if (!sections.some(section => section.name === ".eh_frame")) {
@@ -81,7 +124,8 @@ export function readElfUnwind(elf: ElfInspection, source: Uint8Array, memory: Ma
       const cursor = { position: 0 };
       if (r.byte(cursor) !== 1) throw new ElfError("unsupported GNU EH frame header version");
       const encoding = r.byte(cursor);
-      r.byte(cursor); r.byte(cursor);
+      r.byte(cursor);
+      r.byte(cursor);
       if ((encoding & 0x80) !== 0) throw new ElfError("indirect GNU EH frame section pointer is unsupported");
       const address = r.encoded(cursor, encoding);
       const originalAddress = address - loadBias;
@@ -116,10 +160,17 @@ function readFrames(bytes: Uint8Array, address: bigint, elf: ElfInspection, memo
       const version = reader.byte(cursor);
       if (version !== 1 && version !== 3 && version !== 4) throw new ElfError(`unsupported CIE version ${version}`);
       let augmentation = "";
-      for (;;) { const c = reader.byte(cursor); if (c === 0) break; augmentation += String.fromCharCode(c); }
-      if (version === 4 && (reader.byte(cursor) !== elf.abi.pointerBytes || reader.byte(cursor) !== 0)) throw new ElfError("unsupported CIE address or segment size");
-      reader.leb(cursor, false); reader.leb(cursor, true);
-      if (version === 1) reader.byte(cursor); else reader.leb(cursor, false);
+      for (;;) {
+        const c = reader.byte(cursor);
+        if (c === 0) break;
+        augmentation += String.fromCharCode(c);
+      }
+      if (version === 4 && (reader.byte(cursor) !== elf.abi.pointerBytes || reader.byte(cursor) !== 0))
+        throw new ElfError("unsupported CIE address or segment size");
+      reader.leb(cursor, false);
+      reader.leb(cursor, true);
+      if (version === 1) reader.byte(cursor);
+      else reader.leb(cursor, false);
       let encoding = 0;
       const hasAugmentation = augmentation.startsWith("z");
       if (hasAugmentation) {
@@ -128,11 +179,21 @@ function readFrames(bytes: Uint8Array, address: bigint, elf: ElfInspection, memo
         if (augmentationEnd > end) throw new ElfError("CIE augmentation exceeds record");
         for (const code of augmentation.slice(1)) {
           switch (code) {
-            case "R": encoding = reader.byte(cursor); break;
-            case "L": reader.byte(cursor); break;
-            case "P": { const personalityEncoding = reader.byte(cursor); reader.encoded(cursor, personalityEncoding, false); break; }
-            case "S": break;
-            default: throw new ElfError(`unsupported CIE augmentation ${code}`);
+            case "R":
+              encoding = reader.byte(cursor);
+              break;
+            case "L":
+              reader.byte(cursor);
+              break;
+            case "P": {
+              const personalityEncoding = reader.byte(cursor);
+              reader.encoded(cursor, personalityEncoding, false);
+              break;
+            }
+            case "S":
+              break;
+            default:
+              throw new ElfError(`unsupported CIE augmentation ${code}`);
           }
         }
         if (cursor.position > augmentationEnd) throw new ElfError("CIE fields exceed augmentation size");
@@ -151,9 +212,18 @@ function readFrames(bytes: Uint8Array, address: bigint, elf: ElfInspection, memo
       }
       const range = reader.encoded(cursor, cie.encoding & 15, false);
       if (debug) pc += loadBias;
-      if (cie.augmentation) { const size = checkedNumber(reader.leb(cursor, false), "FDE augmentation size"); reader.require(cursor, size, end); }
+      if (cie.augmentation) {
+        const size = checkedNumber(reader.leb(cursor, false), "FDE augmentation size");
+        reader.require(cursor, size, end);
+      }
       if (range < 0n) throw new ElfError("negative FDE PC range");
-      if (range !== 0n) regions.push({ start: elfAddress(memory, pc), end: elfAddress(memory, pc + range), format: debug ? "elf-debug-frame" : "elf-eh-frame", metadata: bytes });
+      if (range !== 0n)
+        regions.push({
+          start: elfAddress(memory, pc),
+          end: elfAddress(memory, pc + range),
+          format: debug ? "elf-debug-frame" : "elf-eh-frame",
+          metadata: bytes,
+        });
     }
     if (cursor.position > end) throw new ElfError("unwind fields exceed record");
     cursor.position = end;

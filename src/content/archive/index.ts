@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { extname } from "node:path";
 import type { ArchiveFormat } from "../../contracts/content.ts";
 import { readPakDirectory, readPakHeader } from "./pak.ts";
@@ -17,8 +18,12 @@ class OpenArchive implements ArchiveHandle {
   readonly byteLength: number;
   private readonly entryIndexes = new Map<ArchivePathComparison, ReadonlyMap<string, readonly ArchiveEntry[]>>();
 
-  constructor(protected readonly storage: ArchiveSource, readonly format: ArchiveFormat,
-    readonly entries: readonly ArchiveEntry[], protected readonly centralOffset: number) {
+  constructor(
+    protected readonly storage: ArchiveSource,
+    readonly format: ArchiveFormat,
+    readonly entries: readonly ArchiveEntry[],
+    protected readonly centralOffset: number,
+  ) {
     this.source = storage.source;
     this.byteLength = storage.byteLength;
   }
@@ -29,7 +34,8 @@ class OpenArchive implements ArchiveHandle {
     if (index === undefined) {
       const created = new Map<string, ArchiveEntry[]>();
       for (const entry of this.entries) {
-        const name = compareEntryPath(entry.path, comparison), matches = created.get(name);
+        const name = compareEntryPath(entry.path, comparison),
+          matches = created.get(name);
         if (matches === undefined) created.set(name, [entry]);
         else matches.push(entry);
       }
@@ -43,8 +49,7 @@ class OpenArchive implements ArchiveHandle {
   protected select(requested: ArchiveEntry | number): ArchiveEntry {
     const ordinal = typeof requested === "number" ? requested : requested.ordinal;
     const entry = this.entries[ordinal];
-    if (!Number.isSafeInteger(ordinal) || entry === undefined
-      || typeof requested !== "number" && requested !== entry) {
+    if (!Number.isSafeInteger(ordinal) || entry === undefined || (typeof requested !== "number" && requested !== entry)) {
       throw new ArchiveError(this.source, 0, `entry ${ordinal} does not belong to this archive`);
     }
     if (entry.isDirectory) throw new ArchiveError(this.source, 0, `entry ${ordinal} is a directory`);
@@ -60,12 +65,19 @@ class OpenArchive implements ArchiveHandle {
     return decodeZipEntry(await this.storage.read(offset, entry.compressedSize), this.source, offset, entry);
   }
 
-  close(): void { this.entryIndexes.clear(); this.storage.close(); }
+  close(): void {
+    this.entryIndexes.clear();
+    this.storage.close();
+  }
 }
 
 class DecodedArchive extends OpenArchive implements MemoryArchiveHandle {
-  constructor(private readonly memory: MemorySource, format: ArchiveFormat,
-    entries: readonly ArchiveEntry[], centralOffset: number) {
+  constructor(
+    private readonly memory: MemorySource,
+    format: ArchiveFormat,
+    entries: readonly ArchiveEntry[],
+    centralOffset: number,
+  ) {
     super(memory, format, entries, centralOffset);
   }
 

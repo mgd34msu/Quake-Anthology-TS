@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Elementary bot actions translated from id Software's botlib/be_ea.c,
@@ -57,23 +58,31 @@ export interface BotActionHost {
 class BotInputView {
   private data: { readonly view: DataView; readonly byteOffset: number; readonly byteLength: number } | null = null;
 
-  constructor(private readonly allocation: BotMemoryAllocation, private readonly offset: number) {}
+  constructor(
+    private readonly allocation: BotMemoryAllocation,
+    private readonly offset: number,
+  ) {}
 
-  get bytes(): Uint8Array { return this.allocation.bytes.subarray(this.offset, this.offset + BOT_INPUT_BYTES); }
+  get bytes(): Uint8Array {
+    return this.allocation.bytes.subarray(this.offset, this.offset + BOT_INPUT_BYTES);
+  }
 
   private view(): DataView {
     const bytes = this.allocation.bytes;
     let data = this.data;
     if (data === null || data.view.buffer !== bytes.buffer || data.byteOffset !== bytes.byteOffset || data.byteLength !== bytes.byteLength) {
-      data = { view: new DataView(bytes.buffer, bytes.byteOffset + this.offset, BOT_INPUT_BYTES),
-        byteOffset: bytes.byteOffset, byteLength: bytes.byteLength };
+      data = { view: new DataView(bytes.buffer, bytes.byteOffset + this.offset, BOT_INPUT_BYTES), byteOffset: bytes.byteOffset, byteLength: bytes.byteLength };
       this.data = data;
     }
     return data.view;
   }
 
-  get thinkTime(): number { return this.view().getFloat32(0, true); }
-  set thinkTime(value: number) { this.view().setFloat32(0, value, true); }
+  get thinkTime(): number {
+    return this.view().getFloat32(0, true);
+  }
+  set thinkTime(value: number) {
+    this.view().setFloat32(0, value, true);
+  }
   get direction(): Vec3 {
     const view = this.view();
     return { x: view.getFloat32(4, true), y: view.getFloat32(8, true), z: view.getFloat32(12, true) };
@@ -83,8 +92,12 @@ class BotInputView {
     this.view().setFloat32(8, value.y, true);
     this.view().setFloat32(12, value.z, true);
   }
-  get speed(): number { return this.view().getFloat32(16, true); }
-  set speed(value: number) { this.view().setFloat32(16, value, true); }
+  get speed(): number {
+    return this.view().getFloat32(16, true);
+  }
+  set speed(value: number) {
+    this.view().setFloat32(16, value, true);
+  }
   get viewAngles(): Vec3 {
     const view = this.view();
     return { x: view.getFloat32(20, true), y: view.getFloat32(24, true), z: view.getFloat32(28, true) };
@@ -94,10 +107,18 @@ class BotInputView {
     this.view().setFloat32(24, value.y, true);
     this.view().setFloat32(28, value.z, true);
   }
-  get actionFlags(): number { return this.view().getInt32(32, true); }
-  set actionFlags(value: number) { this.view().setInt32(32, value, true); }
-  get weapon(): number { return this.view().getInt32(36, true); }
-  set weapon(value: number) { this.view().setInt32(36, value, true); }
+  get actionFlags(): number {
+    return this.view().getInt32(32, true);
+  }
+  set actionFlags(value: number) {
+    this.view().setInt32(32, value, true);
+  }
+  get weapon(): number {
+    return this.view().getInt32(36, true);
+  }
+  set weapon(value: number) {
+    this.view().setInt32(36, value, true);
+  }
 }
 
 function zeroVector(): Vec3 {
@@ -142,13 +163,16 @@ export class BotActionBuffer {
     if (maxClients !== null) this.setup(maxClients);
   }
 
-  get maxClients(): number { return this.clientCapacity; }
+  get maxClients(): number {
+    return this.clientCapacity;
+  }
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture): { readonly capacity: number; readonly allocation: number | null } {
     return { capacity: this.clientCapacity, allocation: this.inputs === null ? null : memory.reference(this.inputs.allocation) };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.actions"), image = { capacity: reader.field("capacity").integer(0), allocation: reader.field("allocation").nullable(entry => entry.integer(0)) };
+    const reader = new SaveReader(value, "bot.actions"),
+      image = { capacity: reader.field("capacity").integer(0), allocation: reader.field("allocation").nullable(entry => entry.integer(0)) };
     if (this.inputs !== null || !Number.isSafeInteger(image.capacity) || image.capacity < 0) throw new Error("Invalid bot action restoration");
     const allocation = image.allocation === null ? null : memory.allocation(image.allocation);
     if (allocation !== null && allocation.bytes.length !== image.capacity * BOT_INPUT_BYTES) throw new Error("Saved bot action allocation size mismatch");
@@ -160,8 +184,7 @@ export class BotActionBuffer {
     if (!Number.isInteger(maxClients) || maxClients < 0 || maxClients * BOT_INPUT_BYTES > 0x7fffffff) {
       throw new RangeError(`bot action maxClients ${maxClients} exceeds the source signed allocation range`);
     }
-    this.inputs = { allocation: this.memory.allocate(maxClients * BOT_INPUT_BYTES, "hunk", true),
-      views: new Map<number, BotInputView>() };
+    this.inputs = { allocation: this.memory.allocate(maxClients * BOT_INPUT_BYTES, "hunk", true), views: new Map<number, BotInputView>() };
     this.clientCapacity = maxClients;
   }
 
@@ -260,19 +283,45 @@ export class BotActionBuffer {
     yield* this.host.clientCommand(client, byteCString(command, "bot client command"));
   }
 
-  gesture(client: number): void { this.addFlag(client, BotActionFlag.GESTURE); }
-  talk(client: number): void { this.addFlag(client, BotActionFlag.TALK); }
-  attack(client: number): void { this.addFlag(client, BotActionFlag.ATTACK); }
-  use(client: number): void { this.addFlag(client, BotActionFlag.USE); }
-  respawn(client: number): void { this.addFlag(client, BotActionFlag.RESPAWN); }
-  crouch(client: number): void { this.addFlag(client, BotActionFlag.CROUCH); }
-  walk(client: number): void { this.addFlag(client, BotActionFlag.WALK); }
-  moveUp(client: number): void { this.addFlag(client, BotActionFlag.MOVE_UP); }
-  moveDown(client: number): void { this.addFlag(client, BotActionFlag.MOVE_DOWN); }
-  moveForward(client: number): void { this.addFlag(client, BotActionFlag.MOVE_FORWARD); }
-  moveBack(client: number): void { this.addFlag(client, BotActionFlag.MOVE_BACK); }
-  moveLeft(client: number): void { this.addFlag(client, BotActionFlag.MOVE_LEFT); }
-  moveRight(client: number): void { this.addFlag(client, BotActionFlag.MOVE_RIGHT); }
+  gesture(client: number): void {
+    this.addFlag(client, BotActionFlag.GESTURE);
+  }
+  talk(client: number): void {
+    this.addFlag(client, BotActionFlag.TALK);
+  }
+  attack(client: number): void {
+    this.addFlag(client, BotActionFlag.ATTACK);
+  }
+  use(client: number): void {
+    this.addFlag(client, BotActionFlag.USE);
+  }
+  respawn(client: number): void {
+    this.addFlag(client, BotActionFlag.RESPAWN);
+  }
+  crouch(client: number): void {
+    this.addFlag(client, BotActionFlag.CROUCH);
+  }
+  walk(client: number): void {
+    this.addFlag(client, BotActionFlag.WALK);
+  }
+  moveUp(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_UP);
+  }
+  moveDown(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_DOWN);
+  }
+  moveForward(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_FORWARD);
+  }
+  moveBack(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_BACK);
+  }
+  moveLeft(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_LEFT);
+  }
+  moveRight(client: number): void {
+    this.addFlag(client, BotActionFlag.MOVE_RIGHT);
+  }
 
   action(client: number, actionFlags: number): void {
     const input = this.input(client);

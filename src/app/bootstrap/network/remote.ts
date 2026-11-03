@@ -1,496 +1,910 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { angleVectorsRule } from "../../../core/math.ts";
-import { q2RereleaseViewContinuous, Q2RereleaseViewHeight, q2RemoteViewHeight, q2RemoteViewPosition, q2RemoteBodyBounds, q2RemoteCommand } from "./q2-remote-view.ts";
+import {
+  q2RereleaseViewContinuous,
+  Q2RereleaseViewHeight,
+  q2RemoteViewHeight,
+  q2RemoteViewPosition,
+  q2RemoteBodyBounds,
+  q2RemoteCommand,
+} from "./q2-remote-view.ts";
 import { interpolateQ2DamageBlend } from "../q2-damage-blend.ts";
-import type { MvdProfile } from '../../../network/q2/mvd-profile.ts';
-import type { Q2MvdPresentation } from './q2-demo.ts';
-import { q2MvdLayout, q2MvdVisibility } from './q2-mvd-presentation.ts';
-import type { ClientDownloadProgress } from './client-download-policy.ts';
-import { RemoteWorldContent } from './remote-world.ts';
+import type { MvdProfile } from "../../../network/q2/mvd-profile.ts";
+import type { Q2MvdPresentation } from "./q2-demo.ts";
+import { q2MvdLayout, q2MvdVisibility } from "./q2-mvd-presentation.ts";
+import type { ClientDownloadProgress } from "./client-download-policy.ts";
+import { RemoteWorldContent } from "./remote-world.ts";
 import type { RemoteContentMounts } from "../content.ts";
-import type { ClientDownloadPermission } from './client-download-policy.ts';
+import type { ClientDownloadPermission } from "./client-download-policy.ts";
 import type { WorldText } from "../../../text/world.ts";
-import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
-import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
-import { q2proExtensions } from '../../../network/q2/codecs/q2pro-fields.ts';
-import { q2SolidEncoding, unpackQ2Solid } from '../../../network/q2/solid.ts';
-import { negotiatedR1Q2Protocol } from '../../../network/q2/codec.ts';
-import type { Bounds, Vec3 } from '../../../contracts/math.ts';
-import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
-import type { ActorCommand, BodySnapshot, SimulationOutput } from '../../../contracts/session.ts';
-import type { SceneLightStyle, SceneQueries } from '../../../contracts/scene.ts';
-import { blockChecksum } from '../../../core/md4.ts';
-import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
-import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
-import { readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
-import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
-import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
-import type { LoadedApplicationContent } from '../content.ts';
-import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
-import type { Q2ApplicationClientHost, Q2ApplicationGameState, Q2ApplicationPlayer, RemotePresentationAccess } from './types.ts';
+import type { ContentId, ResolvedResourceReference } from "../../../contracts/content.ts";
+import type { ActorId, IdentityOwner } from "../../../contracts/identity.ts";
+import { q2proExtensions } from "../../../network/q2/codecs/q2pro-fields.ts";
+import { q2SolidEncoding, unpackQ2Solid } from "../../../network/q2/solid.ts";
+import { negotiatedR1Q2Protocol } from "../../../network/q2/codec.ts";
+import type { Bounds, Vec3 } from "../../../contracts/math.ts";
+import type { Q2ProtocolIdentity } from "../../../contracts/protocol.ts";
+import type { ActorCommand, BodySnapshot, SimulationOutput } from "../../../contracts/session.ts";
+import type { SceneLightStyle, SceneQueries } from "../../../contracts/scene.ts";
+import { blockChecksum } from "../../../core/md4.ts";
+import { Q2_BASE_WEAPONS } from "../../../content/q2/foundation/weapons/index.ts";
+import { muzzleOffset } from "../../../content/q2/foundation/monsters/muzzle.ts";
+import { readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from "../../../network/q2/index.ts";
+import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from "../../../network/q2/index.ts";
+import type { EngineSession, SessionClient } from "../../../world/session/session.ts";
+import type { LoadedApplicationContent } from "../content.ts";
+import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from "../simulation/types.ts";
+import type { Q2ApplicationClientHost, Q2ApplicationGameState, Q2ApplicationPlayer, RemotePresentationAccess } from "./types.ts";
 import { q2WeaponStatus } from "../simulation/arsenal/weapon-status.ts";
-import { q2ApplicationLayout } from './q2-layout.ts';
-import { Q2DownloadReceiver } from './q2-downloads.ts';
-import { q2BeamFromWire, q2EffectFromWire } from './q2-effects.ts';
-import { SelectedMovementPrediction } from '../simulation/prediction.ts';
-import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
-import { movementOrigin, movementProfile } from '../simulation/players.ts';
+import { q2ApplicationLayout } from "./q2-layout.ts";
+import { Q2DownloadReceiver } from "./q2-downloads.ts";
+import { q2BeamFromWire, q2EffectFromWire } from "./q2-effects.ts";
+import { SelectedMovementPrediction } from "../simulation/prediction.ts";
+import type { MovementPredictionResult, MovementPredictionSnapshot } from "../simulation/prediction.ts";
+import { movementOrigin, movementProfile } from "../simulation/players.ts";
 export interface Q2RemotePresentationOptions {
-    readonly recordedProfile?: MvdProfile;
-    readonly seat: import('../../../contracts/identity.ts').SeatId;
-    publish(output: SimulationOutput): void;
-    disconnected(reason: string): void;
-    presentationTime?(): number;
-    readonly identity: IdentityOwner;
-    readonly session: EngineSession;
-    readonly client: SessionClient;
-    nextGeneration(slot: number): number;
-    readonly content: LoadedApplicationContent | null;
-    readonly protocol: Q2ProtocolIdentity;
-    readonly userinfo: () => string;
-    readonly downloadPermission?: ClientDownloadPermission;
-    readonly cinematic?: { start(name: string, ended: () => void): Promise<void>; stop(): void };
-    print(text: string): void;
-    sendCommand(text: string): void;
-    loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
-    prepareServerData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<RemoteContentMounts>;
-    refreshDownloads?(assertCurrent: () => void): Promise<RemoteContentMounts>;
+  readonly recordedProfile?: MvdProfile;
+  readonly seat: import("../../../contracts/identity.ts").SeatId;
+  publish(output: SimulationOutput): void;
+  disconnected(reason: string): void;
+  presentationTime?(): number;
+  readonly identity: IdentityOwner;
+  readonly session: EngineSession;
+  readonly client: SessionClient;
+  nextGeneration(slot: number): number;
+  readonly content: LoadedApplicationContent | null;
+  readonly protocol: Q2ProtocolIdentity;
+  readonly userinfo: () => string;
+  readonly downloadPermission?: ClientDownloadPermission;
+  readonly cinematic?: { start(name: string, ended: () => void): Promise<void>; stop(): void };
+  print(text: string): void;
+  sendCommand(text: string): void;
+  loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
+  prepareServerData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<RemoteContentMounts>;
+  refreshDownloads?(assertCurrent: () => void): Promise<RemoteContentMounts>;
 }
 export function q2RemoteEntityBounds(solid: number, longSolid: boolean): Bounds {
-    return unpackQ2Solid(solid, longSolid ? 'r1q2' : 'short');
+  return unpackQ2Solid(solid, longSolid ? "r1q2" : "short");
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-function vector(values: Float32Array): Vec3 { return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) }; }
-function interpolate(from: Vec3, to: Vec3, fraction: number): Vec3 { return { x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction, z: from.z + (to.z - from.z) * fraction }; }
+function vector(values: Float32Array): Vec3 {
+  return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) };
+}
+function interpolate(from: Vec3, to: Vec3, fraction: number): Vec3 {
+  return { x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction, z: from.z + (to.z - from.z) * fraction };
+}
 function interpolateAngles(from: Vec3, to: Vec3, fraction: number): Vec3 {
-    const angle = (a: number, b: number): number => a + (((b - a + 540) % 360) - 180) * fraction;
-    return { x: angle(from.x, to.x), y: angle(from.y, to.y), z: angle(from.z, to.z) };
+  const angle = (a: number, b: number): number => a + (((b - a + 540) % 360) - 180) * fraction;
+  return { x: angle(from.x, to.x), y: angle(from.y, to.y), z: angle(from.z, to.z) };
 }
 /** Decoded source records are presentation state. This owner has no Simulation or combat table. */
 export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePresentationAccess {
-    readonly downloads: Q2DownloadReceiver;
-    get downloadProgress(): readonly ClientDownloadProgress[] { return this.downloads.progress; }
-    cancelDownloads(): void { this.downloads.cancel(); }
-    /** The next existing network poll resumes its retained pending gamestate. */
-    retryDownloads(): void { this.downloads.retry(); }
-    private downloadContent: RemoteContentMounts | null = null;
-    readonly client: SessionClient;
-    private selectedProtocol: Q2ProtocolIdentity;
-    private strafejumpHack = false;
-    private extendedGame = false;
-    get protocol(): Q2ProtocolIdentity { return this.selectedProtocol; }
-    readonly messageOptions;
-    readonly userinfo: () => string;
-    private readonly layout;
-    private readonly actors = new Map<number, ActorId>();
-    private readonly configs = new Map<number, string>();
-    private readonly resources = new Map<string, ResolvedResourceReference>();
-    private readonly events = new EventRing<SimulationPresentationEvent>(8192);
-    private readonly eventCursor: EventCursor = this.events.openCursor();
-    private current: Q2WireFrame | null = null;
-    private previousFrame: Q2WireFrame | null = null;
-    private receivedAt = 0;
-    private fraction = 1;
-    private viewTime = 0;
-    private readonly viewHeight = new Q2RereleaseViewHeight();
-    private currentPlayer: Q2ApplicationPlayer | null = null;
-    private published: SimulationOutput | null = null;
-    private eventSequence = 0;
-    private frameMilliseconds = 100;
-    private inventory: readonly number[] = [];
-    private lastRecords: readonly Q2ServerRecord[] = [];
-    private layoutText = '';
-    private readonly world: RemoteWorldContent;
-    private predictionOwner: SelectedMovementPrediction | null = null;
-    private predicted: MovementPredictionResult | null = null;
-    private packetAcknowledged = 0;
-    readonly prediction = {
-        acknowledged: (sequence: number, _nowMilliseconds: number): void => { this.packetAcknowledged = sequence; },
-        sent: (sequence: number, command: UsercmdT, nowMilliseconds: number): void => {
-            this.predictionOwner?.submit({ sequence, timeMilliseconds: nowMilliseconds, command: (this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-kex') ? toQ2RereleaseCommand(command, this.current?.serverFrame ?? 0) : toQ2Command(command) });
-            this.predicted = this.predictionOwner?.replay() ?? null;
-        },
+  readonly downloads: Q2DownloadReceiver;
+  get downloadProgress(): readonly ClientDownloadProgress[] {
+    return this.downloads.progress;
+  }
+  cancelDownloads(): void {
+    this.downloads.cancel();
+  }
+  /** The next existing network poll resumes its retained pending gamestate. */
+  retryDownloads(): void {
+    this.downloads.retry();
+  }
+  private downloadContent: RemoteContentMounts | null = null;
+  readonly client: SessionClient;
+  private selectedProtocol: Q2ProtocolIdentity;
+  private strafejumpHack = false;
+  private extendedGame = false;
+  get protocol(): Q2ProtocolIdentity {
+    return this.selectedProtocol;
+  }
+  readonly messageOptions;
+  readonly userinfo: () => string;
+  private readonly layout;
+  private readonly actors = new Map<number, ActorId>();
+  private readonly configs = new Map<number, string>();
+  private readonly resources = new Map<string, ResolvedResourceReference>();
+  private readonly events = new EventRing<SimulationPresentationEvent>(8192);
+  private readonly eventCursor: EventCursor = this.events.openCursor();
+  private current: Q2WireFrame | null = null;
+  private previousFrame: Q2WireFrame | null = null;
+  private receivedAt = 0;
+  private fraction = 1;
+  private viewTime = 0;
+  private readonly viewHeight = new Q2RereleaseViewHeight();
+  private currentPlayer: Q2ApplicationPlayer | null = null;
+  private published: SimulationOutput | null = null;
+  private eventSequence = 0;
+  private frameMilliseconds = 100;
+  private inventory: readonly number[] = [];
+  private lastRecords: readonly Q2ServerRecord[] = [];
+  private layoutText = "";
+  private readonly world: RemoteWorldContent;
+  private predictionOwner: SelectedMovementPrediction | null = null;
+  private predicted: MovementPredictionResult | null = null;
+  private packetAcknowledged = 0;
+  readonly prediction = {
+    acknowledged: (sequence: number, _nowMilliseconds: number): void => {
+      this.packetAcknowledged = sequence;
+    },
+    sent: (sequence: number, command: UsercmdT, nowMilliseconds: number): void => {
+      this.predictionOwner?.submit({
+        sequence,
+        timeMilliseconds: nowMilliseconds,
+        command:
+          this.protocol.kind === "q2-rerelease" || this.protocol.kind === "q2-kex"
+            ? toQ2RereleaseCommand(command, this.current?.serverFrame ?? 0)
+            : toQ2Command(command),
+      });
+      this.predicted = this.predictionOwner?.replay() ?? null;
+    },
+  };
+  constructor(readonly options: Q2RemotePresentationOptions) {
+    if (options.protocol.kind === "q2-kex-demo") throw new Error("KEX native live transport is not bound");
+    this.selectedProtocol = options.protocol;
+    this.layout = options.recordedProfile === undefined ? q2ApplicationLayout(options.protocol) : q2MvdLayout(options.recordedProfile);
+    this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
+    this.userinfo = options.userinfo;
+    this.world = new RemoteWorldContent(options.content);
+    const refreshDownloads = options.refreshDownloads;
+    this.downloads = new Q2DownloadReceiver(
+      () => {
+        if (this.downloadContent === null) throw new Error("Q2 downloads require prepared server content");
+        return this.downloadContent;
+      },
+      options.sendCommand,
+      options.print,
+      refreshDownloads === undefined
+        ? undefined
+        : async () => {
+            const revision = this.downloads.revision;
+            const assertCurrent = (): void => {
+              if (this.downloads.revision !== revision) throw new Error("Q2 package refresh was retired");
+            };
+            const fresh = await refreshDownloads(assertCurrent);
+            assertCurrent();
+            this.downloadContent = fresh;
+          },
+      options.downloadPermission,
+    );
+
+    this.client = options.client;
+  }
+  get mvdPresentation(): Q2MvdPresentation {
+    const profile = this.options.recordedProfile;
+    if (profile === undefined) throw new Error("MVD presentation requires its recorded profile");
+    return {
+      visibility: q2MvdVisibility({ profile, scene: () => this.world.scene, modelPath: index => this.configs.get(this.layout.models + index) }),
+      selectView: clientnum => this.selectRecordedView(clientnum),
     };
-    constructor(readonly options: Q2RemotePresentationOptions) {
-        if (options.protocol.kind === 'q2-kex-demo')
-            throw new Error('KEX native live transport is not bound');
-        this.selectedProtocol = options.protocol;
-        this.layout = options.recordedProfile === undefined ? q2ApplicationLayout(options.protocol) : q2MvdLayout(options.recordedProfile);
-        this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
-        this.userinfo = options.userinfo;
-        this.world = new RemoteWorldContent(options.content);
-        const refreshDownloads = options.refreshDownloads;
-        this.downloads = new Q2DownloadReceiver(() => { if (this.downloadContent === null) throw new Error('Q2 downloads require prepared server content'); return this.downloadContent; }, options.sendCommand, options.print,
-            refreshDownloads === undefined ? undefined : async () => {
-                const revision = this.downloads.revision;
-                const assertCurrent = (): void => { if (this.downloads.revision !== revision) throw new Error('Q2 package refresh was retired'); };
-                const fresh = await refreshDownloads(assertCurrent);
-                assertCurrent();
-                this.downloadContent = fresh;
-            }, options.downloadPermission);
-
-        this.client = options.client;
+  }
+  selectRecordedView(clientnum: number): void {
+    const maximum = Number(this.configs.get(this.layout.maxClients));
+    if (!Number.isInteger(clientnum) || clientnum < 0 || !Number.isInteger(maximum) || clientnum >= maximum)
+      throw new Error("Recorded viewpoint is outside its admitted player range");
+    if (this.currentPlayer?.sourceEntity !== clientnum + 1) {
+      this.current = null;
+      this.previousFrame = null;
+      this.viewHeight.reset();
     }
-    get mvdPresentation(): Q2MvdPresentation {
-        const profile = this.options.recordedProfile;
-        if (profile === undefined) throw new Error('MVD presentation requires its recorded profile');
-        return { visibility: q2MvdVisibility({ profile, scene: () => this.world.scene,
-            modelPath: index => this.configs.get(this.layout.models + index) }),
-            selectView: clientnum => this.selectRecordedView(clientnum) };
-    }
-    selectRecordedView(clientnum: number): void {
-        const maximum = Number(this.configs.get(this.layout.maxClients));
-        if (!Number.isInteger(clientnum) || clientnum < 0 || !Number.isInteger(maximum) || clientnum >= maximum)
-            throw new Error('Recorded viewpoint is outside its admitted player range');
-        if (this.currentPlayer?.sourceEntity !== clientnum + 1) { this.current = null; this.previousFrame = null; this.viewHeight.reset(); }
-        this.currentPlayer = { client: this.client.id, actor: this.actor(clientnum + 1), sourceEntity: clientnum + 1 };
-        this.predictionOwner = null; this.predicted = null;
-    }
-    get configLayout(): ReturnType<typeof q2ApplicationLayout> { return this.layout; }
-    get player(): Q2ApplicationPlayer | null { return this.currentPlayer; }
-    get output(): SimulationOutput | null { return this.published; }
-    /** Retained native fields include records whose specialized UI/effect handler is still unbound. */
-    get sourceRecords(): readonly Q2ServerRecord[] { return this.lastRecords; }
-    get nativeLayout(): string { return this.layoutText; }
-    get scene(): SceneQueries { return this.world.scene; }
-    isPlayer(actor: ActorId): boolean {
-        if (this.currentPlayer?.actor.equals(actor)) return true;
-        if (this.current === null) return false;
-        const maximum = Number(this.configs.get(this.layout.maxClients));
-        if (!Number.isInteger(maximum) || maximum < 1 || maximum > 256) throw new Error('Remote Q2 frame has no valid advertised client range');
-        return this.current.entities.some(entity => entity.number >= 1 && entity.number <= maximum && this.actors.get(entity.number)?.equals(actor) === true);
-    }
-    private actor(number: number): ActorId {
-        const current = this.actors.get(number);
-        if (current !== undefined)
-            return current;
-        const actor = this.options.identity.actor(number, this.options.nextGeneration(number));
-        this.actors.set(number, actor);
-        return actor;
-    }
-    async serverData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<void> {
-        this.options.cinematic?.stop();
-        const revision = this.downloads.revision;
-        const current = (): void => { assertCurrent(); if (revision !== this.downloads.revision) throw new Error('Q2 server content preparation was retired'); };
-        const prepared = await this.options.prepareServerData(data, current);
-        current(); this.downloadContent = prepared;
-        if (data.clientnum < 0) {
-            const cinematic = this.options.cinematic;
-            if (cinematic === undefined) throw new Error('Q2 cinematic serverdata requires the shared media owner');
-            this.current = null; this.viewHeight.reset(); this.viewTime = 0; this.previousFrame = null; this.published = null; this.currentPlayer = null;
-            this.predictionOwner = null; this.predicted = null;
-            let completed = false;
-            await cinematic.start(data.levelname, () => {
-                if (completed) return;
-                try { current(); } catch { return; }
-                completed = true; this.options.sendCommand(`nextserver ${data.servercount}\n`);
-            });
-            current();
+    this.currentPlayer = { client: this.client.id, actor: this.actor(clientnum + 1), sourceEntity: clientnum + 1 };
+    this.predictionOwner = null;
+    this.predicted = null;
+  }
+  get configLayout(): ReturnType<typeof q2ApplicationLayout> {
+    return this.layout;
+  }
+  get player(): Q2ApplicationPlayer | null {
+    return this.currentPlayer;
+  }
+  get output(): SimulationOutput | null {
+    return this.published;
+  }
+  /** Retained native fields include records whose specialized UI/effect handler is still unbound. */
+  get sourceRecords(): readonly Q2ServerRecord[] {
+    return this.lastRecords;
+  }
+  get nativeLayout(): string {
+    return this.layoutText;
+  }
+  get scene(): SceneQueries {
+    return this.world.scene;
+  }
+  isPlayer(actor: ActorId): boolean {
+    if (this.currentPlayer?.actor.equals(actor)) return true;
+    if (this.current === null) return false;
+    const maximum = Number(this.configs.get(this.layout.maxClients));
+    if (!Number.isInteger(maximum) || maximum < 1 || maximum > 256) throw new Error("Remote Q2 frame has no valid advertised client range");
+    return this.current.entities.some(entity => entity.number >= 1 && entity.number <= maximum && this.actors.get(entity.number)?.equals(actor) === true);
+  }
+  private actor(number: number): ActorId {
+    const current = this.actors.get(number);
+    if (current !== undefined) return current;
+    const actor = this.options.identity.actor(number, this.options.nextGeneration(number));
+    this.actors.set(number, actor);
+    return actor;
+  }
+  async serverData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<void> {
+    this.options.cinematic?.stop();
+    const revision = this.downloads.revision;
+    const current = (): void => {
+      assertCurrent();
+      if (revision !== this.downloads.revision) throw new Error("Q2 server content preparation was retired");
+    };
+    const prepared = await this.options.prepareServerData(data, current);
+    current();
+    this.downloadContent = prepared;
+    if (data.clientnum < 0) {
+      const cinematic = this.options.cinematic;
+      if (cinematic === undefined) throw new Error("Q2 cinematic serverdata requires the shared media owner");
+      this.current = null;
+      this.viewHeight.reset();
+      this.viewTime = 0;
+      this.previousFrame = null;
+      this.published = null;
+      this.currentPlayer = null;
+      this.predictionOwner = null;
+      this.predicted = null;
+      let completed = false;
+      await cinematic.start(data.levelname, () => {
+        if (completed) return;
+        try {
+          current();
+        } catch {
+          return;
         }
+        completed = true;
+        this.options.sendCommand(`nextserver ${data.servercount}\n`);
+      });
+      current();
     }
-    async gameState(state: Q2ApplicationGameState): Promise<void> {
-        const offered = this.options.protocol;
-        if (offered.kind === 'q2-r1q2') this.selectedProtocol = negotiatedR1Q2Protocol(offered, state.data.r1q2Version);
-        this.strafejumpHack = offered.kind === 'q2-r1q2' ? state.data.r1q2StrafejumpHack === true : state.data.q2proStrafejumpHack === true;
-        this.extendedGame = offered.kind === 'q2-q2pro' && q2proExtensions({ revision: state.data.q2proVersion ?? offered.revision, flags: state.data.wireFlags ?? 0 });
-        const revision = this.downloads.revision;
-        const content = this.options.loadContent === undefined ? this.world.content : await this.options.loadContent(state);
-        if (revision !== this.downloads.revision) return;
-        const path = state.configStrings.get(this.layout.models + 1);
-        if (path !== content.recipe.map.geometry.requestedPath)
-            throw new Error(`Q2 server map ${path ?? '<missing>'} requires application content replacement`);
-        const checksum = state.configStrings.get(this.layout.mapChecksum);
-        const mapBytes = await content.mounts.read(content.recipe.map.geometry);
-        if (revision !== this.downloads.revision) return;
-        if (checksum === undefined || (Number(checksum) >>> 0) !== blockChecksum(mapBytes))
-            throw new Error('Q2 server map checksum differs from mounted content');
-        if (state.data.clientnum < 0)
-            throw new Error('Q2 remote multi-seat/cinematic serverdata requires its source presentation binding');
-        this.world.content = content;
-        const owner = this.downloadContent;
-        if (owner !== null) this.downloadContent = { ...owner, catalog: content.catalog, product: content.catalog.product(owner.product.id), mounts: content.mounts };
-        this.actors.clear();
-        this.configs.clear();
-        this.current = null; this.viewHeight.reset(); this.viewTime = 0;
-        this.previousFrame = null;
-        this.published = null;
-        this.predictionOwner = null;
-        this.predicted = null;
+  }
+  async gameState(state: Q2ApplicationGameState): Promise<void> {
+    const offered = this.options.protocol;
+    if (offered.kind === "q2-r1q2") this.selectedProtocol = negotiatedR1Q2Protocol(offered, state.data.r1q2Version);
+    this.strafejumpHack = offered.kind === "q2-r1q2" ? state.data.r1q2StrafejumpHack === true : state.data.q2proStrafejumpHack === true;
+    this.extendedGame =
+      offered.kind === "q2-q2pro" && q2proExtensions({ revision: state.data.q2proVersion ?? offered.revision, flags: state.data.wireFlags ?? 0 });
+    const revision = this.downloads.revision;
+    const content = this.options.loadContent === undefined ? this.world.content : await this.options.loadContent(state);
+    if (revision !== this.downloads.revision) return;
+    const path = state.configStrings.get(this.layout.models + 1);
+    if (path !== content.recipe.map.geometry.requestedPath) throw new Error(`Q2 server map ${path ?? "<missing>"} requires application content replacement`);
+    const checksum = state.configStrings.get(this.layout.mapChecksum);
+    const mapBytes = await content.mounts.read(content.recipe.map.geometry);
+    if (revision !== this.downloads.revision) return;
+    if (checksum === undefined || Number(checksum) >>> 0 !== blockChecksum(mapBytes)) throw new Error("Q2 server map checksum differs from mounted content");
+    if (state.data.clientnum < 0) throw new Error("Q2 remote multi-seat/cinematic serverdata requires its source presentation binding");
+    this.world.content = content;
+    const owner = this.downloadContent;
+    if (owner !== null)
+      this.downloadContent = { ...owner, catalog: content.catalog, product: content.catalog.product(owner.product.id), mounts: content.mounts };
+    this.actors.clear();
+    this.configs.clear();
+    this.current = null;
+    this.viewHeight.reset();
+    this.viewTime = 0;
+    this.previousFrame = null;
+    this.published = null;
+    this.predictionOwner = null;
+    this.predicted = null;
 
-        this.inventory = [];
-        this.layoutText = '';
-        this.events.reset();
-        for (const [index, value] of state.configStrings)
-            this.configs.set(index, value);
-        this.currentPlayer = { client: this.client.id, actor: this.actor(state.data.clientnum + 1), sourceEntity: state.data.clientnum + 1 };
-        this.frameMilliseconds = 1000 / (state.data.serverFps ?? 10);
-        for (const [index, value] of this.configs) this.playerInfo(index, value, 0);
-    }
-    private playerInfo(index: number, value: string, seconds: number): void {
-        if (index < this.layout.playerSkins || index >= this.layout.playerSkins + 256) return;
-        const slot = index - this.layout.playerSkins, split = value.indexOf('\\');
-        this.events.admit({ kind: 'q2-player', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds, sourceEntity: slot + 1,
-            event: { kind: 'userinfo', actor: this.actor(slot + 1), slot, name: split < 0 ? value : value.slice(0, split), skin: split < 0 ? '' : value.slice(split + 1) } });
-    }
-    private requirePlayer(actor: ActorId): {
-        readonly player: Q2ApplicationPlayer;
-        readonly frame: Q2WireFrame;
-    } {
-        if (this.currentPlayer === null || !this.currentPlayer.actor.equals(actor) || this.current === null)
-            throw new Error('Remote Q2 player has no decoded frame');
-        return { player: this.currentPlayer, frame: this.current };
-    }
-    private nativePlayer(frame: Q2WireFrame) { return (this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-kex') ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player); }
-    private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-rerelease' ? movement.origin : { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
-    private sampledPlayerOrigin(frame: Q2WireFrame): Vec3 {
-        const predicted = this.predicted;
-        if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return movementOrigin(predicted.player.state);
-        const origin = this.playerOrigin(frame), previous = this.previousFrame;
-        if (previous === null) return origin;
-        const before = this.playerOrigin(previous), teleport = Math.max(Math.abs(origin.x - before.x), Math.abs(origin.y - before.y), Math.abs(origin.z - before.z)) > 256;
-        return teleport ? origin : interpolate(before, origin, this.fraction);
-    }
-    worldText(): readonly WorldText[] { return []; }
+    this.inventory = [];
+    this.layoutText = "";
+    this.events.reset();
+    for (const [index, value] of state.configStrings) this.configs.set(index, value);
+    this.currentPlayer = { client: this.client.id, actor: this.actor(state.data.clientnum + 1), sourceEntity: state.data.clientnum + 1 };
+    this.frameMilliseconds = 1000 / (state.data.serverFps ?? 10);
+    for (const [index, value] of this.configs) this.playerInfo(index, value, 0);
+  }
+  private playerInfo(index: number, value: string, seconds: number): void {
+    if (index < this.layout.playerSkins || index >= this.layout.playerSkins + 256) return;
+    const slot = index - this.layout.playerSkins,
+      split = value.indexOf("\\");
+    this.events.admit({
+      kind: "q2-player",
+      sequence: this.eventSequence++,
+      content: this.world.content.recipe.map.entities.content,
+      seconds,
+      sourceEntity: slot + 1,
+      event: {
+        kind: "userinfo",
+        actor: this.actor(slot + 1),
+        slot,
+        name: split < 0 ? value : value.slice(0, split),
+        skin: split < 0 ? "" : value.slice(split + 1),
+      },
+    });
+  }
+  private requirePlayer(actor: ActorId): {
+    readonly player: Q2ApplicationPlayer;
+    readonly frame: Q2WireFrame;
+  } {
+    if (this.currentPlayer === null || !this.currentPlayer.actor.equals(actor) || this.current === null)
+      throw new Error("Remote Q2 player has no decoded frame");
+    return { player: this.currentPlayer, frame: this.current };
+  }
+  private nativePlayer(frame: Q2WireFrame) {
+    return this.protocol.kind === "q2-rerelease" || this.protocol.kind === "q2-kex" ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player);
+  }
+  private playerOrigin(frame: Q2WireFrame): Vec3 {
+    const movement = this.nativePlayer(frame).movement;
+    return movement.kind === "q2-rerelease"
+      ? movement.origin
+      : { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 };
+  }
+  private sampledPlayerOrigin(frame: Q2WireFrame): Vec3 {
+    const predicted = this.predicted;
+    if (predicted?.status === "predicted" || predicted?.status === "disabled") return movementOrigin(predicted.player.state);
+    const origin = this.playerOrigin(frame),
+      previous = this.previousFrame;
+    if (previous === null) return origin;
+    const before = this.playerOrigin(previous),
+      teleport = Math.max(Math.abs(origin.x - before.x), Math.abs(origin.y - before.y), Math.abs(origin.z - before.z)) > 256;
+    return teleport ? origin : interpolate(before, origin, this.fraction);
+  }
+  worldText(): readonly WorldText[] {
+    return [];
+  }
 
-    playerView(actor: ActorId): PlayerView {
-        const { frame } = this.requirePlayer(actor), origin = this.sampledPlayerOrigin(frame), previous = this.previousFrame;
-        const fieldOfView = previous === null ? frame.player.fov : previous.player.fov + (frame.player.fov - previous.player.fov) * this.fraction;
-        const native = this.nativePlayer(frame), priorNative = previous === null ? null : this.nativePlayer(previous);
-        const sourceBlend = native.kind === 'q2-rerelease' ? { damageBlend: interpolateQ2DamageBlend(priorNative?.kind === 'q2-rerelease' ? priorNative.damageBlend : null, native.damageBlend, this.fraction) } : {};
-        const predicted = this.predicted, offset = priorNative === null ? native.viewOffset : interpolate(priorNative.viewOffset, native.viewOffset, this.fraction);
-        const height = q2RemoteViewHeight(native), priorHeight = priorNative === null ? height : q2RemoteViewHeight(priorNative);
-        const sourceHeight = native.kind === 'q2-rerelease' ? this.viewHeight.sample(height, this.viewTime) : null;
-        if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return { ...sourceBlend,
-            ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? predicted.player.viewHeight), angles: predicted.player.viewAngles, fieldOfView };
-        return { ...sourceBlend, ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? priorHeight + (height - priorHeight) * this.fraction), fieldOfView,
-            angles: previous === null ? native.viewAngles : interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction) };
+  playerView(actor: ActorId): PlayerView {
+    const { frame } = this.requirePlayer(actor),
+      origin = this.sampledPlayerOrigin(frame),
+      previous = this.previousFrame;
+    const fieldOfView = previous === null ? frame.player.fov : previous.player.fov + (frame.player.fov - previous.player.fov) * this.fraction;
+    const native = this.nativePlayer(frame),
+      priorNative = previous === null ? null : this.nativePlayer(previous);
+    const sourceBlend =
+      native.kind === "q2-rerelease"
+        ? { damageBlend: interpolateQ2DamageBlend(priorNative?.kind === "q2-rerelease" ? priorNative.damageBlend : null, native.damageBlend, this.fraction) }
+        : {};
+    const predicted = this.predicted,
+      offset = priorNative === null ? native.viewOffset : interpolate(priorNative.viewOffset, native.viewOffset, this.fraction);
+    const height = q2RemoteViewHeight(native),
+      priorHeight = priorNative === null ? height : q2RemoteViewHeight(priorNative);
+    const sourceHeight = native.kind === "q2-rerelease" ? this.viewHeight.sample(height, this.viewTime) : null;
+    if (predicted?.status === "predicted" || predicted?.status === "disabled")
+      return {
+        ...sourceBlend,
+        ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? predicted.player.viewHeight),
+        angles: predicted.player.viewAngles,
+        fieldOfView,
+      };
+    return {
+      ...sourceBlend,
+      ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? priorHeight + (height - priorHeight) * this.fraction),
+      fieldOfView,
+      angles: previous === null ? native.viewAngles : interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction),
+    };
+  }
+  playerUi(actor: ActorId): PlayerUi {
+    const { frame } = this.requirePlayer(actor),
+      weaponModel = this.configs.get(this.layout.models + frame.player.gunindex),
+      weapon = Q2_BASE_WEAPONS.find(item => item.viewModel === weaponModel);
+    const source = this.world.content.recipe.weapons[0];
+    if (source === undefined) throw new Error("Remote Q2 presentation requires its selected weapon provider");
+    const entries = this.inventory.flatMap((count, ordinal) => {
+      const label = this.configs.get(this.layout.items + ordinal),
+        definition = Q2_BASE_WEAPONS.find(item => item.name === label?.toLowerCase().replaceAll(" ", ""));
+      return count === 0 || definition === undefined ? [] : [{ item: definition.item, count, capacity: count }];
+    });
+    return {
+      powerups: [],
+      health: readElement(frame.player.stats, 1),
+      armor: {
+        powered: { kind: "none" },
+        regular:
+          readElement(frame.player.stats, 5) === 0
+            ? { kind: "none" }
+            : { kind: "q2", points: readElement(frame.player.stats, 5), normalProtection: 0, energyProtection: 0, item: "q2:remote-armor" },
+      },
+      weaponStatus: q2WeaponStatus(weapon ?? null, () => readElement(frame.player.stats, 3), source),
+      arsenalWarning: "none",
+      activeWeapon: weapon?.item ?? null,
+      ammo: weapon?.ammo === undefined || weapon.ammo === null ? null : { item: weapon.ammo, count: readElement(frame.player.stats, 3) },
+      inventory: entries,
+      items: Q2_BASE_WEAPONS.map((definition, sourceOrdinal) => ({
+        id: definition.item,
+        label: definition.name,
+        kind: "weapon",
+        sourceOrdinal,
+        owned: entries.some(entry => entry.item === definition.item) || weapon === definition,
+        hasAmmo: definition.ammo === null || readElement(frame.player.stats, 3) >= definition.quantity,
+        count: definition.ammo === null ? null : readElement(frame.player.stats, 3),
+        warningCount: definition.warning,
+      })),
+    };
+  }
+  characterViews(): ReturnType<RemotePresentationAccess["characterViews"]> {
+    return [];
+  }
+  presentations(): readonly SimulationPresentation[] {
+    const current = this.current,
+      player = this.currentPlayer;
+    if (current === null || player === null) return [];
+    const result: SimulationPresentation[] = [];
+    for (const entity of current.entities) {
+      let path = this.configs.get(this.layout.models + entity.modelindex),
+        skinPath: string | null = null;
+      if (entity.modelindex === 255) {
+        const value = this.configs.get(this.layout.playerSkins + (entity.skinnum & 255)) ?? "player\\male/grunt",
+          appearance = value.slice(value.indexOf("\\") + 1),
+          slash = appearance.indexOf("/"),
+          model = slash < 0 ? "male" : appearance.slice(0, slash),
+          skin = slash < 0 ? "grunt" : appearance.slice(slash + 1);
+        path = `players/${model}/tris.md2`;
+        skinPath = `players/${model}/${skin}.pcx`;
+      }
+      if (path === undefined || entity.modelindex === 0) continue;
+      const prior = this.previousFrame?.entities.find(value => value.number === entity.number),
+        continuous =
+          prior !== undefined &&
+          prior.modelindex === entity.modelindex &&
+          entity.event !== 6 &&
+          entity.event !== 7 &&
+          Math.max(...[0, 1, 2].map(index => Math.abs(readElement(entity.origin, index) - readElement(prior.origin, index)))) <= 512;
+      result.push({
+        actor: this.actor(entity.number),
+        content: this.world.content.recipe.map.entities.content,
+        family: "q2",
+        path,
+        frame: entity.frame,
+        oldFrame: continuous ? prior.frame : entity.frame,
+        backLerp: continuous ? 1 - this.fraction : 0,
+        skin: entity.modelindex === 255 ? 0 : entity.skinnum,
+        skinPath,
+        effects: entity.effects,
+        renderFlags: entity.renderfx,
+        origin: continuous ? interpolate(vector(prior.origin), vector(entity.origin), this.fraction) : vector(entity.origin),
+        angles: continuous ? interpolateAngles(vector(prior.angles), vector(entity.angles), this.fraction) : vector(entity.angles),
+        scale: entity.scale || 1,
+        visible: true,
+        viewWeapon: false,
+      });
     }
-    playerUi(actor: ActorId): PlayerUi {
-        const { frame } = this.requirePlayer(actor), weaponModel = this.configs.get(this.layout.models + frame.player.gunindex), weapon = Q2_BASE_WEAPONS.find(item => item.viewModel === weaponModel);
-        const source = this.world.content.recipe.weapons[0];
-        if (source === undefined) throw new Error("Remote Q2 presentation requires its selected weapon provider");
-        const entries = this.inventory.flatMap((count, ordinal) => {
-            const label = this.configs.get(this.layout.items + ordinal), definition = Q2_BASE_WEAPONS.find(item => item.name === label?.toLowerCase().replaceAll(' ', ''));
-            return count === 0 || definition === undefined ? [] : [{ item: definition.item, count, capacity: count }];
+    const gunPath = this.configs.get(this.layout.models + current.player.gunindex);
+    if (gunPath !== undefined && current.player.gunindex !== 0) {
+      const view = this.playerView(player.actor),
+        offset = vector(current.player.gunoffset);
+      result.push({
+        actor: player.actor,
+        content: this.world.content.recipe.map.entities.content,
+        family: "q2",
+        path: gunPath,
+        frame: current.player.gunframe,
+        oldFrame: this.previousFrame?.player.gunindex === current.player.gunindex ? this.previousFrame.player.gunframe : current.player.gunframe,
+        backLerp: 1 - this.fraction,
+        skin: current.player.gunskin,
+        effects: 0,
+        renderFlags: 0,
+        origin: { x: view.origin.x + offset.x, y: view.origin.y + offset.y, z: view.origin.z + view.viewHeight + offset.z },
+        viewOrigin: { ...view.origin, z: view.origin.z + view.viewHeight },
+        viewAngles: view.angles,
+        angles: view.angles,
+        scale: 1,
+        visible: true,
+        viewWeapon: true,
+      });
+    }
+    return result;
+  }
+  registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined {
+    this.resources.set(`${content}/${path}`, resource);
+    return undefined;
+  }
+  playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
+    this.requirePlayer(actor);
+    if ([name, ...args].some(value => /["\n\r;]/.test(value))) throw new Error("Q2 console argument contains a command delimiter");
+    this.options.sendCommand([name, ...args.map(value => `"${value}"`)].join(" "));
+    return undefined;
+  }
+  command(command: ActorCommand): UsercmdT {
+    const { frame } = this.requirePlayer(command.actor);
+    if (command.command.kind !== "q2-classic" && command.command.kind !== "q2-rerelease") throw new Error("Native Q2 client requires Q2 movement commands");
+    return q2RemoteCommand(command.command, this.nativePlayer(frame));
+  }
+  frame(frame: Q2WireFrame, records: readonly Q2ServerRecord[], nowMilliseconds: number): void {
+    for (const { event } of records) if (event.kind === "config-string") this.configs.set(event.index, event.value);
+    const player = this.currentPlayer;
+    if (player === null) throw new Error("Q2 frame precedes application signon");
+    const previous = this.current;
+    const native = this.nativePlayer(frame),
+      priorNative = previous === null ? null : this.nativePlayer(previous);
+    const continuous =
+      native.kind !== "q2-rerelease" ||
+      (previous !== null &&
+        previous.valid !== false &&
+        priorNative?.kind === "q2-rerelease" &&
+        q2RereleaseViewContinuous(
+          priorNative,
+          native,
+          previous.serverFrame,
+          frame.serverFrame,
+          frame.entities.find(entity => entity.number === player.sourceEntity)?.event ?? 0,
+        ));
+    this.previousFrame = continuous ? previous : null;
+    this.current = frame;
+    this.predicted = null;
+    this.fraction = 1;
+    this.viewTime = Math.max(this.viewTime, (frame.serverFrame - 1) * this.frameMilliseconds);
+    this.receivedAt = this.options.presentationTime?.() ?? nowMilliseconds;
+    const movement = this.nativePlayer(frame).movement,
+      view = this.playerView(player.actor),
+      velocity =
+        movement.kind === "q2-rerelease"
+          ? movement.velocity
+          : { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
+    const bodies: BodySnapshot[] = frame.entities
+      .filter(entity => entity.number !== player.sourceEntity)
+      .map(entity => {
+        const bounds = unpackQ2Solid(entity.solid, q2SolidEncoding(this.protocol, this.extendedGame));
+        return {
+          actor: this.actor(entity.number),
+          body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds, ground: null },
+        };
+      });
+    bodies.push({
+      actor: player.actor,
+      body: { origin: this.playerOrigin(frame), angles: view.angles, velocity, bounds: q2RemoteBodyBounds(this.nativePlayer(frame)), ground: null },
+    });
+    const time = frame.serverFrame * this.frameMilliseconds,
+      recipe = this.world.content.recipe;
+    const lightStyles: SceneLightStyle[] = [];
+    for (let style = 0; style < 256; style++) {
+      const pattern = this.configs.get(this.layout.lights + style);
+      if (pattern === undefined) continue;
+      const value = pattern.length === 0 ? 1 : (pattern.charCodeAt(Math.floor(time / 100) % pattern.length) - 97) / 12;
+      lightStyles.push({ kind: "q2", style, rgb: { x: value, y: value, z: value }, white: value * 3 });
+    }
+    this.published = {
+      snapshot: {
+        session: this.options.session.session,
+        frame: {
+          frame: frame.serverFrame,
+          time: { kind: "milliseconds", value: time },
+          elapsed: {
+            kind: "milliseconds",
+            value: previous === null ? this.frameMilliseconds : (frame.serverFrame - previous.serverFrame) * this.frameMilliseconds,
+          },
+          phase: "frame-exit",
+        },
+        actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: "q2:remote-entity" })),
+        bodies,
+        inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }],
+        configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }],
+        scene: {
+          session: this.options.session.session,
+          time: { kind: "milliseconds", value: time },
+          world: { resource: recipe.map.geometry, geometry: this.world.content.world },
+          entities: [],
+          lights: [],
+          particles: [],
+          lightStyles,
+          areaBits: frame.areaBits,
+        },
+      },
+      events: [],
+    };
+    this.options.publish(this.published);
+    this.linkSolids(frame, bodies);
+    if (this.options.recordedProfile === undefined) this.receivePrediction(frame);
+    for (const entity of frame.entities)
+      if (entity.event !== 0)
+        this.events.admit({
+          kind: "q2",
+          sequence: this.eventSequence++,
+          content: this.world.content.recipe.map.entities.content,
+          seconds: time / 1000,
+          sourceEntity: entity.number,
+          event: { kind: "entity-event", actor: this.actor(entity.number), event: entity.event },
         });
-        return { powerups: [], health: readElement(frame.player.stats, 1), armor: { powered: { kind: 'none' }, regular: readElement(frame.player.stats, 5) === 0 ? { kind: 'none' } : { kind: 'q2', points: readElement(frame.player.stats, 5), normalProtection: 0, energyProtection: 0, item: 'q2:remote-armor' } },
-            weaponStatus: q2WeaponStatus(weapon ?? null, () => readElement(frame.player.stats, 3), source), arsenalWarning: "none",
-            activeWeapon: weapon?.item ?? null, ammo: weapon?.ammo === undefined || weapon.ammo === null ? null : { item: weapon.ammo, count: readElement(frame.player.stats, 3) }, inventory: entries,
-            items: Q2_BASE_WEAPONS.map((definition, sourceOrdinal) => ({ id: definition.item, label: definition.name, kind: 'weapon', sourceOrdinal, owned: entries.some(entry => entry.item === definition.item) || weapon === definition, hasAmmo: definition.ammo === null || readElement(frame.player.stats, 3) >= definition.quantity, count: definition.ammo === null ? null : readElement(frame.player.stats, 3), warningCount: definition.warning })) };
+    for (const entity of previous?.entities ?? []) {
+      if (entity.sound === 0 || frame.entities.some(current => current.number === entity.number && current.sound === entity.sound)) continue;
+      this.events.admit({
+        kind: "q2",
+        sequence: this.eventSequence++,
+        content: this.world.content.recipe.map.entities.content,
+        seconds: time / 1000,
+        sourceEntity: entity.number,
+        event: {
+          kind: "sound",
+          actor: this.actor(entity.number),
+          origin: vector(entity.origin),
+          path: this.configs.get(this.layout.sounds + entity.sound) ?? "",
+          channel: 0,
+          volume: 0,
+          attenuation: 0,
+          reliable: false,
+          loop: "stop",
+        },
+      });
     }
-    characterViews(): ReturnType<RemotePresentationAccess['characterViews']> { return []; }
-    presentations(): readonly SimulationPresentation[] {
-        const current = this.current, player = this.currentPlayer;
-        if (current === null || player === null)
-            return [];
-        const result: SimulationPresentation[] = [];
-        for (const entity of current.entities) {
-            let path = this.configs.get(this.layout.models + entity.modelindex), skinPath: string | null = null;
-            if (entity.modelindex === 255) {
-                const value = this.configs.get(this.layout.playerSkins + (entity.skinnum & 255)) ?? 'player\\male/grunt', appearance = value.slice(value.indexOf('\\') + 1), slash = appearance.indexOf('/'), model = slash < 0 ? 'male' : appearance.slice(0, slash), skin = slash < 0 ? 'grunt' : appearance.slice(slash + 1);
-                path = `players/${model}/tris.md2`;
-                skinPath = `players/${model}/${skin}.pcx`;
-            }
-            if (path === undefined || entity.modelindex === 0)
-                continue;
-            const prior = this.previousFrame?.entities.find(value => value.number === entity.number), continuous = prior !== undefined && prior.modelindex === entity.modelindex && entity.event !== 6 && entity.event !== 7 && Math.max(...[0, 1, 2].map(index => Math.abs(readElement(entity.origin, index) - readElement(prior.origin, index)))) <= 512;
-            result.push({ actor: this.actor(entity.number), content: this.world.content.recipe.map.entities.content, family: 'q2', path, frame: entity.frame, oldFrame: continuous ? prior.frame : entity.frame, backLerp: continuous ? 1 - this.fraction : 0, skin: entity.modelindex === 255 ? 0 : entity.skinnum, skinPath, effects: entity.effects, renderFlags: entity.renderfx, origin: continuous ? interpolate(vector(prior.origin), vector(entity.origin), this.fraction) : vector(entity.origin), angles: continuous ? interpolateAngles(vector(prior.angles), vector(entity.angles), this.fraction) : vector(entity.angles), scale: entity.scale || 1, visible: true, viewWeapon: false });
-        }
-        const gunPath = this.configs.get(this.layout.models + current.player.gunindex);
-        if (gunPath !== undefined && current.player.gunindex !== 0) {
-            const view = this.playerView(player.actor), offset = vector(current.player.gunoffset);
-            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q2', path: gunPath, frame: current.player.gunframe, oldFrame: this.previousFrame?.player.gunindex === current.player.gunindex ? this.previousFrame.player.gunframe : current.player.gunframe, backLerp: 1 - this.fraction, skin: current.player.gunskin, effects: 0, renderFlags: 0, origin: { x: view.origin.x + offset.x, y: view.origin.y + offset.y, z: view.origin.z + view.viewHeight + offset.z }, viewOrigin: { ...view.origin, z: view.origin.z + view.viewHeight }, viewAngles: view.angles, angles: view.angles, scale: 1, visible: true, viewWeapon: true });
-        }
-        return result;
+    for (const entity of frame.entities) {
+      if (entity.sound === 0 || previous?.entities.some(old => old.number === entity.number && old.sound === entity.sound)) continue;
+      const path = this.configs.get(this.layout.sounds + entity.sound);
+      if (path === undefined) throw new Error(`Q2 loop sound ${entity.sound} has no configstring`);
+      this.events.admit({
+        kind: "q2",
+        sequence: this.eventSequence++,
+        content: this.world.content.recipe.map.entities.content,
+        seconds: time / 1000,
+        sourceEntity: entity.number,
+        event: {
+          kind: "sound",
+          actor: this.actor(entity.number),
+          origin: vector(entity.origin),
+          path,
+          channel: 0,
+          volume: 1,
+          attenuation: 1,
+          reliable: false,
+          loop: "start",
+        },
+      });
     }
-    registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined { this.resources.set(`${content}/${path}`, resource); return undefined; }
-    playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
-        this.requirePlayer(actor);
-        if ([name, ...args].some(value => /["\n\r;]/.test(value)))
-            throw new Error('Q2 console argument contains a command delimiter');
-        this.options.sendCommand([name, ...args.map(value => `"${value}"`)].join(' '));
-        return undefined;
+  }
+  private receivePrediction(frame: Q2WireFrame): void {
+    const player = this.currentPlayer;
+    if (player === null) return;
+    const native = this.nativePlayer(frame),
+      recipe = this.world.content.recipe;
+    const profile = movementProfile(recipe);
+    if (profile.kind !== "q2-classic" && profile.kind !== "q2-rerelease") return;
+    if (profile.kind !== native.kind) throw new Error("Q2 server movement API differs from selected prediction profile");
+    const airAccelerate = (): number => Number(this.configs.get(this.layout.airAccelerate) ?? "0");
+    const strafejumpHack = (): boolean => this.strafejumpHack;
+    const n64Physics = (): boolean => this.layout.n64Physics !== null && Number(this.configs.get(this.layout.n64Physics) ?? "0") !== 0;
+    const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
+    const snapshot: MovementPredictionSnapshot = {
+      sequence: this.packetAcknowledged,
+      commandTimeMilliseconds: frame.serverFrame * this.frameMilliseconds,
+      state: native.movement,
+      viewAngles: native.viewAngles,
+      viewHeight: q2RemoteViewHeight(native),
+      viewOffset: native.viewOffset,
+      bounds: q2RemoteBodyBounds(native),
+      environment: { health: native.stats[1] ?? 0, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
+      arsenal: {
+        provider: recipe.inventory.provider,
+        activeWeapon: this.playerUi(player.actor).activeWeapon,
+        ammo: this.playerUi(player.actor).inventory,
+        state: {
+          kind: "q2",
+          gunFrame: native.gunFrame,
+          state: 0,
+          pendingWeapon: null,
+          machinegunShots: 0,
+          grenadeTime: { kind: "seconds", value: 0 },
+          grenadeBlewUp: false,
+        },
+      },
+      animation: { provider: recipe.character.definition.provider, state: { kind: "q2", frame: 0, endFrame: 0, priority: 0, duck: false, run: false } },
+      contact: null,
+      q3Arsenal: null,
+    };
+    if (this.predictionOwner === null)
+      this.predictionOwner = new SelectedMovementPrediction(
+        {
+          actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider),
+          seat: this.options.seat,
+          recipe,
+          get profile() {
+            return profile.kind === "q2-rerelease"
+              ? { ...profile, airAccelerate: airAccelerate(), n64Physics: n64Physics() }
+              : { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() };
+          },
+          standingBounds: bounds,
+          standingViewHeight: 22,
+          scene: this.world.scene,
+          isBrush: hit =>
+            hit.kind === "world" ||
+            (hit.kind === "actor" && (this.current?.entities.some(entity => this.actor(entity.number).equals(hit.actor) && entity.solid === 31) ?? false)),
+        },
+        snapshot,
+      );
+    else this.predictionOwner.receive(snapshot);
+    this.predicted = this.predictionOwner.replay();
+  }
+  private linkSolids(frame: Q2WireFrame, bodies: readonly BodySnapshot[]): void {
+    for (const actor of this.actors.values()) this.world.scene.unlink(actor);
+    for (const entity of frame.entities) {
+      if (entity.solid === 0) continue;
+      const body = bodies.find(value => value.actor.equals(this.actor(entity.number)));
+      if (body === undefined) continue;
+      const path = this.configs.get(this.layout.models + entity.modelindex),
+        model = entity.solid === 31 && path?.startsWith("*") ? Number(path.slice(1)) : null;
+      if (entity.solid === 31 && (model === null || !Number.isInteger(model))) continue;
+      const bounds = model === null ? body.body.bounds : this.world.scene.modelBounds(model),
+        origin = body.body.origin;
+      const radius = Math.hypot(
+        Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)),
+        Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)),
+        Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)),
+      );
+      const rotated = model !== null && (body.body.angles.x !== 0 || body.body.angles.y !== 0 || body.body.angles.z !== 0),
+        linkedBounds = rotated ? { min: { x: -radius, y: -radius, z: -radius }, max: { x: radius, y: radius, z: radius } } : bounds;
+      this.world.scene.link(
+        {
+          actor: body.actor,
+          state: { ...body.body, bounds },
+          linkCount: frame.serverFrame,
+          absoluteBounds: {
+            min: { x: origin.x + linkedBounds.min.x - 1, y: origin.y + linkedBounds.min.y - 1, z: origin.z + linkedBounds.min.z - 1 },
+            max: { x: origin.x + linkedBounds.max.x + 1, y: origin.y + linkedBounds.max.y + 1, z: origin.z + linkedBounds.max.z + 1 },
+          },
+        },
+        {
+          family: "q2",
+          shape: model === null ? { kind: "box" } : { kind: "model", model },
+          contents: model === null ? 0x2000000 : 1,
+          owner: null,
+          role: "solid",
+          monster: model === null,
+          deadMonster: false,
+        },
+      );
     }
-    command(command: ActorCommand): UsercmdT {
-        const { frame } = this.requirePlayer(command.actor);
-        if (command.command.kind !== 'q2-classic' && command.command.kind !== 'q2-rerelease')
-            throw new Error('Native Q2 client requires Q2 movement commands');
-        return q2RemoteCommand(command.command, this.nativePlayer(frame));
-    }
-    frame(frame: Q2WireFrame, records: readonly Q2ServerRecord[], nowMilliseconds: number): void {
-        for (const { event } of records)
-            if (event.kind === 'config-string')
-                this.configs.set(event.index, event.value);
-        const player = this.currentPlayer;
-        if (player === null)
-            throw new Error('Q2 frame precedes application signon');
-        const previous = this.current;
-        const native = this.nativePlayer(frame), priorNative = previous === null ? null : this.nativePlayer(previous);
-        const continuous = native.kind !== 'q2-rerelease' || previous !== null && previous.valid !== false && priorNative?.kind === 'q2-rerelease' && q2RereleaseViewContinuous(priorNative, native, previous.serverFrame, frame.serverFrame, frame.entities.find(entity => entity.number === player.sourceEntity)?.event ?? 0);
-        this.previousFrame = continuous ? previous : null;
-        this.current = frame;
-        this.predicted = null;
-        this.fraction = 1;
-        this.viewTime = Math.max(this.viewTime, (frame.serverFrame - 1) * this.frameMilliseconds);
-        this.receivedAt = this.options.presentationTime?.() ?? nowMilliseconds;
-        const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = movement.kind === 'q2-rerelease' ? movement.velocity : { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
-        const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
-            const bounds = unpackQ2Solid(entity.solid, q2SolidEncoding(this.protocol, this.extendedGame));
-            return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds, ground: null } };
+  }
+  /** Remote bodies remain presentation samples; pending moves replay in private player state. */
+  samplePresentation(nowMilliseconds: number): SimulationOutput | null {
+    nowMilliseconds = this.options.presentationTime?.() ?? nowMilliseconds;
+    return this.sampleFrame((nowMilliseconds - this.receivedAt) / this.frameMilliseconds);
+  }
+  sampleDemo(recordedMilliseconds: number): SimulationOutput | null {
+    this.predicted = null;
+    return this.sampleFrame((recordedMilliseconds - ((this.current?.serverFrame ?? 0) - 1) * this.frameMilliseconds) / this.frameMilliseconds);
+  }
+  private sampleFrame(fraction: number): SimulationOutput | null {
+    const current = this.current,
+      output = this.published,
+      player = this.currentPlayer;
+    if (current === null || output === null || player === null) return null;
+    this.fraction = Math.max(0, Math.min(1, fraction));
+    const time = (current.serverFrame - 1 + this.fraction) * this.frameMilliseconds;
+    this.viewTime = time;
+    const presentations = this.presentations(),
+      view = this.playerView(player.actor);
+    const priorTime = output.snapshot.frame.time.kind === "milliseconds" ? output.snapshot.frame.time.value : output.snapshot.frame.time.value * 1000;
+    const sampled: SimulationOutput = {
+      ...output,
+      snapshot: {
+        ...output.snapshot,
+        frame: {
+          ...output.snapshot.frame,
+          time: { kind: "milliseconds", value: time },
+          elapsed: { kind: "milliseconds", value: Math.max(0, time - priorTime) },
+        },
+        scene: { ...output.snapshot.scene, time: { kind: "milliseconds", value: time } },
+        bodies: output.snapshot.bodies.map(body => {
+          if (body.actor.equals(player.actor))
+            return {
+              ...body,
+              body: {
+                ...body.body,
+                origin: this.sampledPlayerOrigin(current),
+                angles: view.angles,
+                bounds:
+                  this.predicted?.status === "predicted" || this.predicted?.status === "disabled"
+                    ? this.predicted.player.bounds
+                    : q2RemoteBodyBounds(this.nativePlayer(current)),
+              },
+            };
+          const presentation = presentations.find(value => value.actor.equals(body.actor) && !value.viewWeapon);
+          return presentation === undefined ? body : { ...body, body: { ...body.body, origin: presentation.origin, angles: presentation.angles } };
+        }),
+      },
+    };
+    this.published = sampled;
+    this.options.publish(sampled);
+    return sampled;
+  }
+  records(records: readonly Q2ServerRecord[]): void {
+    this.lastRecords = records;
+    const content = () => this.world.content.recipe.map.entities.content;
+    const seconds = ((this.current?.serverFrame ?? 0) * this.frameMilliseconds) / 1000;
+    for (const { event } of records) {
+      if (event.kind === "config-string") {
+        this.configs.set(event.index, event.value);
+        if (this.currentPlayer !== null) this.playerInfo(event.index, event.value, seconds);
+      } else if (event.kind === "print" && event.level === 3 && this.currentPlayer !== null)
+        this.events.admit({
+          kind: "q2-player",
+          sequence: this.eventSequence++,
+          content: content(),
+          seconds,
+          sourceEntity: this.currentPlayer?.sourceEntity ?? null,
+          event: { kind: "print", target: this.currentPlayer?.actor ?? null, level: "chat", text: event.text },
         });
-        bodies.push({ actor: player.actor, body: { origin: this.playerOrigin(frame), angles: view.angles, velocity, bounds: q2RemoteBodyBounds(this.nativePlayer(frame)), ground: null } });
-        const time = frame.serverFrame * this.frameMilliseconds, recipe = this.world.content.recipe;
-        const lightStyles: SceneLightStyle[] = [];
-        for (let style = 0; style < 256; style++) {
-            const pattern = this.configs.get(this.layout.lights + style);
-            if (pattern === undefined)
-                continue;
-            const value = pattern.length === 0 ? 1 : (pattern.charCodeAt(Math.floor(time / 100) % pattern.length) - 97) / 12;
-            lightStyles.push({ kind: 'q2', style, rgb: { x: value, y: value, z: value }, white: value * 3 });
+      else if (event.kind === "inventory") this.inventory = event.counts;
+      else if (event.kind === "layout") this.layoutText = event.text;
+      else if (event.kind === "temporary-entity") {
+        const decoded = q2EffectFromWire(event.value);
+        if (decoded !== null)
+          this.events.admit({ kind: "q2", sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: decoded });
+        else {
+          const beam = q2BeamFromWire(event.value);
+          if (beam !== null)
+            this.events.admit({ kind: "q2-weapon", sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: beam });
         }
-        this.published = { snapshot: { session: this.options.session.session, frame: { frame: frame.serverFrame, time: { kind: 'milliseconds', value: time }, elapsed: { kind: 'milliseconds', value: previous === null ? this.frameMilliseconds : (frame.serverFrame - previous.serverFrame) * this.frameMilliseconds }, phase: 'frame-exit' },
-                actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q2:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }],
-                scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles, areaBits: frame.areaBits } }, events: [] };
-        this.options.publish(this.published);
-        this.linkSolids(frame, bodies);
-        if (this.options.recordedProfile === undefined) this.receivePrediction(frame);
-        for (const entity of frame.entities)
-            if (entity.event !== 0)
-                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'entity-event', actor: this.actor(entity.number), event: entity.event } });
-        for (const entity of previous?.entities ?? []) {
-            if (entity.sound === 0 || frame.entities.some(current => current.number === entity.number && current.sound === entity.sound)) continue;
-            this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path: this.configs.get(this.layout.sounds + entity.sound) ?? '', channel: 0, volume: 0, attenuation: 0, reliable: false, loop: 'stop' } });
-        }
-        for (const entity of frame.entities) {
-            if (entity.sound === 0 || previous?.entities.some(old => old.number === entity.number && old.sound === entity.sound)) continue;
-            const path = this.configs.get(this.layout.sounds + entity.sound);
-            if (path === undefined) throw new Error(`Q2 loop sound ${entity.sound} has no configstring`);
-            this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: 'start' } });
-        }
+      } else if (event.kind === "sound") {
+        const path = this.configs.get(this.layout.sounds + event.sound.index);
+        if (path === undefined) throw new Error(`Q2 sound ${event.sound.index} has no configstring`);
+        const entity = this.current?.entities.find(entity => entity.number === event.sound.entity);
+        this.events.admit({
+          kind: "q2",
+          sequence: this.eventSequence++,
+          content: content(),
+          seconds,
+          sourceEntity: event.sound.entity,
+          event: {
+            kind: "sound",
+            actor: event.sound.entity === 0 ? null : this.actor(event.sound.entity),
+            origin: event.sound.position ?? (entity === undefined ? zero : vector(entity.origin)),
+            path,
+            volume: event.sound.volume,
+            attenuation: event.sound.attenuation,
+            channel: event.sound.channel,
+            reliable: false,
+            loop: "once",
+          },
+        });
+      } else if (event.kind === "muzzle-flash") {
+        if (event.monster) {
+          const entity = this.current?.entities.find(entity => entity.number === event.entity);
+          if (entity === undefined) continue;
+          const axes = angleVectorsRule(vector(entity.angles), "native"),
+            offset = muzzleOffset("classic", event.flash),
+            origin = vector(entity.origin);
+          this.events.admit({
+            kind: "q2",
+            sequence: this.eventSequence++,
+            content: content(),
+            seconds,
+            sourceEntity: event.entity,
+            event: {
+              kind: "monster-muzzleflash",
+              actor: this.actor(event.entity),
+              flash: event.flash,
+              origin: {
+                x: origin.x + axes.forward.x * offset.x + axes.right.x * offset.y,
+                y: origin.y + axes.forward.y * offset.x + axes.right.y * offset.y,
+                z: origin.z + axes.forward.z * offset.x + axes.right.z * offset.y + offset.z,
+              },
+              direction: axes.forward,
+            },
+          });
+        } else
+          this.events.admit({
+            kind: "q2-weapon",
+            sequence: this.eventSequence++,
+            content: content(),
+            seconds,
+            sourceEntity: event.entity,
+            event: { kind: "muzzleflash", actor: this.actor(event.entity), flash: event.flash, silenced: event.silenced },
+          });
+      } else if (event.kind === "center-print" && this.currentPlayer !== null)
+        this.events.admit({
+          kind: "q2",
+          sequence: this.eventSequence++,
+          content: content(),
+          seconds,
+          sourceEntity: this.currentPlayer.sourceEntity,
+          event: { kind: "centerprint", actor: this.currentPlayer.actor, text: event.text },
+        });
     }
-    private receivePrediction(frame: Q2WireFrame): void {
-        const player = this.currentPlayer;
-        if (player === null) return;
-        const native = this.nativePlayer(frame), recipe = this.world.content.recipe;
-        const profile = movementProfile(recipe);
-        if (profile.kind !== 'q2-classic' && profile.kind !== 'q2-rerelease') return;
-        if (profile.kind !== native.kind) throw new Error('Q2 server movement API differs from selected prediction profile');
-        const airAccelerate = (): number => Number(this.configs.get(this.layout.airAccelerate) ?? '0');
-        const strafejumpHack = (): boolean => this.strafejumpHack;
-        const n64Physics = (): boolean => this.layout.n64Physics !== null && Number(this.configs.get(this.layout.n64Physics) ?? '0') !== 0;
-        const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
-        const snapshot: MovementPredictionSnapshot = { sequence: this.packetAcknowledged, commandTimeMilliseconds: frame.serverFrame * this.frameMilliseconds,
-            state: native.movement, viewAngles: native.viewAngles, viewHeight: q2RemoteViewHeight(native), viewOffset: native.viewOffset, bounds: q2RemoteBodyBounds(native),
-            environment: { health: native.stats[1] ?? 0, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
-            arsenal: { provider: recipe.inventory.provider, activeWeapon: this.playerUi(player.actor).activeWeapon,
-                ammo: this.playerUi(player.actor).inventory, state: { kind: 'q2', gunFrame: native.gunFrame, state: 0, pendingWeapon: null,
-                    machinegunShots: 0, grenadeTime: { kind: 'seconds', value: 0 }, grenadeBlewUp: false } },
-            animation: { provider: recipe.character.definition.provider, state: { kind: 'q2', frame: 0, endFrame: 0, priority: 0, duck: false, run: false } },
-            contact: null, q3Arsenal: null };
-        if (this.predictionOwner === null) this.predictionOwner = new SelectedMovementPrediction({
-            actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider), seat: this.options.seat,
-            recipe, get profile() { return profile.kind === 'q2-rerelease' ? { ...profile, airAccelerate: airAccelerate(), n64Physics: n64Physics() } : { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() }; },
-            standingBounds: bounds, standingViewHeight: 22, scene: this.world.scene,
-            isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && (this.current?.entities.some(entity => this.actor(entity.number).equals(hit.actor) && entity.solid === 31) ?? false),
-        }, snapshot);
-        else this.predictionOwner.receive(snapshot);
-        this.predicted = this.predictionOwner.replay();
-    }
-    private linkSolids(frame: Q2WireFrame, bodies: readonly BodySnapshot[]): void {
-        for (const actor of this.actors.values())
-            this.world.scene.unlink(actor);
-        for (const entity of frame.entities) {
-            if (entity.solid === 0)
-                continue;
-            const body = bodies.find(value => value.actor.equals(this.actor(entity.number)));
-            if (body === undefined)
-                continue;
-            const path = this.configs.get(this.layout.models + entity.modelindex), model = entity.solid === 31 && path?.startsWith('*') ? Number(path.slice(1)) : null;
-            if (entity.solid === 31 && (model === null || !Number.isInteger(model)))
-                continue;
-            const bounds = model === null ? body.body.bounds : this.world.scene.modelBounds(model), origin = body.body.origin;
-            const radius = Math.hypot(Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)), Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)), Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)));
-            const rotated = model !== null && (body.body.angles.x !== 0 || body.body.angles.y !== 0 || body.body.angles.z !== 0), linkedBounds = rotated ? { min: { x: -radius, y: -radius, z: -radius }, max: { x: radius, y: radius, z: radius } } : bounds;
-            this.world.scene.link({ actor: body.actor, state: { ...body.body, bounds }, linkCount: frame.serverFrame, absoluteBounds: { min: { x: origin.x + linkedBounds.min.x - 1, y: origin.y + linkedBounds.min.y - 1, z: origin.z + linkedBounds.min.z - 1 }, max: { x: origin.x + linkedBounds.max.x + 1, y: origin.y + linkedBounds.max.y + 1, z: origin.z + linkedBounds.max.z + 1 } } }, { family: 'q2', shape: model === null ? { kind: 'box' } : { kind: 'model', model }, contents: model === null ? 0x2000000 : 1, owner: null, role: 'solid', monster: model === null, deadMonster: false });
-        }
-    }
-    /** Remote bodies remain presentation samples; pending moves replay in private player state. */
-    samplePresentation(nowMilliseconds: number): SimulationOutput | null {
-        nowMilliseconds = this.options.presentationTime?.() ?? nowMilliseconds;
-        return this.sampleFrame((nowMilliseconds - this.receivedAt) / this.frameMilliseconds);
-    }
-    sampleDemo(recordedMilliseconds: number): SimulationOutput | null {
-        this.predicted = null;
-        return this.sampleFrame((recordedMilliseconds - ((this.current?.serverFrame ?? 0) - 1) * this.frameMilliseconds) / this.frameMilliseconds);
-    }
-    private sampleFrame(fraction: number): SimulationOutput | null {
-        const current = this.current, output = this.published, player = this.currentPlayer;
-        if (current === null || output === null || player === null) return null;
-        this.fraction = Math.max(0, Math.min(1, fraction));
-        const time = (current.serverFrame - 1 + this.fraction) * this.frameMilliseconds;
-        this.viewTime = time;
-        const presentations = this.presentations(), view = this.playerView(player.actor);
-        const priorTime = output.snapshot.frame.time.kind === 'milliseconds' ? output.snapshot.frame.time.value : output.snapshot.frame.time.value * 1000;
-        const sampled: SimulationOutput = { ...output, snapshot: { ...output.snapshot,
-                frame: { ...output.snapshot.frame, time: { kind: 'milliseconds', value: time }, elapsed: { kind: 'milliseconds', value: Math.max(0, time - priorTime) } },
-                scene: { ...output.snapshot.scene, time: { kind: 'milliseconds', value: time } },
-                bodies: output.snapshot.bodies.map(body => {
-                    if (body.actor.equals(player.actor))
-                        return { ...body, body: { ...body.body, origin: this.sampledPlayerOrigin(current), angles: view.angles, bounds: this.predicted?.status === "predicted" || this.predicted?.status === "disabled" ? this.predicted.player.bounds : q2RemoteBodyBounds(this.nativePlayer(current)) } };
-                    const presentation = presentations.find(value => value.actor.equals(body.actor) && !value.viewWeapon);
-                    return presentation === undefined ? body : { ...body, body: { ...body.body, origin: presentation.origin, angles: presentation.angles } };
-                }) } };
-        this.published = sampled;
-        this.options.publish(sampled);
-        return sampled;
-    }
-    records(records: readonly Q2ServerRecord[]): void {
-        this.lastRecords = records;
-        const content = () => this.world.content.recipe.map.entities.content;
-        const seconds = (this.current?.serverFrame ?? 0) * this.frameMilliseconds / 1000;
-        for (const { event } of records) {
-            if (event.kind === 'config-string') {
-                this.configs.set(event.index, event.value);
-                if (this.currentPlayer !== null) this.playerInfo(event.index, event.value, seconds);
-            }
-            else if (event.kind === 'print' && event.level === 3 && this.currentPlayer !== null) this.events.admit({ kind: 'q2-player', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer?.sourceEntity ?? null, event: { kind: 'print', target: this.currentPlayer?.actor ?? null, level: 'chat', text: event.text } });
-            else if (event.kind === 'inventory')
-                this.inventory = event.counts;
-            else if (event.kind === 'layout')
-                this.layoutText = event.text;
-            else if (event.kind === 'temporary-entity') {
-                const decoded = q2EffectFromWire(event.value);
-                if (decoded !== null)
-                    this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: decoded });
-                else {
-                    const beam = q2BeamFromWire(event.value);
-                    if (beam !== null) this.events.admit({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: beam });
-                }
-            }
-            else if (event.kind === 'sound') {
-                const path = this.configs.get(this.layout.sounds + event.sound.index);
-                if (path === undefined)
-                    throw new Error(`Q2 sound ${event.sound.index} has no configstring`);
-                const entity = this.current?.entities.find(entity => entity.number === event.sound.entity);
-                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.sound.entity, event: { kind: 'sound', actor: event.sound.entity === 0 ? null : this.actor(event.sound.entity), origin: event.sound.position ?? (entity === undefined ? zero : vector(entity.origin)), path, volume: event.sound.volume, attenuation: event.sound.attenuation, channel: event.sound.channel, reliable: false, loop: 'once' } });
-            }
-            else if (event.kind === 'muzzle-flash') {
-                if (event.monster) {
-                    const entity = this.current?.entities.find(entity => entity.number === event.entity);
-                    if (entity === undefined)
-                        continue;
-                    const axes = angleVectorsRule(vector(entity.angles), "native"), offset = muzzleOffset('classic', event.flash), origin = vector(entity.origin);
-                    this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'monster-muzzleflash', actor: this.actor(event.entity), flash: event.flash,
-                            origin: { x: origin.x + axes.forward.x * offset.x + axes.right.x * offset.y, y: origin.y + axes.forward.y * offset.x + axes.right.y * offset.y, z: origin.z + axes.forward.z * offset.x + axes.right.z * offset.y + offset.z }, direction: axes.forward } });
-                }
-                else
-                    this.events.admit({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'muzzleflash', actor: this.actor(event.entity), flash: event.flash, silenced: event.silenced } });
-            }
-            else if (event.kind === 'center-print' && this.currentPlayer !== null)
-                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer.sourceEntity, event: { kind: 'centerprint', actor: this.currentPlayer.actor, text: event.text } });
-        }
-    }
-    drainPresentationEvents(): readonly SimulationPresentationEvent[] { const taken = this.events.take(this.eventCursor); this.events.retire(); return taken; }
-    disconnected(reason: string): void { this.options.cinematic?.stop(); this.options.print(`${reason}\n`); this.options.disconnected(reason); }
-    print(text: string): void { this.options.print(text); }
+  }
+  drainPresentationEvents(): readonly SimulationPresentationEvent[] {
+    const taken = this.events.take(this.eventCursor);
+    this.events.retire();
+    return taken;
+  }
+  disconnected(reason: string): void {
+    this.options.cinematic?.stop();
+    this.options.print(`${reason}\n`);
+    this.options.disconnected(reason);
+  }
+  print(text: string): void {
+    this.options.print(text);
+  }
 }

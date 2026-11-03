@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { sweepBody } from "../../../movement/swept-body.ts";
 import { pushQ1Pusher } from "../../../movement/q1/pusher.ts";
@@ -78,8 +79,17 @@ export interface SharedPhysicsOptions {
   readonly stopSpeed?: () => number;
   readonly takeKillVelocity?: (actor: OwnedActor) => boolean;
 }
-interface Pushed { readonly actor: OwnedActor; readonly origin: Vec3; readonly angles: Vec3; readonly deltaYaw: number; }
-export interface PhysicsEvent { readonly actor: ActorId; readonly kind: "water-enter" | "water-leave" | "land"; readonly origin: Vec3; }
+interface Pushed {
+  readonly actor: OwnedActor;
+  readonly origin: Vec3;
+  readonly angles: Vec3;
+  readonly deltaYaw: number;
+}
+export interface PhysicsEvent {
+  readonly actor: ActorId;
+  readonly kind: "water-enter" | "water-leave" | "land";
+  readonly origin: Vec3;
+}
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const defaultMask = 0x02020003;
 
@@ -105,41 +115,99 @@ export class SharedPhysics {
     this.bodies = new SharedBodyTable(options.actors, {
       absoluteBounds: (actor, state) => this.absoluteBounds(actor, state),
       onLink: body => this.linked(body),
-      onUnlink: actor => { options.scene.unlink(actor); return undefined; },
+      onUnlink: actor => {
+        options.scene.unlink(actor);
+        return undefined;
+      },
     });
     options.scene.bindActorState(this.bodies);
-    options.actors.onRelease(actor => { this.sources.delete(actor); this.solids.delete(actor); this.collisions.delete(actor); this.motions.delete(actor); this.flags.delete(actor); return undefined; });
+    options.actors.onRelease(actor => {
+      this.sources.delete(actor);
+      this.solids.delete(actor);
+      this.collisions.delete(actor);
+      this.motions.delete(actor);
+      this.flags.delete(actor);
+      return undefined;
+    });
   }
-  private vector(x: number, y: number, z: number): Vec3 { return { x: this.n.store(x), y: this.n.store(y), z: this.n.store(z) }; }
-  private add(a: Vec3, b: Vec3): Vec3 { return this.vector(this.n.add(a.x, b.x), this.n.add(a.y, b.y), this.n.add(a.z, b.z)); }
-  private sub(a: Vec3, b: Vec3): Vec3 { return this.vector(this.n.subtract(a.x, b.x), this.n.subtract(a.y, b.y), this.n.subtract(a.z, b.z)); }
-  private scale(v: Vec3, value: number): Vec3 { return this.vector(this.n.multiply(v.x, value), this.n.multiply(v.y, value), this.n.multiply(v.z, value)); }
-  private dot(a: Vec3, b: Vec3): number { return this.n.add(this.n.add(this.n.multiply(a.x, b.x), this.n.multiply(a.y, b.y)), this.n.multiply(a.z, b.z)); }
-  private moving(v: Vec3): boolean { return v.x !== 0 || v.y !== 0 || v.z !== 0; }
-  private live(actor: OwnedActor): boolean { return this.options.actors.isLive(actor.id); }
-  private solid(actor: OwnedActor): SharedSolid | null { return this.sources.get(actor)?.collision() ?? this.options.getCollision?.(actor) ?? this.solids.get(actor) ?? null; }
-  private motion(actor: OwnedActor): Q2Motion | null { return this.sources.get(actor)?.motion() ?? this.options.getMotion?.(actor) ?? this.motions.get(actor) ?? null; }
+  private vector(x: number, y: number, z: number): Vec3 {
+    return { x: this.n.store(x), y: this.n.store(y), z: this.n.store(z) };
+  }
+  private add(a: Vec3, b: Vec3): Vec3 {
+    return this.vector(this.n.add(a.x, b.x), this.n.add(a.y, b.y), this.n.add(a.z, b.z));
+  }
+  private sub(a: Vec3, b: Vec3): Vec3 {
+    return this.vector(this.n.subtract(a.x, b.x), this.n.subtract(a.y, b.y), this.n.subtract(a.z, b.z));
+  }
+  private scale(v: Vec3, value: number): Vec3 {
+    return this.vector(this.n.multiply(v.x, value), this.n.multiply(v.y, value), this.n.multiply(v.z, value));
+  }
+  private dot(a: Vec3, b: Vec3): number {
+    return this.n.add(this.n.add(this.n.multiply(a.x, b.x), this.n.multiply(a.y, b.y)), this.n.multiply(a.z, b.z));
+  }
+  private moving(v: Vec3): boolean {
+    return v.x !== 0 || v.y !== 0 || v.z !== 0;
+  }
+  private live(actor: OwnedActor): boolean {
+    return this.options.actors.isLive(actor.id);
+  }
+  private solid(actor: OwnedActor): SharedSolid | null {
+    return this.sources.get(actor)?.collision() ?? this.options.getCollision?.(actor) ?? this.solids.get(actor) ?? null;
+  }
+  private motion(actor: OwnedActor): Q2Motion | null {
+    return this.sources.get(actor)?.motion() ?? this.options.getMotion?.(actor) ?? this.motions.get(actor) ?? null;
+  }
   bindSource(actor: OwnedActor, source: SourceBodyPhysics): () => undefined {
     this.options.actors.assertOwned(actor);
     if (this.sources.has(actor)) throw new Error("Actor already has source physics");
     this.sources.set(actor, source);
-    return () => { if (this.sources.get(actor) === source) this.sources.delete(actor); return undefined; };
+    return () => {
+      if (this.sources.get(actor) === source) this.sources.delete(actor);
+      return undefined;
+    };
   }
-  private family(actor: OwnedActor): PhysicsFamily { return this.solid(actor)?.family ?? "q2"; }
-  get gravity(): number { return this.worldGravity; }
+  private family(actor: OwnedActor): PhysicsFamily {
+    return this.solid(actor)?.family ?? "q2";
+  }
+  get gravity(): number {
+    return this.worldGravity;
+  }
   setWorldGravity(value: number): undefined {
     if (!Number.isFinite(value)) throw new RangeError("World gravity must be finite");
-    this.worldGravity = value; return undefined;
+    this.worldGravity = value;
+    return undefined;
   }
   capture() {
     if (this.pushTransaction !== null || this.events.pending(this.eventCursor) !== 0) throw new Error("Physics save requires a completed event boundary");
-    return { gravity: this.worldGravity, rereleaseMovement: this.rereleaseMovement.capture(),
-      collisions: [...this.collisions].map(([actor, collision]) => ({ actor: savedActorId(actor.id), collision: { ...collision, owner: collision.owner === null ? null : savedActorId(collision.owner) } })),
-      spatial: this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } }).map(value => ({
-        actor: savedActorId(value.body.actor), collision: { ...value.collision, owner: value.collision.owner === null ? null : savedActorId(value.collision.owner) } })),
-      solids: [...this.solids].map(([actor, solid]) => ({ actor: savedActorId(actor.id), ...solid, owner: solid.owner === null ? null : savedActorId(solid.owner) })),
-      motions: [...this.motions].map(([actor, motion]) => ({ ...motion, actor: savedActorId(actor.id), owner: motion.owner === null ? null : savedActorId(motion.owner) })),
-      flags: [...this.flags].map(([actor, flags]) => ({ actor: savedActorId(actor.id), ...flags, ...(flags.enemy === undefined ? {} : { enemy: flags.enemy === null ? null : savedActorId(flags.enemy) }) })) };
+    return {
+      gravity: this.worldGravity,
+      rereleaseMovement: this.rereleaseMovement.capture(),
+      collisions: [...this.collisions].map(([actor, collision]) => ({
+        actor: savedActorId(actor.id),
+        collision: { ...collision, owner: collision.owner === null ? null : savedActorId(collision.owner) },
+      })),
+      spatial: this.options.scene.spatial
+        .query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } })
+        .map(value => ({
+          actor: savedActorId(value.body.actor),
+          collision: { ...value.collision, owner: value.collision.owner === null ? null : savedActorId(value.collision.owner) },
+        })),
+      solids: [...this.solids].map(([actor, solid]) => ({
+        actor: savedActorId(actor.id),
+        ...solid,
+        owner: solid.owner === null ? null : savedActorId(solid.owner),
+      })),
+      motions: [...this.motions].map(([actor, motion]) => ({
+        ...motion,
+        actor: savedActorId(actor.id),
+        owner: motion.owner === null ? null : savedActorId(motion.owner),
+      })),
+      flags: [...this.flags].map(([actor, flags]) => ({
+        actor: savedActorId(actor.id),
+        ...flags,
+        ...(flags.enemy === undefined ? {} : { enemy: flags.enemy === null ? null : savedActorId(flags.enemy) }),
+      })),
+    };
   }
   restoreCheckpoint(reader: SaveReader, requireExactCollisions = false, reconstructed: (actor: ActorId) => boolean = () => false): undefined {
     const retain = <T>(values: Map<OwnedActor, T>): (() => void) => {
@@ -158,42 +226,63 @@ export class SharedPhysics {
       if (actor === null) return value.fail("Missing shared physics actor");
       return actor;
     };
-    this.solids.clear(); this.motions.clear(); this.flags.clear(); this.collisions.clear();
+    this.solids.clear();
+    this.motions.clear();
+    this.flags.clear();
+    this.collisions.clear();
     const collisions = reader.field("collisions");
-    if (requireExactCollisions || collisions.value !== undefined) collisions.list(value => {
-      const actor = owner(value.field("actor"));
-      if (this.collisions.has(actor)) return value.fail("Duplicate saved collision actor");
-      this.collisions.set(actor, this.readCollision(value.field("collision")));
-    });
+    if (requireExactCollisions || collisions.value !== undefined)
+      collisions.list(value => {
+        const actor = owner(value.field("actor"));
+        if (this.collisions.has(actor)) return value.fail("Duplicate saved collision actor");
+        this.collisions.set(actor, this.readCollision(value.field("collision")));
+      });
     reader.field("solids").list(value => {
-      this.solids.set(owner(value.field("actor")), { solid: value.field("solid").choice("none", "trigger", "box", "brush"), model: value.field("model").nullable(v => v.integer(0)),
-        family: value.field("family").choice("q1", "q2", "q3"), owner: value.field("owner").nullable(reference),
+      this.solids.set(owner(value.field("actor")), {
+        solid: value.field("solid").choice("none", "trigger", "box", "brush"),
+        model: value.field("model").nullable(v => v.integer(0)),
+        family: value.field("family").choice("q1", "q2", "q3"),
+        owner: value.field("owner").nullable(reference),
         ...(value.field("monster").value === undefined ? {} : { monster: value.field("monster").boolean() }),
         ...(value.field("deadMonster").value === undefined ? {} : { deadMonster: value.field("deadMonster").boolean() }),
         ...this.readCorpse(value),
-        ...(value.field("item").value === undefined ? {} : { item: value.field("item").boolean() }) });
+        ...(value.field("item").value === undefined ? {} : { item: value.field("item").boolean() }),
+      });
     });
     reader.field("motions").list(value => {
       const actor = owner(value.field("actor"));
-      this.motions.set(actor, { actor, kind: value.field("kind").choice("stationary", "push", "stop", "toss", "new-toss", "bounce", "wall-bounce", "fly", "fly-missile", "step"),
-        velocity: readVector(value.field("velocity")), angularVelocity: readVector(value.field("angularVelocity")), gravity: value.field("gravity").number(), gravityVector: readVector(value.field("gravityVector")),
-        clipMask: value.field("clipMask").number(), owner: value.field("owner").nullable(reference) });
+      this.motions.set(actor, {
+        actor,
+        kind: value.field("kind").choice("stationary", "push", "stop", "toss", "new-toss", "bounce", "wall-bounce", "fly", "fly-missile", "step"),
+        velocity: readVector(value.field("velocity")),
+        angularVelocity: readVector(value.field("angularVelocity")),
+        gravity: value.field("gravity").number(),
+        gravityVector: readVector(value.field("gravityVector")),
+        clipMask: value.field("clipMask").number(),
+        owner: value.field("owner").nullable(reference),
+      });
     });
     reader.field("flags").list(value => {
       this.flags.set(owner(value.field("actor")), {
         ...(value.field("teamSlave").value === undefined ? {} : { teamSlave: value.field("teamSlave").boolean() }),
         ...(value.field("alwaysTouch").value === undefined ? {} : { alwaysTouch: value.field("alwaysTouch").boolean() }),
-        ...(value.field("fly").value === undefined ? {} : { fly: value.field("fly").boolean() }), ...(value.field("swim").value === undefined ? {} : { swim: value.field("swim").boolean() }),
-        ...(value.field("partialGround").value === undefined ? {} : { partialGround: value.field("partialGround").boolean() }), ...(value.field("dead").value === undefined ? {} : { dead: value.field("dead").boolean() }),
-        ...(value.field("player").value === undefined ? {} : { player: value.field("player").boolean() }), ...(value.field("waterLevel").value === undefined ? {} : { waterLevel: value.field("waterLevel").number() }),
-        ...(value.field("waterType").value === undefined ? {} : { waterType: value.field("waterType").number() }), ...(value.field("deltaYaw").value === undefined ? {} : { deltaYaw: value.field("deltaYaw").number() }),
-        ...(value.field("enemy").value === undefined ? {} : { enemy: value.field("enemy").nullable(reference) }) });
+        ...(value.field("fly").value === undefined ? {} : { fly: value.field("fly").boolean() }),
+        ...(value.field("swim").value === undefined ? {} : { swim: value.field("swim").boolean() }),
+        ...(value.field("partialGround").value === undefined ? {} : { partialGround: value.field("partialGround").boolean() }),
+        ...(value.field("dead").value === undefined ? {} : { dead: value.field("dead").boolean() }),
+        ...(value.field("player").value === undefined ? {} : { player: value.field("player").boolean() }),
+        ...(value.field("waterLevel").value === undefined ? {} : { waterLevel: value.field("waterLevel").number() }),
+        ...(value.field("waterType").value === undefined ? {} : { waterType: value.field("waterType").number() }),
+        ...(value.field("deltaYaw").value === undefined ? {} : { deltaYaw: value.field("deltaYaw").number() }),
+        ...(value.field("enemy").value === undefined ? {} : { enemy: value.field("enemy").nullable(reference) }),
+      });
     });
     for (const restore of restoreRetained) restore();
     return undefined;
   }
   restoreSpatial(reader: SaveReader, reconstructed: (actor: ActorId) => boolean = () => false): undefined {
-    const retained = this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } })
+    const retained = this.options.scene.spatial
+      .query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } })
       .filter(entry => reconstructed(entry.body.actor));
     this.options.scene.spatial.clear();
     reader.field("spatial").list(value => {
@@ -209,12 +298,26 @@ export class SharedPhysics {
     return undefined;
   }
   private readCollision(collision: SaveReader): ActorCollision {
-    const shape = collision.field("shape"), kind = shape.field("kind").choice("box", "capsule", "model");
-    return { family: collision.field("family").choice("q1", "q2", "q3"), shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
-      contents: collision.field("contents").number(), owner: collision.field("owner").nullable(value => this.options.actors.referenceSaved(readSavedActor(value))),
-      ...(collision.field("q3Owner").value === undefined ? {} : { q3Owner: { entityNumber: collision.field("q3Owner").field("entityNumber").integer(), ownerNumber: collision.field("q3Owner").field("ownerNumber").integer() } }),
+    const shape = collision.field("shape"),
+      kind = shape.field("kind").choice("box", "capsule", "model");
+    return {
+      family: collision.field("family").choice("q1", "q2", "q3"),
+      shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
+      contents: collision.field("contents").number(),
+      owner: collision.field("owner").nullable(value => this.options.actors.referenceSaved(readSavedActor(value))),
+      ...(collision.field("q3Owner").value === undefined
+        ? {}
+        : {
+            q3Owner: {
+              entityNumber: collision.field("q3Owner").field("entityNumber").integer(),
+              ownerNumber: collision.field("q3Owner").field("ownerNumber").integer(),
+            },
+          }),
       ...this.readCorpse(collision),
-      role: collision.field("role").choice("solid", "trigger"), monster: collision.field("monster").boolean(), deadMonster: collision.field("deadMonster").boolean() };
+      role: collision.field("role").choice("solid", "trigger"),
+      monster: collision.field("monster").boolean(),
+      deadMonster: collision.field("deadMonster").boolean(),
+    };
   }
   private readCorpse(value: SaveReader): Pick<SharedSolid, "q1Corpse"> {
     const corpse = value.field("q1Corpse");
@@ -222,12 +325,31 @@ export class SharedPhysics {
     if (!corpse.boolean()) return corpse.fail("Saved Q1 corpse flag must be true or absent");
     return { q1Corpse: true };
   }
-  solidOf(actor: ActorId): SharedSolid | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.solid(owned); }
-  motionOf(actor: ActorId): Q2Motion | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.motion(owned); }
-  isBrush(actor: ActorId): boolean { const owned = this.options.actors.resolveOwned(actor); return owned !== null && this.solid(owned)?.solid === "brush"; }
-  drainEvents(): readonly PhysicsEvent[] { const taken = this.events.take(this.eventCursor); this.events.retire(); return taken; }
-  private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.admit(event); return undefined; }
-  private actorFlags(actor: OwnedActor): SharedPhysicsFlags { return { ...this.flags.get(actor), ...(this.sources.get(actor)?.flags() ?? this.options.getFlags?.(actor)) }; }
+  solidOf(actor: ActorId): SharedSolid | null {
+    const owned = this.options.actors.resolveOwned(actor);
+    return owned === null ? null : this.solid(owned);
+  }
+  motionOf(actor: ActorId): Q2Motion | null {
+    const owned = this.options.actors.resolveOwned(actor);
+    return owned === null ? null : this.motion(owned);
+  }
+  isBrush(actor: ActorId): boolean {
+    const owned = this.options.actors.resolveOwned(actor);
+    return owned !== null && this.solid(owned)?.solid === "brush";
+  }
+  drainEvents(): readonly PhysicsEvent[] {
+    const taken = this.events.take(this.eventCursor);
+    this.events.retire();
+    return taken;
+  }
+  private emit(event: PhysicsEvent): undefined {
+    if (this.options.event !== undefined) return this.options.event(event);
+    this.events.admit(event);
+    return undefined;
+  }
+  private actorFlags(actor: OwnedActor): SharedPhysicsFlags {
+    return { ...this.flags.get(actor), ...(this.sources.get(actor)?.flags() ?? this.options.getFlags?.(actor)) };
+  }
   setFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined {
     if (!this.live(actor)) return undefined;
     this.flags.set(actor, { ...this.actorFlags(actor), ...changes });
@@ -249,9 +371,15 @@ export class SharedPhysics {
   setCollision(actor: OwnedActor, collision: ActorCollision): undefined {
     this.options.actors.assertOwned(actor);
     this.collisions.set(actor, collision);
-    this.solids.set(actor, { solid: collision.role === "trigger" ? "trigger" : collision.shape.kind === "model" ? "brush" : "box",
-      model: collision.shape.kind === "model" ? collision.shape.model : null, family: collision.family, owner: collision.owner,
-      monster: collision.monster, deadMonster: collision.deadMonster, ...(collision.q1Corpse === true ? { q1Corpse: true } : {}) });
+    this.solids.set(actor, {
+      solid: collision.role === "trigger" ? "trigger" : collision.shape.kind === "model" ? "brush" : "box",
+      model: collision.shape.kind === "model" ? collision.shape.model : null,
+      family: collision.family,
+      owner: collision.owner,
+      monster: collision.monster,
+      deadMonster: collision.deadMonster,
+      ...(collision.q1Corpse === true ? { q1Corpse: true } : {}),
+    });
     const linked = this.bodies.linked(actor.id);
     return linked === null ? undefined : this.linked(linked);
   }
@@ -260,15 +388,21 @@ export class SharedPhysics {
     this.motions.set(motion.actor, { ...motion });
     const body = this.bodies.read(motion.actor.id);
     if (body !== null) this.bodies.write(motion.actor, { ...body, velocity: motion.velocity });
-    const linked = this.bodies.linked(motion.actor.id); if (linked !== null) this.linked(linked);
+    const linked = this.bodies.linked(motion.actor.id);
+    if (linked !== null) this.linked(linked);
     return undefined;
   }
   private absoluteBounds(actor: OwnedActor, state: BodyState): Bounds {
     const solid = this.solid(actor);
     let bounds: Bounds = { min: this.add(state.origin, state.bounds.min), max: this.add(state.origin, state.bounds.max) };
     if (solid?.solid === "brush" && this.moving(state.angles)) {
-      const extent = { x: Math.max(Math.abs(state.bounds.min.x), Math.abs(state.bounds.max.x)), y: Math.max(Math.abs(state.bounds.min.y), Math.abs(state.bounds.max.y)), z: Math.max(Math.abs(state.bounds.min.z), Math.abs(state.bounds.max.z)) };
-      const radius = this.n.squareRoot(this.dot(extent, extent)), offset = { x: radius, y: radius, z: radius };
+      const extent = {
+        x: Math.max(Math.abs(state.bounds.min.x), Math.abs(state.bounds.max.x)),
+        y: Math.max(Math.abs(state.bounds.min.y), Math.abs(state.bounds.max.y)),
+        z: Math.max(Math.abs(state.bounds.min.z), Math.abs(state.bounds.max.z)),
+      };
+      const radius = this.n.squareRoot(this.dot(extent, extent)),
+        offset = { x: radius, y: radius, z: radius };
       bounds = { min: this.sub(state.origin, offset), max: this.add(state.origin, offset) };
     }
     const pad = solid?.family === "q1" && solid.item ? { x: 15, y: 15, z: 0 } : { x: 1, y: 1, z: 1 };
@@ -278,15 +412,29 @@ export class SharedPhysics {
     const actor = this.options.actors.resolveOwned(body.actor);
     if (actor === null) return undefined;
     const exact = this.collisions.get(actor);
-    if (exact !== undefined) { this.options.scene.link(body, exact); return undefined; }
-    const solid = this.solid(actor), world = this.options.worldActor();
-    if (solid === null || solid.solid === "none" || world !== null && sameActor(world, actor.id)) { this.options.scene.unlink(actor.id); return undefined; }
+    if (exact !== undefined) {
+      this.options.scene.link(body, exact);
+      return undefined;
+    }
+    const solid = this.solid(actor),
+      world = this.options.worldActor();
+    if (solid === null || solid.solid === "none" || (world !== null && sameActor(world, actor.id))) {
+      this.options.scene.unlink(actor.id);
+      return undefined;
+    }
     const shape: ActorCollision["shape"] = solid.solid === "brush" && solid.model !== null ? { kind: "model", model: solid.model } : { kind: "box" };
     const contents = solid.family === "q1" ? -2 : solid.solid === "brush" ? 1 : solid.deadMonster ? 0x4000000 : 0x2000000;
     const motion = this.motion(actor);
-    this.options.scene.link(body, { family: solid.family, shape, contents, owner: motion === null ? solid.owner : motion.owner,
+    this.options.scene.link(body, {
+      family: solid.family,
+      shape,
+      contents,
+      owner: motion === null ? solid.owner : motion.owner,
       ...(solid.q1Corpse === true ? { q1Corpse: true } : {}),
-      role: solid.solid === "trigger" ? "trigger" : "solid", monster: solid.monster ?? false, deadMonster: solid.deadMonster ?? false });
+      role: solid.solid === "trigger" ? "trigger" : "solid",
+      monster: solid.monster ?? false,
+      deadMonster: solid.deadMonster ?? false,
+    });
     return undefined;
   }
   private policy(family: PhysicsFamily, mask: number, move: "normal" | "no-monsters" | "missile" = "normal"): TracePolicy {
@@ -295,20 +443,36 @@ export class SharedPhysics {
     return { kind: "q3", contentsMask: mask, curves: true, playerCurveClip: true };
   }
   trace(request: Q2TraceRequest, family: PhysicsFamily = "q2"): TraceResult {
-    const query: TraceQuery = { start: request.start, end: request.end,
+    const query: TraceQuery = {
+      start: request.start,
+      end: request.end,
       shape: request.bounds === null ? { kind: "point" } : { kind: "box", bounds: request.bounds },
-      target: { kind: "world" }, policy: this.policy(family, request.mask), numeric: this.options.numeric, passActor: request.ignore };
-    return request.exclude === undefined || request.exclude.length === 0 ? this.options.scene.trace(query) : this.options.scene.traceExcluding(query, request.exclude);
+      target: { kind: "world" },
+      policy: this.policy(family, request.mask),
+      numeric: this.options.numeric,
+      passActor: request.ignore,
+    };
+    return request.exclude === undefined || request.exclude.length === 0
+      ? this.options.scene.trace(query)
+      : this.options.scene.traceExcluding(query, request.exclude);
   }
   private bodyTrace(actor: OwnedActor, start: Vec3, end: Vec3, exclude: readonly ActorId[] = [], exactMask = false, bounds?: Bounds): TraceResult {
     const body = this.bodies.read(actor.id);
     if (body === null) throw new RangeError("Cannot trace an actor without a body");
-    const family = this.family(actor), motion = this.motion(actor);
+    const family = this.family(actor),
+      motion = this.motion(actor);
     const solid = this.solid(actor)?.solid;
-    const move = family === "q1" && motion?.kind === "fly-missile" ? "missile" : family === "q1" && (solid === "none" || solid === "trigger") ? "no-monsters" : "normal";
-    const query: TraceQuery = { start, end, shape: { kind: "box", bounds: bounds ?? body.bounds }, target: { kind: "world" },
-      policy: this.policy(family, exactMask ? motion?.clipMask ?? 0 : motion?.clipMask || 3, move),
-      numeric: this.options.numeric, passActor: actor.id };
+    const move =
+      family === "q1" && motion?.kind === "fly-missile" ? "missile" : family === "q1" && (solid === "none" || solid === "trigger") ? "no-monsters" : "normal";
+    const query: TraceQuery = {
+      start,
+      end,
+      shape: { kind: "box", bounds: bounds ?? body.bounds },
+      target: { kind: "world" },
+      policy: this.policy(family, exactMask ? (motion?.clipMask ?? 0) : motion?.clipMask || 3, move),
+      numeric: this.options.numeric,
+      passActor: actor.id,
+    };
     return exclude.length === 0 ? this.options.scene.trace(query) : this.options.scene.traceExcluding(query, exclude);
   }
   private hitActor(trace: TraceResult): ActorId | null {
@@ -318,19 +482,36 @@ export class SharedPhysics {
   touchTriggers(actor: OwnedActor): undefined {
     const linked = this.bodies.linked(actor.id);
     if (linked === null || !this.live(actor)) return undefined;
-    const flags = this.actorFlags(actor), family = this.family(actor);
-    if (family === "q1") return touchQ1Triggers({ actors: this.options.actors, bodies: this.bodies,
-      spatial: this.options.scene.spatial, isTrigger: trigger => this.solid(trigger)?.solid === "trigger",
-      touch: contact => { this.options.callbacks.touch(contact); return undefined; } }, actor);
+    const flags = this.actorFlags(actor),
+      family = this.family(actor);
+    if (family === "q1")
+      return touchQ1Triggers(
+        {
+          actors: this.options.actors,
+          bodies: this.bodies,
+          spatial: this.options.scene.spatial,
+          isTrigger: trigger => this.solid(trigger)?.solid === "trigger",
+          touch: contact => {
+            this.options.callbacks.touch(contact);
+            return undefined;
+          },
+        },
+        actor,
+      );
     if (flags.dead && (flags.player || this.solid(actor)?.monster)) return undefined;
     const touch = (id: ActorId): void => {
       if (!this.live(actor)) return;
-      const trigger = this.options.actors.resolveOwned(id), current = this.bodies.linked(id), moving = this.bodies.linked(actor.id);
+      const trigger = this.options.actors.resolveOwned(id),
+        current = this.bodies.linked(id),
+        moving = this.bodies.linked(actor.id);
       if (trigger === null || current === null || moving === null || sameActor(id, actor.id) || this.solid(trigger)?.solid !== "trigger") return;
       if (!boundsIntersect(current.absoluteBounds, moving.absoluteBounds)) return;
       this.options.callbacks.touch({ self: trigger, other: actor.id, plane: null, surface: null });
     };
-    for (const candidate of this.options.scene.queryActors(linked.absoluteBounds, "trigger")) { if (!this.live(actor)) break; touch(candidate.body.actor); }
+    for (const candidate of this.options.scene.queryActors(linked.absoluteBounds, "trigger")) {
+      if (!this.live(actor)) break;
+      touch(candidate.body.actor);
+    }
     return undefined;
   }
   private impact(actor: OwnedActor, trace: TraceResult): undefined {
@@ -338,18 +519,34 @@ export class SharedPhysics {
     if (otherId === null || !this.live(actor)) return undefined;
     const other = this.options.actors.resolveOwned(otherId);
     const plane = trace.contact.kind === "plane" ? trace.contact.plane : trace.sourcePlane;
-    const surface = trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : trace.kind === "q1" && trace.surfaceFlags !== undefined ? { name: "", nativeFlags: trace.surfaceFlags & 0x86, nativeValue: 0 } : null;
+    const surface =
+      trace.kind === "q2" && trace.surface !== null
+        ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value }
+        : trace.kind === "q1" && trace.surfaceFlags !== undefined
+          ? { name: "", nativeFlags: trace.surfaceFlags & 0x86, nativeValue: 0 }
+          : null;
     if (this.family(actor) === "q2" && this.options.q2Edition === "rerelease" && trace.kind === "q2") {
       if (this.solid(actor)?.solid !== "none" || this.actorFlags(actor).alwaysTouch === true)
-        this.options.callbacks.touch({ self: actor, other: otherId, plane, surface,
-          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: false } });
+        this.options.callbacks.touch({
+          self: actor,
+          other: otherId,
+          plane,
+          surface,
+          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: false },
+        });
       if (other !== null && this.live(other) && (this.solid(other)?.solid !== "none" || this.actorFlags(other).alwaysTouch === true))
-        this.options.callbacks.touch({ self: other, other: actor.id, plane, surface,
-          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: true } });
+        this.options.callbacks.touch({
+          self: other,
+          other: actor.id,
+          plane,
+          surface,
+          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: true },
+        });
       return undefined;
     }
     if (this.solid(actor)?.solid !== "none") this.options.callbacks.touch({ self: actor, other: otherId, plane, surface });
-    if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none") this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
+    if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none")
+      this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
     return undefined;
   }
   /** SV_PushEntity runs once per toss; `callbacks: false` is the sliding retry, which must not repeat touch and impact callbacks. */
@@ -358,20 +555,26 @@ export class SharedPhysics {
     if (initial === null) throw new RangeError("Cannot push an actor without a body");
     const end = this.add(initial.origin, displacement);
     for (;;) {
-      const trace = this.bodyTrace(actor, initial.origin, end, exclude), current = this.bodies.read(actor.id);
+      const trace = this.bodyTrace(actor, initial.origin, end, exclude),
+        current = this.bodies.read(actor.id);
       if (current === null) return trace;
-      this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor);
+      this.bodies.write(actor, { ...current, origin: trace.end });
+      this.bodies.link(actor);
       // Q1 SV_PushEntity links with trigger touching before SV_Impact; Q2
       // impacts first and may retry the push when the obstacle was removed.
       const q1 = this.family(actor) === "q1";
       if (q1 && callbacks && this.live(actor)) this.touchTriggers(actor);
       // SV_PushEntity impacts on `trace.ent`, which is also set when the move starts inside a solid.
-      if (trace.fraction !== 1 || q1 && trace.startSolid) {
+      if (trace.fraction !== 1 || (q1 && trace.startSolid)) {
         const hit = this.hitActor(trace);
         if (callbacks && this.live(actor)) this.impact(actor, trace);
         if (!q1 && hit !== null && !this.options.actors.isLive(hit) && this.live(actor)) {
           const changed = this.bodies.read(actor.id);
-          if (changed !== null) { this.bodies.write(actor, { ...changed, origin: initial.origin }); this.bodies.link(actor); continue; }
+          if (changed !== null) {
+            this.bodies.write(actor, { ...changed, origin: initial.origin });
+            this.bodies.link(actor);
+            continue;
+          }
         }
       }
       if (!q1 && callbacks && this.live(actor)) this.touchTriggers(actor);
@@ -380,9 +583,12 @@ export class SharedPhysics {
   }
   private clip(velocity: Vec3, normal: Vec3, overbounce = 1): Vec3 {
     const backoff = this.n.multiply(this.dot(velocity, normal), overbounce);
-    const clipped = this.vector(this.n.subtract(velocity.x, this.n.multiply(normal.x, backoff)),
-      this.n.subtract(velocity.y, this.n.multiply(normal.y, backoff)), this.n.subtract(velocity.z, this.n.multiply(normal.z, backoff)));
-    const stop = (v: number): number => v > -0.1 && v < 0.1 ? 0 : v;
+    const clipped = this.vector(
+      this.n.subtract(velocity.x, this.n.multiply(normal.x, backoff)),
+      this.n.subtract(velocity.y, this.n.multiply(normal.y, backoff)),
+      this.n.subtract(velocity.z, this.n.multiply(normal.z, backoff)),
+    );
+    const stop = (v: number): number => (v > -0.1 && v < 0.1 ? 0 : v);
     return this.vector(stop(clipped.x), stop(clipped.y), stop(clipped.z));
   }
   private testPosition(actor: OwnedActor): TraceResult | null {
@@ -403,17 +609,26 @@ export class SharedPhysics {
     // The registry revision moves on every allocation, source binding and release, so the ordered list is rebuilt only then.
     const revision = this.options.actors.revision;
     if (this.candidateOrder?.revision === revision) return this.candidateOrder.actors;
-    const actors = this.options.actors.observations().map(actor => actor.id).sort(this.options.sourceOrder)
-      .flatMap(id => { const actor = this.options.actors.resolveOwned(id); return actor === null ? [] : [actor]; });
+    const actors = this.options.actors
+      .observations()
+      .map(actor => actor.id)
+      .sort(this.options.sourceOrder)
+      .flatMap(id => {
+        const actor = this.options.actors.resolveOwned(id);
+        return actor === null ? [] : [actor];
+      });
     this.candidateOrder = { revision, actors };
     return actors;
   }
   /** Source-owned fields stay in the caller; collision and rider movement stay here. */
   q1PusherServices(projection: Pick<Q1PusherServices, "read" | "write" | "link" | "blocked">): Omit<Q1PusherServices, "think"> {
-    return { ...projection, movement: { numeric: this.n },
+    return {
+      ...projection,
+      movement: { numeric: this.n },
       candidates: () => this.candidates().map(actor => actor.id),
       collisionEnabled: (actor, enabled) => {
-        if (enabled) projection.link(actor, false); else this.options.scene.unlink(actor.id);
+        if (enabled) projection.link(actor, false);
+        else this.options.scene.unlink(actor.id);
         return undefined;
       },
       testPosition: entity => this.testPosition(entity.actor)?.hit ?? { kind: "none" },
@@ -426,36 +641,87 @@ export class SharedPhysics {
     };
   }
   readQ1Pusher(actor: ActorId): Q1PhysicsEntity | null {
-    const owned = this.options.actors.resolveOwned(actor), body = this.bodies.read(actor), linked = this.bodies.linked(actor);
+    const owned = this.options.actors.resolveOwned(actor),
+      body = this.bodies.read(actor),
+      linked = this.bodies.linked(actor);
     if (owned === null || body === null || linked === null) return null;
-    const flags = this.actorFlags(owned), motion = this.motion(owned), solid = this.solid(owned);
-    const moveType = flags.player ? 3 : motion?.kind === "push" || motion?.kind === "stop" ? 7
-      : motion?.kind === "step" ? 4 : motion?.kind === "fly" ? 5 : motion?.kind === "fly-missile" ? 9
-      : motion?.kind === "bounce" || motion?.kind === "wall-bounce" ? 10
-      : motion?.kind === "toss" || motion?.kind === "new-toss" ? 6 : 0;
-    return { actor: owned, bounds: body.bounds, absoluteBounds: linked.absoluteBounds,
+    const flags = this.actorFlags(owned),
+      motion = this.motion(owned),
+      solid = this.solid(owned);
+    const moveType = flags.player
+      ? 3
+      : motion?.kind === "push" || motion?.kind === "stop"
+        ? 7
+        : motion?.kind === "step"
+          ? 4
+          : motion?.kind === "fly"
+            ? 5
+            : motion?.kind === "fly-missile"
+              ? 9
+              : motion?.kind === "bounce" || motion?.kind === "wall-bounce"
+                ? 10
+                : motion?.kind === "toss" || motion?.kind === "new-toss"
+                  ? 6
+                  : 0;
+    return {
+      actor: owned,
+      bounds: body.bounds,
+      absoluteBounds: linked.absoluteBounds,
       solid: solid?.deadMonster ? "corpse" : solid?.solid === "brush" ? "bsp" : solid?.solid === "trigger" ? "trigger" : solid?.solid === "box" ? "box" : "not",
-      localTimeSeconds: 0, nextThinkSeconds: 0,
-      state: { kind: "q1-netquake", origin: body.origin, angles: body.angles, velocity: body.velocity,
-        oldOrigin: body.origin, angularVelocity: motion?.angularVelocity ?? zero,
-        flags: (body.ground === null ? 0 : 512) | (flags.fly ? 1 : 0) | (flags.swim ? 2 : 0), moveType,
+      localTimeSeconds: 0,
+      nextThinkSeconds: 0,
+      state: {
+        kind: "q1-netquake",
+        origin: body.origin,
+        angles: body.angles,
+        velocity: body.velocity,
+        oldOrigin: body.origin,
+        angularVelocity: motion?.angularVelocity ?? zero,
+        flags: (body.ground === null ? 0 : 512) | (flags.fly ? 1 : 0) | (flags.swim ? 2 : 0),
+        moveType,
         ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground },
-        viewAngles: zero, punchAngles: zero, waterLevel: flags.waterLevel ?? 0, waterType: flags.waterType ?? -1,
-        teleportTimeSeconds: 0, waterJumpDirection: zero, idealPitch: 0, fixAngle: false, health: 0 } };
+        viewAngles: zero,
+        punchAngles: zero,
+        waterLevel: flags.waterLevel ?? 0,
+        waterType: flags.waterType ?? -1,
+        teleportTimeSeconds: 0,
+        waterJumpDirection: zero,
+        idealPitch: 0,
+        fixAngle: false,
+        health: 0,
+      },
+    };
   }
   writeQ1Pusher(entity: Q1PhysicsEntity): undefined {
-    this.writeLive(entity.actor, { origin: entity.state.origin, angles: entity.state.angles,
-      bounds: entity.bounds, ground: (entity.state.flags & 512) === 0 ? null
-        : entity.state.ground.kind === "actor" ? entity.state.ground.actor
-        : entity.state.ground.kind === "world" ? this.options.worldActor() : null });
+    this.writeLive(entity.actor, {
+      origin: entity.state.origin,
+      angles: entity.state.angles,
+      bounds: entity.bounds,
+      ground:
+        (entity.state.flags & 512) === 0
+          ? null
+          : entity.state.ground.kind === "actor"
+            ? entity.state.ground.actor
+            : entity.state.ground.kind === "world"
+              ? this.options.worldActor()
+              : null,
+    });
     return undefined;
   }
   private pushQ1(actor: OwnedActor, displacement: Vec3, angularDisplacement: Vec3): ActorId | null {
     let obstacle: ActorId | null = null;
-    const services = this.q1PusherServices({ read: id => this.readQ1Pusher(id),
+    const services = this.q1PusherServices({
+      read: id => this.readQ1Pusher(id),
       write: entity => this.writeQ1Pusher(entity),
-      link: (owned, touch) => { this.bodies.link(owned); if (touch) this.touchTriggers(owned); return undefined; },
-      blocked: (owned, other) => { obstacle = other; return this.options.onBlocked(owned, other); },
+      link: (owned, touch) => {
+        this.bodies.link(owned);
+        if (touch) this.touchTriggers(owned);
+        return undefined;
+      },
+      blocked: (owned, other) => {
+        obstacle = other;
+        return this.options.onBlocked(owned, other);
+      },
     });
     pushQ1Pusher({ actor: actor.id, displacement, angularDisplacement, elapsedSeconds: 0 }, services);
     return obstacle;
@@ -473,12 +739,16 @@ export class SharedPhysics {
     const bounds = this.bodies.linked(actor.id)?.absoluteBounds;
     if (bounds === undefined) return null;
     const angles = this.scale(angularDisplacement, -1);
-    const forward = { ...zero }, right = { ...zero }, up = { ...zero };
+    const forward = { ...zero },
+      right = { ...zero },
+      up = { ...zero };
     if (this.options.numeric.arithmetic.kind === "donor-binary64") donorAngleVectors(angles, forward, right, up);
     const axes = this.options.numeric.arithmetic.kind === "donor-binary64" ? { forward, right, up } : angleVectors(angles);
     for (const candidate of this.candidates()) {
       if (sameActor(candidate.id, actor.id) || !this.live(actor)) continue;
-      const body = this.bodies.read(candidate.id), linked = this.bodies.linked(candidate.id), kind = this.motion(candidate)?.kind;
+      const body = this.bodies.read(candidate.id),
+        linked = this.bodies.linked(candidate.id),
+        kind = this.motion(candidate)?.kind;
       if (body === null || linked === null || kind === "push" || kind === "stop" || kind === "stationary" || kind === undefined) continue;
       const rider = body.ground !== null && sameActor(body.ground, actor.id);
       if (!rider && (!boundsIntersect(linked.absoluteBounds, bounds) || this.testPosition(candidate) === null)) continue;
@@ -487,20 +757,26 @@ export class SharedPhysics {
         saved.push({ actor: candidate, origin: body.origin, angles: body.angles, deltaYaw: this.actorFlags(candidate).deltaYaw ?? 0 });
         const pusherOrigin = this.bodies.read(actor.id)?.origin;
         if (pusherOrigin === undefined) return null;
-        const translated = this.add(body.origin, move), offset = this.sub(translated, pusherOrigin);
+        const translated = this.add(body.origin, move),
+          offset = this.sub(translated, pusherOrigin);
         const rotated = this.vector(this.dot(offset, axes.forward), -this.dot(offset, axes.right), this.dot(offset, axes.up));
         const delta = this.add(move, this.sub(rotated, offset));
         this.writeLive(candidate, { origin: this.add(body.origin, delta), ground: rider ? body.ground : null });
-        if (this.actorFlags(candidate).player) this.setFlags(candidate, { deltaYaw: this.n.add(this.actorFlags(candidate).deltaYaw ?? 0, angularDisplacement.y) });
+        if (this.actorFlags(candidate).player)
+          this.setFlags(candidate, { deltaYaw: this.n.add(this.actorFlags(candidate).deltaYaw ?? 0, angularDisplacement.y) });
         if (!this.live(actor)) return null;
         if (!this.live(candidate)) continue;
         blocked = this.testPosition(candidate) !== null;
         if (!blocked) {
-          this.bodies.link(candidate); continue;
+          this.bodies.link(candidate);
+          continue;
         }
         const state = this.bodies.read(candidate.id);
         if (state !== null) this.writeLive(candidate, { origin: this.sub(state.origin, move) });
-        if (this.testPosition(candidate) === null) { saved.pop(); continue; }
+        if (this.testPosition(candidate) === null) {
+          saved.pop();
+          continue;
+        }
       }
 
       if (blocked) {
@@ -521,12 +797,15 @@ export class SharedPhysics {
     try {
       for (const actor of actors) {
         if (!this.live(actor)) continue;
-        const body = this.bodies.read(actor.id), motion = this.motion(actor);
+        const body = this.bodies.read(actor.id),
+          motion = this.motion(actor);
         if (body === null || motion === null) continue;
         const blocked = this.pushMove(actor, this.scale(body.velocity, elapsed), this.scale(motion.angularVelocity, elapsed));
         if (blocked !== null) return blocked;
       }
-    } finally { this.pushTransaction = null; }
+    } finally {
+      this.pushTransaction = null;
+    }
     for (const entry of saved.slice().reverse()) if (this.live(entry.actor)) this.touchTriggers(entry.actor);
     return null;
   }
@@ -539,89 +818,156 @@ export class SharedPhysics {
     return undefined;
   }
   private checkBottom(actor: OwnedActor, body: BodyState): boolean {
-    const min = this.add(body.origin, body.bounds.min), max = this.add(body.origin, body.bounds.max);
-    const direction = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 }, floor = direction.z > 0 ? max.z : min.z;
-    const point = (x: number, y: number): TraceResult => this.options.scene.trace({ start: { x, y, z: floor }, end: { x, y, z: floor + direction.z * 36 },
-      shape: { kind: "point" }, passActor: actor.id, target: { kind: "world" }, policy: this.policy(this.family(actor), defaultMask, "no-monsters"), numeric: this.options.numeric });
+    const min = this.add(body.origin, body.bounds.min),
+      max = this.add(body.origin, body.bounds.max);
+    const direction = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 },
+      floor = direction.z > 0 ? max.z : min.z;
+    const point = (x: number, y: number): TraceResult =>
+      this.options.scene.trace({
+        start: { x, y, z: floor },
+        end: { x, y, z: floor + direction.z * 36 },
+        shape: { kind: "point" },
+        passActor: actor.id,
+        target: { kind: "world" },
+        policy: this.policy(this.family(actor), defaultMask, "no-monsters"),
+        numeric: this.options.numeric,
+      });
     const middle = point((min.x + max.x) * 0.5, (min.y + max.y) * 0.5);
     if (middle.fraction === 1) return false;
-    for (const x of [min.x, max.x]) for (const y of [min.y, max.y]) {
-      const corner = point(x, y);
-      if (corner.fraction === 1 || (corner.end.z - middle.end.z) * direction.z > 18) return false;
-    }
+    for (const x of [min.x, max.x])
+      for (const y of [min.y, max.y]) {
+        const corner = point(x, y);
+        if (corner.fraction === 1 || (corner.end.z - middle.end.z) * direction.z > 18) return false;
+      }
     return true;
   }
   walkMove(actor: OwnedActor, yaw: number, distance: number): boolean {
     const body = this.bodies.read(actor.id);
     if (body === null) return false;
-    const radians = yaw * Math.PI * 2 / 360, move = this.vector(Math.cos(radians) * distance, Math.sin(radians) * distance, 0);
-    const flags = this.actorFlags(actor), family = this.family(actor);
+    const radians = (yaw * Math.PI * 2) / 360,
+      move = this.vector(Math.cos(radians) * distance, Math.sin(radians) * distance, 0);
+    const flags = this.actorFlags(actor),
+      family = this.family(actor);
     if (flags.fly || flags.swim) {
       const enemy = flags.enemy === undefined || flags.enemy === null ? null : this.bodies.read(flags.enemy);
       for (let attempt = 0; attempt < (enemy === null ? 1 : 2); attempt++) {
         let end = this.add(body.origin, move);
-        if (attempt === 0 && enemy !== null) { const dz = body.origin.z - enemy.origin.z; end = this.add(end, { x: 0, y: 0, z: dz > 40 ? -8 : dz < 30 ? 8 : 0 }); }
+        if (attempt === 0 && enemy !== null) {
+          const dz = body.origin.z - enemy.origin.z;
+          end = this.add(end, { x: 0, y: 0, z: dz > 40 ? -8 : dz < 30 ? 8 : 0 });
+        }
         const trace = this.bodyTrace(actor, body.origin, end);
         if (trace.fraction !== 1) continue;
-        const contents = this.options.scene.pointContents({ point: trace.end, target: { kind: "world" }, policy: this.policy(family, defaultMask), numeric: this.options.numeric, passActor: actor.id });
-        const water = contents.kind === "q1" ? contents.contents <= -3 && contents.contents >= -5 : ((contents.kind === "q2" ? contents.merged : contents.contents) & 56) !== 0;
+        const contents = this.options.scene.pointContents({
+          point: trace.end,
+          target: { kind: "world" },
+          policy: this.policy(family, defaultMask),
+          numeric: this.options.numeric,
+          passActor: actor.id,
+        });
+        const water =
+          contents.kind === "q1"
+            ? contents.contents <= -3 && contents.contents >= -5
+            : ((contents.kind === "q2" ? contents.merged : contents.contents) & 56) !== 0;
         if (flags.swim && !water) return false;
-        this.writeLive(actor, { origin: trace.end }, true); this.touchTriggers(actor); return this.live(actor);
+        this.writeLive(actor, { origin: trace.end }, true);
+        this.touchTriggers(actor);
+        return this.live(actor);
       }
       return false;
     }
-    const desired = this.add(body.origin, move), raised = this.add(desired, { x: 0, y: 0, z: 18 }), down = this.add(desired, { x: 0, y: 0, z: -18 });
+    const desired = this.add(body.origin, move),
+      raised = this.add(desired, { x: 0, y: 0, z: 18 }),
+      down = this.add(desired, { x: 0, y: 0, z: -18 });
     let trace = this.bodyTrace(actor, raised, down);
     if (trace.allSolid) return false;
-    if (trace.startSolid) { trace = this.bodyTrace(actor, desired, down); if (trace.allSolid || trace.startSolid) return false; }
+    if (trace.startSolid) {
+      trace = this.bodyTrace(actor, desired, down);
+      if (trace.allSolid || trace.startSolid) return false;
+    }
     if (trace.fraction === 1) {
       if (!flags.partialGround) return false;
-      this.writeLive(actor, { origin: desired, ground: null }, true); this.touchTriggers(actor); return this.live(actor);
+      this.writeLive(actor, { origin: desired, ground: null }, true);
+      this.touchTriggers(actor);
+      return this.live(actor);
     }
     const landed = { ...body, origin: trace.end };
     if (!this.checkBottom(actor, landed)) {
       if (!flags.partialGround) return false;
-      this.writeLive(actor, { origin: trace.end }, true); this.touchTriggers(actor); return this.live(actor);
+      this.writeLive(actor, { origin: trace.end }, true);
+      this.touchTriggers(actor);
+      return this.live(actor);
     }
     this.writeLive(actor, { origin: trace.end, ground: this.hitActor(trace) }, true);
-    this.setFlags(actor, { partialGround: false }); this.touchTriggers(actor); return this.live(actor);
+    this.setFlags(actor, { partialGround: false });
+    this.touchTriggers(actor);
+    return this.live(actor);
   }
   private flyMove(actor: OwnedActor, elapsed: number, newToss = false): undefined {
     if (this.family(actor) === "q2" && this.options.q2Edition === "rerelease") {
-      return this.rereleaseFlyMove(actor, elapsed, { actors: this.options.actors, bodies: this.bodies,
-        trace: (start, end, bounds) => this.bodyTrace(actor, start, end, [], newToss, bounds), hitActor: trace => this.hitActor(trace),
-        impact: trace => this.impact(actor, trace), takeKillVelocity: () => this.options.takeKillVelocity?.(actor) ?? false });
+      return this.rereleaseFlyMove(actor, elapsed, {
+        actors: this.options.actors,
+        bodies: this.bodies,
+        trace: (start, end, bounds) => this.bodyTrace(actor, start, end, [], newToss, bounds),
+        hitActor: trace => this.hitActor(trace),
+        impact: trace => this.impact(actor, trace),
+        takeKillVelocity: () => this.options.takeKillVelocity?.(actor) ?? false,
+      });
     }
     if (this.bodies.read(actor.id) === null) return undefined;
     this.writeLive(actor, { ground: null });
-    sweepBody({
-      read: () => this.live(actor) ? this.bodies.read(actor.id) : null,
-      writeOrigin: origin => { this.writeLive(actor, { origin }); },
-      writeVelocity: velocity => { this.writeLive(actor, { velocity }); },
-      trace: (start, end) => this.bodyTrace(actor, start, end, [], newToss), stopWhenStill: false,
-      normal: trace => trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal,
-      samePlane: (first, second) => first === second || this.family(actor) !== "q1" && first.x === second.x && first.y === second.y && first.z === second.z,
-      impact: (trace, normal) => {
-        const hit = this.hitActor(trace), target = hit === null ? null : this.options.actors.resolveOwned(hit);
-        const down = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 };
-        if ((newToss ? normal.z > 0.7 : this.dot(normal, down) < -0.7) && hit !== null && (trace.hit.kind === "world" || target !== null && this.solid(target)?.solid === "brush")) this.writeLive(actor, { ground: hit });
-        this.impact(actor, trace);
+    sweepBody(
+      {
+        read: () => (this.live(actor) ? this.bodies.read(actor.id) : null),
+        writeOrigin: origin => {
+          this.writeLive(actor, { origin });
+        },
+        writeVelocity: velocity => {
+          this.writeLive(actor, { velocity });
+        },
+        trace: (start, end) => this.bodyTrace(actor, start, end, [], newToss),
+        stopWhenStill: false,
+        normal: trace => (trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal),
+        samePlane: (first, second) => first === second || (this.family(actor) !== "q1" && first.x === second.x && first.y === second.y && first.z === second.z),
+        impact: (trace, normal) => {
+          const hit = this.hitActor(trace),
+            target = hit === null ? null : this.options.actors.resolveOwned(hit);
+          const down = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 };
+          if (
+            (newToss ? normal.z > 0.7 : this.dot(normal, down) < -0.7) &&
+            hit !== null &&
+            (trace.hit.kind === "world" || (target !== null && this.solid(target)?.solid === "brush"))
+          )
+            this.writeLive(actor, { ground: hit });
+          this.impact(actor, trace);
+        },
+        math: {
+          advance: (origin, time, velocity) => this.add(origin, this.scale(velocity, time)),
+          remaining: (time, fraction) => this.n.subtract(time, this.n.multiply(time, fraction)),
+          clip: (velocity, normal) => this.clip(velocity, normal),
+          dot: (first, second) => this.dot(first, second),
+          cross: (a, b) => this.vector(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x),
+          scale: (vector, amount) => this.scale(vector, amount),
+        },
       },
-      math: { advance: (origin, time, velocity) => this.add(origin, this.scale(velocity, time)),
-        remaining: (time, fraction) => this.n.subtract(time, this.n.multiply(time, fraction)),
-        clip: (velocity, normal) => this.clip(velocity, normal), dot: (first, second) => this.dot(first, second),
-        cross: (a, b) => this.vector(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x),
-        scale: (vector, amount) => this.scale(vector, amount) },
-    }, elapsed);
+      elapsed,
+    );
     return undefined;
   }
   waterTransition(actor: OwnedActor, previousOrigin: Vec3): undefined {
-    const body = this.bodies.read(actor.id); if (body === null) return undefined;
-    const family = this.family(actor), before = this.actorFlags(actor);
-    const contents = this.options.scene.pointContents({ point: body.origin, target: { kind: "world" },
-      policy: this.policy(family, defaultMask), numeric: this.options.numeric, passActor: actor.id });
-    const value = contents.kind === "q2" ? this.options.q2Edition === "rerelease" ? contents.merged : contents.stored : contents.contents;
-    const wet = family === "q1" ? value <= -3 && value >= -5 || value <= -9 && value >= -14 : (value & 56) !== 0;
+    const body = this.bodies.read(actor.id);
+    if (body === null) return undefined;
+    const family = this.family(actor),
+      before = this.actorFlags(actor);
+    const contents = this.options.scene.pointContents({
+      point: body.origin,
+      target: { kind: "world" },
+      policy: this.policy(family, defaultMask),
+      numeric: this.options.numeric,
+      passActor: actor.id,
+    });
+    const value = contents.kind === "q2" ? (this.options.q2Edition === "rerelease" ? contents.merged : contents.stored) : contents.contents;
+    const wet = family === "q1" ? (value <= -3 && value >= -5) || (value <= -9 && value >= -14) : (value & 56) !== 0;
     const wasWet = (before.waterLevel ?? 0) !== 0;
     this.setFlags(actor, { waterLevel: wet ? 1 : 0, waterType: value });
     if (wet !== wasWet) this.emit({ actor: actor.id, kind: wet ? "water-enter" : "water-leave", origin: wet ? previousOrigin : body.origin });
@@ -633,27 +979,57 @@ export class SharedPhysics {
     const motion = this.motion(actor);
     if (state === null || motion === null || elapsed === 0 || motion.kind === "stationary") return undefined;
     if (this.bodies.attachment(actor.id) !== null) {
-      if (motion.kind === "fly" || motion.kind === "fly-missile") this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
+      if (motion.kind === "fly" || motion.kind === "fly-missile")
+        this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
       this.pushEntity(actor, zero);
       if (this.live(actor)) this.waterTransition(actor, state.origin);
       return undefined;
     }
-    if (motion.kind === "push" || motion.kind === "stop") { this.pushMove(actor, this.scale(state.velocity, elapsed), this.scale(motion.angularVelocity, elapsed)); return undefined; }
-    const family = this.family(actor), flags = this.actorFlags(actor);
+    if (motion.kind === "push" || motion.kind === "stop") {
+      this.pushMove(actor, this.scale(state.velocity, elapsed), this.scale(motion.angularVelocity, elapsed));
+      return undefined;
+    }
+    const family = this.family(actor),
+      flags = this.actorFlags(actor);
     if (motion.kind === "new-toss") {
-      return stepQ2NewToss(actor, elapsed, motion, { actors: this.options.actors, bodies: this.bodies, numeric: this.n,
-        edition: this.options.q2Edition ?? "classic", worldGravity: this.worldGravity, maxVelocity: this.options.maxVelocity ?? 2000,
-        stopSpeed: this.options.stopSpeed?.() ?? 100, teamSlave: flags.teamSlave ?? false,
-        water: () => { const water = this.actorFlags(actor); return { waterLevel: water.waterLevel ?? 0, waterType: water.waterType ?? 0 }; },
+      return stepQ2NewToss(actor, elapsed, motion, {
+        actors: this.options.actors,
+        bodies: this.bodies,
+        numeric: this.n,
+        edition: this.options.q2Edition ?? "classic",
+        worldGravity: this.worldGravity,
+        maxVelocity: this.options.maxVelocity ?? 2000,
+        stopSpeed: this.options.stopSpeed?.() ?? 100,
+        teamSlave: flags.teamSlave ?? false,
+        water: () => {
+          const water = this.actorFlags(actor);
+          return { waterLevel: water.waterLevel ?? 0, waterType: water.waterType ?? 0 };
+        },
         trace: (start, end) => this.bodyTrace(actor, start, end, [], true),
-        hitActor: trace => trace.hit.kind === "actor" ? trace.hit.actor : this.options.worldActor(),
+        hitActor: trace => (trace.hit.kind === "actor" ? trace.hit.actor : this.options.worldActor()),
         flyMove: frame => this.flyMove(actor, frame, true),
-        writeAngularVelocity: angularVelocity => { this.motions.set(actor, { ...motion, angularVelocity }); this.writeAngularVelocity(actor, angularVelocity); return undefined; },
-        touchTriggers: () => this.touchTriggers(actor), pointContents: point => {
-          const contents = this.options.scene.pointContents({ point, target: { kind: "world" }, policy: this.policy("q2", -1), numeric: this.options.numeric, passActor: actor.id });
-          if (contents.kind !== "q2") throw new Error("NewToss requires Q2 contents representation"); return contents.stored;
-        }, writeWater: (waterLevel, waterType) => this.setFlags(actor, { waterLevel, waterType }),
-        waterSound: origin => { this.emit({ actor: this.options.worldActor() ?? actor.id, kind: "water-enter", origin }); return undefined; },
+        writeAngularVelocity: angularVelocity => {
+          this.motions.set(actor, { ...motion, angularVelocity });
+          this.writeAngularVelocity(actor, angularVelocity);
+          return undefined;
+        },
+        touchTriggers: () => this.touchTriggers(actor),
+        pointContents: point => {
+          const contents = this.options.scene.pointContents({
+            point,
+            target: { kind: "world" },
+            policy: this.policy("q2", -1),
+            numeric: this.options.numeric,
+            passActor: actor.id,
+          });
+          if (contents.kind !== "q2") throw new Error("NewToss requires Q2 contents representation");
+          return contents.stored;
+        },
+        writeWater: (waterLevel, waterType) => this.setFlags(actor, { waterLevel, waterType }),
+        waterSound: origin => {
+          this.emit({ actor: this.options.worldActor() ?? actor.id, kind: "water-enter", origin });
+          return undefined;
+        },
       });
     }
     if (state.ground !== null && !this.options.actors.isLive(state.ground)) {
@@ -662,10 +1038,13 @@ export class SharedPhysics {
       const world = family === "q1" ? this.options.worldActor() : null;
       this.writeLive(actor, { ground: world });
       state = this.bodies.read(actor.id);
-    } else if (state.ground !== null && family !== "q1" && this.dot(state.velocity, motion.gravityVector) < 0) { this.writeLive(actor, { ground: null }); state = this.bodies.read(actor.id); }
+    } else if (state.ground !== null && family !== "q1" && this.dot(state.velocity, motion.gravityVector) < 0) {
+      this.writeLive(actor, { ground: null });
+      state = this.bodies.read(actor.id);
+    }
     if (state === null) return undefined;
     const maximum = this.options.maxVelocity ?? 2000;
-    const clamp = (v: number): number => Number.isFinite(v) ? Math.max(-maximum, Math.min(maximum, v)) : 0;
+    const clamp = (v: number): number => (Number.isFinite(v) ? Math.max(-maximum, Math.min(maximum, v)) : 0);
     let velocity = this.vector(clamp(state.velocity.x), clamp(state.velocity.y), clamp(state.velocity.z));
     if (motion.kind === "step") {
       if (family === "q1") {
@@ -674,7 +1053,10 @@ export class SharedPhysics {
         velocity = this.add(state.velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
         this.writeLive(actor, { velocity: this.vector(clamp(velocity.x), clamp(velocity.y), clamp(velocity.z)) });
         this.flyMove(actor, elapsed);
-        if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
+        if (this.live(actor)) {
+          this.bodies.link(actor);
+          this.touchTriggers(actor);
+        }
         const landed = this.bodies.read(actor.id);
         if (hitSound && landed?.ground != null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
         return undefined;
@@ -684,25 +1066,30 @@ export class SharedPhysics {
         if (floor.fraction < 1 && !floor.startSolid && this.dot(floor.sourcePlane.normal, motion.gravityVector) <= -0.7) {
           // M_CheckGround snaps to the trace end point and stops vertical motion on landing.
           velocity = this.vector(velocity.x, velocity.y, 0);
-          this.writeLive(actor, { ground: this.hitActor(floor), origin: floor.end, velocity: this.vector(state.velocity.x, state.velocity.y, 0) }); state = this.bodies.read(actor.id) ?? state;
+          this.writeLive(actor, { ground: this.hitActor(floor), origin: floor.end, velocity: this.vector(state.velocity.x, state.velocity.y, 0) });
+          state = this.bodies.read(actor.id) ?? state;
         }
       }
-      const wasGrounded = state.ground !== null, fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
+      const wasGrounded = state.ground !== null,
+        fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
       this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
       if (this.moving(motion.angularVelocity)) {
         const adjustment = elapsed * 600;
-        const friction = (value: number): number => value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment);
+        const friction = (value: number): number => (value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment));
         const angular = this.vector(friction(motion.angularVelocity.x), friction(motion.angularVelocity.y), friction(motion.angularVelocity.z));
-        this.motions.set(actor, { ...motion, angularVelocity: angular }); this.writeAngularVelocity(actor, angular);
+        this.motions.set(actor, { ...motion, angularVelocity: angular });
+        this.writeAngularVelocity(actor, angular);
       }
       if (state.ground === null && !flags.fly && !(flags.swim && (flags.waterLevel ?? 0) > 2) && (flags.waterLevel ?? 0) === 0)
         velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
       if (flags.fly && velocity.z !== 0) {
-        const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * 2) / speed;
+        const speed = Math.abs(velocity.z),
+          factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * 2) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
       }
       if (flags.swim && velocity.z !== 0) {
-        const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * (flags.waterLevel ?? 0)) / speed;
+        const speed = Math.abs(velocity.z),
+          factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * (flags.waterLevel ?? 0)) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
       }
       if (this.moving(velocity)) {
@@ -715,14 +1102,18 @@ export class SharedPhysics {
         }
         this.writeLive(actor, { velocity });
         this.flyMove(actor, elapsed);
-        if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
+        if (this.live(actor)) {
+          this.bodies.link(actor);
+          this.touchTriggers(actor);
+        }
         const landed = this.bodies.read(actor.id);
         if (!wasGrounded && fallingFast && landed !== null && landed.ground !== null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
       } else this.writeLive(actor, { velocity });
       return undefined;
     }
     if (state.ground !== null) return undefined;
-    if (motion.kind !== "fly" && motion.kind !== "fly-missile" && motion.kind !== "wall-bounce") velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
+    if (motion.kind !== "fly" && motion.kind !== "fly-missile" && motion.kind !== "wall-bounce")
+      velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
     this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
     let trace = this.pushEntity(actor, this.scale(velocity, elapsed));
     if (family !== "q1") this.waterTransition(actor, state.origin);
@@ -738,7 +1129,11 @@ export class SharedPhysics {
       const currentMotion = this.motion(actor) ?? motion;
       const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
       velocity = this.clip(state.velocity, normal, currentMotion.kind === "wall-bounce" ? 2 : currentMotion.kind === "bounce" ? 1.5 : 1);
-      if (currentMotion.kind !== "wall-bounce" && this.dot(normal, currentMotion.gravityVector) < -0.7 && (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")) {
+      if (
+        currentMotion.kind !== "wall-bounce" &&
+        this.dot(normal, currentMotion.gravityVector) < -0.7 &&
+        (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")
+      ) {
         this.writeLive(actor, { velocity: zero, ground: this.hitActor(trace) });
         this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
         this.writeAngularVelocity(actor, zero);
@@ -750,9 +1145,15 @@ export class SharedPhysics {
       state = this.bodies.read(actor.id);
       if (state === null || trace.fraction === 1) break;
     }
-    if (family === "q1" && this.live(actor)) { const source = this.sources.get(actor); if (source === undefined) this.options.q1WaterTransition?.(actor); else source.waterTransition(); }
+    if (family === "q1" && this.live(actor)) {
+      const source = this.sources.get(actor);
+      if (source === undefined) this.options.q1WaterTransition?.(actor);
+      else source.waterTransition();
+    }
     return undefined;
   }
 
-  commitAttachments(): undefined { return this.bodies.transportAttachments(this.n); }
+  commitAttachments(): undefined {
+    return this.bodies.transportAttachments(this.n);
+  }
 }

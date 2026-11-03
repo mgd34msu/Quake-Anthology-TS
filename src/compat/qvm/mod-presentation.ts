@@ -1,14 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CleanupStack } from "../../foundation/cleanup.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../persistence/value.ts";
 import { savedActorId, readSavedActor } from "../../persistence/save-image.ts";
 import { readGuest } from "../../persistence/execution.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
-import { capturePresentationGameState, readPresentationGameState, capturePresentationSnapshot, readPresentationSnapshot } from "./mod-presentation-checkpoint.ts";
+import {
+  capturePresentationGameState,
+  readPresentationGameState,
+  capturePresentationSnapshot,
+  readPresentationSnapshot,
+} from "./mod-presentation-checkpoint.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
 import type { Axis, Vec3 } from "../../contracts/math.ts";
-import type { QvmModPresentationDeclaration, QvmPresentationArgument, QvmPresentationCall, QvmScenePresentation } from "../../contracts/qvm-mod-presentation.ts";
+import type {
+  QvmModPresentationDeclaration,
+  QvmPresentationArgument,
+  QvmPresentationCall,
+  QvmScenePresentation,
+} from "../../contracts/qvm-mod-presentation.ts";
 import type { Q3SourcePlayerEvent } from "../../app/bootstrap/simulation/q3/types.ts";
 import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
 import { dot3, vectorToAngles } from "../../core/math.ts";
@@ -32,7 +43,10 @@ export interface QvmBodyMesh {
   base: boolean;
   readonly passes: Extract<SourceRefEntityRecord, { readonly kind: "model" }>[];
 }
-export interface QvmBodyPresentation { readonly actor: ActorId; readonly parts: readonly QvmBodyMesh[]; }
+export interface QvmBodyPresentation {
+  readonly actor: ActorId;
+  readonly parts: readonly QvmBodyMesh[];
+}
 
 export interface QvmSceneContext {
   readonly revision: number;
@@ -76,9 +90,16 @@ function int32(value: number): number {
 class RetiredPlayer extends Error {}
 
 export function validateQvmModPresentation(options: Pick<QvmModPresentationOptions, "artifact" | "source" | "declaration">): void {
-  const { artifact, source, declaration } = options, storage = declaration.storage;
-  if (artifact.role !== "cgame" || artifact.module.artifactPath !== declaration.cgame.path || artifact.module.digest !== declaration.cgame.digest
-    || (artifact.abiProfile ?? "q3-modern") !== declaration.cgame.abiProfile || source.artifactPath !== declaration.gameplay.path || source.digest !== declaration.gameplay.digest)
+  const { artifact, source, declaration } = options,
+    storage = declaration.storage;
+  if (
+    artifact.role !== "cgame" ||
+    artifact.module.artifactPath !== declaration.cgame.path ||
+    artifact.module.digest !== declaration.cgame.digest ||
+    (artifact.abiProfile ?? "q3-modern") !== declaration.cgame.abiProfile ||
+    source.artifactPath !== declaration.gameplay.path ||
+    source.digest !== declaration.gameplay.digest
+  )
     throw new Error("Source presentation differs from its declared gameplay/cgame artifacts");
   if (declaration.gameplay.abiProfile !== declaration.cgame.abiProfile) throw new Error("Source presentation requires matching player-state ABI profiles");
   const end = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
@@ -92,12 +113,21 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
   for (const address of storage.viewAxis ?? []) range(address, 36);
   const entities = storage.centities;
   range(entities.address, entities.stride * entities.capacity);
-  if (!Number.isSafeInteger(entities.capacity) || entities.capacity < 1 || !Number.isSafeInteger(entities.stride)
-    || !Number.isSafeInteger(entities.state) || entities.state < 0 || entities.state + qvmEntityStateBytes(declaration.cgame.abiProfile) > entities.stride)
+  if (
+    !Number.isSafeInteger(entities.capacity) ||
+    entities.capacity < 1 ||
+    !Number.isSafeInteger(entities.stride) ||
+    !Number.isSafeInteger(entities.state) ||
+    entities.state < 0 ||
+    entities.state + qvmEntityStateBytes(declaration.cgame.abiProfile) > entities.stride
+  )
     throw new Error("Source presentation centity layout is invalid");
   if (declaration.runtime === "qvm-player-events") {
-    const storage = declaration.storage, psBytes = qvmPlayerStateBytes(declaration.cgame.abiProfile), snapshotBytes = qvmSnapshotBytes(declaration.cgame.abiProfile);
-    range(storage.playerState, psBytes); range(storage.snapshot.address, snapshotBytes);
+    const storage = declaration.storage,
+      psBytes = qvmPlayerStateBytes(declaration.cgame.abiProfile),
+      snapshotBytes = qvmSnapshotBytes(declaration.cgame.abiProfile);
+    range(storage.playerState, psBytes);
+    range(storage.snapshot.address, snapshotBytes);
     for (const address of storage.snapshot.pointers) range(address, 4);
     if (storage.centities.origin < 0 || storage.centities.origin + 12 > entities.stride) throw new Error("Source centity origin exceeds its record");
     if (storage.playerState < storage.snapshot.address + snapshotBytes && storage.snapshot.address < storage.playerState + psBytes)
@@ -107,16 +137,21 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
     for (const offset of [declaration.storage.centities.previousEvent, declaration.storage.centities.snapshotTime])
       if (!Number.isSafeInteger(offset) || offset < 0 || offset + 4 > entities.stride) throw new Error("Source centity event cursor exceeds its record");
     const { player, mesh } = declaration.body;
-    for (const entry of [player.entry, mesh.entry, declaration.eventCheck.entry]) if (artifact.image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER)
-      throw new Error("Source mesh scope has no original function entry");
+    for (const entry of [player.entry, mesh.entry, declaration.eventCheck.entry])
+      if (artifact.image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Source mesh scope has no original function entry");
     for (const argument of [player.centityArgument, mesh.entityArgument, mesh.stateArgument, declaration.eventCheck.centityArgument])
-      if (!Number.isInteger(argument) || argument < 0 || argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("Source mesh scope has an invalid argument");
+      if (!Number.isInteger(argument) || argument < 0 || argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS)
+        throw new Error("Source mesh scope has an invalid argument");
     if (mesh.shaderOffset !== 112) throw new Error("Source mesh shader field differs from the declared refEntity ABI");
     qualifyQvmBodyCalls(artifact.image, declaration.body);
     if (declaration.snapshots.length === 0) throw new Error("Source scene requires original snapshot processing");
   }
   const checkCall = (call: QvmPresentationCall, initializing: boolean): void => {
-    if (!Number.isInteger(call.entry) || artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER || call.arguments.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS)
+    if (
+      !Number.isInteger(call.entry) ||
+      artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER ||
+      call.arguments.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS
+    )
       throw new Error("Source presentation call has no original function entry");
     for (const argument of call.arguments) {
       if (argument.kind === "address") range(argument.value, 1);
@@ -157,15 +192,40 @@ export class QvmModPresentation {
   private restoringScene = false;
   private currentGameState: SourceGameStateRecord | null = null;
   private bodyFrame: QvmBodyPresentation[] = [];
-  get bodies(): readonly QvmBodyPresentation[] { this.current(); return this.bodyFrame; }
-  private playerScope: { readonly actor: ActorId; readonly state: number; readonly parts: QvmBodyMesh[]; readonly pending: Map<number, QvmBodyMesh> } | null = null;
-  private meshScope: { readonly player: NonNullable<QvmModPresentation["playerScope"]>; readonly pointer: number; readonly shader: number; readonly output: QvmBodyMesh } | null = null;
+  get bodies(): readonly QvmBodyPresentation[] {
+    this.current();
+    return this.bodyFrame;
+  }
+  private playerScope: { readonly actor: ActorId; readonly state: number; readonly parts: QvmBodyMesh[]; readonly pending: Map<number, QvmBodyMesh> } | null =
+    null;
+  private meshScope: {
+    readonly player: NonNullable<QvmModPresentation["playerScope"]>;
+    readonly pointer: number;
+    readonly shader: number;
+    readonly output: QvmBodyMesh;
+  } | null = null;
   constructor(private readonly options: QvmModPresentationOptions) {
     validateQvmModPresentation(options);
-    this.module = new QvmModule({ artifact: options.artifact, host: call => { this.current(this.activeEvent); return this.sceneSyscall(call) ?? options.host(call); },
-      hostState: { checkpoint: () => ({ state: { module: options.artifact.module, format: "qvm:component-client-v1", bytes: encodeCheckpointValue(this.captureHost()) }, random: [], callbacks: [] }),
-        restore: state => { if (state.state.format !== "qvm:component-client-v1" || state.random.length !== 0 || state.callbacks.length !== 0) throw new Error("Invalid component client host checkpoint");
-          this.restoreHost(decodeCheckpointValue(state.state.bytes)); return undefined; } } });
+    this.module = new QvmModule({
+      artifact: options.artifact,
+      host: call => {
+        this.current(this.activeEvent);
+        return this.sceneSyscall(call) ?? options.host(call);
+      },
+      hostState: {
+        checkpoint: () => ({
+          state: { module: options.artifact.module, format: "qvm:component-client-v1", bytes: encodeCheckpointValue(this.captureHost()) },
+          random: [],
+          callbacks: [],
+        }),
+        restore: state => {
+          if (state.state.format !== "qvm:component-client-v1" || state.random.length !== 0 || state.callbacks.length !== 0)
+            throw new Error("Invalid component client host checkpoint");
+          this.restoreHost(decodeCheckpointValue(state.state.bytes));
+          return undefined;
+        },
+      },
+    });
     if (options.declaration.runtime === "qvm-scene") this.bindBody(options.declaration);
   }
   captureCheckpoint() {
@@ -179,27 +239,52 @@ export class QvmModPresentation {
     const checkpoint = readGuest(new SaveReader(value, "component-client"));
     if (checkpoint.kind !== "qvm") throw new Error("Component client checkpoint is not QVM state");
     this.restoreActor = resolveActor;
-    try { this.module.restore(checkpoint); this.phase = "initialized"; }
-    catch (error) { this.fail(error); }
-    finally { this.restoreActor = null; }
+    try {
+      this.module.restore(checkpoint);
+      this.phase = "initialized";
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.restoreActor = null;
+    }
   }
   private captureHost() {
-    if (this.phase !== "initialized" || this.busy || this.commandArguments !== null || this.activeEvent !== undefined
-      || this.playerScope !== null || this.meshScope !== null || this.restoringScene) throw new Error("Cannot checkpoint an active component call");
-    return { version: 1, sequence: this.sequence, revision: this.revision, frame: this.frame, hudFrame: this.hudFrame,
-      players: [...this.players].map(([slot, actor]) => ({ slot, actor: savedActorId(actor) })), defaults: this.defaults?.slice() ?? null,
+    if (
+      this.phase !== "initialized" ||
+      this.busy ||
+      this.commandArguments !== null ||
+      this.activeEvent !== undefined ||
+      this.playerScope !== null ||
+      this.meshScope !== null ||
+      this.restoringScene
+    )
+      throw new Error("Cannot checkpoint an active component call");
+    return {
+      version: 1,
+      sequence: this.sequence,
+      revision: this.revision,
+      frame: this.frame,
+      hudFrame: this.hudFrame,
+      players: [...this.players].map(([slot, actor]) => ({ slot, actor: savedActorId(actor) })),
+      defaults: this.defaults?.slice() ?? null,
       snapshots: [...this.snapshots.values()].map(snapshot => capturePresentationSnapshot(snapshot, this.options.declaration.cgame.abiProfile)),
-      snapshotNumber: this.snapshotNumber, sceneRevision: this.sceneRevision,
-      commands: [...this.commands].map(([sequence, arguments_]) => ({ sequence, arguments: [...arguments_] })), arguments: [...this.arguments_],
+      snapshotNumber: this.snapshotNumber,
+      sceneRevision: this.sceneRevision,
+      commands: [...this.commands].map(([sequence, arguments_]) => ({ sequence, arguments: [...arguments_] })),
+      arguments: [...this.arguments_],
       sceneActors: [...this.sceneActors.values()].map(row => ({ slot: row.slot, owned: row.owned, actor: savedActorId(row.actor) })),
-      currentGameState: this.currentGameState === null ? null : capturePresentationGameState(this.currentGameState) };
+      currentGameState: this.currentGameState === null ? null : capturePresentationGameState(this.currentGameState),
+    };
   }
   private restoreHost(value: unknown): void {
     const resolve = this.restoreActor;
     if (resolve === null) throw new Error("Component host restore has no saved-actor resolver");
-    const r = new SaveReader(value, "component-host"); r.field("version").literal(1);
-    this.sequence = r.field("sequence").integer(-1); this.revision = r.field("revision").integer(-1);
-    this.frame = r.field("frame").integer(-1); this.hudFrame = r.field("hudFrame").integer(-1);
+    const r = new SaveReader(value, "component-host");
+    r.field("version").literal(1);
+    this.sequence = r.field("sequence").integer(-1);
+    this.revision = r.field("revision").integer(-1);
+    this.frame = r.field("frame").integer(-1);
+    this.hudFrame = r.field("hudFrame").integer(-1);
     this.defaults = r.field("defaults").nullable(v => v.bytes().slice());
     const layout = this.options.declaration.storage.centities;
     if (this.defaults === null || this.defaults.length !== layout.stride * layout.capacity) r.fail("invalid default centity bytes");
@@ -207,56 +292,89 @@ export class QvmModPresentation {
       if (row.slot >= layout.capacity || this.players.has(row.slot)) r.fail("invalid saved centity owner");
       this.players.set(row.slot, resolve(row.actor));
     }
-    this.snapshotNumber = r.field("snapshotNumber").integer(0); this.sceneRevision = r.field("sceneRevision").integer(-1);
+    this.snapshotNumber = r.field("snapshotNumber").integer(0);
+    this.sceneRevision = r.field("sceneRevision").integer(-1);
     for (const snapshot of r.field("snapshots").list(v => readPresentationSnapshot(v, this.options.declaration.cgame.abiProfile))) {
-      if (this.snapshots.has(snapshot.number) || snapshot.number > this.snapshotNumber || snapshot.number <= this.snapshotNumber - 32) r.fail("invalid snapshot ring");
+      if (this.snapshots.has(snapshot.number) || snapshot.number > this.snapshotNumber || snapshot.number <= this.snapshotNumber - 32)
+        r.fail("invalid snapshot ring");
       this.snapshots.set(snapshot.number, snapshot);
     }
-    for (const command of r.field("commands").list(v => ({ sequence: v.field("sequence").integer(0), arguments: v.field("arguments").list(a => a.string()) }))) {
-      if (this.commands.has(command.sequence)) r.fail("duplicate saved server command"); this.commands.set(command.sequence, command.arguments);
+    for (const command of r
+      .field("commands")
+      .list(v => ({ sequence: v.field("sequence").integer(0), arguments: v.field("arguments").list(a => a.string()) }))) {
+      if (this.commands.has(command.sequence)) r.fail("duplicate saved server command");
+      this.commands.set(command.sequence, command.arguments);
     }
     this.arguments_ = r.field("arguments").list(a => a.string());
-    for (const row of r.field("sceneActors").list(v => ({ slot: v.field("slot").integer(0), actor: readSavedActor(v.field("actor")), owned: v.field("owned").boolean() }))) {
+    for (const row of r
+      .field("sceneActors")
+      .list(v => ({ slot: v.field("slot").integer(0), actor: readSavedActor(v.field("actor")), owned: v.field("owned").boolean() }))) {
       if (row.slot >= layout.capacity || this.sceneActors.has(row.slot)) r.fail("invalid saved scene owner");
       this.sceneActors.set(row.slot, { ...row, actor: resolve(row.actor) });
     }
     this.currentGameState = r.field("currentGameState").nullable(readPresentationGameState);
   }
 
-  get arguments(): readonly string[] { return this.commandArguments ?? this.arguments_; }
+  get arguments(): readonly string[] {
+    return this.commandArguments ?? this.arguments_;
+  }
   private async scoped(call: QvmFunctionCall, enter: () => () => void): Promise<number> {
     const leave = enter();
-    try { return await call.proceedAsync(); } finally { leave(); }
+    try {
+      return await call.proceedAsync();
+    } finally {
+      leave();
+    }
   }
   private bindBody(declaration: QvmScenePresentation): void {
     const calls = qualifyQvmBodyCalls(this.options.artifact.image, declaration.body);
-    const bind = (entry: number, hook: (call: QvmFunctionCall) => Promise<number>) => this.removals.push(this.module.bindInvocation({ kind: "qvm",
-      module: this.module.profile.module, instructionIndex: entry }, hook));
-    bind(declaration.body.player.entry, call => this.scoped(call, () => {
-      const previous = this.playerScope, pointer = call.words.getInt32(declaration.body.player.centityArgument * 4, true) + declaration.storage.centities.state;
-      const number = call.guest.view(pointer, 4).getInt32(0, true), row = this.sceneActors.get(number);
-      const pending = new Map<number, QvmBodyMesh>([...calls].map(([site, part]) => [site, { part, base: false, passes: [] }]));
-      this.playerScope = row !== undefined && !row.owned && this.options.actor(number)?.equals(row.actor) === true && this.options.live(row.actor)
-        ? { actor: row.actor, state: pointer, parts: [...pending.values()], pending } : null;
-      const player = this.playerScope;
-      return () => { if (player !== null && this.options.live(player.actor)) this.bodyFrame.push({ actor: player.actor, parts: player.parts }); this.playerScope = previous; };
-    }));
-    bind(declaration.body.mesh.entry, call => this.scoped(call, () => {
-      const previous = this.meshScope, player = this.playerScope, mesh = declaration.body.mesh;
-      const pointer = call.words.getInt32(mesh.entityArgument * 4, true), state = call.words.getInt32(mesh.stateArgument * 4, true);
-      const part = call.callerInstruction === null ? undefined : calls.get(call.callerInstruction);
-      let output: QvmBodyMesh | null = null;
-      if (player !== null && state === player.state && part !== undefined && call.callerInstruction !== null) {
-        output = player.pending.get(call.callerInstruction) ?? null;
-        if (output === null) { output = { part, base: false, passes: [] }; player.parts.push(output); }
-        else player.pending.delete(call.callerInstruction);
-      }
-      this.meshScope = player !== null && output !== null ? { player, pointer, shader: call.guest.view(pointer + mesh.shaderOffset, 4).getInt32(0, true), output } : null;
-      return () => { this.meshScope = previous; };
-    }));
+    const bind = (entry: number, hook: (call: QvmFunctionCall) => Promise<number>) =>
+      this.removals.push(this.module.bindInvocation({ kind: "qvm", module: this.module.profile.module, instructionIndex: entry }, hook));
+    bind(declaration.body.player.entry, call =>
+      this.scoped(call, () => {
+        const previous = this.playerScope,
+          pointer = call.words.getInt32(declaration.body.player.centityArgument * 4, true) + declaration.storage.centities.state;
+        const number = call.guest.view(pointer, 4).getInt32(0, true),
+          row = this.sceneActors.get(number);
+        const pending = new Map<number, QvmBodyMesh>([...calls].map(([site, part]) => [site, { part, base: false, passes: [] }]));
+        this.playerScope =
+          row !== undefined && !row.owned && this.options.actor(number)?.equals(row.actor) === true && this.options.live(row.actor)
+            ? { actor: row.actor, state: pointer, parts: [...pending.values()], pending }
+            : null;
+        const player = this.playerScope;
+        return () => {
+          if (player !== null && this.options.live(player.actor)) this.bodyFrame.push({ actor: player.actor, parts: player.parts });
+          this.playerScope = previous;
+        };
+      }),
+    );
+    bind(declaration.body.mesh.entry, call =>
+      this.scoped(call, () => {
+        const previous = this.meshScope,
+          player = this.playerScope,
+          mesh = declaration.body.mesh;
+        const pointer = call.words.getInt32(mesh.entityArgument * 4, true),
+          state = call.words.getInt32(mesh.stateArgument * 4, true);
+        const part = call.callerInstruction === null ? undefined : calls.get(call.callerInstruction);
+        let output: QvmBodyMesh | null = null;
+        if (player !== null && state === player.state && part !== undefined && call.callerInstruction !== null) {
+          output = player.pending.get(call.callerInstruction) ?? null;
+          if (output === null) {
+            output = { part, base: false, passes: [] };
+            player.parts.push(output);
+          } else player.pending.delete(call.callerInstruction);
+        }
+        this.meshScope =
+          player !== null && output !== null ? { player, pointer, shader: call.guest.view(pointer + mesh.shaderOffset, 4).getInt32(0, true), output } : null;
+        return () => {
+          this.meshScope = previous;
+        };
+      }),
+    );
     bind(declaration.eventCheck.entry, call => {
       if (this.restoringScene) {
-        const pointer = call.words.getInt32(declaration.eventCheck.centityArgument * 4, true), fields = declaration.storage.centities;
+        const pointer = call.words.getInt32(declaration.eventCheck.centityArgument * 4, true),
+          fields = declaration.storage.centities;
         const state = call.guest.view(pointer + fields.state, qvmEntityStateBytes(declaration.cgame.abiProfile));
         const previous = state.getInt32(4, true) > declaration.eventEntityType ? 1 : state.getInt32(180, true);
         call.guest.view(pointer + fields.previousEvent, 4).setInt32(0, previous, true);
@@ -266,37 +384,48 @@ export class QvmModPresentation {
   }
   private sceneSyscall(call: QvmHostCall): QvmHostResult | null {
     if (this.options.declaration.runtime !== "qvm-scene" || call.kind !== "engine" || call.role !== "cgame") return null;
-    const { words, guest } = call, profile = this.options.declaration.cgame.abiProfile;
+    const { words, guest } = call,
+      profile = this.options.declaration.cgame.abiProfile;
     if (call.code === QvmCgameImport.CG_GETGAMESTATE) {
       if (this.currentGameState === null) throw new Error("Component cgame has no active source gameState");
-      writeSourceQvmGameState(guest, guest.view(words.getInt32(4, true), QVM_GAME_STATE_BYTES), this.currentGameState); return 0;
+      writeSourceQvmGameState(guest, guest.view(words.getInt32(4, true), QVM_GAME_STATE_BYTES), this.currentGameState);
+      return 0;
     }
     if (call.code === QvmCgameImport.CG_R_ADDREFENTITYTOSCENE) {
       const mesh = this.meshScope;
-      if (mesh !== null && mesh.player === this.playerScope && this.options.live(mesh.player.actor)
-        && this.options.actor(guest.view(mesh.player.state, 4).getInt32(0, true))?.equals(mesh.player.actor) === true
-        && words.getInt32(4, true) === mesh.pointer) {
+      if (
+        mesh !== null &&
+        mesh.player === this.playerScope &&
+        this.options.live(mesh.player.actor) &&
+        this.options.actor(guest.view(mesh.player.state, 4).getInt32(0, true))?.equals(mesh.player.actor) === true &&
+        words.getInt32(4, true) === mesh.pointer
+      ) {
         const source = readQvmRefEntity(guest.view(mesh.pointer, QVM_REF_ENTITY_BYTES));
         if (source.kind !== "model") return null;
-        if (source.customShader === mesh.shader) mesh.output.base = true; else mesh.output.passes.push(source);
+        if (source.customShader === mesh.shader) mesh.output.base = true;
+        else mesh.output.passes.push(source);
         return 0;
       }
       return null;
     }
     if (call.code === QvmCgameImport.CG_GETCURRENTSNAPSHOTNUMBER) {
       guest.view(words.getInt32(4, true), 4).setInt32(0, this.snapshotNumber, true);
-      guest.view(words.getInt32(8, true), 4).setInt32(0, this.snapshots.get(this.snapshotNumber)?.serverTime ?? 0, true); return 0;
+      guest.view(words.getInt32(8, true), 4).setInt32(0, this.snapshots.get(this.snapshotNumber)?.serverTime ?? 0, true);
+      return 0;
     }
     if (call.code === QvmCgameImport.CG_GETSNAPSHOT) {
       const number = words.getInt32(4, true);
       if (number > this.snapshotNumber) throw new Error("Component cgame requested a future snapshot");
-      const snapshot = this.snapshots.get(number); if (snapshot === undefined) return 0;
-      writeSourceQvmSnapshot(guest, guest.view(words.getInt32(8, true), qvmSnapshotBytes(profile)), snapshot, profile); return 1;
+      const snapshot = this.snapshots.get(number);
+      if (snapshot === undefined) return 0;
+      writeSourceQvmSnapshot(guest, guest.view(words.getInt32(8, true), qvmSnapshotBytes(profile)), snapshot, profile);
+      return 1;
     }
     if (call.code === QvmCgameImport.CG_GETSERVERCOMMAND) {
       const arguments_ = this.commands.get(words.getInt32(4, true));
       if (arguments_ === undefined) throw new Error("Component cgame server command fell outside retained source history");
-      this.arguments_ = arguments_; return Number(arguments_.length !== 0);
+      this.arguments_ = arguments_;
+      return Number(arguments_.length !== 0);
     }
     return null;
   }
@@ -310,53 +439,86 @@ export class QvmModPresentation {
     for (const row of scene.actors) {
       if (!Number.isInteger(row.slot) || row.slot < 0 || row.slot >= entities.capacity) throw new Error("Component source actor exceeds cgame centities");
       const previous = this.players.get(row.slot);
-      if (previous !== undefined && !previous.equals(row.actor)) this.module.memory.writeBytes(entities.address + row.slot * entities.stride,
-        this.defaults.subarray(row.slot * entities.stride, (row.slot + 1) * entities.stride));
+      if (previous !== undefined && !previous.equals(row.actor))
+        this.module.memory.writeBytes(
+          entities.address + row.slot * entities.stride,
+          this.defaults.subarray(row.slot * entities.stride, (row.slot + 1) * entities.stride),
+        );
       this.players.set(row.slot, row.actor);
       this.sceneActors.set(row.slot, row);
     }
-    if (baseline) for (const state of scene.snapshot.entities) {
-      if (!Number.isInteger(state.number) || state.number < 0 || state.number >= entities.capacity) throw new Error("Component snapshot entity exceeds cgame centities");
-      const view = this.module.memory.dataView(entities.address + state.number * entities.stride, entities.stride);
-      view.setInt32(entities.previousEvent, state.eType > declaration.eventEntityType ? 1 : state.event, true);
-      view.setInt32(entities.snapshotTime, scene.snapshot.serverTime, true);
-    }
+    if (baseline)
+      for (const state of scene.snapshot.entities) {
+        if (!Number.isInteger(state.number) || state.number < 0 || state.number >= entities.capacity)
+          throw new Error("Component snapshot entity exceeds cgame centities");
+        const view = this.module.memory.dataView(entities.address + state.number * entities.stride, entities.stride);
+        view.setInt32(entities.previousEvent, state.eType > declaration.eventEntityType ? 1 : state.event, true);
+        view.setInt32(entities.snapshotTime, scene.snapshot.serverTime, true);
+      }
     this.sceneRevision = scene.revision;
     for (const command of scene.commands) this.commands.set(command.sequence, command.arguments);
     for (const number of this.commands.keys()) if (number <= scene.snapshot.serverCommandSequence - 64) this.commands.delete(number);
     const number = ++this.snapshotNumber;
-    this.snapshots.set(number, { ...scene.snapshot, number }); this.snapshots.delete(number - 32);
+    this.snapshots.set(number, { ...scene.snapshot, number });
+    this.snapshots.delete(number - 32);
     return true;
   }
-  get lastSequence(): number { return this.sequence; }
+  get lastSequence(): number {
+    return this.sequence;
+  }
   private current(event?: Q3SourcePlayerEvent): void {
     this.options.assertCurrent();
     if (this.phase === "closed" || this.phase === "failed") throw new Error(`Source presentation is ${this.phase}`);
     if (event !== undefined && (!this.options.live(event.actor) || this.options.actor(event.playerState.clientNumber)?.equals(event.actor) !== true))
       throw new RetiredPlayer("Source event actor no longer owns its original client slot");
   }
-  private fail(error: unknown): never { if (this.phase !== "closed") this.phase = "failed"; throw error; }
+  private fail(error: unknown): never {
+    if (this.phase !== "closed") this.phase = "failed";
+    throw error;
+  }
   private context(scene?: QvmSceneContext): QvmPresentationContext {
-    const source = this.options.context(), context = scene === undefined ? source : { ...source, scene,
-      gameState: scene.gameState, gameStateRevision: scene.gameStateRevision, snapshot: scene.snapshot,
-      timeMilliseconds: scene.snapshot.serverTime, frameTimeMilliseconds: 0 };
-    const { storage, cgame } = this.options.declaration, memory = this.module.memory;
+    const source = this.options.context(),
+      context =
+        scene === undefined
+          ? source
+          : {
+              ...source,
+              scene,
+              gameState: scene.gameState,
+              gameStateRevision: scene.gameStateRevision,
+              snapshot: scene.snapshot,
+              timeMilliseconds: scene.snapshot.serverTime,
+              frameTimeMilliseconds: 0,
+            };
+    const { storage, cgame } = this.options.declaration,
+      memory = this.module.memory;
     if (!Number.isSafeInteger(context.gameStateRevision) || context.gameStateRevision < 0 || context.gameStateRevision < this.revision)
       throw new Error("Source gameState revision is invalid or stale");
-    if (int32(context.frameTimeMilliseconds) < 0 || ![context.viewOrigin.x, context.viewOrigin.y, context.viewOrigin.z].every(value => Number.isFinite(Math.fround(value))))
+    if (
+      int32(context.frameTimeMilliseconds) < 0 ||
+      ![context.viewOrigin.x, context.viewOrigin.y, context.viewOrigin.z].every(value => Number.isFinite(Math.fround(value)))
+    )
       throw new Error("Source presentation frame context is invalid");
     const snapshot = context.snapshot;
     this.currentGameState = context.gameState;
-    int32(snapshot.serverTime); int32(snapshot.playerState.clientNumber);
-    if (context.gameStateRevision !== this.revision) writeSourceQvmGameState(memory, memory.dataView(storage.gameState, QVM_GAME_STATE_BYTES), context.gameState);
+    int32(snapshot.serverTime);
+    int32(snapshot.playerState.clientNumber);
+    if (context.gameStateRevision !== this.revision)
+      writeSourceQvmGameState(memory, memory.dataView(storage.gameState, QVM_GAME_STATE_BYTES), context.gameState);
     if (this.options.declaration.runtime === "qvm-player-events") {
-      const storage = this.options.declaration.storage, bytes = qvmSnapshotBytes(cgame.abiProfile), psBytes = qvmPlayerStateBytes(cgame.abiProfile);
+      const storage = this.options.declaration.storage,
+        bytes = qvmSnapshotBytes(cgame.abiProfile),
+        psBytes = qvmPlayerStateBytes(cgame.abiProfile);
       const view = memory.dataView(storage.snapshot.address, bytes);
-      view.setInt32(0, 0, true); view.setInt32(4, snapshot.playerState.pingMilliseconds, true); view.setInt32(8, snapshot.serverTime, true);
+      view.setInt32(0, 0, true);
+      view.setInt32(4, snapshot.playerState.pingMilliseconds, true);
+      view.setInt32(8, snapshot.serverTime, true);
       memory.fillBytes(storage.snapshot.address + 12, 32, 0);
       writeSourceQvmPlayerState(memory.dataView(storage.snapshot.address + 44, psBytes), snapshot.playerState, cgame.abiProfile);
       writeSourceQvmPlayerState(memory.dataView(storage.playerState, psBytes), snapshot.playerState, cgame.abiProfile);
-      view.setInt32(44 + psBytes, 0, true); view.setInt32(bytes - 8, 0, true); view.setInt32(bytes - 4, 0, true);
+      view.setInt32(44 + psBytes, 0, true);
+      view.setInt32(bytes - 8, 0, true);
+      view.setInt32(bytes - 4, 0, true);
       for (const address of storage.snapshot.pointers) memory.dataView(address, 4).setInt32(0, storage.snapshot.address, true);
     }
     for (const address of storage.time) memory.dataView(address, 4).setInt32(0, int32(context.timeMilliseconds ?? snapshot.serverTime), true);
@@ -368,15 +530,18 @@ export class QvmModPresentation {
     const storage = this.options.declaration.storage;
     const vector = (address: number, value: Vec3): void => {
       const view = this.module.memory.dataView(address, 12);
-      view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);
+      view.setFloat32(0, value.x, true);
+      view.setFloat32(4, value.y, true);
+      view.setFloat32(8, value.z, true);
     };
     for (const address of storage.viewOrigin) vector(address, context.viewOrigin);
     if ((storage.viewAngles?.length ?? 0) + (storage.viewAxis?.length ?? 0) === 0) return;
     const axis = context.viewAxis;
     if (axis === undefined) throw new Error("Declared original view storage requires the actual viewing camera axis");
     for (const address of storage.viewAxis ?? []) for (const [index, value] of axis.entries()) vector(address + index * 12, value);
-    const angles = vectorToAngles(axis[0]), basis = qvmAnglesToAxis(angles);
-    const roll = Math.atan2(dot3(axis[1], basis[2]), dot3(axis[1], basis[1])) * 180 / Math.PI;
+    const angles = vectorToAngles(axis[0]),
+      basis = qvmAnglesToAxis(angles);
+    const roll = (Math.atan2(dot3(axis[1], basis[2]), dot3(axis[1], basis[1])) * 180) / Math.PI;
     for (const address of storage.viewAngles ?? []) vector(address, { ...angles, z: roll });
   }
   private word(argument: QvmPresentationArgument, context: QvmPresentationContext, event?: Q3SourcePlayerEvent): number {
@@ -384,32 +549,43 @@ export class QvmModPresentation {
     if (argument.kind !== "source") return argument.value;
     const declaration = this.options.declaration;
     switch (argument.value) {
-      case "snapshot-number": return Math.max(0, this.snapshotNumber - 1);
-      case "server-command-sequence": return context.scene?.snapshot.serverCommandSequence ?? 0;
+      case "snapshot-number":
+        return Math.max(0, this.snapshotNumber - 1);
+      case "server-command-sequence":
+        return context.scene?.snapshot.serverCommandSequence ?? 0;
       case "player-state":
         if (declaration.runtime !== "qvm-player-events") throw new Error("Scene calls cannot borrow event projection state");
         return declaration.storage.playerState;
       case "snapshot":
         if (declaration.runtime !== "qvm-player-events") throw new Error("Scene snapshots are supplied by original engine traps");
         return declaration.storage.snapshot.address;
-      case "client-number": return context.clientNumber ?? context.snapshot.playerState.clientNumber;
-      case "time": return context.timeMilliseconds ?? context.snapshot.serverTime;
+      case "client-number":
+        return context.clientNumber ?? context.snapshot.playerState.clientNumber;
+      case "time":
+        return context.timeMilliseconds ?? context.snapshot.serverTime;
       default: {
         if (event === undefined || declaration.runtime !== "qvm-player-events") throw new Error("Original call requires a source player event");
         const storage = declaration.storage;
         const entity = storage.centities.address + event.playerState.clientNumber * storage.centities.stride;
         switch (argument.value) {
-          case "entity-state": return entity + storage.centities.state;
-          case "centity": return entity;
-          case "origin": return entity + storage.centities.origin;
-          case "event": return event.event;
-          case "parameter": return event.parameter;
+          case "entity-state":
+            return entity + storage.centities.state;
+          case "centity":
+            return entity;
+          case "origin":
+            return entity + storage.centities.origin;
+          case "event":
+            return event.event;
+          case "parameter":
+            return event.parameter;
         }
       }
     }
   }
   private async call(call: QvmPresentationCall, context: QvmPresentationContext, event?: Q3SourcePlayerEvent): Promise<void> {
-    const current = () => { this.current(event ?? this.activeEvent); };
+    const current = () => {
+      this.current(event ?? this.activeEvent);
+    };
     current();
     if (call.when === "weapon-presented") {
       const selected = this.options.context().weaponPresented;
@@ -417,7 +593,11 @@ export class QvmModPresentation {
       if (!selected) return;
     }
     this.view(context);
-    await this.module.callAsync(call.arguments.map(argument => this.word(argument, context, event)), call.entry, current);
+    await this.module.callAsync(
+      call.arguments.map(argument => this.word(argument, context, event)),
+      call.entry,
+      current,
+    );
     current();
   }
   private async refresh(context: QvmPresentationContext): Promise<void> {
@@ -427,8 +607,10 @@ export class QvmModPresentation {
   }
   async initialize(baselineSequence = -1): Promise<void> {
     this.current();
-    if (this.busy || this.phase !== "created" || !Number.isSafeInteger(baselineSequence) || baselineSequence < -1) throw new Error("Invalid source presentation initialization");
-    this.busy = true; this.sequence = baselineSequence;
+    if (this.busy || this.phase !== "created" || !Number.isSafeInteger(baselineSequence) || baselineSequence < -1)
+      throw new Error("Invalid source presentation initialization");
+    this.busy = true;
+    this.sequence = baselineSequence;
     try {
       let context = this.context();
       if (context.scene?.baseline !== undefined) context = this.context(context.scene.baseline);
@@ -444,12 +626,18 @@ export class QvmModPresentation {
         if (baseline !== undefined) {
           this.acceptScene(baseline, true);
           this.restoringScene = true;
-          try { for (const call of this.options.declaration.snapshots) await this.call(call, context); }
-          finally { this.restoringScene = false; }
+          try {
+            for (const call of this.options.declaration.snapshots) await this.call(call, context);
+          } finally {
+            this.restoringScene = false;
+          }
         }
       }
-    } catch (error) { this.fail(error); }
-    finally { this.busy = false; }
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
   }
   async consume(event: Q3SourcePlayerEvent, sequence: number): Promise<void> {
     this.current();
@@ -459,14 +647,21 @@ export class QvmModPresentation {
     if (!matches(event.source.module, this.options.source) || event.source.abiProfile !== this.options.declaration.gameplay.abiProfile)
       throw new Error("Source player event belongs to a different gameplay module");
     if (this.options.declaration.runtime !== "qvm-player-events") throw new Error("Scene presentation owns events through original snapshots");
-    const declaration = this.options.declaration, { storage, cgame } = declaration, slot = event.playerState.clientNumber;
+    const declaration = this.options.declaration,
+      { storage, cgame } = declaration,
+      slot = event.playerState.clientNumber;
     if (!Number.isInteger(slot) || slot < 0 || slot >= storage.centities.capacity) throw new Error("Source player event exceeds the declared centity array");
-    int32(event.event); int32(event.parameter);
-    if (![event.origin.x, event.origin.y, event.origin.z].every(value => Number.isFinite(Math.fround(value)))) throw new Error("Source player event has a nonfinite origin");
-    this.sequence = sequence; this.busy = true; this.activeEvent = event;
+    int32(event.event);
+    int32(event.parameter);
+    if (![event.origin.x, event.origin.y, event.origin.z].every(value => Number.isFinite(Math.fround(value))))
+      throw new Error("Source player event has a nonfinite origin");
+    this.sequence = sequence;
+    this.busy = true;
+    this.activeEvent = event;
     try {
       this.current(event);
-      const memory = this.module.memory, entity = storage.centities.address + slot * storage.centities.stride;
+      const memory = this.module.memory,
+        entity = storage.centities.address + slot * storage.centities.stride;
       if (this.players.get(slot)?.equals(event.actor) !== true) {
         if (this.defaults === null) throw new Error("Source centity defaults are unavailable");
         memory.writeBytes(entity, this.defaults.subarray(slot * storage.centities.stride, (slot + 1) * storage.centities.stride));
@@ -477,57 +672,90 @@ export class QvmModPresentation {
       writeSourceQvmPlayerState(memory.dataView(storage.playerState, qvmPlayerStateBytes(cgame.abiProfile)), event.playerState, cgame.abiProfile);
       for (const call of declaration.project) await this.call(call, context, event);
       const state = memory.dataView(entity + storage.centities.state, qvmEntityStateBytes(cgame.abiProfile));
-      state.setInt32(180, event.event, true); state.setInt32(184, event.parameter, true);
+      state.setInt32(180, event.event, true);
+      state.setInt32(184, event.parameter, true);
       const origin = memory.dataView(entity + storage.centities.origin, 12);
-      origin.setFloat32(0, event.origin.x, true); origin.setFloat32(4, event.origin.y, true); origin.setFloat32(8, event.origin.z, true);
+      origin.setFloat32(0, event.origin.x, true);
+      origin.setFloat32(4, event.origin.y, true);
+      origin.setFloat32(8, event.origin.z, true);
       await this.call(declaration.event, context, event);
     } catch (error) {
       if (error instanceof RetiredPlayer) return;
       this.fail(error);
-    } finally { this.busy = false; this.activeEvent = undefined; }
+    } finally {
+      this.busy = false;
+      this.activeEvent = undefined;
+    }
   }
   async advance(frameSequence: number): Promise<void> {
     this.current();
     if (this.busy || this.phase !== "initialized") throw new Error("Source presentation frame requires an idle initialized owner");
     if (!Number.isSafeInteger(frameSequence) || frameSequence < 0) throw new Error("Invalid source presentation frame sequence");
     if (frameSequence <= this.frame) return;
-    this.frame = frameSequence; this.busy = true; this.bodyFrame = [];
+    this.frame = frameSequence;
+    this.busy = true;
+    this.bodyFrame = [];
     try {
-      const context = this.context(); await this.refresh(context);
+      const context = this.context();
+      await this.refresh(context);
       if (this.options.declaration.runtime === "qvm-scene") {
         if (context.scene === undefined) throw new Error("Scene declaration requires real source snapshots");
         if (this.acceptScene(context.scene)) for (const call of this.options.declaration.snapshots) await this.call(call, context);
       }
       for (const call of this.options.declaration.frame) await this.call(call, context);
-    } catch (error) { this.fail(error); }
-    finally { this.busy = false; }
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
   }
   async consoleCommand(arguments_: readonly string[]): Promise<boolean> {
     this.current();
     if (this.busy || this.phase !== "initialized") throw new Error("Source console command requires an idle initialized owner");
-    this.busy = true; this.commandArguments = [...arguments_];
+    this.busy = true;
+    this.commandArguments = [...arguments_];
     try {
       const result = await this.module.commandAsync([QvmCgameExport.CG_CONSOLE_COMMAND], arguments_, () => this.current());
-      this.current(); return result !== 0;
-    } catch (error) { this.fail(error); }
-    finally { this.commandArguments = null; this.busy = false; }
+      this.current();
+      return result !== 0;
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.commandArguments = null;
+      this.busy = false;
+    }
   }
   async drawHud(frameSequence: number): Promise<void> {
     this.current();
-    if (this.busy || this.phase !== "initialized" || this.frame !== frameSequence)
-      throw new Error("Source HUD requires its completed scene frame");
+    if (this.busy || this.phase !== "initialized" || this.frame !== frameSequence) throw new Error("Source HUD requires its completed scene frame");
     if (frameSequence <= this.hudFrame) return;
     const hud = this.options.declaration.hud;
     if (hud === undefined) throw new Error("Source presentation has no HUD admission");
-    this.hudFrame = frameSequence; this.busy = true;
+    this.hudFrame = frameSequence;
+    this.busy = true;
     try {
       const context = this.context();
       for (const call of hud.frame) await this.call(call, context);
-    } catch (error) { this.fail(error); }
-    finally { this.busy = false; }
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.busy = false;
+    }
   }
-  release(actor: ActorId): void { for (const [slot, player] of this.players) if (player.equals(actor)) this.players.delete(slot); }
-  close(): void { if (this.phase === "closed") return; this.phase = "closed";
+  release(actor: ActorId): void {
+    for (const [slot, player] of this.players) if (player.equals(actor)) this.players.delete(slot);
+  }
+  close(): void {
+    if (this.phase === "closed") return;
+    this.phase = "closed";
     this.removals.runAll();
-    this.bodyFrame = []; this.players.clear(); this.sceneActors.clear(); this.snapshots.clear(); this.commands.clear(); this.defaults = null; this.currentGameState = null; this.module.retire(); }
+    this.bodyFrame = [];
+    this.players.clear();
+    this.sceneActors.clear();
+    this.snapshots.clear();
+    this.commands.clear();
+    this.defaults = null;
+    this.currentGameState = null;
+    this.module.retire();
+  }
 }

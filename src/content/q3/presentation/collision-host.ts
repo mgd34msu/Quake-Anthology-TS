@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CollisionWorld as Q3CollisionWorld } from "../../../world/collision/q3/world.ts";
 export type { TraceQuery, TraceResult } from "../../../world/collision/q3/world.ts";
 /** Methods are supplied by the selected map's collision adapter, including foreign BSP families. */

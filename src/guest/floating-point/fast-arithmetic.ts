@@ -9,7 +9,10 @@ import { loadF64LE, loadU32LE, storeF64LE, storeU32LE } from "../../foundation/b
  */
 export const fastResult = { value: 0, error: 0 };
 
-const windowLow = 2 ** -200, windowHigh = 2 ** 200, resultLow = 2 ** -1000, resultHigh = 2 ** 1000;
+const windowLow = 2 ** -200,
+  windowHigh = 2 ** 200,
+  resultLow = 2 ** -1000,
+  resultHigh = 2 ** 1000;
 const split = 134217729;
 
 export function inWindow(value: number): boolean {
@@ -26,7 +29,7 @@ export function fastArithmetic(operation: number, a: number, b: number): boolean
     const y = operation === 0 ? b : -b;
     result = a + y;
     const virtual = result - a;
-    error = (a - (result - virtual)) + (y - virtual);
+    error = a - (result - virtual) + (y - virtual);
   } else if (operation === 1) {
     result = a * b;
     error = productError(a, b, result);
@@ -34,8 +37,8 @@ export function fastArithmetic(operation: number, a: number, b: number): boolean
     if (b === 0) return false;
     result = a / b;
     const product = result * b;
-    const remainder = (a - product) - productError(result, b, product);
-    error = remainder === 0 ? 0 : (remainder > 0) === (b > 0) ? 1 : -1;
+    const remainder = a - product - productError(result, b, product);
+    error = remainder === 0 ? 0 : remainder > 0 === b > 0 ? 1 : -1;
   }
   if (result !== 0) {
     const magnitude = Math.abs(result);
@@ -47,18 +50,24 @@ export function fastArithmetic(operation: number, a: number, b: number): boolean
 }
 
 function productError(a: number, b: number, product: number): number {
-  const ca = split * a, ah = ca - (ca - a), al = a - ah;
-  const cb = split * b, bh = cb - (cb - b), bl = b - bh;
-  return ((ah * bh - product) + ah * bl + al * bh) + al * bl;
+  const ca = split * a,
+    ah = ca - (ca - a),
+    al = a - ah;
+  const cb = split * b,
+    bh = cb - (cb - b),
+    bl = b - bh;
+  return ah * bh - product + ah * bl + al * bh + al * bl;
 }
 
 const bytes = new Uint8Array(8);
 /** Loads a 10-byte x87 register as a double when it is exactly one inside the window, else NaN. */
 export function extendedToDouble(registers: Uint8Array, slot: number): number {
   const base = slot * 10;
-  const high = loadU32LE(registers, base + 4), low = loadU32LE(registers, base);
+  const high = loadU32LE(registers, base + 4),
+    low = loadU32LE(registers, base);
   const exponentWord = (registers[base + 8] ?? 0) | ((registers[base + 9] ?? 0) << 8);
-  const sign = exponentWord >>> 15, exponent = exponentWord & 0x7fff;
+  const sign = exponentWord >>> 15,
+    exponent = exponentWord & 0x7fff;
   if (exponent === 0 && high === 0 && low === 0) return sign === 1 ? -0 : 0;
   if (exponent < 16383 - 200 || exponent > 16383 + 200 || (high & 0x80000000) === 0 || (low & 0x7ff) !== 0) return Number.NaN;
   // Drop the explicit integer bit; 52 fraction bits remain after removing the zero low 11 bits.
@@ -69,13 +78,14 @@ export function extendedToDouble(registers: Uint8Array, slot: number): number {
   return loadF64LE(bytes, 0);
 }
 
-
 /** Writes a finite double produced by fastArithmetic into a 10-byte x87 register. */
 export function doubleToExtended(registers: Uint8Array, slot: number, value: number): void {
   const base = slot * 10;
   storeF64LE(bytes, 0, value);
-  const low = loadU32LE(bytes, 0), high = loadU32LE(bytes, 4);
-  const sign = high >>> 31, exponent = (high >>> 20) & 0x7ff;
+  const low = loadU32LE(bytes, 0),
+    high = loadU32LE(bytes, 4);
+  const sign = high >>> 31,
+    exponent = (high >>> 20) & 0x7ff;
   if (value === 0) {
     registers.fill(0, base, base + 10);
     registers[base + 9] = sign << 7;

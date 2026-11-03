@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Native QW client continuation follows the reference port qw/client/cl_pred.ts. */
 import type { Q1MovementProfile, QwMovementProfile } from "../../../../contracts/movement.ts";
 import type { QwPlayerState, QwUserCommand } from "../../../../contracts/protocol.ts";
@@ -7,27 +8,53 @@ import { copyPredictionSnapshot } from "./step.ts";
 import type { MovementPredictionOptions, MovementPredictionResult, MovementPredictionSnapshot } from "./types.ts";
 
 export function qwPredictionProfile(base: Q1MovementProfile | QwMovementProfile, variables: QwMoveVariables): QwMovementProfile {
-  return { kind: "q1-quakeworld", id: base.id, numeric: base.numeric,
-    clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 }, parameters: { ...variables } };
+  return {
+    kind: "q1-quakeworld",
+    id: base.id,
+    numeric: base.numeric,
+    clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 },
+    parameters: { ...variables },
+  };
 }
 
-export interface QwPredictionStatus { readonly health: number; readonly spectator: number; }
+export interface QwPredictionStatus {
+  readonly health: number;
+  readonly spectator: number;
+}
 
 /** Playerinfo has no oldbuttons, waterjumptime or ground: retain the matching command's continuation. */
-export function qwPredictionSnapshot(base: MovementPredictionSnapshot, player: QwPlayerState,
-  status: QwPredictionStatus, acknowledged: MovementPredictionSnapshot | null,
-  sequence: number, commandTimeMilliseconds: number): MovementPredictionSnapshot {
+export function qwPredictionSnapshot(
+  base: MovementPredictionSnapshot,
+  player: QwPlayerState,
+  status: QwPredictionStatus,
+  acknowledged: MovementPredictionSnapshot | null,
+  sequence: number,
+  commandTimeMilliseconds: number,
+): MovementPredictionSnapshot {
   if (status.spectator !== 0) throw new Error("The native QW graphical player slice does not admit spectators");
   if (base.state.kind !== "q1-quakeworld") throw new Error("QW prediction requires a QW snapshot");
   const continuation = acknowledged?.state.kind === "q1-quakeworld" ? acknowledged.state : base.state;
   const viewHeight = (player.flags & 1024) !== 0 ? 8 : (player.flags & 512) !== 0 ? -16 : 22;
-  return copyPredictionSnapshot({ ...base, sequence, commandTimeMilliseconds,
-    state: { kind: "q1-quakeworld", origin: { ...player.origin }, velocity: { ...player.velocity }, angles: { ...base.viewAngles },
-      oldButtons: continuation.oldButtons, waterJumpTimeSeconds: continuation.waterJumpTimeSeconds,
-      ground: continuation.ground, dead: status.health <= 0, spectator: 0 },
-    viewHeight, viewOffset: { x: 0, y: 0, z: viewHeight },
+  return copyPredictionSnapshot({
+    ...base,
+    sequence,
+    commandTimeMilliseconds,
+    state: {
+      kind: "q1-quakeworld",
+      origin: { ...player.origin },
+      velocity: { ...player.velocity },
+      angles: { ...base.viewAngles },
+      oldButtons: continuation.oldButtons,
+      waterJumpTimeSeconds: continuation.waterJumpTimeSeconds,
+      ground: continuation.ground,
+      dead: status.health <= 0,
+      spectator: 0,
+    },
+    viewHeight,
+    viewOffset: { x: 0, y: 0, z: viewHeight },
     environment: { ...base.environment, health: status.health, gravityMultiplier: 1 },
-    contact: acknowledged?.contact ?? base.contact });
+    contact: acknowledged?.contact ?? base.contact,
+  });
 }
 
 interface SentPrediction {
@@ -50,8 +77,17 @@ export class QuakeWorldPrediction {
     if (initial.state.kind !== "q1-quakeworld" || initial.state.spectator !== 0) throw new Error("QW prediction requires an admitted native player");
     this.profile = qwPredictionProfile(options.profile, variables);
     const owner = this;
-    this.prediction = new SelectedMovementPrediction({ ...options, get profile() { return owner.profile; } }, initial);
-    this.acknowledgedSequence = initial.sequence; this.lastSent = initial.sequence;
+    this.prediction = new SelectedMovementPrediction(
+      {
+        ...options,
+        get profile() {
+          return owner.profile;
+        },
+      },
+      initial,
+    );
+    this.acknowledgedSequence = initial.sequence;
+    this.lastSent = initial.sequence;
     this.viewHeight = initial.viewHeight;
     this.result = this.prediction.replay();
   }
@@ -60,7 +96,10 @@ export class QuakeWorldPrediction {
     this.prediction.submit({ sequence, timeMilliseconds: now, command });
     this.lastSent = sequence;
     this.history.set(sequence, { command: { ...command, angles: { ...command.angles } }, timeMilliseconds: now, player: null });
-    while (this.history.size > 64) { const first = this.history.keys().next(); if (!first.done) this.history.delete(first.value); }
+    while (this.history.size > 64) {
+      const first = this.history.keys().next();
+      if (!first.done) this.history.delete(first.value);
+    }
     this.predict();
   }
   acknowledged(sequence: number, _now: number): void {
@@ -70,8 +109,14 @@ export class QuakeWorldPrediction {
   /** Call only for a packet containing this player's playerinfo, after its channel acknowledgement. */
   receive(base: MovementPredictionSnapshot, player: QwPlayerState, variables: QwMoveVariables, status: QwPredictionStatus): void {
     const acknowledged = this.history.get(this.acknowledgedSequence);
-    const snapshot = qwPredictionSnapshot(base, player, status, acknowledged?.player ?? null,
-      this.acknowledgedSequence, acknowledged?.timeMilliseconds ?? base.commandTimeMilliseconds);
+    const snapshot = qwPredictionSnapshot(
+      base,
+      player,
+      status,
+      acknowledged?.player ?? null,
+      this.acknowledgedSequence,
+      acknowledged?.timeMilliseconds ?? base.commandTimeMilliseconds,
+    );
     this.profile = qwPredictionProfile(this.profile, variables);
     this.viewHeight = snapshot.viewHeight;
     this.prediction.receive(snapshot);
@@ -89,8 +134,9 @@ export class QuakeWorldPrediction {
   private clientContinuation(player: MovementPredictionSnapshot, command: QwUserCommand): MovementPredictionSnapshot {
     if (player.state.kind !== "q1-quakeworld") throw new Error("QW replay changed movement family");
     // CL_PredictUsercmd writes to.oldbuttons = pmove.cmd.buttons, unlike the server's PMove latch.
-    return { ...player, viewHeight: this.viewHeight, viewOffset: { x: 0, y: 0, z: this.viewHeight },
-      state: { ...player.state, oldButtons: command.buttons } };
+    return { ...player, viewHeight: this.viewHeight, viewOffset: { x: 0, y: 0, z: this.viewHeight }, state: { ...player.state, oldButtons: command.buttons } };
   }
-  replay(): MovementPredictionResult { return { ...this.result, player: copyPredictionSnapshot(this.result.player) }; }
+  replay(): MovementPredictionResult {
+    return { ...this.result, player: copyPredictionSnapshot(this.result.player) };
+  }
 }

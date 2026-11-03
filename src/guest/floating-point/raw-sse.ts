@@ -9,18 +9,31 @@ export type RawSseOperation =
 const executed: NumericExecutionResult = { kind: "executed" };
 
 export function prepareRawSse(opcode: number, prefix: NumericInstruction["prefix"], registerIndex: number): RawSseOperation | null {
-  if (opcode === 0x10 || opcode === 0x11 || (opcode === 0x28 || opcode === 0x29) && (prefix === "none" || prefix === "66")
-    || (opcode === 0x6f || opcode === 0x7f) && (prefix === "66" || prefix === "f3")) {
+  if (
+    opcode === 0x10 ||
+    opcode === 0x11 ||
+    ((opcode === 0x28 || opcode === 0x29) && (prefix === "none" || prefix === "66")) ||
+    ((opcode === 0x6f || opcode === 0x7f) && (prefix === "66" || prefix === "f3"))
+  ) {
     const scalar = (opcode === 0x10 || opcode === 0x11) && (prefix === "f2" || prefix === "f3");
-    return Object.freeze({ kind: "move", registerIndex, size: scalar ? prefix === "f2" ? 8 : 4 : 16,
+    return Object.freeze({
+      kind: "move",
+      registerIndex,
+      size: scalar ? (prefix === "f2" ? 8 : 4) : 16,
       store: opcode === 0x11 || opcode === 0x29 || opcode === 0x7f,
-      aligned: opcode === 0x28 || opcode === 0x29 || (opcode === 0x6f || opcode === 0x7f) && prefix === "66" });
+      aligned: opcode === 0x28 || opcode === 0x29 || ((opcode === 0x6f || opcode === 0x7f) && prefix === "66"),
+    });
   }
-  if (opcode >= 0x54 && opcode <= 0x57 && (prefix === "none" || prefix === "66")
-    || (opcode === 0xdb || opcode === 0xdf || opcode === 0xeb || opcode === 0xef) && prefix === "66") {
-    return Object.freeze({ kind: "logic", registerIndex,
-      operation: opcode === 0x54 || opcode === 0xdb ? "and" : opcode === 0x55 || opcode === 0xdf ? "and-not"
-        : opcode === 0x56 || opcode === 0xeb ? "or" : "xor" });
+  if (
+    (opcode >= 0x54 && opcode <= 0x57 && (prefix === "none" || prefix === "66")) ||
+    ((opcode === 0xdb || opcode === 0xdf || opcode === 0xeb || opcode === 0xef) && prefix === "66")
+  ) {
+    return Object.freeze({
+      kind: "logic",
+      registerIndex,
+      operation:
+        opcode === 0x54 || opcode === 0xdb ? "and" : opcode === 0x55 || opcode === 0xdf ? "and-not" : opcode === 0x56 || opcode === 0xeb ? "or" : "xor",
+    });
   }
   return null;
 }
@@ -28,8 +41,14 @@ export function prepareRawSse(opcode: number, prefix: NumericInstruction["prefix
 function validRegister(bytes: Uint8Array, index: number): boolean {
   return Number.isInteger(index) && index >= 0 && (index + 1) * 16 <= bytes.length;
 }
-export function executeRawSse(operation: RawSseOperation, operand: NumericOperand, state: GuestProcessorState, memory: MappedGuestMemory): NumericExecutionResult {
-  const registers = state.simd.xmm, destination = operation.registerIndex * 16;
+export function executeRawSse(
+  operation: RawSseOperation,
+  operand: NumericOperand,
+  state: GuestProcessorState,
+  memory: MappedGuestMemory,
+): NumericExecutionResult {
+  const registers = state.simd.xmm,
+    destination = operation.registerIndex * 16;
   if (!validRegister(registers, operation.registerIndex)) return { kind: "unsupported", detail: "Invalid XMM register index" };
   if (operand.kind === "memory" && (operation.kind === "logic" || operation.aligned) && operand.address.byteOffset % 16n !== 0n)
     return { kind: "exception", vector: 13, detail: "Unaligned 16-byte SIMD operand" };
@@ -66,17 +85,27 @@ export function executeRawSse(operation: RawSseOperation, operand: NumericOperan
     }
     return executed;
   }
-  let right: Uint8Array, rightOffset = 0;
-  if (operand.kind === "register") { right = registers; rightOffset = operand.index * 16; }
-  else {
+  let right: Uint8Array,
+    rightOffset = 0;
+  if (operand.kind === "register") {
+    right = registers;
+    rightOffset = operand.index * 16;
+  } else {
     right = state.simd.scratch.operand;
     memory.copyInto(operand.address, right);
   }
   for (let index = 0; index < 16; index++) {
-    const leftByte = registers[destination + index], rightByte = right[rightOffset + index];
+    const leftByte = registers[destination + index],
+      rightByte = right[rightOffset + index];
     if (leftByte === undefined || rightByte === undefined) throw new Error("Qualified SSE register or source range is incomplete");
-    registers[destination + index] = operation.operation === "and" ? leftByte & rightByte
-      : operation.operation === "and-not" ? ~leftByte & rightByte : operation.operation === "or" ? leftByte | rightByte : leftByte ^ rightByte;
+    registers[destination + index] =
+      operation.operation === "and"
+        ? leftByte & rightByte
+        : operation.operation === "and-not"
+          ? ~leftByte & rightByte
+          : operation.operation === "or"
+            ? leftByte | rightByte
+            : leftByte ^ rightByte;
   }
   return executed;
 }

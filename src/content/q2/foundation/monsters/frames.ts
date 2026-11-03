@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Source frame tables: id Software Quake II game and ZeniMax rerelease DLL. GPL-2.0-or-later. */
 export const classic_soldierFrames = Object.freeze({
   attak101: 0,

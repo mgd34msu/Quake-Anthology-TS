@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Symbol lookup/loading, ParseHex and VM_VmProfile_f from id Software's qcommon/vm.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -59,12 +60,14 @@ export class QvmSymbols {
     private readonly assertLive: () => void,
   ) {}
 
-  get count(): number { this.assertLive(); return this.parsedCount; }
+  get count(): number {
+    this.assertLive();
+    return this.parsedCount;
+  }
 
   get entries(): readonly QvmSymbol[] {
     this.assertLive();
-    return this.records.map(record => ({ value: record.data.getInt32(4, true), name: record.name,
-      profileCount: record.data.getInt32(8, true) }));
+    return this.records.map(record => ({ value: record.data.getInt32(4, true), name: record.name, profileCount: record.data.getInt32(8, true) }));
   }
 
   valueToFunctionSymbol(value: number): QvmFunctionSymbol {
@@ -92,7 +95,8 @@ export class QvmSymbols {
 
   symbolToValue(name: string): number {
     this.assertLive();
-    const nul = name.indexOf("\0"), symbolName = nul < 0 ? name : name.slice(0, nul);
+    const nul = name.indexOf("\0"),
+      symbolName = nul < 0 ? name : name.slice(0, nul);
     return this.records.find(symbol => symbol.name === symbolName)?.value ?? 0;
   }
 
@@ -111,25 +115,47 @@ export class QvmSymbols {
       options.print(`Couldn't load symbol file: ${path}\n`);
       return;
     }
-    const cursor = new CommonParseCursor(byteText(file.terminatedBytes)), parser = new CommonParseState();
+    const cursor = new CommonParseCursor(byteText(file.terminatedBytes)),
+      parser = new CommonParseState();
     let count = 0;
     for (;;) {
       const segment = parser.parse(cursor);
       if (segment.length === 0) break;
-      if (parseHex(segment) !== 0) { parser.parse(cursor); parser.parse(cursor); continue; }
+      if (parseHex(segment) !== 0) {
+        parser.parse(cursor);
+        parser.parse(cursor);
+        continue;
+      }
       const address = parser.parse(cursor);
-      if (address.length === 0) { options.print("WARNING: incomplete line at end of file\n"); break; }
+      if (address.length === 0) {
+        options.print("WARNING: incomplete line at end of file\n");
+        break;
+      }
       let value = parseHex(address);
       const symbolName = parser.parse(cursor);
-      if (symbolName.length === 0) { options.print("WARNING: incomplete line at end of file\n"); break; }
+      if (symbolName.length === 0) {
+        options.print("WARNING: incomplete line at end of file\n");
+        break;
+      }
       // vmSymbol_t is 16 bytes in the selected release32 profile, including symName[1] and tail padding.
       const bytes = this.allocate(16 + symbolName.length, path);
       const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const assertLive = this.assertLive;
-      const record: SymbolRecord = { name: symbolName, data,
-        get value(): number { assertLive(); return data.getInt32(4, true); },
-        get profileCount(): number { assertLive(); return data.getInt32(8, true); },
-        set profileCount(count: number) { assertLive(); data.setInt32(8, count, true); },
+      const record: SymbolRecord = {
+        name: symbolName,
+        data,
+        get value(): number {
+          assertLive();
+          return data.getInt32(4, true);
+        },
+        get profileCount(): number {
+          assertLive();
+          return data.getInt32(8, true);
+        },
+        set profileCount(count: number) {
+          assertLive();
+          data.setInt32(8, count, true);
+        },
       };
       if (count === 0) this.records = [];
       this.records.push(record);
@@ -156,14 +182,21 @@ export class QvmSymbols {
     sorted.sort((left, right) => left.data.getInt32(8, true) - right.data.getInt32(8, true));
     if (total === 0) {
       // C's NaN-to-int conversion has no defined percentage, including after resetting a debug profile.
-      print(debugEnabled
-        ? "vmprofile: percentages are undefined with zero total instructions.\n"
-        : "vmprofile: percentages are undefined with zero total instructions; DEBUG_VM is disabled.\n");
+      print(
+        debugEnabled
+          ? "vmprofile: percentages are undefined with zero total instructions.\n"
+          : "vmprofile: percentages are undefined with zero total instructions; DEBUG_VM is disabled.\n",
+      );
     }
     for (const record of sorted) {
       this.assertLive();
       const count = record.data.getInt32(8, true);
-      const prefix = total === 0 ? "    " : `${Math.trunc(Math.fround(100 * Math.fround(count)) / total).toString().padStart(2)}% `;
+      const prefix =
+        total === 0
+          ? "    "
+          : `${Math.trunc(Math.fround(100 * Math.fround(count)) / total)
+              .toString()
+              .padStart(2)}% `;
       print(`${prefix}${count.toString().padStart(9)} ${record.name}\n`);
       this.assertLive();
       record.data.setInt32(8, 0, true);
@@ -172,7 +205,9 @@ export class QvmSymbols {
   }
 }
 
-export interface QvmSymbolFile { readonly terminatedBytes: Uint8Array; }
+export interface QvmSymbolFile {
+  readonly terminatedBytes: Uint8Array;
+}
 export interface QvmSymbolFiles {
   readFileRetainedSync(path: string): QvmSymbolFile | undefined;
   freeFile(file: QvmSymbolFile): void;

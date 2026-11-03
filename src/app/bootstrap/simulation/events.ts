@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../../../contracts/content.ts";
 import type { ActorId, ClientId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -23,18 +24,31 @@ export class SimulationEvents extends PresentationState {
   private sequence = 0;
   private readonly emitted = new EventRing<SimulationEvent>(SIMULATION_EVENT_CAPACITY);
   private readonly emittedCursor: EventCursor = this.emitted.openCursor();
-  constructor(private readonly bodies: SharedBodyTable, now: () => SourceTime,
-    private readonly clientFor: (actor: ActorId) => ClientId | null, sourceSlot: (actor: ActorId) => number | null,
-    fogOptions: SimulationQ1FogOptions | null = null) { super(now, sourceSlot, fogOptions); }
+  constructor(
+    private readonly bodies: SharedBodyTable,
+    now: () => SourceTime,
+    private readonly clientFor: (actor: ActorId) => ClientId | null,
+    sourceSlot: (actor: ActorId) => number | null,
+    fogOptions: SimulationQ1FogOptions | null = null,
+  ) {
+    super(now, sourceSlot, fogOptions);
+  }
 
-  get nextSequence(): number { return this.sequence; }
+  get nextSequence(): number {
+    return this.sequence;
+  }
 
-  protected override emitOwned(owner: PresentationOwner | undefined, content: ContentId, source: SourcePresentationEvent,
-    time: SourceTime = this.now(), recipient?: ActorId): SimulationPresentationEvent {
+  protected override emitOwned(
+    owner: PresentationOwner | undefined,
+    content: ContentId,
+    source: SourcePresentationEvent,
+    time: SourceTime = this.now(),
+    recipient?: ActorId,
+  ): SimulationPresentationEvent {
     const presentation = super.emitOwned(owner, content, source, time, recipient);
     if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) {
       const event = source.event.event;
-      if (event.kind === "scoreboard" || source.event.kind === "lmctf" && event.kind === "hud" && "layout" in event)
+      if (event.kind === "scoreboard" || (source.event.kind === "lmctf" && event.kind === "hud" && "layout" in event))
         this.message({ kind: "q2-layout", program: event.layout }, event.actor);
       else if (event.kind === "match-status") this.message({ kind: "print", level: 2, text: event.text });
     }
@@ -50,11 +64,19 @@ export class SimulationEvents extends PresentationState {
   append(payload: SimulationEventPayload, actor: ActorId | null = null): undefined {
     const client = actor === null ? null : this.clientFor(actor);
     if (actor !== null && client === null) return undefined;
-    const admitted = this.emitted.append({ sequence: this.sequence, time: this.now(), payload,
-      audience: client === null ? { kind: "world" } : { kind: "client", client } });
+    const admitted = this.emitted.append({
+      sequence: this.sequence,
+      time: this.now(),
+      payload,
+      audience: client === null ? { kind: "world" } : { kind: "client", client },
+    });
     if (admitted === 0) {
       // Sounds and transient effects are unreliable output; a full queue drops them as the original servers drop overflowing datagrams.
-      if (payload.kind === "sound" || payload.kind === "message" && (payload.event.kind === "sound" || payload.event.kind === "q1-particle" || payload.event.kind === "q2-muzzle-flash")) return undefined;
+      if (
+        payload.kind === "sound" ||
+        (payload.kind === "message" && (payload.event.kind === "sound" || payload.event.kind === "q1-particle" || payload.event.kind === "q2-muzzle-flash"))
+      )
+        return undefined;
       throw new Error(`Simulation event capacity exhausted (${SIMULATION_EVENT_CAPACITY} undrained events); publish output before admitting more`);
     }
     this.sequence++;
@@ -73,7 +95,9 @@ export class SimulationEvents extends PresentationState {
 
   /** Zero-allocation drain for consumers that can visit events in place. */
   drainEvents(visit: (event: SimulationEvent) => void): number {
-    const count = this.emitted.drain(this.emittedCursor, (event) => { visit(event); });
+    const count = this.emitted.drain(this.emittedCursor, event => {
+      visit(event);
+    });
     this.emitted.retire();
     return count;
   }
@@ -84,14 +108,26 @@ export class SimulationEvents extends PresentationState {
     return undefined;
   }
 
-  override capture() { return { ...super.capture(), sequence: this.sequence }; }
+  override capture() {
+    return { ...super.capture(), sequence: this.sequence };
+  }
 
   override restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
-    this.sequence = reader.field("sequence").integer(0); this.emitted.reset();
+    this.sequence = reader.field("sequence").integer(0);
+    this.emitted.reset();
     return super.restore(reader, reference);
   }
 
-  private sound(content: ContentId, path: string, actor: ActorId | null, origin: Vec3, channel: number, volume: number, attenuation: number, recipient?: ActorId): undefined {
+  private sound(
+    content: ContentId,
+    path: string,
+    actor: ActorId | null,
+    origin: Vec3,
+    channel: number,
+    volume: number,
+    attenuation: number,
+    recipient?: ActorId,
+  ): undefined {
     const resource = this.resourceFor(content, path) ?? this.resourceFor(content, `sound/${path}`);
     if (resource !== undefined) this.append({ kind: "sound", resource: resource.id, actor, origin, channel, volume, attenuation }, recipient ?? null);
     return undefined;
@@ -99,17 +135,32 @@ export class SimulationEvents extends PresentationState {
 
   private q1(content: ContentId, event: Q1Event, sequence: number, recipient?: ActorId): undefined {
     if (event.kind === "sound") {
-      const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
+      const channel =
+        typeof event.channel === "number"
+          ? event.channel
+          : event.channel === "auto"
+            ? 0
+            : event.channel === "weapon"
+              ? 1
+              : event.channel === "voice"
+                ? 2
+                : event.channel === "item"
+                  ? 3
+                  : 4;
       const body = this.bodies.read(event.actor);
       // SV_StartSound captures origin + 0.5 * (mins + maxs) before the source edict can move or disappear.
-      const center = body === null ? zero : {
-        x: Math.fround(body.origin.x + Math.fround(body.bounds.min.x + body.bounds.max.x) * 0.5),
-        y: Math.fround(body.origin.y + Math.fround(body.bounds.min.y + body.bounds.max.y) * 0.5),
-        z: Math.fround(body.origin.z + Math.fround(body.bounds.min.z + body.bounds.max.z) * 0.5),
-      };
+      const center =
+        body === null
+          ? zero
+          : {
+              x: Math.fround(body.origin.x + Math.fround(body.bounds.min.x + body.bounds.max.x) * 0.5),
+              y: Math.fround(body.origin.y + Math.fround(body.bounds.min.y + body.bounds.max.y) * 0.5),
+              z: Math.fround(body.origin.z + Math.fround(body.bounds.min.z + body.bounds.max.z) * 0.5),
+            };
       this.sound(content, event.path, event.actor, event.origin ?? center, channel, event.volume, event.attenuation, recipient);
     } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation, recipient);
-    else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player, sequence);
+    else if (event.kind === "message")
+      this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player, sequence);
     return undefined;
   }
 

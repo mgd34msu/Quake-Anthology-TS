@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q2 rerelease extends field values with brace-delimited bounds vectors.
 // Shared brace-block tokenizer for the 2021 re-release's bots/*.txt family
 // and wwheel.txt. Not a ported C file -- these are id's own bot/UI data
@@ -96,7 +97,8 @@ function tokenizeLine(line: string, lineNumber: number, errors: BlockParseError[
         tok += line[i];
         i++;
       }
-      if (i < n) i++; // skip closing quote
+      if (i < n)
+        i++; // skip closing quote
       else errors.push({ message: "unclosed quoted string", line: lineNumber });
       tokens.push(tok);
     } else if (line[i] === "{" || line[i] === "}") {
@@ -198,5 +200,5 @@ export function fieldBool(values: string[]): boolean | undefined {
 
 /** A field's value as a "|"-separated flag list (e.g. "melee | starting"): the pipe tokens are dropped. */
 export function fieldFlagList(values: string[]): string[] {
-  return values.filter((v) => v !== "|");
+  return values.filter(v => v !== "|");
 }

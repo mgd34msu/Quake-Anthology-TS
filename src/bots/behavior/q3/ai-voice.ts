@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's game/ai_vcmd.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -9,11 +10,29 @@ import { botInitialChat } from "./ai-chat.ts";
 import { botPrintTeamGoal } from "./ai-command.ts";
 import { botEntityInfo } from "./ai-combat.ts";
 import type { GameAiContext } from "./ai-context.ts";
-import { BotLongTermGoal, BotTeamTaskPreference, CTF_GETFLAG_TIME, CTF_RETURNFLAG_TIME,
-  TEAM_ACCOMPANY_TIME, TEAM_ATTACKENEMYBASE_TIME, TEAM_CAMP_TIME, TEAM_DEFENDKEYAREA_TIME, TEAM_HARVEST_TIME } from "./ai-definitions.ts";
+import {
+  BotLongTermGoal,
+  BotTeamTaskPreference,
+  CTF_GETFLAG_TIME,
+  CTF_RETURNFLAG_TIME,
+  TEAM_ACCOMPANY_TIME,
+  TEAM_ATTACKENEMYBASE_TIME,
+  TEAM_CAMP_TIME,
+  TEAM_DEFENDKEYAREA_TIME,
+  TEAM_HARVEST_TIME,
+} from "./ai-definitions.ts";
 import { botGetAlternateRouteGoal, botPointAreaNum } from "./ai-navigation.ts";
-import { botOppositeTeam, botRememberLastOrderedTask, botSameTeam, botSetTeamStatus, botTeam,
-  botTeamFlagCarrier, clientName, copyClientNameToTeamLeader, easyClientName } from "./ai-orders.ts";
+import {
+  botOppositeTeam,
+  botRememberLastOrderedTask,
+  botSameTeam,
+  botSetTeamStatus,
+  botTeam,
+  botTeamFlagCarrier,
+  clientName,
+  copyClientNameToTeamLeader,
+  easyClientName,
+} from "./ai-orders.ts";
 import type { BotState } from "./ai-state.ts";
 import { botGetTeamMateTaskPreference, botSetTeamMateTaskPreference, botVoiceChatOnly } from "./ai-team.ts";
 import { gameAtoi } from "../../../content/q3/base/game/numeric.ts";
@@ -42,7 +61,7 @@ export function botVoiceChatGetFlag(context: GameAiContext, state: BotState, cli
 }
 
 export function botVoiceChatOffense(context: GameAiContext, state: BotState, client: number, mode: number): void {
-  if (context.gameType === GameType.GT_CTF || context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF) {
+  if (context.gameType === GameType.GT_CTF || (context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF)) {
     botVoiceChatGetFlag(context, state, client, mode);
     return;
   }
@@ -59,11 +78,12 @@ export function botVoiceChatOffense(context: GameAiContext, state: BotState, cli
 }
 
 export function botVoiceChatDefend(context: GameAiContext, state: BotState, client: number, _mode: number): void {
-  const goals = context.deathmatch, team = botTeam(context, state);
+  const goals = context.deathmatch,
+    team = botTeam(context, state);
   if (team !== Team.TEAM_RED && team !== Team.TEAM_BLUE) return;
   if (context.game.options.product === "missionpack" && (context.gameType === GameType.GT_OBELISK || context.gameType === GameType.GT_HARVESTER)) {
     state.teamGoal.copyFrom(team === Team.TEAM_RED ? goals.redObelisk : goals.blueObelisk);
-  } else if (context.gameType === GameType.GT_CTF || context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF) {
+  } else if (context.gameType === GameType.GT_CTF || (context.game.options.product === "missionpack" && context.gameType === GameType.GT_1FCTF)) {
     state.teamGoal.copyFrom(team === Team.TEAM_RED ? goals.ctfRedFlag : goals.ctfBlueFlag);
   } else return;
   ordered(context, state, client, BotLongTermGoal.DEFENDKEYAREA, TEAM_DEFENDKEYAREA_TIME);
@@ -185,11 +205,20 @@ export function botVoiceChatWantOnOffense(context: GameAiContext, state: BotStat
 }
 
 const voiceCommands: ReadonlyMap<string, (context: GameAiContext, state: BotState, client: number, mode: number) => void> = new Map([
-  ["getflag", botVoiceChatGetFlag], ["offense", botVoiceChatOffense], ["defend", botVoiceChatDefend],
-  ["defendflag", botVoiceChatDefendFlag], ["patrol", botVoiceChatPatrol], ["camp", botVoiceChatCamp],
-  ["followme", botVoiceChatFollowMe], ["followflagcarrier", botVoiceChatFollowFlagCarrier],
-  ["returnflag", botVoiceChatReturnFlag], ["startleader", botVoiceChatStartLeader], ["stopleader", botVoiceChatStopLeader],
-  ["whoisleader", botVoiceChatWhoIsLeader], ["wantondefense", botVoiceChatWantOnDefense], ["wantonoffense", botVoiceChatWantOnOffense],
+  ["getflag", botVoiceChatGetFlag],
+  ["offense", botVoiceChatOffense],
+  ["defend", botVoiceChatDefend],
+  ["defendflag", botVoiceChatDefendFlag],
+  ["patrol", botVoiceChatPatrol],
+  ["camp", botVoiceChatCamp],
+  ["followme", botVoiceChatFollowMe],
+  ["followflagcarrier", botVoiceChatFollowFlagCarrier],
+  ["returnflag", botVoiceChatReturnFlag],
+  ["startleader", botVoiceChatStartLeader],
+  ["stopleader", botVoiceChatStopLeader],
+  ["whoisleader", botVoiceChatWhoIsLeader],
+  ["wantondefense", botVoiceChatWantOnDefense],
+  ["wantonoffense", botVoiceChatWantOnOffense],
 ]);
 
 function folded(text: string): string {

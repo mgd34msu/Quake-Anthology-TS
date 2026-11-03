@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { add3, angleVectorsRule, boundsOverlap, dot3, length3, scale3, sub3 } from "../../../core/math.ts";
 import type { WeaponBehaviorProjectilePort } from "../../../contracts/weapon-behavior.ts";
 /* Q1 gameplay adapted from id Software Quake / Quake rerelease QuakeC.
@@ -14,19 +15,65 @@ import type { Q1EntityServices } from "./entity-services.ts";
 export type Q1BaseWeapon = "axe" | "shotgun" | "supershotgun" | "nailgun" | "supernailgun" | "grenadelauncher" | "rocketlauncher" | "lightning";
 export function q1WeaponBit(weapon: Q1BaseWeapon): number {
   switch (weapon) {
-    case "axe": return 4096;
-    case "shotgun": return 1;
-    case "supershotgun": return 2;
-    case "nailgun": return 4;
-    case "supernailgun": return 8;
-    case "grenadelauncher": return 16;
-    case "rocketlauncher": return 32;
-    case "lightning": return 64;
+    case "axe":
+      return 4096;
+    case "shotgun":
+      return 1;
+    case "supershotgun":
+      return 2;
+    case "nailgun":
+      return 4;
+    case "supernailgun":
+      return 8;
+    case "grenadelauncher":
+      return 16;
+    case "rocketlauncher":
+      return 32;
+    case "lightning":
+      return 64;
   }
 }
-export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
-export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav" | "mg3:lavasuit" | "q3:haste" | "q3:regen" | "q3:flight";
-export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav", "mg3:lavasuit", "q3:haste", "q3:regen", "q3:flight"];
+export type Q1Weapon =
+  | Q1BaseWeapon
+  | "hipnotic:laser"
+  | "hipnotic:mjolnir"
+  | "hipnotic:proximity"
+  | "rogue:lava-nailgun"
+  | "rogue:lava-supernailgun"
+  | "rogue:multi-grenade"
+  | "rogue:multi-rocket"
+  | "rogue:plasma"
+  | "rogue:grapple"
+  | "mg3:laser"
+  | "mg3:mjolnir"
+  | "ctf:grapple";
+export type Q1Powerup =
+  | "quad"
+  | "invulnerability"
+  | "invisibility"
+  | "suit"
+  | "hipnotic:wetsuit"
+  | "hipnotic:empathy"
+  | "rogue:shield"
+  | "rogue:antigrav"
+  | "mg3:lavasuit"
+  | "q3:haste"
+  | "q3:regen"
+  | "q3:flight";
+export const Q1_POWERUP_IDS: readonly Q1Powerup[] = [
+  "quad",
+  "invulnerability",
+  "invisibility",
+  "suit",
+  "hipnotic:wetsuit",
+  "hipnotic:empathy",
+  "rogue:shield",
+  "rogue:antigrav",
+  "mg3:lavasuit",
+  "q3:haste",
+  "q3:regen",
+  "q3:flight",
+];
 export type Q1SoundChannel = "auto" | "weapon" | "voice" | "item" | "body" | -1 | 5 | 6 | 7;
 export type Q1BeamStyle = "lightning1" | "lightning2" | "lightning3" | "grapple";
 export type Q1Solid = "none" | "trigger" | "bbox" | "slidebox" | "bsp" | "corpse";
@@ -50,18 +97,68 @@ export interface Q1TraceRequest {
   readonly monsters: boolean;
   readonly missile?: boolean;
 }
-export interface Q1Basis { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3; }
+export interface Q1Basis {
+  readonly forward: Vec3;
+  readonly right: Vec3;
+  readonly up: Vec3;
+}
 export type Q1CharacterAttack = { readonly kind: "axe"; readonly variant: 0 | 1 | 2 | 3 } | { readonly kind: "shotgun" | "rocket" | "nail" | "lightning" };
 
-export interface Q1MessagePart { readonly text: string; readonly args?: readonly (string | number)[]; }
+export interface Q1MessagePart {
+  readonly text: string;
+  readonly args?: readonly (string | number)[];
+}
 export type Q1Event =
   | { readonly kind: "stop-sound"; readonly actor: ActorId; readonly channel: number }
-  | { readonly kind: "sound"; readonly origin?: Vec3; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
+  | {
+      readonly kind: "sound";
+      readonly origin?: Vec3;
+      readonly actor: ActorId;
+      readonly path: string;
+      readonly channel: Q1SoundChannel;
+      readonly attenuation: number;
+      readonly volume: number;
+    }
   | { readonly kind: "ambient"; readonly origin: Vec3; readonly path: string; readonly volume: number; readonly attenuation: number }
-  | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[]; readonly parts?: readonly Q1MessagePart[] }
-  | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray" | "wizard-spike" | "knight-spike"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number; readonly muzzle?: { readonly origin: Vec3; readonly angles: Vec3 } }
+  | {
+      readonly kind: "message";
+      readonly player: ActorId;
+      readonly text: string;
+      readonly center: boolean;
+      readonly args?: readonly (string | number)[];
+      readonly parts?: readonly Q1MessagePart[];
+    }
+  | {
+      readonly kind: "effect";
+      readonly effect:
+        | "blood"
+        | "gunshot"
+        | "spike"
+        | "superspike"
+        | "explosion"
+        | "teleport"
+        | "muzzleflash"
+        | "pickup"
+        | "lava-splash"
+        | "tar-explosion"
+        | "meat-spray"
+        | "wizard-spike"
+        | "knight-spike";
+      readonly actor: ActorId | null;
+      readonly origin: Vec3;
+      readonly amount: number;
+      readonly muzzle?: { readonly origin: Vec3; readonly angles: Vec3 };
+    }
   | { readonly kind: "colored-explosion"; readonly origin: Vec3; readonly colorStart: number; readonly colorLength: number }
-  | { readonly kind: "static-model"; readonly path: string; readonly frame: number; readonly colorMap: number; readonly skin: number; readonly origin: Vec3; readonly angles: Vec3 }
+  | {
+      readonly kind: "static-model";
+      readonly path: string;
+      readonly frame: number;
+      readonly colorMap: number;
+      readonly skin: number;
+      readonly origin: Vec3;
+      readonly angles: Vec3;
+    }
   | { readonly kind: "particles"; readonly origin: Vec3; readonly direction: Vec3; readonly color: number; readonly count: number }
   | { readonly kind: "server-command"; readonly text: string }
   | { readonly kind: "camera"; readonly player: ActorId; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset?: Vec3 }
@@ -69,7 +166,15 @@ export type Q1Event =
   | { readonly kind: "lightstyle"; readonly style: number; readonly pattern: string }
   | { readonly kind: "monster-total"; readonly total: number }
   | { readonly kind: "secret" | "monster-killed"; readonly actor: ActorId; readonly total: number; readonly found: number }
-  | { readonly kind: "weapon"; readonly player: ActorId; readonly weapon: Q1Weapon; readonly viewModel: string; readonly frame: number; readonly punch: number; readonly attack?: Q1CharacterAttack }
+  | {
+      readonly kind: "weapon";
+      readonly player: ActorId;
+      readonly weapon: Q1Weapon;
+      readonly viewModel: string;
+      readonly frame: number;
+      readonly punch: number;
+      readonly attack?: Q1CharacterAttack;
+    }
   | { readonly kind: "teleport-player"; readonly player: ActorId; readonly angles: Vec3; readonly lockUntil: number }
   | { readonly kind: "powerup"; readonly player: ActorId; readonly powerup: Q1Powerup; readonly expires: number }
   | { readonly kind: "intermission"; readonly origin: Vec3; readonly angles: Vec3; readonly map: string; readonly exitAfter: number; readonly track: number }
@@ -162,7 +267,11 @@ export interface Q1Presentation {
   readonly sourceOrdinal: number | null;
 }
 /** invisible_time, invisible_sound and the matching per-powerup timers of CheckPowerups. */
-export interface Q1PowerupCue { warned: boolean; flashAt: number; hum: number }
+export interface Q1PowerupCue {
+  warned: boolean;
+  flashAt: number;
+  hum: number;
+}
 /** Presentation gates that only drive cues and sounds; they are rebuilt, not saved. */
 export interface Q1PlayerCues {
   protectSoundAt: number;
@@ -178,8 +287,10 @@ export function createPlayerCues(): Q1PlayerCues {
   return { protectSoundAt: 0, windFlySoundAt: 0, quadSoundAt: 0, invisibility: cue(), invulnerability: cue(), quad: cue(), suit: cue() };
 }
 const POWERUP_WARNINGS = {
-  invisibility: ["$qc_ring_fade", "items/inv2.wav"], invulnerability: ["$qc_protection_fade", "items/protect2.wav"],
-  quad: ["$qc_quad_fade", "items/damage2.wav"], suit: ["$qc_biosuit_fade", "items/suit2.wav"],
+  invisibility: ["$qc_ring_fade", "items/inv2.wav"],
+  invulnerability: ["$qc_protection_fade", "items/protect2.wav"],
+  quad: ["$qc_quad_fade", "items/damage2.wav"],
+  suit: ["$qc_biosuit_fade", "items/suit2.wav"],
 } as const;
 /** Fade message and sound of the four powerups CheckPowerups warns about, or null. */
 export function powerupWarning(powerup: Q1Powerup): readonly [string, string] | null {
@@ -190,7 +301,11 @@ export function powerupCue(cues: Q1PlayerCues, powerup: Q1Powerup): Q1PowerupCue
 }
 export function resetPowerupCue(cues: Q1PlayerCues, powerup: Q1Powerup): void {
   const cue = powerupCue(cues, powerup);
-  if (cue !== null) { cue.warned = false; cue.flashAt = 0; cue.hum = 0; }
+  if (cue !== null) {
+    cue.warned = false;
+    cue.flashAt = 0;
+    cue.hum = 0;
+  }
 }
 export interface Q1PlayerState {
   alpha: number;
@@ -228,17 +343,45 @@ export const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
 export const POINT: Bounds = { min: ZERO, max: ZERO };
 export const PLAYER_BOUNDS: Bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 export const WEAPONS: readonly Q1BaseWeapon[] = ["axe", "shotgun", "supershotgun", "nailgun", "supernailgun", "grenadelauncher", "rocketlauncher", "lightning"];
-export const Q1_WEAPON_IDS: readonly Q1Weapon[] = [...WEAPONS, "hipnotic:laser", "hipnotic:mjolnir", "hipnotic:proximity", "rogue:lava-nailgun", "rogue:lava-supernailgun", "rogue:multi-grenade", "rogue:multi-rocket", "rogue:plasma", "rogue:grapple", "mg3:laser", "mg3:mjolnir", "ctf:grapple"];
-export function isQ1BaseWeapon(weapon: Q1Weapon): weapon is Q1BaseWeapon { return WEAPONS.some(candidate => candidate === weapon); }
-export function weaponItem(weapon: Q1Weapon): ItemId { return `q1:weapon/${weapon}`; }
+export const Q1_WEAPON_IDS: readonly Q1Weapon[] = [
+  ...WEAPONS,
+  "hipnotic:laser",
+  "hipnotic:mjolnir",
+  "hipnotic:proximity",
+  "rogue:lava-nailgun",
+  "rogue:lava-supernailgun",
+  "rogue:multi-grenade",
+  "rogue:multi-rocket",
+  "rogue:plasma",
+  "rogue:grapple",
+  "mg3:laser",
+  "mg3:mjolnir",
+  "ctf:grapple",
+];
+export function isQ1BaseWeapon(weapon: Q1Weapon): weapon is Q1BaseWeapon {
+  return WEAPONS.some(candidate => candidate === weapon);
+}
+export function weaponItem(weapon: Q1Weapon): ItemId {
+  return `q1:weapon/${weapon}`;
+}
 export const vadd = add3;
 export const vsub = sub3;
 export const vscale = scale3;
 export const dot = dot3;
 export const length = length3;
-export function normalize(a: Vec3): Vec3 { const magnitude = length3(a); return magnitude === 0 ? ZERO : scale3(a, 1 / magnitude); }
-export function vectors(angles: Vec3): Q1Basis { return angleVectorsRule(angles, "q1"); }
+export function normalize(a: Vec3): Vec3 {
+  const magnitude = length3(a);
+  return magnitude === 0 ? ZERO : scale3(a, 1 / magnitude);
+}
+export function vectors(angles: Vec3): Q1Basis {
+  return angleVectorsRule(angles, "q1");
+}
 /** The time a monster at the end of its path stays put: pausetime = time + 999999 in single precision. */
-export function pathEndTime(time: number): number { return Math.fround(Math.fround(time) + 999999); }
-export function yawFor(direction: Vec3): number { const yaw = Math.atan2(direction.y, direction.x) * 180 / Math.PI; return yaw < 0 ? yaw + 360 : yaw; }
+export function pathEndTime(time: number): number {
+  return Math.fround(Math.fround(time) + 999999);
+}
+export function yawFor(direction: Vec3): number {
+  const yaw = (Math.atan2(direction.y, direction.x) * 180) / Math.PI;
+  return yaw < 0 ? yaw + 360 : yaw;
+}
 export const overlaps = boundsOverlap;

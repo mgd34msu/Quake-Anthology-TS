@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { GameEntity } from "../base/game/state.ts";
@@ -17,11 +18,28 @@ import { ConnectionState, GameFlags, MAX_CLIENTS } from "../base/game/state.ts";
 import type { EntityDie, EntityPain, EntityThink, EntityTouch, GameClient } from "../base/game/state.ts";
 import { findEntity } from "../base/game/utilities.ts";
 
-export enum FlagStatus { AT_BASE = 0, TAKEN = 1, TAKEN_RED = 2, TAKEN_BLUE = 3, DROPPED = 4 }
+export enum FlagStatus {
+  AT_BASE = 0,
+  TAKEN = 1,
+  TAKEN_RED = 2,
+  TAKEN_BLUE = 3,
+  DROPPED = 4,
+}
 export enum GlobalTeamSound {
-  RED_CAPTURE = 0, BLUE_CAPTURE = 1, RED_RETURN = 2, BLUE_RETURN = 3, RED_TAKEN = 4, BLUE_TAKEN = 5,
-  RED_OBELISK_ATTACKED = 6, BLUE_OBELISK_ATTACKED = 7, RED_SCORED = 8, BLUE_SCORED = 9,
-  RED_TOOK_LEAD = 10, BLUE_TOOK_LEAD = 11, TIED = 12, KAMIKAZE = 13,
+  RED_CAPTURE = 0,
+  BLUE_CAPTURE = 1,
+  RED_RETURN = 2,
+  BLUE_RETURN = 3,
+  RED_TAKEN = 4,
+  BLUE_TAKEN = 5,
+  RED_OBELISK_ATTACKED = 6,
+  BLUE_OBELISK_ATTACKED = 7,
+  RED_SCORED = 8,
+  BLUE_SCORED = 9,
+  RED_TOOK_LEAD = 10,
+  BLUE_TOOK_LEAD = 11,
+  TIED = 12,
+  KAMIKAZE = 13,
 }
 
 interface TeamServices {
@@ -47,8 +65,7 @@ export interface ObeliskSettings {
   readonly regenAmount: number;
   readonly respawnDelaySeconds: number;
 }
-export type TeamHost = TeamServices & ({ readonly product: "baseq3" } |
-  { readonly product: "missionpack"; readonly obelisk: ObeliskSettings });
+export type TeamHost = TeamServices & ({ readonly product: "baseq3" } | { readonly product: "missionpack"; readonly obelisk: ObeliskSettings });
 
 function sortClients(first: number, second: number): number {
   return first - second;
@@ -72,10 +89,11 @@ export function otherTeam(team: Team): Team {
 export function teamName(team: Team): string {
   return team === Team.TEAM_RED ? "RED" : team === Team.TEAM_BLUE ? "BLUE" : team === Team.TEAM_SPECTATOR ? "SPECTATOR" : "FREE";
 }
-export function otherTeamName(team: Team): string { return teamName(otherTeam(team)); }
+export function otherTeamName(team: Team): string {
+  return teamName(otherTeam(team));
+}
 export function onSameTeam(gameType: number, first: GameEntity, second: GameEntity): boolean {
-  return first.client !== null && second.client !== null && gameType >= GameType.GT_TEAM &&
-    first.client.sess.sessionTeam === second.client.sess.sessionTeam;
+  return first.client !== null && second.client !== null && gameType >= GameType.GT_TEAM && first.client.sess.sessionTeam === second.client.sess.sessionTeam;
 }
 
 /** All four SP_team_CTF_{red,blue}{player,spawn} source bodies are empty.
@@ -98,22 +116,57 @@ function ctfStatus(status: FlagStatus | -1): string {
   // Team_InitGame first reads ctfFlagStatusRemap[-1]. The baseline QVM
   // has a zero byte there; preserve its transient one-character publication.
   switch (status) {
-    case -1: return "\0";
-    case FlagStatus.AT_BASE: return "0";
-    case FlagStatus.TAKEN: return "1";
-    case FlagStatus.TAKEN_RED: case FlagStatus.TAKEN_BLUE: return "*";
-    case FlagStatus.DROPPED: return "2";
+    case -1:
+      return "\0";
+    case FlagStatus.AT_BASE:
+      return "0";
+    case FlagStatus.TAKEN:
+      return "1";
+    case FlagStatus.TAKEN_RED:
+    case FlagStatus.TAKEN_BLUE:
+      return "*";
+    case FlagStatus.DROPPED:
+      return "2";
   }
 }
 
 export class TeamRuntime {
-  captureSaveState() { return { state: { lastFlagCapture: this.state.lastFlagCapture, lastCaptureTeam: this.state.lastCaptureTeam, redStatus: this.state.redStatus, blueStatus: this.state.blueStatus, flagStatus: this.state.flagStatus, redTakenTime: this.state.redTakenTime, blueTakenTime: this.state.blueTakenTime, redObeliskAttackedTime: this.state.redObeliskAttackedTime, blueObeliskAttackedTime: this.state.blueObeliskAttackedTime }, neutralObelisk: this.neutralObelisk?.slot ?? null, lastTeamLocationTime: this.lastTeamLocationTime }; }
+  captureSaveState() {
+    return {
+      state: {
+        lastFlagCapture: this.state.lastFlagCapture,
+        lastCaptureTeam: this.state.lastCaptureTeam,
+        redStatus: this.state.redStatus,
+        blueStatus: this.state.blueStatus,
+        flagStatus: this.state.flagStatus,
+        redTakenTime: this.state.redTakenTime,
+        blueTakenTime: this.state.blueTakenTime,
+        redObeliskAttackedTime: this.state.redObeliskAttackedTime,
+        blueObeliskAttackedTime: this.state.blueObeliskAttackedTime,
+      },
+      neutralObelisk: this.neutralObelisk?.slot ?? null,
+      lastTeamLocationTime: this.lastTeamLocationTime,
+    };
+  }
   restoreSaveState(value: unknown): void {
-    const reader = new SaveReader(value, "q3.team"), state = reader.field("state");
-    const restored = { lastFlagCapture: state.field("lastFlagCapture").integer(), lastCaptureTeam: state.field("lastCaptureTeam").integer(), redStatus: state.field("redStatus").choice(-1, 0, 1, 2, 3, 4), blueStatus: state.field("blueStatus").choice(-1, 0, 1, 2, 3, 4), flagStatus: state.field("flagStatus").choice(-1, 0, 1, 2, 3, 4), redTakenTime: state.field("redTakenTime").integer(), blueTakenTime: state.field("blueTakenTime").integer(), redObeliskAttackedTime: state.field("redObeliskAttackedTime").integer(), blueObeliskAttackedTime: state.field("blueObeliskAttackedTime").integer() };
+    const reader = new SaveReader(value, "q3.team"),
+      state = reader.field("state");
+    const restored = {
+      lastFlagCapture: state.field("lastFlagCapture").integer(),
+      lastCaptureTeam: state.field("lastCaptureTeam").integer(),
+      redStatus: state.field("redStatus").choice(-1, 0, 1, 2, 3, 4),
+      blueStatus: state.field("blueStatus").choice(-1, 0, 1, 2, 3, 4),
+      flagStatus: state.field("flagStatus").choice(-1, 0, 1, 2, 3, 4),
+      redTakenTime: state.field("redTakenTime").integer(),
+      blueTakenTime: state.field("blueTakenTime").integer(),
+      redObeliskAttackedTime: state.field("redObeliskAttackedTime").integer(),
+      blueObeliskAttackedTime: state.field("blueObeliskAttackedTime").integer(),
+    };
     const neutral = reader.field("neutralObelisk").nullable(entry => readModuleEntity(entry, this.host.pool));
     const time = reader.field("lastTeamLocationTime").integer();
-    Object.assign(this.state, restored); this.neutralObelisk = neutral; this.lastTeamLocationTime = time;
+    Object.assign(this.state, restored);
+    this.neutralObelisk = neutral;
+    this.lastTeamLocationTime = time;
   }
 
   readonly state = new TeamGameState();
@@ -148,13 +201,22 @@ export class TeamRuntime {
   addTeamScore(origin: Vec3, team: Team, score: number): void {
     const event = this.host.pool.tempEntity(origin, EntityEvent.EV_GLOBAL_TEAM_SOUND);
     event.r.svFlags |= ServerEntityFlags.BROADCAST;
-    const red = this.host.teamScores.get(Team.TEAM_RED), blue = this.host.teamScores.get(Team.TEAM_BLUE);
+    const red = this.host.teamScores.get(Team.TEAM_RED),
+      blue = this.host.teamScores.get(Team.TEAM_BLUE);
     if (team === Team.TEAM_RED) {
-      event.s.eventParm = ((red + score) | 0) === blue ? GlobalTeamSound.TIED
-        : red <= blue && ((red + score) | 0) > blue ? GlobalTeamSound.RED_TOOK_LEAD : GlobalTeamSound.RED_SCORED;
+      event.s.eventParm =
+        ((red + score) | 0) === blue
+          ? GlobalTeamSound.TIED
+          : red <= blue && ((red + score) | 0) > blue
+            ? GlobalTeamSound.RED_TOOK_LEAD
+            : GlobalTeamSound.RED_SCORED;
     } else {
-      event.s.eventParm = ((blue + score) | 0) === red ? GlobalTeamSound.TIED
-        : blue <= red && ((blue + score) | 0) > red ? GlobalTeamSound.BLUE_TOOK_LEAD : GlobalTeamSound.BLUE_SCORED;
+      event.s.eventParm =
+        ((blue + score) | 0) === red
+          ? GlobalTeamSound.TIED
+          : blue <= red && ((blue + score) | 0) > red
+            ? GlobalTeamSound.BLUE_TOOK_LEAD
+            : GlobalTeamSound.BLUE_SCORED;
     }
     this.host.teamScores.set(team, this.host.teamScores.get(team) + score);
   }
@@ -189,15 +251,18 @@ export class TeamRuntime {
   checkHurtCarrier(target: GameEntity, attacker: GameEntity): void {
     if (target.client === null || attacker.client === null) return;
     const flag = target.client.sess.sessionTeam === Team.TEAM_RED ? Powerup.PW_BLUEFLAG : Powerup.PW_REDFLAG;
-    if ((target.client.ps.powerups.get(flag) !== 0 || target.client.ps.generic1 !== 0) &&
-      target.client.sess.sessionTeam !== attacker.client.sess.sessionTeam) {
+    if ((target.client.ps.powerups.get(flag) !== 0 || target.client.ps.generic1 !== 0) && target.client.sess.sessionTeam !== attacker.client.sess.sessionTeam) {
       attacker.client.pers.teamState.lastHurtCarrier = Math.fround(this.host.time);
     }
   }
 
   fragBonuses(target: GameEntity, attacker: GameEntity | null): void {
-    if (target.client === null || attacker === null || attacker.client === null || target === attacker || onSameTeam(this.host.gameType, target, attacker)) return;
-    const victim = target.client, killer = attacker.client, team = victim.sess.sessionTeam, opposing = otherTeam(team);
+    if (target.client === null || attacker === null || attacker.client === null || target === attacker || onSameTeam(this.host.gameType, target, attacker))
+      return;
+    const victim = target.client,
+      killer = attacker.client,
+      team = victim.sess.sessionTeam,
+      opposing = otherTeam(team);
     const flag = team === Team.TEAM_RED ? Powerup.PW_REDFLAG : Powerup.PW_BLUEFLAG;
     const enemyFlag = this.host.gameType === GameType.GT_1FCTF ? Powerup.PW_NEUTRALFLAG : team === Team.TEAM_RED ? Powerup.PW_BLUEFLAG : Powerup.PW_REDFLAG;
     const tokens = this.host.product === "missionpack" && this.host.gameType === GameType.GT_HARVESTER ? victim.ps.generic1 : 0;
@@ -205,7 +270,7 @@ export class TeamRuntime {
     if (victim.ps.powerups.get(enemyFlag) !== 0 || tokens !== 0) {
       const hasFlag = victim.ps.powerups.get(enemyFlag) !== 0;
       killer.pers.teamState.lastFraggedCarrier = Math.fround(this.host.time);
-      this.host.addScore(attacker, target.r.currentOrigin, hasFlag ? mission ? 20 : 2 : Math.imul(Math.imul(mission ? 20 : 2, tokens), tokens));
+      this.host.addScore(attacker, target.r.currentOrigin, hasFlag ? (mission ? 20 : 2) : Math.imul(Math.imul(mission ? 20 : 2, tokens), tokens));
       killer.pers.teamState.fragCarrier = (killer.pers.teamState.fragCarrier + 1) | 0;
       this.printMessage(null, `${killer.pers.netname}^7 fragged ${teamName(team)}'s ${hasFlag ? "flag" : "skull"} carrier!\n`);
       for (let index = 0; index < this.host.pool.maxClients; index++) {
@@ -235,7 +300,10 @@ export class TeamRuntime {
       classname = killer.sess.sessionTeam === Team.TEAM_RED ? "team_CTF_redflag" : "team_CTF_blueflag";
       for (let index = 0; index < this.host.pool.maxClients; index++) {
         const entity = this.host.pool.at(index);
-        if (entity.inuse && clientOf(entity).ps.powerups.get(flag) !== 0) { carrier = entity; break; }
+        if (entity.inuse && clientOf(entity).ps.powerups.get(flag) !== 0) {
+          carrier = entity;
+          break;
+        }
       }
     }
     let base: GameEntity | null = null;
@@ -243,8 +311,11 @@ export class TeamRuntime {
     if (base === null) return;
     const targetDistance = length3(sub3(target.r.currentOrigin, base.r.currentOrigin));
     const attackerDistance = length3(sub3(attacker.r.currentOrigin, base.r.currentOrigin));
-    if (((targetDistance < 1000 && this.host.inPVS(base.r.currentOrigin, target.r.currentOrigin)) ||
-      (attackerDistance < 1000 && this.host.inPVS(base.r.currentOrigin, attacker.r.currentOrigin))) && killer.sess.sessionTeam !== victim.sess.sessionTeam) {
+    if (
+      ((targetDistance < 1000 && this.host.inPVS(base.r.currentOrigin, target.r.currentOrigin)) ||
+        (attackerDistance < 1000 && this.host.inPVS(base.r.currentOrigin, attacker.r.currentOrigin))) &&
+      killer.sess.sessionTeam !== victim.sess.sessionTeam
+    ) {
       this.host.addScore(attacker, target.r.currentOrigin, mission ? 10 : 1);
       killer.pers.teamState.baseDefense = (killer.pers.teamState.baseDefense + 1) | 0;
       killer.ps.persistant.set(PersistentIndex.PERS_DEFEND_COUNT, killer.ps.persistant.get(PersistentIndex.PERS_DEFEND_COUNT) + 1);
@@ -254,8 +325,11 @@ export class TeamRuntime {
     if (carrier !== null && carrier !== attacker) {
       // Source writes v1 twice and leaves v2 measured from the base flag.
       const distance = length3(sub3(attacker.r.currentOrigin, carrier.r.currentOrigin));
-      if (((distance < 1000 && this.host.inPVS(carrier.r.currentOrigin, target.r.currentOrigin)) ||
-        (attackerDistance < 1000 && this.host.inPVS(carrier.r.currentOrigin, attacker.r.currentOrigin))) && killer.sess.sessionTeam !== victim.sess.sessionTeam) {
+      if (
+        ((distance < 1000 && this.host.inPVS(carrier.r.currentOrigin, target.r.currentOrigin)) ||
+          (attackerDistance < 1000 && this.host.inPVS(carrier.r.currentOrigin, attacker.r.currentOrigin))) &&
+        killer.sess.sessionTeam !== victim.sess.sessionTeam
+      ) {
         this.host.addScore(attacker, target.r.currentOrigin, mission ? 2 : 1);
         killer.pers.teamState.carrierDefense = (killer.pers.teamState.carrierDefense + 1) | 0;
         killer.ps.persistant.set(PersistentIndex.PERS_DEFEND_COUNT, killer.ps.persistant.get(PersistentIndex.PERS_DEFEND_COUNT) + 1);
@@ -265,20 +339,27 @@ export class TeamRuntime {
   }
 
   resetFlag(team: Team): GameEntity | null {
-    const classname = team === Team.TEAM_RED ? "team_CTF_redflag" : team === Team.TEAM_BLUE ? "team_CTF_blueflag" : team === Team.TEAM_FREE ? "team_CTF_neutralflag" : null;
+    const classname =
+      team === Team.TEAM_RED ? "team_CTF_redflag" : team === Team.TEAM_BLUE ? "team_CTF_blueflag" : team === Team.TEAM_FREE ? "team_CTF_neutralflag" : null;
     if (classname === null) return null;
-    let entity: GameEntity | null = null, base: GameEntity | null = null;
+    let entity: GameEntity | null = null,
+      base: GameEntity | null = null;
     while ((entity = findEntity(this.host.pool, entity, "classname", classname)) !== null) {
       if ((entity.flags & GameFlags.DROPPED_ITEM) !== 0) this.host.pool.free(entity);
-      else { base = entity; this.host.respawnItem(entity); }
+      else {
+        base = entity;
+        this.host.respawnItem(entity);
+      }
     }
     this.setFlagStatus(team, FlagStatus.AT_BASE);
     return base;
   }
 
   resetFlags(): void {
-    if (this.host.gameType === GameType.GT_CTF) { this.resetFlag(Team.TEAM_RED); this.resetFlag(Team.TEAM_BLUE); }
-    else if (this.host.product === "missionpack" && this.host.gameType === GameType.GT_1FCTF) this.resetFlag(Team.TEAM_FREE);
+    if (this.host.gameType === GameType.GT_CTF) {
+      this.resetFlag(Team.TEAM_RED);
+      this.resetFlag(Team.TEAM_BLUE);
+    } else if (this.host.product === "missionpack" && this.host.gameType === GameType.GT_1FCTF) this.resetFlag(Team.TEAM_FREE);
   }
 
   private flagSound(entity: GameEntity, sound: GlobalTeamSound): void {
@@ -288,12 +369,18 @@ export class TeamRuntime {
   }
 
   returnFlagSound(entity: GameEntity | null, team: Team): void {
-    if (entity === null) { this.host.warn("Warning:  NULL passed to Team_ReturnFlagSound\n"); return; }
+    if (entity === null) {
+      this.host.warn("Warning:  NULL passed to Team_ReturnFlagSound\n");
+      return;
+    }
     this.flagSound(entity, team === Team.TEAM_BLUE ? GlobalTeamSound.RED_RETURN : GlobalTeamSound.BLUE_RETURN);
   }
 
   takeFlagSound(entity: GameEntity | null, team: Team): void {
-    if (entity === null) { this.host.warn("Warning:  NULL passed to Team_TakeFlagSound\n"); return; }
+    if (entity === null) {
+      this.host.warn("Warning:  NULL passed to Team_TakeFlagSound\n");
+      return;
+    }
     if (team === Team.TEAM_RED) {
       if (this.state.blueStatus !== FlagStatus.AT_BASE && this.state.blueTakenTime > ((this.host.time - 10000) | 0)) return;
       this.state.blueTakenTime = this.host.time;
@@ -305,7 +392,10 @@ export class TeamRuntime {
   }
 
   captureFlagSound(entity: GameEntity | null, team: Team): void {
-    if (entity === null) { this.host.warn("Warning:  NULL passed to Team_CaptureFlagSound\n"); return; }
+    if (entity === null) {
+      this.host.warn("Warning:  NULL passed to Team_CaptureFlagSound\n");
+      return;
+    }
     this.flagSound(entity, team === Team.TEAM_BLUE ? GlobalTeamSound.BLUE_CAPTURE : GlobalTeamSound.RED_CAPTURE);
   }
 
@@ -314,14 +404,18 @@ export class TeamRuntime {
     this.printMessage(null, team === Team.TEAM_FREE ? "The flag has returned!\n" : `The ${teamName(team)} flag has returned!\n`);
   }
 
-  freeEntity(entity: GameEntity): void { const team = flagTeam(entity); if (team !== null) this.returnFlag(team); }
+  freeEntity(entity: GameEntity): void {
+    const team = flagTeam(entity);
+    if (team !== null) this.returnFlag(team);
+  }
   droppedFlagThink(entity: GameEntity): void {
     const team = flagTeam(entity) ?? Team.TEAM_FREE;
     this.returnFlagSound(this.resetFlag(team), team);
   }
 
   touchOurFlag(entity: GameEntity, other: GameEntity, team: Team): number {
-    const client = clientOf(other), mission = this.host.product === "missionpack";
+    const client = clientOf(other),
+      mission = this.host.product === "missionpack";
     const oneFlag = mission && this.host.gameType === GameType.GT_1FCTF;
     const enemyFlag = oneFlag ? Powerup.PW_NEUTRALFLAG : client.sess.sessionTeam === Team.TEAM_RED ? Powerup.PW_BLUEFLAG : Powerup.PW_REDFLAG;
     if (!oneFlag && (entity.flags & GameFlags.DROPPED_ITEM) !== 0) {
@@ -369,7 +463,8 @@ export class TeamRuntime {
   }
 
   touchEnemyFlag(entity: GameEntity, other: GameEntity, team: Team): number {
-    const client = clientOf(other), mission = this.host.product === "missionpack";
+    const client = clientOf(other),
+      mission = this.host.product === "missionpack";
     if (mission && this.host.gameType === GameType.GT_1FCTF) {
       this.printMessage(null, `${client.pers.netname}^7 got the flag!\n`);
       client.ps.powerups.set(Powerup.PW_NEUTRALFLAG, 2147483647);
@@ -389,16 +484,28 @@ export class TeamRuntime {
   pickupTeam(entity: GameEntity, other: GameEntity): number {
     const client = clientOf(other);
     if (this.host.product === "missionpack") {
-      if (this.host.gameType === GameType.GT_OBELISK) { this.host.pool.free(entity); return 0; }
+      if (this.host.gameType === GameType.GT_OBELISK) {
+        this.host.pool.free(entity);
+        return 0;
+      }
       if (this.host.gameType === GameType.GT_HARVESTER) {
         if (entity.spawnflags !== client.sess.sessionTeam) client.ps.generic1 = (client.ps.generic1 + 1) | 0;
         this.host.pool.free(entity);
         return 0;
       }
     }
-    const team = entity.classname === "team_CTF_redflag" ? Team.TEAM_RED : entity.classname === "team_CTF_blueflag" ? Team.TEAM_BLUE
-      : this.host.product === "missionpack" && entity.classname === "team_CTF_neutralflag" ? Team.TEAM_FREE : null;
-    if (team === null) { this.printMessage(other, "Don't know what team the flag is on.\n"); return 0; }
+    const team =
+      entity.classname === "team_CTF_redflag"
+        ? Team.TEAM_RED
+        : entity.classname === "team_CTF_blueflag"
+          ? Team.TEAM_BLUE
+          : this.host.product === "missionpack" && entity.classname === "team_CTF_neutralflag"
+            ? Team.TEAM_FREE
+            : null;
+    if (team === null) {
+      this.printMessage(other, "Don't know what team the flag is on.\n");
+      return 0;
+    }
     if (this.host.product === "missionpack" && this.host.gameType === GameType.GT_1FCTF) {
       if (team === Team.TEAM_FREE) return this.touchEnemyFlag(entity, other, client.sess.sessionTeam);
       return team !== client.sess.sessionTeam ? this.touchOurFlag(entity, other, client.sess.sessionTeam) : 0;
@@ -407,7 +514,8 @@ export class TeamRuntime {
   }
 
   getLocation(entity: GameEntity): GameEntity | null {
-    let best: GameEntity | null = null, bestLength = 3 * 8192 * 8192;
+    let best: GameEntity | null = null,
+      bestLength = 3 * 8192 * 8192;
     for (let location = this.host.locationHead; location !== null; location = location.nextTrain) {
       const delta = sub3(entity.r.currentOrigin, location.r.currentOrigin);
       const length = dot3(delta, delta);
@@ -442,14 +550,25 @@ export class TeamRuntime {
       }
     }
     clients.sort(sortClients);
-    let message = "", count = 0;
+    let message = "",
+      count = 0;
     // Source sorts a local clients[] that is never read by this output loop.
     for (let index = 0; index < this.host.pool.maxClients && count < 32; index++) {
       const player = this.host.pool.at(index);
       if (!player.inuse || clientOf(player).sess.sessionTeam !== clientOf(entity).sess.sessionTeam) continue;
       const client = clientOf(player);
-      const entry = gameFormat(" %i %i %i %i %i %i", [index, client.pers.teamState.location,
-        Math.max(0, client.ps.health), Math.max(0, client.ps.stats.get(statSchema(this.host.product).armor)), client.ps.weapon, player.s.powerups], 1024);
+      const entry = gameFormat(
+        " %i %i %i %i %i %i",
+        [
+          index,
+          client.pers.teamState.location,
+          Math.max(0, client.ps.health),
+          Math.max(0, client.ps.stats.get(statSchema(this.host.product).armor)),
+          client.ps.weapon,
+          player.s.powerups,
+        ],
+        1024,
+      );
       if (message.length + entry.length > 8192) break;
       message += entry;
       count++;
@@ -461,14 +580,16 @@ export class TeamRuntime {
     if (((this.host.time - this.lastTeamLocationTime) | 0) <= 1000) return;
     this.lastTeamLocationTime = this.host.time;
     for (let index = 0; index < this.host.pool.maxClients; index++) {
-      const entity = this.host.pool.at(index), client = clientOf(entity);
+      const entity = this.host.pool.at(index),
+        client = clientOf(entity);
       if (client.pers.connected !== ConnectionState.CONNECTED) continue;
       if (entity.inuse && (client.sess.sessionTeam === Team.TEAM_RED || client.sess.sessionTeam === Team.TEAM_BLUE)) {
         client.pers.teamState.location = this.getLocation(entity)?.health ?? 0;
       }
     }
     for (let index = 0; index < this.host.pool.maxClients; index++) {
-      const entity = this.host.pool.at(index), client = clientOf(entity);
+      const entity = this.host.pool.at(index),
+        client = clientOf(entity);
       if (client.pers.connected !== ConnectionState.CONNECTED) continue;
       if (entity.inuse && (client.sess.sessionTeam === Team.TEAM_RED || client.sess.sessionTeam === Team.TEAM_BLUE)) this.teamplayInfoMessage(entity);
     }
@@ -553,8 +674,13 @@ export class TeamRuntime {
 
   private obeliskTeam(entity: GameEntity): Team {
     switch (entity.spawnflags) {
-      case Team.TEAM_FREE: case Team.TEAM_RED: case Team.TEAM_BLUE: case Team.TEAM_SPECTATOR: return entity.spawnflags;
-      default: throw new Error("Spawned obelisk has no source team");
+      case Team.TEAM_FREE:
+      case Team.TEAM_RED:
+      case Team.TEAM_BLUE:
+      case Team.TEAM_SPECTATOR:
+        return entity.spawnflags;
+      default:
+        throw new Error("Spawned obelisk has no source team");
     }
   }
 
@@ -585,12 +711,16 @@ export class TeamRuntime {
     else {
       entity.s.origin = vec3(origin.x, origin.y, origin.z + 1);
       const destination = vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z - 4096);
-      const trace = this.host.world.traceActor({ start: entity.s.origin, end: destination,
-        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passActor: entity.actor.id, mask: 1 });
+      const trace = this.host.world.traceActor({
+        start: entity.s.origin,
+        end: destination,
+        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
+        passActor: entity.actor.id,
+        mask: 1,
+      });
       if (trace.solidity !== "clear") {
         entity.s.origin = vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z - 1);
-        this.host.warn(gameFormat("SpawnObelisk: %s startsolid at %s\n",
-          [entity.classname, this.host.pool.utilities.vtos(entity.s.origin).readString()]));
+        this.host.warn(gameFormat("SpawnObelisk: %s startsolid at %s\n", [entity.classname, this.host.pool.utilities.vtos(entity.s.origin).readString()]));
         writeGround(entity, null, this.host.pool);
         setOrigin(entity, entity.s.origin);
       } else {
@@ -605,12 +735,18 @@ export class TeamRuntime {
 
   spawnTeamObelisk(entity: GameEntity, team: Team.TEAM_RED | Team.TEAM_BLUE): void {
     this.obeliskSettings();
-    if (this.host.gameType <= GameType.GT_TEAM) { this.host.pool.free(entity); return; }
+    if (this.host.gameType <= GameType.GT_TEAM) {
+      this.host.pool.free(entity);
+      return;
+    }
     entity.s.eType = EntityType.ET_TEAM;
     if (this.host.gameType === GameType.GT_OBELISK || this.host.gameType === GameType.GT_HARVESTER) {
       const obelisk = this.spawnObelisk(entity.s.origin, team, entity.spawnflags);
       obelisk.activator = entity;
-      if (this.host.gameType === GameType.GT_OBELISK) { entity.s.modelindex2 = 255; entity.s.frame = 0; }
+      if (this.host.gameType === GameType.GT_OBELISK) {
+        entity.s.modelindex2 = 255;
+        entity.s.frame = 0;
+      }
     }
     entity.s.modelindex = team;
     this.host.world.link(entity);
@@ -618,7 +754,10 @@ export class TeamRuntime {
 
   spawnNeutralObelisk(entity: GameEntity): void {
     this.obeliskSettings();
-    if (this.host.gameType !== GameType.GT_1FCTF && this.host.gameType !== GameType.GT_HARVESTER) { this.host.pool.free(entity); return; }
+    if (this.host.gameType !== GameType.GT_1FCTF && this.host.gameType !== GameType.GT_HARVESTER) {
+      this.host.pool.free(entity);
+      return;
+    }
     entity.s.eType = EntityType.ET_TEAM;
     if (this.host.gameType === GameType.GT_HARVESTER) this.neutralObelisk = this.spawnObelisk(entity.s.origin, Team.TEAM_FREE, entity.spawnflags);
     entity.s.modelindex = Team.TEAM_FREE;
@@ -628,9 +767,12 @@ export class TeamRuntime {
   checkObeliskAttack(obelisk: GameEntity, attacker: GameEntity): boolean {
     if (obelisk.die !== this.obeliskDie || attacker.client === null) return false;
     if (obelisk.spawnflags === attacker.client.sess.sessionTeam) return true;
-    const red = obelisk.spawnflags === Team.TEAM_RED, blue = obelisk.spawnflags === Team.TEAM_BLUE;
-    if ((red && this.state.redObeliskAttackedTime < ((this.host.time - 20000) | 0)) ||
-      (blue && this.state.blueObeliskAttackedTime < ((this.host.time - 20000) | 0))) {
+    const red = obelisk.spawnflags === Team.TEAM_RED,
+      blue = obelisk.spawnflags === Team.TEAM_BLUE;
+    if (
+      (red && this.state.redObeliskAttackedTime < ((this.host.time - 20000) | 0)) ||
+      (blue && this.state.blueObeliskAttackedTime < ((this.host.time - 20000) | 0))
+    ) {
       this.flagSound(obelisk, red ? GlobalTeamSound.RED_OBELISK_ATTACKED : GlobalTeamSound.BLUE_OBELISK_ATTACKED);
       if (red) this.state.redObeliskAttackedTime = this.host.time;
       else this.state.blueObeliskAttackedTime = this.host.time;

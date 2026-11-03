@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Native ClientThink / ClientBeginServerFrame weapon command continuation. */
 export interface Q2WeaponTurnState {
   buttons: number;

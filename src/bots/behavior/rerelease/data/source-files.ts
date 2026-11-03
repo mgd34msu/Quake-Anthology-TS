@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { BotSourceFiles } from "../../assets.ts";
 
 /** The legacy text family uses byte characters; preserve values above ASCII without UTF-8 replacement. */

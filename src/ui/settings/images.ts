@@ -1,35 +1,89 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SettingCvars } from "./index.ts";
 import { bindCvarSetting } from "./index.ts";
 import type { SettingBinding } from "./index.ts";
 
 /** The application owns registration and refresh; menus edit its existing controls. */
 export function bindImageSettings(registry: SettingCvars): readonly SettingBinding[] {
-  const replacement = bindCvarSetting(registry, { name: "r_override_textures", label: "Replacement images", category: "video", restart: null,
-    kind: "choice", choices: [{ id: "0", label: "Disabled" }, { id: "1", label: "Replace classic formats" }, { id: "2", label: "Replace all formats" }] }, null);
-  const formats = bindCvarSetting(registry, { name: "r_texture_formats", label: "Formats (source = default)", category: "video", restart: null,
-    kind: "text-entry", maximumLength: 128 }, null);
-  const mask = bindCvarSetting(registry, { name: "r_texture_overrides", label: "Image types", category: "video", restart: null,
-    kind: "text-entry", maximumLength: 12 }, null);
+  const replacement = bindCvarSetting(
+    registry,
+    {
+      name: "r_override_textures",
+      label: "Replacement images",
+      category: "video",
+      restart: null,
+      kind: "choice",
+      choices: [
+        { id: "0", label: "Disabled" },
+        { id: "1", label: "Replace classic formats" },
+        { id: "2", label: "Replace all formats" },
+      ],
+    },
+    null,
+  );
+  const formats = bindCvarSetting(
+    registry,
+    { name: "r_texture_formats", label: "Formats (source = default)", category: "video", restart: null, kind: "text-entry", maximumLength: 128 },
+    null,
+  );
+  const mask = bindCvarSetting(
+    registry,
+    { name: "r_texture_overrides", label: "Image types", category: "video", restart: null, kind: "text-entry", maximumLength: 12 },
+    null,
+  );
   if (mask.kind !== "text-entry") throw new Error("Image mask requires a numeric text binding");
   // the reference port ImagetypeT bits, explicitly mapped rather than UI choice ordinals.
   const usages: readonly (readonly [string, string, number])[] = [
-    ["skin", "Replace model skins", 1], ["sprite", "Replace sprites", 2], ["wall", "Replace wall textures", 4],
-    ["picture", "Replace pictures", 8], ["sky", "Replace sky images", 16],
+    ["skin", "Replace model skins", 1],
+    ["sprite", "Replace sprites", 2],
+    ["wall", "Replace wall textures", 4],
+    ["picture", "Replace pictures", 8],
+    ["sky", "Replace sky images", 16],
   ];
-  return [replacement, formats, ...usages.map(([usage, label, bit]): SettingBinding => ({
-    id: `ui:settings:image-${usage}`, label, category: "video", kind: "toggle", enabled: mask.enabled,
-    read: () => (Number(mask.read()) & bit) !== 0,
-    write: value => { const current = Number(mask.read()); mask.write(String(value ? current | bit : current & ~bit)); },
-  }))];
+  return [
+    replacement,
+    formats,
+    ...usages.map(
+      ([usage, label, bit]): SettingBinding => ({
+        id: `ui:settings:image-${usage}`,
+        label,
+        category: "video",
+        kind: "toggle",
+        enabled: mask.enabled,
+        read: () => (Number(mask.read()) & bit) !== 0,
+        write: value => {
+          const current = Number(mask.read());
+          mask.write(String(value ? current | bit : current & ~bit));
+        },
+      }),
+    ),
+  ];
 }
 
 export function bindModelSettings(registry: SettingCvars): readonly SettingBinding[] {
   const controls: readonly (readonly [string, string])[] = [
-    ["r_enhancedmodels", "Q1 enhanced models"], ["gl_md5_load", "Load Q2 enhanced models"],
+    ["r_enhancedmodels", "Q1 enhanced models"],
+    ["gl_md5_load", "Load Q2 enhanced models"],
     ["gl_md5_use", "Draw Q2 enhanced models"],
   ];
-  return [...controls.map(([name, label]) => bindCvarSetting(registry, {
-    name, label, category: "video", restart: null, kind: "toggle",
-  }, null)), bindCvarSetting(registry, { name: "r_model_distance", label: "Model range (map units)",
-    category: "video", restart: null, kind: "text-entry", maximumLength: 16, submitOnly: true }, null)];
+  return [
+    ...controls.map(([name, label]) =>
+      bindCvarSetting(
+        registry,
+        {
+          name,
+          label,
+          category: "video",
+          restart: null,
+          kind: "toggle",
+        },
+        null,
+      ),
+    ),
+    bindCvarSetting(
+      registry,
+      { name: "r_model_distance", label: "Model range (map units)", category: "video", restart: null, kind: "text-entry", maximumLength: 16, submitOnly: true },
+      null,
+    ),
+  ];
 }

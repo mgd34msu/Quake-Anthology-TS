@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Snapshot transitions from id Software's code/cgame/cg_snapshot.c,
 // and the CL_GetSnapshot boundary from code/client/cl_cgame.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -18,8 +19,11 @@ export interface SnapshotSource {
 }
 
 export class HistorySnapshotSource implements SnapshotSource {
-  constructor(readonly history: SnapshotHistory, private readonly parseEntitiesNumber: () => number,
-    private readonly debugPrint: (message: string) => void) {}
+  constructor(
+    readonly history: SnapshotHistory,
+    private readonly parseEntitiesNumber: () => number,
+    private readonly debugPrint: (message: string) => void,
+  ) {}
   current(): { readonly number: number; readonly serverTime: number } {
     const latest = this.history.latest;
     return latest === null ? { number: 0, serverTime: 0 } : { number: latest.messageNumber, serverTime: latest.serverTime };
@@ -55,8 +59,10 @@ export class HistorySnapshotSource implements SnapshotSource {
       this.debugPrint(`CL_GetSnapshot: truncated ${count} entities to 256\n`);
       count = 256;
     }
-    const entities = retained === null ? snapshot.entities.slice(0, count).map(entity => entity.copy())
-      : Array.from({ length: count }, (_, index) => retained.at(snapshot.parseEntitiesNumber + index).copy());
+    const entities =
+      retained === null
+        ? snapshot.entities.slice(0, count).map(entity => entity.copy())
+        : Array.from({ length: count }, (_, index) => retained.at(snapshot.parseEntitiesNumber + index).copy());
     return { ...output, entities };
   }
 }
@@ -77,15 +83,28 @@ export interface SnapshotHost {
 
 export class SnapshotRuntime {
   private transitioning = false;
-  constructor(readonly state: ClientGameState, readonly host: SnapshotHost) {}
+  constructor(
+    readonly state: ClientGameState,
+    readonly host: SnapshotHost,
+  ) {}
   private async exclusive(operation: () => Promise<void>): Promise<void> {
     if (this.transitioning) throw new Error("Snapshot transition already in progress");
     this.transitioning = true;
-    try { await operation(); } finally { this.transitioning = false; }
+    try {
+      await operation();
+    } finally {
+      this.transitioning = false;
+    }
   }
-  setInitialSnapshot(input: Snapshot): Promise<void> { return this.exclusive(() => this.initialSnapshot(input)); }
-  transitionSnapshot(): Promise<void> { return this.exclusive(() => this.transition()); }
-  processSnapshots(): Promise<void> { return this.exclusive(() => this.process()); }
+  setInitialSnapshot(input: Snapshot): Promise<void> {
+    return this.exclusive(() => this.initialSnapshot(input));
+  }
+  transitionSnapshot(): Promise<void> {
+    return this.exclusive(() => this.transition());
+  }
+  processSnapshots(): Promise<void> {
+    return this.exclusive(() => this.process());
+  }
   private resetEntity(entity: ClientEntity, snapshot: { readonly serverTime: number }): void {
     if (entity.snapshotTime < ((this.state.time - 300) | 0)) entity.previousEvent = 0;
     entity.trailTime = snapshot.serverTime;
@@ -125,8 +144,10 @@ export class SnapshotRuntime {
       entity.nextState = entry.copy();
       entity.interpolate = entity.currentValid && ((entity.currentState.eFlags ^ entry.eFlags) & 4) === 0;
     }
-    this.state.nextFrameTeleport = ((snapshot.playerState.eFlags ^ previous.playerState.eFlags) & 4) !== 0
-      || snapshot.playerState.clientNum !== previous.playerState.clientNum || ((snapshot.flags ^ previous.flags) & 4) !== 0;
+    this.state.nextFrameTeleport =
+      ((snapshot.playerState.eFlags ^ previous.playerState.eFlags) & 4) !== 0 ||
+      snapshot.playerState.clientNum !== previous.playerState.clientNum ||
+      ((snapshot.flags ^ previous.flags) & 4) !== 0;
     buildSolidList(this.state);
   }
   private async transition(): Promise<void> {

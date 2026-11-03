@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 

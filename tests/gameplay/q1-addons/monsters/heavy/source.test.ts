@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../../../support/corpus.ts";
 
@@ -36,105 +37,317 @@ interface SavedHeavy {
 
 async function session(name: string, saved?: SavedHeavy) {
   const archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
-  const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${name}`);
-  const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); archive.close();
-  const identity = createIdentityOwner("mg3-heavy"), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
+  const entry = archive.findEntries(`maps/${name}.bsp`)[0];
+  if (entry === undefined) throw new Error(`Missing retail ${name}`);
+  const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` });
+  archive.close();
+  const identity = createIdentityOwner("mg3-heavy"),
+    actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources),
+    callbacks = new ActorCallbackTable(actors),
+    scene = createSceneQueries(map);
   const players: ActorId[] = [];
-  let active: Q1Foundation | null = null, randomValue = 0.4;
+  let active: Q1Foundation | null = null,
+    randomValue = 0.4;
   const bodies = q1SceneBodies(actors, scene, actor => active?.entity(actor));
-  const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, readTarget: actor => {
-    const owner = actors.resolveOwned(actor), body = bodies.read(actor);
-    return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
-  }, read: actor => {
-    const body = bodies.read(actor), entity = active?.entity(actor); if (body === null || entity === null || entity === undefined) return null;
-    return { ...body, absoluteBounds: translatedBodyBounds(entity.actor, body), flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null };
-  }, write: (actor, state) => {
-    const body = bodies.read(actor.id), entity = active?.entity(actor.id); if (body === null || entity === null || entity === undefined) throw new Error("Missing source movement actor");
-    bodies.write(actor, { ...body, origin: state.origin, angles: state.angles, ground: state.ground.kind === "none" ? null : state.ground.kind === "actor" ? state.ground.actor : active?.world?.actor.id ?? null });
-    entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed; return undefined;
-  }, link: actor => bodies.link(actor) });
+  const movement = new Q1MonsterMovement({
+    scene,
+    numeric: createNumericOperations(Q1_DONOR_PROFILE),
+    random: { nextInteger: () => 1 },
+    readTarget: actor => {
+      const owner = actors.resolveOwned(actor),
+        body = bodies.read(actor);
+      return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
+    },
+    read: actor => {
+      const body = bodies.read(actor),
+        entity = active?.entity(actor);
+      if (body === null || entity === null || entity === undefined) return null;
+      return {
+        ...body,
+        absoluteBounds: translatedBodyBounds(entity.actor, body),
+        flags: entity.movementFlags,
+        ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground },
+        idealYaw: entity.idealYaw,
+        yawSpeed: entity.yawSpeed,
+        enemy: entity.monster?.enemy ?? null,
+      };
+    },
+    write: (actor, state) => {
+      const body = bodies.read(actor.id),
+        entity = active?.entity(actor.id);
+      if (body === null || entity === null || entity === undefined) throw new Error("Missing source movement actor");
+      bodies.write(actor, {
+        ...body,
+        origin: state.origin,
+        angles: state.angles,
+        ground: state.ground.kind === "none" ? null : state.ground.kind === "actor" ? state.ground.actor : (active?.world?.actor.id ?? null),
+      });
+      entity.movementFlags = state.flags;
+      entity.idealYaw = state.idealYaw;
+      entity.yawSpeed = state.yawSpeed;
+      return undefined;
+    },
+    link: actor => bodies.link(actor),
+  });
   const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
-  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => active?.world?.actor.id ?? null, entity: actor => active?.entity(actor), players: () => players }, {
-    random: () => randomValue, contents: () => "empty", walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance), changeYaw: actor => movement.changeYaw(actor),
-    moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode), checkBottom: actor => movement.checkBottom(actor) });
+  const { host, pending, events } = q1TestHost(
+    {
+      actors,
+      callbacks,
+      bodies,
+      combat,
+      inventory,
+      scene,
+      world: () => active?.world?.actor.id ?? null,
+      entity: actor => active?.entity(actor),
+      players: () => players,
+    },
+    {
+      random: () => randomValue,
+      contents: () => "empty",
+      walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance),
+      changeYaw: actor => movement.changeYaw(actor),
+      moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode),
+      checkBottom: actor => movement.checkBottom(actor),
+    },
+  );
   function provider() {
-    const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, campaign: "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" }); active = game;
-    const base = registerQ1Base(game), context = new Q1AddonContext(base, "mg3", { emit: () => undefined, isMonster: actor => game.entity(actor)?.monster !== null && game.entity(actor) !== null, cvar: name => name === "skill" ? 1 : 0, setCvar: () => undefined });
-    const monsters = registerMg3Heavy(context); return { game, monsters, base };
+    const game = new Q1Foundation(host, {
+      edition: "rerelease",
+      skill: 1,
+      deathmatch: 0,
+      coop: false,
+      gravity: 800,
+      campaign: "q1:mg3",
+      combatProvider: "q1:combat",
+      inventoryProvider: "q1:inventory",
+      movementProvider: "q1:movement",
+    });
+    active = game;
+    const base = registerQ1Base(game),
+      context = new Q1AddonContext(base, "mg3", {
+        emit: () => undefined,
+        isMonster: actor => game.entity(actor)?.monster !== null && game.entity(actor) !== null,
+        cvar: name => (name === "skill" ? 1 : 0),
+        setCvar: () => undefined,
+      });
+    const monsters = registerMg3Heavy(context);
+    return { game, monsters, base };
   }
   const initial = provider();
-  combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => { if (active === null) throw new Error("Missing source provider"); return active.combatContext(request); }, armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
+  combat.register(
+    createQ1CombatPolicy({
+      id: "q1:combat",
+      context: request => {
+        if (active === null) throw new Error("Missing source provider");
+        return active.combatContext(request);
+      },
+      armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })),
+    }),
+  );
   let player: OwnedActor;
   if (saved === undefined) {
-    for (const source of map.entityList) { const classname = q1EntityValue(source, "classname") ?? ""; if (classname === "worldspawn" || initial.monsters.definitions.has(classname) || classname === "path_corner") initial.game.spawnEntity(initial.game.create(classname, source)); }
-    player = actors.allocateAtSource("q3:character", 1, "q3:sarge"); bodies.create(player, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); initial.game.attachPlayer(player);
+    for (const source of map.entityList) {
+      const classname = q1EntityValue(source, "classname") ?? "";
+      if (classname === "worldspawn" || initial.monsters.definitions.has(classname) || classname === "path_corner")
+        initial.game.spawnEntity(initial.game.create(classname, source));
+    }
+    player = actors.allocateAtSource("q3:character", 1, "q3:sarge");
+    bodies.create(player, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
+    combat.create(player, {
+      health: 1000,
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+      mass: 100,
+      canTakeDamage: true,
+      invulnerable: false,
+      team: null,
+    });
+    initial.game.attachPlayer(player);
   } else {
-    const actor = actors.atSource("q3:character", 1); if (actor === null) throw new Error("Missing saved foreign player"); player = actor;
-    const owner = (id: BodyCheckpoint["actor"]): OwnedActor => { const actor = actors.resolveSaved(id); if (actor === null) throw new Error("Missing saved actor"); return actor; };
-    for (const entry of saved.bodies) bodies.create(owner(entry.actor), { ...entry.body, ground: entry.body.ground === null ? null : actors.referenceSaved(entry.body.ground) });
+    const actor = actors.atSource("q3:character", 1);
+    if (actor === null) throw new Error("Missing saved foreign player");
+    player = actor;
+    const owner = (id: BodyCheckpoint["actor"]): OwnedActor => {
+      const actor = actors.resolveSaved(id);
+      if (actor === null) throw new Error("Missing saved actor");
+      return actor;
+    };
+    for (const entry of saved.bodies)
+      bodies.create(owner(entry.actor), { ...entry.body, ground: entry.body.ground === null ? null : actors.referenceSaved(entry.body.ground) });
     for (const entry of saved.combat) combat.create(owner(entry.actor), entry.state);
     for (const entry of saved.inventories) inventory.create(owner(entry.actor), entry.entries);
-    initial.game.restore(saved.source); restoreSharedBodyLinks(saved, { actors, bodies });
+    initial.game.restore(saved.source);
+    restoreSharedBodyLinks(saved, { actors, bodies });
   }
   players.push(player.id);
-  function tick(entity: Q1Actor) { const callback = entity.think; if (callback === null || active === null) throw new Error("Missing scheduled source callback"); active.time = entity.nextThink; entity.think = null; entity.nextThink = -1; pending.delete(entity.actor); callback(); }
-  function capture(): SavedHeavy { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(initial.game.capture())), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }) }; }
-  return { ...initial, player, actors, events, tick, capture, random: (value: number) => { randomValue = value; } };
+  function tick(entity: Q1Actor) {
+    const callback = entity.think;
+    if (callback === null || active === null) throw new Error("Missing scheduled source callback");
+    active.time = entity.nextThink;
+    entity.think = null;
+    entity.nextThink = -1;
+    pending.delete(entity.actor);
+    callback();
+  }
+  function capture(): SavedHeavy {
+    return {
+      source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(initial.game.capture())),
+      ...captureSharedActors({ actors, bodies: bodies, combat, inventory }),
+    };
+  }
+  return {
+    ...initial,
+    player,
+    actors,
+    events,
+    tick,
+    capture,
+    random: (value: number) => {
+      randomValue = value;
+    },
+  };
 }
 
 test("MG3 retail heavy models cover all 401 source frame callbacks", async () => {
-  const current = await session("map2"), archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
+  const current = await session("map2"),
+    archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
   try {
     let frames = 0;
     for (const definition of current.monsters.definitions.values()) {
-      const entry = archive.findEntries(`progs/${definition.spec.model}.mdl`)[0]; if (entry === undefined) throw new Error(`Missing retail ${definition.spec.model}`);
-      const model = parseMdl(await archive.readEntry(entry), entry.path); frames += definition.frames.size;
-      expect([...definition.frames.values()].every(frame => frame.frame < model.frames.length && (definition.frames.has(frame.next) || frame.next in definition.actions) && frame.operations.every(op => op.kind !== "action" || op.name in definition.actions))).toBe(true);
+      const entry = archive.findEntries(`progs/${definition.spec.model}.mdl`)[0];
+      if (entry === undefined) throw new Error(`Missing retail ${definition.spec.model}`);
+      const model = parseMdl(await archive.readEntry(entry), entry.path);
+      frames += definition.frames.size;
+      expect(
+        [...definition.frames.values()].every(
+          frame =>
+            frame.frame < model.frames.length &&
+            (definition.frames.has(frame.next) || frame.next in definition.actions) &&
+            frame.operations.every(op => op.kind !== "action" || op.name in definition.actions),
+        ),
+      ).toBe(true);
     }
-    expect(frames).toBe(401); expect(current.monsters.monsters.size).toBe(2);
-    const source = current.game.create("monster_ranged_knight"); source.spawnflags = 262144; current.game.spawnEntity(source); expect(current.game.live(source)).toBe(false); expect(current.game.totalMonsters).toBe(2);
+    expect(frames).toBe(401);
+    expect(current.monsters.monsters.size).toBe(2);
+    const source = current.game.create("monster_ranged_knight");
+    source.spawnflags = 262144;
+    current.game.spawnEntity(source);
+    expect(current.game.live(source)).toBe(false);
+    expect(current.game.totalMonsters).toBe(2);
     expect(() => current.capture()).not.toThrow();
-  } finally { archive.close(); current.actors.close(); }
+  } finally {
+    archive.close();
+    current.actors.close();
+  }
 });
 
 test("Super Shambler keeps source blast counts and guarded lightning children", async () => {
-  const current = await session("map8"), { game, player, monsters } = current;
-  const monster = [...monsters.monsters.values()].find(monster => monster.entity.classname === "monster_super_shambler"); if (monster === undefined) throw new Error("Missing retail Super Shambler");
-  monster.start(); monster.enemy = player.id; const body = game.host.bodies.read(player.id); if (body === null) throw new Error("Missing target body");
+  const current = await session("map8"),
+    { game, player, monsters } = current;
+  const monster = [...monsters.monsters.values()].find(monster => monster.entity.classname === "monster_super_shambler");
+  if (monster === undefined) throw new Error("Missing retail Super Shambler");
+  monster.start();
+  monster.enemy = player.id;
+  const body = game.host.bodies.read(player.id);
+  if (body === null) throw new Error("Missing target body");
   game.host.bodies.write(player, { ...body, origin: vadd(monster.origin, { x: 500, y: 0, z: 0 }) });
-  monster.play("supsham_smash10"); expect([...game.entities.values()].filter(entity => entity.classname === "knightspike")).toHaveLength(11);
-  monster.play("supsham_swingl7"); expect([...game.entities.values()].filter(entity => entity.classname === "knightspike")).toHaveLength(20);
-  monster.play("supsham_magic3"); const child = game.entity(monster.entity.references.get("child") ?? null); if (child === null) throw new Error("Missing lightning child");
-  expect(child.owner).toBe(monster.entity.actor.id); current.tick(monster.entity); expect(child.frame).toBe(1);
-  const restored = await session("map8", current.capture()), owner = restored.actors.resolveSaved(monster.entity.actor.id), entity = owner === null ? null : restored.game.entity(owner.id); if (entity === null) throw new Error("Missing restored Super Shambler");
-  const restoredChild = restored.game.entity(entity.references.get("child") ?? null); if (restoredChild === null) throw new Error("Missing restored lightning child");
-  restored.tick(entity); expect(restoredChild.frame).toBe(2);
-  const controller = restored.monsters.require(entity); controller.play("supsham_magic6"); restored.tick(entity); restored.tick(entity);
-  expect(entity.number("frags")).toBe(3); expect(restored.events.filter(event => event.kind === "beam" && event.style === "lightning1")).toHaveLength(3); expect(restored.game.live(restoredChild)).toBe(false);
-  controller.play("supsham_magic_b3"); const fast = restored.game.entity(entity.references.get("child") ?? null); if (fast === null) throw new Error("Missing fast lightning child"); restored.tick(entity);
-  expect(fast.owner).toBe(null); expect(fast.classname).toBe(""); expect(fast.frame).toBe(0);
-  current.actors.close(); restored.actors.close();
+  monster.play("supsham_smash10");
+  expect([...game.entities.values()].filter(entity => entity.classname === "knightspike")).toHaveLength(11);
+  monster.play("supsham_swingl7");
+  expect([...game.entities.values()].filter(entity => entity.classname === "knightspike")).toHaveLength(20);
+  monster.play("supsham_magic3");
+  const child = game.entity(monster.entity.references.get("child") ?? null);
+  if (child === null) throw new Error("Missing lightning child");
+  expect(child.owner).toBe(monster.entity.actor.id);
+  current.tick(monster.entity);
+  expect(child.frame).toBe(1);
+  const restored = await session("map8", current.capture()),
+    owner = restored.actors.resolveSaved(monster.entity.actor.id),
+    entity = owner === null ? null : restored.game.entity(owner.id);
+  if (entity === null) throw new Error("Missing restored Super Shambler");
+  const restoredChild = restored.game.entity(entity.references.get("child") ?? null);
+  if (restoredChild === null) throw new Error("Missing restored lightning child");
+  restored.tick(entity);
+  expect(restoredChild.frame).toBe(2);
+  const controller = restored.monsters.require(entity);
+  controller.play("supsham_magic6");
+  restored.tick(entity);
+  restored.tick(entity);
+  expect(entity.number("frags")).toBe(3);
+  expect(restored.events.filter(event => event.kind === "beam" && event.style === "lightning1")).toHaveLength(3);
+  expect(restored.game.live(restoredChild)).toBe(false);
+  controller.play("supsham_magic_b3");
+  const fast = restored.game.entity(entity.references.get("child") ?? null);
+  if (fast === null) throw new Error("Missing fast lightning child");
+  restored.tick(entity);
+  expect(fast.owner).toBe(null);
+  expect(fast.classname).toBe("");
+  expect(fast.frame).toBe(0);
+  current.actors.close();
+  restored.actors.close();
 });
 
 test("Rune Knight resumes its saved burst counter and Lava Man retains MG3 awakening", async () => {
-  const current = await session("map2"), monster = [...current.monsters.monsters.values()].find(value => value.entity.classname === "monster_ranged_knight"); if (monster === undefined) throw new Error("Missing retail Rune Knight");
-  monster.start(); monster.enemy = current.player.id; monster.play("rknight_magicb6"); for (let frame = 0; frame < 6; frame++) current.tick(monster.entity);
-  expect(monster.currentFrame).toBe("rknight_magicb12"); expect(monster.entity.number("ammo_nails")).toBe(2); current.base.campaign.writeFlags(64);
-  const restored = await session("map2", current.capture()), owner = restored.actors.resolveSaved(monster.entity.actor.id), entity = owner === null ? null : restored.game.entity(owner.id); if (entity === null) throw new Error("Missing saved Rune Knight");
-  restored.tick(entity); restored.tick(entity); expect(entity.number("ammo_nails")).toBe(0); expect(restored.monsters.require(entity).nextFrame).toBe("rknight_magicb13");
-  const shots = [...restored.game.entities.values()].filter(entity => entity.classname === "knightspike"), last = shots[shots.length - 1]; if (last === undefined) throw new Error("Missing saved burst shots");
-  expect(shots).toHaveLength(8); expect(length(restored.game.body(last).velocity)).toBeCloseTo(600, 3); current.actors.close(); restored.actors.close();
-  const lava = await session("map2b"), source = [...lava.monsters.monsters.values()].find(value => value.entity.classname === "monster_lava_man"); if (source === undefined) throw new Error("Missing retail Lava Man");
-  const origin = source.origin; source.entity.use?.(null, lava.player.id); expect(source.origin).toEqual(origin); expect(source.entity.movement).toBe("fly"); expect(lava.game.health(source.entity.actor.id)).toBe(1500);
-  lava.random(0.9); source.pain(lava.player.id, 1); expect(source.entity.count).toBe(1); expect(source.currentFrame).toBe("lavaman_shocka1");
-  source.enemy = lava.player.id; source.play("lavaman_fire7"); const ball = [...lava.game.entities.values()].find(entity => entity.classname === "lavaman_ball"); if (ball === undefined) throw new Error("Missing Lava Man missile");
-  const up = lava.game.basis.up; expect(lava.game.body(ball).origin.z - origin.z).toBeCloseTo(vscale(up, 90).z, 3); expect(ball.movement).toBe("bounce");
-  const world = lava.game.world; if (world === null) throw new Error("Missing source world");
-  ball.touch?.(world.actor.id, null); expect(ball.model).toBe("progs/s_explod.spr"); expect(ball.frame).toBe(0); expect(ball.movement).toBe("none");
+  const current = await session("map2"),
+    monster = [...current.monsters.monsters.values()].find(value => value.entity.classname === "monster_ranged_knight");
+  if (monster === undefined) throw new Error("Missing retail Rune Knight");
+  monster.start();
+  monster.enemy = current.player.id;
+  monster.play("rknight_magicb6");
+  for (let frame = 0; frame < 6; frame++) current.tick(monster.entity);
+  expect(monster.currentFrame).toBe("rknight_magicb12");
+  expect(monster.entity.number("ammo_nails")).toBe(2);
+  current.base.campaign.writeFlags(64);
+  const restored = await session("map2", current.capture()),
+    owner = restored.actors.resolveSaved(monster.entity.actor.id),
+    entity = owner === null ? null : restored.game.entity(owner.id);
+  if (entity === null) throw new Error("Missing saved Rune Knight");
+  restored.tick(entity);
+  restored.tick(entity);
+  expect(entity.number("ammo_nails")).toBe(0);
+  expect(restored.monsters.require(entity).nextFrame).toBe("rknight_magicb13");
+  const shots = [...restored.game.entities.values()].filter(entity => entity.classname === "knightspike"),
+    last = shots[shots.length - 1];
+  if (last === undefined) throw new Error("Missing saved burst shots");
+  expect(shots).toHaveLength(8);
+  expect(length(restored.game.body(last).velocity)).toBeCloseTo(600, 3);
+  current.actors.close();
+  restored.actors.close();
+  const lava = await session("map2b"),
+    source = [...lava.monsters.monsters.values()].find(value => value.entity.classname === "monster_lava_man");
+  if (source === undefined) throw new Error("Missing retail Lava Man");
+  const origin = source.origin;
+  source.entity.use?.(null, lava.player.id);
+  expect(source.origin).toEqual(origin);
+  expect(source.entity.movement).toBe("fly");
+  expect(lava.game.health(source.entity.actor.id)).toBe(1500);
+  lava.random(0.9);
+  source.pain(lava.player.id, 1);
+  expect(source.entity.count).toBe(1);
+  expect(source.currentFrame).toBe("lavaman_shocka1");
+  source.enemy = lava.player.id;
+  source.play("lavaman_fire7");
+  const ball = [...lava.game.entities.values()].find(entity => entity.classname === "lavaman_ball");
+  if (ball === undefined) throw new Error("Missing Lava Man missile");
+  const up = lava.game.basis.up;
+  expect(lava.game.body(ball).origin.z - origin.z).toBeCloseTo(vscale(up, 90).z, 3);
+  expect(ball.movement).toBe("bounce");
+  const world = lava.game.world;
+  if (world === null) throw new Error("Missing source world");
+  ball.touch?.(world.actor.id, null);
+  expect(ball.model).toBe("progs/s_explod.spr");
+  expect(ball.frame).toBe(0);
+  expect(ball.movement).toBe("none");
   expect(lava.events.filter(event => event.kind === "effect" && event.effect === "explosion")).toHaveLength(1);
   for (let frame = 1; frame <= 5; frame++) lava.tick(ball);
-  expect(ball.frame).toBe(5); expect(lava.game.live(ball)).toBe(true); lava.tick(ball); expect(lava.game.live(ball)).toBe(false);
-  source.entity.use?.(null, lava.player.id); expect(lava.game.killedMonsters).toBe(1); expect(source.currentFrame).toBe("lavaman_death1"); expect(() => lava.capture()).not.toThrow(); lava.actors.close();
+  expect(ball.frame).toBe(5);
+  expect(lava.game.live(ball)).toBe(true);
+  lava.tick(ball);
+  expect(lava.game.live(ball)).toBe(false);
+  source.entity.use?.(null, lava.player.id);
+  expect(lava.game.killedMonsters).toBe(1);
+  expect(source.currentFrame).toBe("lavaman_death1");
+  expect(() => lava.capture()).not.toThrow();
+  lava.actors.close();
 });

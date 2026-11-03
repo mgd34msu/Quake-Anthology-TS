@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
@@ -11,15 +12,16 @@ import type { Vec3 } from "../../../core/math.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
 import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../content/legacy-script/preprocessor.ts";
-import { StructureReader, StructureFieldType, writeStructure, type StructureDefinition, type StructureField, type StructureFieldDefinition } from "./structure.ts";
-import type { BotLog } from "./log.ts";
 import {
-  WeightConfigError,
-  WeightConfigLoadError,
-  type WeightConfig,
-  type WeightConfigStore,
-  type WeightInventory,
-} from "./weights.ts";
+  StructureReader,
+  StructureFieldType,
+  writeStructure,
+  type StructureDefinition,
+  type StructureField,
+  type StructureFieldDefinition,
+} from "./structure.ts";
+import type { BotLog } from "./log.ts";
+import { WeightConfigError, WeightConfigLoadError, type WeightConfig, type WeightConfigStore, type WeightInventory } from "./weights.ts";
 import type { BotScriptReader } from "./script-sources.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 
@@ -123,7 +125,11 @@ export interface WeaponDiagnostic {
 }
 
 class WeaponPrintDiagnostic {
-  constructor(readonly severity: "warning" | "error", readonly message: string, readonly location: SourceLocation) {}
+  constructor(
+    readonly severity: "warning" | "error",
+    readonly message: string,
+    readonly location: SourceLocation,
+  ) {}
 }
 
 type WeaponPointer =
@@ -138,22 +144,37 @@ class WeaponPointers {
   private next = 1;
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture, weights: WeightConfigStore) {
-    return { next: this.next, records: [...this.records].map(([pointer, record]) => ({ pointer, kind: record.kind,
-      target: record.kind === "config" ? weights.reference(record.config) : memory.reference(record.allocation),
-      references: record.kind === "config" ? record.references : 0 })),
+    return {
+      next: this.next,
+      records: [...this.records].map(([pointer, record]) => ({
+        pointer,
+        kind: record.kind,
+        target: record.kind === "config" ? weights.reference(record.config) : memory.reference(record.allocation),
+        references: record.kind === "config" ? record.references : 0,
+      })),
       configs: weights.configurations().flatMap(config => {
         const pointer = this.configs.get(config);
         return pointer === undefined ? [] : [{ pointer, config: weights.reference(config) }];
-      }) };
+      }),
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore, weights: WeightConfigStore): void {
-    const reader = new SaveReader(value, "bot.weapons.pointers"), image = { next: reader.field("next").integer(1),
-      records: reader.field("records").list(entry => ({ pointer: entry.field("pointer").integer(1), kind: entry.field("kind").choice("config", "indexes"),
-        target: entry.field("target").integer(0), references: entry.field("references").integer(0) })),
-      configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })) };
-    if (this.records.size !== 0 || !Number.isSafeInteger(image.next) || image.next < 1 || image.next > 0x100000000) throw new Error("Invalid weapon pointer restoration");
+    const reader = new SaveReader(value, "bot.weapons.pointers"),
+      image = {
+        next: reader.field("next").integer(1),
+        records: reader.field("records").list(entry => ({
+          pointer: entry.field("pointer").integer(1),
+          kind: entry.field("kind").choice("config", "indexes"),
+          target: entry.field("target").integer(0),
+          references: entry.field("references").integer(0),
+        })),
+        configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })),
+      };
+    if (this.records.size !== 0 || !Number.isSafeInteger(image.next) || image.next < 1 || image.next > 0x100000000)
+      throw new Error("Invalid weapon pointer restoration");
     for (const entry of image.records) {
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.records.has(entry.pointer)) throw new Error("Invalid saved weapon pointer");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.records.has(entry.pointer))
+        throw new Error("Invalid saved weapon pointer");
       if (entry.kind === "config") {
         if (!Number.isSafeInteger(entry.references) || entry.references < 1) throw new Error("Invalid saved weapon weight reference count");
         this.records.set(entry.pointer, { kind: "config", config: weights.resolve(entry.target), references: entry.references });
@@ -164,7 +185,8 @@ class WeaponPointers {
     }
     for (const entry of image.configs) {
       const config = weights.resolve(entry.config);
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.configs.has(config)) throw new Error("Invalid saved weapon weight identity");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.configs.has(config))
+        throw new Error("Invalid saved weapon weight identity");
       const live = this.records.get(entry.pointer);
       if (live !== undefined && (live.kind !== "config" || live.config !== config)) throw new Error("Saved weapon weight identities disagree");
       this.configs.set(config, entry.pointer);
@@ -199,7 +221,9 @@ class WeaponPointers {
     return record;
   }
 
-  forgetIndexes(pointer: number): void { this.records.delete(pointer); }
+  forgetIndexes(pointer: number): void {
+    this.records.delete(pointer);
+  }
 
   releaseConfig(pointer: number): void {
     const record = this.resolve(pointer);
@@ -211,7 +235,10 @@ class WeaponPointers {
 
 class WeaponState {
   revision = 0;
-  constructor(readonly allocation: BotMemoryAllocation, private readonly pointers: WeaponPointers) {}
+  constructor(
+    readonly allocation: BotMemoryAllocation,
+    private readonly pointers: WeaponPointers,
+  ) {}
 
   private get view(): DataView {
     const bytes = this.allocation.bytes;
@@ -230,8 +257,12 @@ class WeaponState {
     this.pointers.releaseConfig(view.getUint32(0, true));
     view.setUint32(0, pointer, true);
   }
-  get indexPointer(): number { return this.view.getUint32(4, true); }
-  set indexPointer(pointer: number) { this.view.setUint32(4, pointer, true); }
+  get indexPointer(): number {
+    return this.view.getUint32(4, true);
+  }
+  set indexPointer(pointer: number) {
+    this.view.setUint32(4, pointer, true);
+  }
   get indexes(): BotMemoryAllocation | undefined {
     const record = this.pointers.resolve(this.indexPointer);
     if (record === undefined) return undefined;
@@ -241,7 +272,8 @@ class WeaponState {
 
   reset(): void {
     const view = this.view;
-    const config = view.getUint32(0, true), indexes = view.getUint32(4, true);
+    const config = view.getUint32(0, true),
+      indexes = view.getUint32(4, true);
     view.setUint32(0, config, true);
     view.setUint32(4, indexes, true);
   }
@@ -311,14 +343,14 @@ function overlayVector(current: Vec3, values: readonly number[]): Vec3 {
   const first = values[0];
   const second = values[1];
   const third = values[2];
-  return vector(
-    first === undefined ? current.x : first,
-    second === undefined ? current.y : second,
-    third === undefined ? current.z : third,
-  );
+  return vector(first === undefined ? current.x : first, second === undefined ? current.y : second, third === undefined ? current.z : third);
 }
 
-function sourceCapacity(value: number | undefined, fallback: number, label: string): {
+function sourceCapacity(
+  value: number | undefined,
+  fallback: number,
+  label: string,
+): {
   readonly value: number;
   readonly corrected: boolean;
 } {
@@ -347,7 +379,6 @@ function freezeWeapon(weapon: WeaponInfo, projectileInfo: ProjectileInfo, valid:
     projectileInfo: Object.freeze({ ...projectileInfo }),
   });
 }
-
 
 // be_ai_weap.c and be_ai_weap.h, selected 32-bit source layout.
 const WEAPON_CONFIG_BYTES = 16;
@@ -407,19 +438,33 @@ const weaponDumpDefinition: StructureDefinition = {
 };
 
 class WeaponConfigCell {
-  constructor(private readonly allocation: BotMemoryAllocation, private readonly offset: number) {}
+  constructor(
+    private readonly allocation: BotMemoryAllocation,
+    private readonly offset: number,
+  ) {}
   private get view(): DataView {
     const bytes = this.allocation.bytes;
     return new DataView(bytes.buffer, bytes.byteOffset + this.offset, bytes.byteLength - this.offset);
   }
-  int(offset: number): number { return this.view.getInt32(offset, true); }
-  setInt(offset: number, value: number): void { this.view.setInt32(offset, value, true); }
-  float(offset: number): number { return this.view.getFloat32(offset, true); }
-  setFloat(offset: number, value: number): void { this.view.setFloat32(offset, value, true); }
+  int(offset: number): number {
+    return this.view.getInt32(offset, true);
+  }
+  setInt(offset: number, value: number): void {
+    this.view.setInt32(offset, value, true);
+  }
+  float(offset: number): number {
+    return this.view.getFloat32(offset, true);
+  }
+  setFloat(offset: number, value: number): void {
+    this.view.setFloat32(offset, value, true);
+  }
   text(offset: number): string {
     const bytes = this.allocation.bytes.subarray(this.offset + offset, this.offset + offset + 80);
     let result = "";
-    for (const byte of bytes) { if (byte === 0) break; result += String.fromCharCode(byte); }
+    for (const byte of bytes) {
+      if (byte === 0) break;
+      result += String.fromCharCode(byte);
+    }
     return result;
   }
   setText(offset: number, value: string): void {
@@ -447,34 +492,90 @@ class WeaponConfigCell {
 function projectileConfigView(allocation: BotMemoryAllocation, offset: number) {
   const cell = new WeaponConfigCell(allocation, offset);
   return {
-    get name(): string { return cell.text(0); },
-    set name(value: string) { cell.setText(0, value); },
-    get model(): string { return cell.text(80); },
-    set model(value: string) { cell.setText(80, value); },
-    get flags(): number { return cell.int(160); },
-    set flags(value: number) { cell.setInt(160, value); },
-    get gravity(): number { return cell.float(164); },
-    set gravity(value: number) { cell.setFloat(164, value); },
-    get damage(): number { return cell.int(168); },
-    set damage(value: number) { cell.setInt(168, value); },
-    get radius(): number { return cell.float(172); },
-    set radius(value: number) { cell.setFloat(172, value); },
-    get visibleDamage(): number { return cell.int(176); },
-    set visibleDamage(value: number) { cell.setInt(176, value); },
-    get damageType(): number { return cell.int(180); },
-    set damageType(value: number) { cell.setInt(180, value); },
-    get healthIncrease(): number { return cell.int(184); },
-    set healthIncrease(value: number) { cell.setInt(184, value); },
-    get push(): number { return cell.float(188); },
-    set push(value: number) { cell.setFloat(188, value); },
-    get detonation(): number { return cell.float(192); },
-    set detonation(value: number) { cell.setFloat(192, value); },
-    get bounce(): number { return cell.float(196); },
-    set bounce(value: number) { cell.setFloat(196, value); },
-    get bounceFriction(): number { return cell.float(200); },
-    set bounceFriction(value: number) { cell.setFloat(200, value); },
-    get bounceStop(): number { return cell.float(204); },
-    set bounceStop(value: number) { cell.setFloat(204, value); },
+    get name(): string {
+      return cell.text(0);
+    },
+    set name(value: string) {
+      cell.setText(0, value);
+    },
+    get model(): string {
+      return cell.text(80);
+    },
+    set model(value: string) {
+      cell.setText(80, value);
+    },
+    get flags(): number {
+      return cell.int(160);
+    },
+    set flags(value: number) {
+      cell.setInt(160, value);
+    },
+    get gravity(): number {
+      return cell.float(164);
+    },
+    set gravity(value: number) {
+      cell.setFloat(164, value);
+    },
+    get damage(): number {
+      return cell.int(168);
+    },
+    set damage(value: number) {
+      cell.setInt(168, value);
+    },
+    get radius(): number {
+      return cell.float(172);
+    },
+    set radius(value: number) {
+      cell.setFloat(172, value);
+    },
+    get visibleDamage(): number {
+      return cell.int(176);
+    },
+    set visibleDamage(value: number) {
+      cell.setInt(176, value);
+    },
+    get damageType(): number {
+      return cell.int(180);
+    },
+    set damageType(value: number) {
+      cell.setInt(180, value);
+    },
+    get healthIncrease(): number {
+      return cell.int(184);
+    },
+    set healthIncrease(value: number) {
+      cell.setInt(184, value);
+    },
+    get push(): number {
+      return cell.float(188);
+    },
+    set push(value: number) {
+      cell.setFloat(188, value);
+    },
+    get detonation(): number {
+      return cell.float(192);
+    },
+    set detonation(value: number) {
+      cell.setFloat(192, value);
+    },
+    get bounce(): number {
+      return cell.float(196);
+    },
+    set bounce(value: number) {
+      cell.setFloat(196, value);
+    },
+    get bounceFriction(): number {
+      return cell.float(200);
+    },
+    set bounceFriction(value: number) {
+      cell.setFloat(200, value);
+    },
+    get bounceStop(): number {
+      return cell.float(204);
+    },
+    set bounceStop(value: number) {
+      cell.setFloat(204, value);
+    },
   };
 }
 
@@ -482,117 +583,229 @@ function weaponConfigView(allocation: BotMemoryAllocation, offset: number) {
   const cell = new WeaponConfigCell(allocation, offset);
   const projectileInfo = Object.freeze(projectileConfigView(allocation, offset + 344));
   return {
-    get valid(): boolean { return cell.int(0) !== 0; },
-    set valid(value: boolean) { cell.setInt(0, value ? 1 : 0); },
-    get number(): number { return cell.int(4); },
-    set number(value: number) { cell.setInt(4, value); },
-    get name(): string { return cell.text(8); },
-    set name(value: string) { cell.setText(8, value); },
-    get model(): string { return cell.text(88); },
-    set model(value: string) { cell.setText(88, value); },
-    get level(): number { return cell.int(168); },
-    set level(value: number) { cell.setInt(168, value); },
-    get weaponInventoryIndex(): number { return cell.int(172); },
-    set weaponInventoryIndex(value: number) { cell.setInt(172, value); },
-    get flags(): number { return cell.int(176); },
-    set flags(value: number) { cell.setInt(176, value); },
-    get projectile(): string { return cell.text(180); },
-    set projectile(value: string) { cell.setText(180, value); },
-    get projectileCount(): number { return cell.int(260); },
-    set projectileCount(value: number) { cell.setInt(260, value); },
-    get horizontalSpread(): number { return cell.float(264); },
-    set horizontalSpread(value: number) { cell.setFloat(264, value); },
-    get verticalSpread(): number { return cell.float(268); },
-    set verticalSpread(value: number) { cell.setFloat(268, value); },
-    get speed(): number { return cell.float(272); },
-    set speed(value: number) { cell.setFloat(272, value); },
-    get acceleration(): number { return cell.float(276); },
-    set acceleration(value: number) { cell.setFloat(276, value); },
-    get recoil(): Vec3 { return cell.vector(280); },
-    set recoil(value: Vec3) { cell.setVector(280, value); },
-    get offset(): Vec3 { return cell.vector(292); },
-    set offset(value: Vec3) { cell.setVector(292, value); },
-    get angleOffset(): Vec3 { return cell.vector(304); },
-    set angleOffset(value: Vec3) { cell.setVector(304, value); },
-    get extraZVelocity(): number { return cell.float(316); },
-    set extraZVelocity(value: number) { cell.setFloat(316, value); },
-    get ammoAmount(): number { return cell.int(320); },
-    set ammoAmount(value: number) { cell.setInt(320, value); },
-    get ammoInventoryIndex(): number { return cell.int(324); },
-    set ammoInventoryIndex(value: number) { cell.setInt(324, value); },
-    get activate(): number { return cell.float(328); },
-    set activate(value: number) { cell.setFloat(328, value); },
-    get reload(): number { return cell.float(332); },
-    set reload(value: number) { cell.setFloat(332, value); },
-    get spinUp(): number { return cell.float(336); },
-    set spinUp(value: number) { cell.setFloat(336, value); },
-    get spinDown(): number { return cell.float(340); },
-    set spinDown(value: number) { cell.setFloat(340, value); },
-    get projectileInfo(): ProjectileInfo { return projectileInfo; },
-    set projectileInfo(value: ProjectileInfo) { Object.assign(projectileInfo, value); },
+    get valid(): boolean {
+      return cell.int(0) !== 0;
+    },
+    set valid(value: boolean) {
+      cell.setInt(0, value ? 1 : 0);
+    },
+    get number(): number {
+      return cell.int(4);
+    },
+    set number(value: number) {
+      cell.setInt(4, value);
+    },
+    get name(): string {
+      return cell.text(8);
+    },
+    set name(value: string) {
+      cell.setText(8, value);
+    },
+    get model(): string {
+      return cell.text(88);
+    },
+    set model(value: string) {
+      cell.setText(88, value);
+    },
+    get level(): number {
+      return cell.int(168);
+    },
+    set level(value: number) {
+      cell.setInt(168, value);
+    },
+    get weaponInventoryIndex(): number {
+      return cell.int(172);
+    },
+    set weaponInventoryIndex(value: number) {
+      cell.setInt(172, value);
+    },
+    get flags(): number {
+      return cell.int(176);
+    },
+    set flags(value: number) {
+      cell.setInt(176, value);
+    },
+    get projectile(): string {
+      return cell.text(180);
+    },
+    set projectile(value: string) {
+      cell.setText(180, value);
+    },
+    get projectileCount(): number {
+      return cell.int(260);
+    },
+    set projectileCount(value: number) {
+      cell.setInt(260, value);
+    },
+    get horizontalSpread(): number {
+      return cell.float(264);
+    },
+    set horizontalSpread(value: number) {
+      cell.setFloat(264, value);
+    },
+    get verticalSpread(): number {
+      return cell.float(268);
+    },
+    set verticalSpread(value: number) {
+      cell.setFloat(268, value);
+    },
+    get speed(): number {
+      return cell.float(272);
+    },
+    set speed(value: number) {
+      cell.setFloat(272, value);
+    },
+    get acceleration(): number {
+      return cell.float(276);
+    },
+    set acceleration(value: number) {
+      cell.setFloat(276, value);
+    },
+    get recoil(): Vec3 {
+      return cell.vector(280);
+    },
+    set recoil(value: Vec3) {
+      cell.setVector(280, value);
+    },
+    get offset(): Vec3 {
+      return cell.vector(292);
+    },
+    set offset(value: Vec3) {
+      cell.setVector(292, value);
+    },
+    get angleOffset(): Vec3 {
+      return cell.vector(304);
+    },
+    set angleOffset(value: Vec3) {
+      cell.setVector(304, value);
+    },
+    get extraZVelocity(): number {
+      return cell.float(316);
+    },
+    set extraZVelocity(value: number) {
+      cell.setFloat(316, value);
+    },
+    get ammoAmount(): number {
+      return cell.int(320);
+    },
+    set ammoAmount(value: number) {
+      cell.setInt(320, value);
+    },
+    get ammoInventoryIndex(): number {
+      return cell.int(324);
+    },
+    set ammoInventoryIndex(value: number) {
+      cell.setInt(324, value);
+    },
+    get activate(): number {
+      return cell.float(328);
+    },
+    set activate(value: number) {
+      cell.setFloat(328, value);
+    },
+    get reload(): number {
+      return cell.float(332);
+    },
+    set reload(value: number) {
+      cell.setFloat(332, value);
+    },
+    get spinUp(): number {
+      return cell.float(336);
+    },
+    set spinUp(value: number) {
+      cell.setFloat(336, value);
+    },
+    get spinDown(): number {
+      return cell.float(340);
+    },
+    set spinDown(value: number) {
+      cell.setFloat(340, value);
+    },
+    get projectileInfo(): ProjectileInfo {
+      return projectileInfo;
+    },
+    set projectileInfo(value: ProjectileInfo) {
+      Object.assign(projectileInfo, value);
+    },
   };
 }
 
 class WeaponConfigTokens {
   private unreadToken: ScriptToken | undefined;
   constructor(private readonly source: ScriptSourceReader) {}
-  get diagnostics(): readonly ScriptDiagnostic[] { return this.source.diagnostics; }
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return this.source.diagnostics;
+  }
   next(): ScriptToken | undefined {
     if (this.unreadToken !== undefined) {
       const token = this.unreadToken;
       this.unreadToken = undefined;
       return token;
     }
-    try { return this.source.next()?.token; }
-    catch (error) {
+    try {
+      return this.source.next()?.token;
+    } catch (error) {
       if (!this.source.isSourceFailure(error)) throw error;
       return undefined;
     }
   }
-  unread(token: ScriptToken): void { this.unreadToken = token; }
-  dispose(): void { this.source.dispose(); }
+  unread(token: ScriptToken): void {
+    this.unreadToken = token;
+  }
+  dispose(): void {
+    this.source.dispose();
+  }
 }
 
 class RetiredWeaponSetup extends Error {}
 
 function bindWeaponConfig(path: string, allocation: BotMemoryAllocation, diagnostics: readonly ScriptDiagnostic[], free: () => void): WeaponConfig {
-  const header = new WeaponConfigCell(allocation, 0), capacity = header.int(0), count = header.int(4);
-  if (capacity < 0 || count < 0 || WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + count * PROJECTILE_INFO_BYTES > allocation.bytes.length) throw new Error("Saved weapon configuration header exceeds allocation");
+  const header = new WeaponConfigCell(allocation, 0),
+    capacity = header.int(0),
+    count = header.int(4);
+  if (capacity < 0 || count < 0 || WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + count * PROJECTILE_INFO_BYTES > allocation.bytes.length)
+    throw new Error("Saved weapon configuration header exceeds allocation");
   const weapons = Array.from({ length: capacity }, (_, index) => {
     const view = weaponConfigView(allocation, WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES);
     return view.valid ? Object.freeze(view) : undefined;
   });
-  const projectiles = Array.from({ length: count }, (_, index) => Object.freeze(projectileConfigView(allocation, WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + index * PROJECTILE_INFO_BYTES)));
+  const projectiles = Array.from({ length: count }, (_, index) =>
+    Object.freeze(projectileConfigView(allocation, WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + index * PROJECTILE_INFO_BYTES)),
+  );
   const definedWeaponCount = weapons.filter(weapon => weapon !== undefined).length;
-    const weaponOffset = (index: number): number => {
-      const start = WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES;
-      if (!Number.isInteger(index) || start < WEAPON_CONFIG_BYTES || start + WEAPON_INFO_BYTES > allocation.bytes.length) {
-        throw new RangeError("weapon info copy exceeds the source configuration allocation");
+  const weaponOffset = (index: number): number => {
+    const start = WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES;
+    if (!Number.isInteger(index) || start < WEAPON_CONFIG_BYTES || start + WEAPON_INFO_BYTES > allocation.bytes.length) {
+      throw new RangeError("weapon info copy exceeds the source configuration allocation");
+    }
+    return start;
+  };
+  return Object.freeze({
+    allocation,
+    path,
+    get weaponCapacity(): number {
+      return new WeaponConfigCell(allocation, 0).int(0);
+    },
+    definedWeaponCount,
+    weapons: Object.freeze(weapons),
+    projectiles: Object.freeze(projectiles),
+    diagnostics: Object.freeze(diagnostics),
+    weaponBytes(index: number): Uint8Array {
+      const start = weaponOffset(index);
+      return allocation.bytes.subarray(start, start + WEAPON_INFO_BYTES);
+    },
+    projectileBytes(index: number): Uint8Array {
+      const start = ((WEAPON_CONFIG_BYTES + Math.imul(this.weaponCapacity, WEAPON_INFO_BYTES)) >>> 0) + index * PROJECTILE_INFO_BYTES;
+      if (!Number.isInteger(index) || index < 0 || index >= this.projectiles.length || start + PROJECTILE_INFO_BYTES > allocation.bytes.length) {
+        throw new RangeError("projectile dump exceeds the source configuration allocation");
       }
-      return start;
-    };
-    return Object.freeze({
-      allocation,
-      path,
-      get weaponCapacity(): number { return new WeaponConfigCell(allocation, 0).int(0); },
-      definedWeaponCount,
-      weapons: Object.freeze(weapons),
-      projectiles: Object.freeze(projectiles),
-      diagnostics: Object.freeze(diagnostics),
-      weaponBytes(index: number): Uint8Array {
-        const start = weaponOffset(index);
-        return allocation.bytes.subarray(start, start + WEAPON_INFO_BYTES);
-      },
-      projectileBytes(index: number): Uint8Array {
-        const start = ((WEAPON_CONFIG_BYTES + Math.imul(this.weaponCapacity, WEAPON_INFO_BYTES)) >>> 0) + index * PROJECTILE_INFO_BYTES;
-        if (!Number.isInteger(index) || index < 0 || index >= this.projectiles.length || start + PROJECTILE_INFO_BYTES > allocation.bytes.length) {
-          throw new RangeError("projectile dump exceeds the source configuration allocation");
-        }
-        return allocation.bytes.subarray(start, start + PROJECTILE_INFO_BYTES);
-      },
-      weaponInfo(index: number): WeaponInfo { return Object.freeze(weaponConfigView(allocation, weaponOffset(index))); },
-      free,
-    });
+      return allocation.bytes.subarray(start, start + PROJECTILE_INFO_BYTES);
+    },
+    weaponInfo(index: number): WeaponInfo {
+      return Object.freeze(weaponConfigView(allocation, weaponOffset(index)));
+    },
+    free,
+  });
 }
 
 class WeaponConfigParser {
@@ -645,10 +858,7 @@ class WeaponConfigParser {
         const header = new WeaponConfigCell(this.allocation, 0);
         const count = header.int(4);
         if (count >= this.projectileCapacity) {
-          this.fail(
-            `more than ${this.projectileCapacity} projectiles defined in ${this.path}`,
-            definition.location,
-          );
+          this.fail(`more than ${this.projectileCapacity} projectiles defined in ${this.path}`, definition.location);
         }
         const offset = ((WEAPON_CONFIG_BYTES + Math.imul(this.weaponCapacity, WEAPON_INFO_BYTES)) >>> 0) + count * PROJECTILE_INFO_BYTES;
         projectiles.push(this.readProjectile(offset));
@@ -672,7 +882,7 @@ class WeaponConfigParser {
       if (weapon.projectile.length === 0) {
         this.fail(`weapon ${weapon.name} has no projectile in ${this.path}`, location(this.path));
       }
-      const projectileIndex = projectiles.findIndex((candidate) => candidate.name === weapon.projectile);
+      const projectileIndex = projectiles.findIndex(candidate => candidate.name === weapon.projectile);
       if (projectileIndex < 0) {
         this.fail(`weapon ${weapon.name} uses undefined projectile in ${this.path}`, location(this.path));
       }
@@ -704,22 +914,51 @@ class WeaponConfigParser {
         return Object.freeze(projectile);
       }
       switch (field.name) {
-        case "name": projectile.name = this.reader.readString(); break;
+        case "name":
+          projectile.name = this.reader.readString();
+          break;
         // be_ai_weap.c uses WEAPON_OFS(model), eight bytes past projectile.model.
-        case "model": new WeaponConfigCell(this.allocation, offset).setText(88, this.reader.readString()); break;
-        case "flags": projectile.flags = this.reader.readInt(); break;
-        case "gravity": projectile.gravity = this.reader.readFloat(); break;
-        case "damage": projectile.damage = this.reader.readInt(); break;
-        case "radius": projectile.radius = this.reader.readFloat(); break;
-        case "visdamage": projectile.visibleDamage = this.reader.readInt(); break;
-        case "damagetype": projectile.damageType = this.reader.readInt(); break;
-        case "healthinc": projectile.healthIncrease = this.reader.readInt(); break;
-        case "push": projectile.push = this.reader.readFloat(); break;
-        case "detonation": projectile.detonation = this.reader.readFloat(); break;
-        case "bounce": projectile.bounce = this.reader.readFloat(); break;
-        case "bouncefric": projectile.bounceFriction = this.reader.readFloat(); break;
-        case "bouncestop": projectile.bounceStop = this.reader.readFloat(); break;
-        default: this.reader.rejectField(field);
+        case "model":
+          new WeaponConfigCell(this.allocation, offset).setText(88, this.reader.readString());
+          break;
+        case "flags":
+          projectile.flags = this.reader.readInt();
+          break;
+        case "gravity":
+          projectile.gravity = this.reader.readFloat();
+          break;
+        case "damage":
+          projectile.damage = this.reader.readInt();
+          break;
+        case "radius":
+          projectile.radius = this.reader.readFloat();
+          break;
+        case "visdamage":
+          projectile.visibleDamage = this.reader.readInt();
+          break;
+        case "damagetype":
+          projectile.damageType = this.reader.readInt();
+          break;
+        case "healthinc":
+          projectile.healthIncrease = this.reader.readInt();
+          break;
+        case "push":
+          projectile.push = this.reader.readFloat();
+          break;
+        case "detonation":
+          projectile.detonation = this.reader.readFloat();
+          break;
+        case "bounce":
+          projectile.bounce = this.reader.readFloat();
+          break;
+        case "bouncefric":
+          projectile.bounceFriction = this.reader.readFloat();
+          break;
+        case "bouncestop":
+          projectile.bounceStop = this.reader.readFloat();
+          break;
+        default:
+          this.reader.rejectField(field);
       }
     }
   }
@@ -741,56 +980,104 @@ class WeaponConfigParser {
     }
   }
 
-  private readWeaponField(weapon: {
-    valid: boolean;
-    number: number;
-    name: string;
-    model: string;
-    level: number;
-    weaponInventoryIndex: number;
-    flags: number;
-    projectile: string;
-    projectileCount: number;
-    horizontalSpread: number;
-    verticalSpread: number;
-    speed: number;
-    acceleration: number;
-    recoil: Vec3;
-    offset: Vec3;
-    angleOffset: Vec3;
-    extraZVelocity: number;
-    ammoAmount: number;
-    ammoInventoryIndex: number;
-    activate: number;
-    reload: number;
-    spinUp: number;
-    spinDown: number;
-    projectileInfo: ProjectileInfo;
-  }, field: StructureField): void {
+  private readWeaponField(
+    weapon: {
+      valid: boolean;
+      number: number;
+      name: string;
+      model: string;
+      level: number;
+      weaponInventoryIndex: number;
+      flags: number;
+      projectile: string;
+      projectileCount: number;
+      horizontalSpread: number;
+      verticalSpread: number;
+      speed: number;
+      acceleration: number;
+      recoil: Vec3;
+      offset: Vec3;
+      angleOffset: Vec3;
+      extraZVelocity: number;
+      ammoAmount: number;
+      ammoInventoryIndex: number;
+      activate: number;
+      reload: number;
+      spinUp: number;
+      spinDown: number;
+      projectileInfo: ProjectileInfo;
+    },
+    field: StructureField,
+  ): void {
     switch (field.name) {
-      case "number": weapon.number = this.reader.readInt(); break;
-      case "name": weapon.name = this.reader.readString(); break;
-      case "level": weapon.level = this.reader.readInt(); break;
-      case "model": weapon.model = this.reader.readString(); break;
-      case "weaponindex": weapon.weaponInventoryIndex = this.reader.readInt(); break;
-      case "flags": weapon.flags = this.reader.readInt(); break;
-      case "projectile": weapon.projectile = this.reader.readString(); break;
-      case "numprojectiles": weapon.projectileCount = this.reader.readInt(); break;
-      case "hspread": weapon.horizontalSpread = this.reader.readFloat(); break;
-      case "vspread": weapon.verticalSpread = this.reader.readFloat(); break;
-      case "speed": weapon.speed = this.reader.readFloat(); break;
-      case "acceleration": weapon.acceleration = this.reader.readFloat(); break;
-      case "recoil": weapon.recoil = overlayVector(weapon.recoil, this.reader.readFloatArray(3)); break;
-      case "offset": weapon.offset = overlayVector(weapon.offset, this.reader.readFloatArray(3)); break;
-      case "angleoffset": weapon.angleOffset = overlayVector(weapon.angleOffset, this.reader.readFloatArray(3)); break;
-      case "extrazvelocity": weapon.extraZVelocity = this.reader.readFloat(); break;
-      case "ammoamount": weapon.ammoAmount = this.reader.readInt(); break;
-      case "ammoindex": weapon.ammoInventoryIndex = this.reader.readInt(); break;
-      case "activate": weapon.activate = this.reader.readFloat(); break;
-      case "reload": weapon.reload = this.reader.readFloat(); break;
-      case "spinup": weapon.spinUp = this.reader.readFloat(); break;
-      case "spindown": weapon.spinDown = this.reader.readFloat(); break;
-      default: this.reader.rejectField(field);
+      case "number":
+        weapon.number = this.reader.readInt();
+        break;
+      case "name":
+        weapon.name = this.reader.readString();
+        break;
+      case "level":
+        weapon.level = this.reader.readInt();
+        break;
+      case "model":
+        weapon.model = this.reader.readString();
+        break;
+      case "weaponindex":
+        weapon.weaponInventoryIndex = this.reader.readInt();
+        break;
+      case "flags":
+        weapon.flags = this.reader.readInt();
+        break;
+      case "projectile":
+        weapon.projectile = this.reader.readString();
+        break;
+      case "numprojectiles":
+        weapon.projectileCount = this.reader.readInt();
+        break;
+      case "hspread":
+        weapon.horizontalSpread = this.reader.readFloat();
+        break;
+      case "vspread":
+        weapon.verticalSpread = this.reader.readFloat();
+        break;
+      case "speed":
+        weapon.speed = this.reader.readFloat();
+        break;
+      case "acceleration":
+        weapon.acceleration = this.reader.readFloat();
+        break;
+      case "recoil":
+        weapon.recoil = overlayVector(weapon.recoil, this.reader.readFloatArray(3));
+        break;
+      case "offset":
+        weapon.offset = overlayVector(weapon.offset, this.reader.readFloatArray(3));
+        break;
+      case "angleoffset":
+        weapon.angleOffset = overlayVector(weapon.angleOffset, this.reader.readFloatArray(3));
+        break;
+      case "extrazvelocity":
+        weapon.extraZVelocity = this.reader.readFloat();
+        break;
+      case "ammoamount":
+        weapon.ammoAmount = this.reader.readInt();
+        break;
+      case "ammoindex":
+        weapon.ammoInventoryIndex = this.reader.readInt();
+        break;
+      case "activate":
+        weapon.activate = this.reader.readFloat();
+        break;
+      case "reload":
+        weapon.reload = this.reader.readFloat();
+        break;
+      case "spinup":
+        weapon.spinUp = this.reader.readFloat();
+        break;
+      case "spindown":
+        weapon.spinDown = this.reader.readFloat();
+        break;
+      default:
+        this.reader.rejectField(field);
     }
   }
 
@@ -826,13 +1113,16 @@ function loadConfig(
   };
   let preprocessor: WeaponConfigTokens;
   try {
-    preprocessor = new WeaponConfigTokens(ScriptSourceReader.open(source, resolver, {
-      ...options, globals: resolver.globals,
-      report: diagnostic => {
-        options.report?.(diagnostic);
-        if (!reportPendingDiagnostics([diagnostic])) throw new RetiredWeaponSetup();
-      },
-    }));
+    preprocessor = new WeaponConfigTokens(
+      ScriptSourceReader.open(source, resolver, {
+        ...options,
+        globals: resolver.globals,
+        report: diagnostic => {
+          options.report?.(diagnostic);
+          if (!reportPendingDiagnostics([diagnostic])) throw new RetiredWeaponSetup();
+        },
+      }),
+    );
   } catch (error) {
     if (!diagnosticCallbackAborted() && error instanceof ScriptLanguageError) reportPendingDiagnostics(error.diagnostics);
     throw error;
@@ -845,10 +1135,18 @@ function loadConfig(
   header.setInt(8, WEAPON_CONFIG_BYTES + Math.imul(weaponCapacity, WEAPON_INFO_BYTES));
   header.setInt(12, WEAPON_CONFIG_BYTES);
   try {
-    const config = new WeaponConfigParser(preprocessor, source.path, weaponCapacity, projectileCapacity, allocation, () => {
-      if (!reportPendingDiagnostics(preprocessor.diagnostics)) throw new RetiredWeaponSetup();
-      preprocessor.dispose();
-    }, () => memory.free(allocation)).parse();
+    const config = new WeaponConfigParser(
+      preprocessor,
+      source.path,
+      weaponCapacity,
+      projectileCapacity,
+      allocation,
+      () => {
+        if (!reportPendingDiagnostics(preprocessor.diagnostics)) throw new RetiredWeaponSetup();
+        preprocessor.dispose();
+      },
+      () => memory.free(allocation),
+    ).parse();
     if (!reportPendingDiagnostics(config.diagnostics)) throw new RetiredWeaponSetup();
     return config;
   } catch (error) {
@@ -868,10 +1166,7 @@ export class WeaponAi {
   private readonly maxProjectileInfo: number | (() => number);
   private readonly preprocessorOptions: ScriptPreprocessorOptions;
   private readonly report: ((diagnostic: WeaponDiagnostic) => undefined) | undefined;
-  private readonly states: (WeaponState | undefined)[] = Array.from(
-    { length: MAX_WEAPON_STATES + 1 },
-    (): WeaponState | undefined => undefined,
-  );
+  private readonly states: (WeaponState | undefined)[] = Array.from({ length: MAX_WEAPON_STATES + 1 }, (): WeaponState | undefined => undefined);
   private readonly reported: WeaponDiagnostic[] = [];
   private currentConfig: WeaponConfig | undefined;
   private generation = 0;
@@ -883,12 +1178,12 @@ export class WeaponAi {
     this.debug = options.debug;
     this.memory = options.memory ?? new BotMemory();
     this.report = options.report;
-    const weapons = typeof options.maxWeaponInfo === "function"
-      ? options.maxWeaponInfo
-      : sourceCapacity(options.maxWeaponInfo, DEFAULT_WEAPON_CAPACITY, "maxWeaponInfo");
-    const projectiles = typeof options.maxProjectileInfo === "function"
-      ? options.maxProjectileInfo
-      : sourceCapacity(options.maxProjectileInfo, DEFAULT_PROJECTILE_CAPACITY, "maxProjectileInfo");
+    const weapons =
+      typeof options.maxWeaponInfo === "function" ? options.maxWeaponInfo : sourceCapacity(options.maxWeaponInfo, DEFAULT_WEAPON_CAPACITY, "maxWeaponInfo");
+    const projectiles =
+      typeof options.maxProjectileInfo === "function"
+        ? options.maxProjectileInfo
+        : sourceCapacity(options.maxProjectileInfo, DEFAULT_PROJECTILE_CAPACITY, "maxProjectileInfo");
     this.maxWeaponInfo = typeof weapons === "function" ? weapons : weapons.value;
     this.maxProjectileInfo = typeof projectiles === "function" ? projectiles : projectiles.value;
     this.preprocessorOptions = options.preprocessor ?? {};
@@ -905,36 +1200,76 @@ export class WeaponAi {
   }
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { generation: this.generation, setupRevision: this.setupRevision, reported: structuredClone(this.reported),
+    return {
+      generation: this.generation,
+      setupRevision: this.setupRevision,
+      reported: structuredClone(this.reported),
       pointers: this.pointers.checkpoint(memory, this.host.weights),
-      states: this.states.map(state => state === undefined ? null : { allocation: memory.reference(state.allocation), revision: state.revision }),
-      config: this.currentConfig === undefined ? null : { allocation: memory.reference(this.currentConfig.allocation),
-        path: this.currentConfig.path, diagnostics: structuredClone(this.currentConfig.diagnostics) } };
+      states: this.states.map(state => (state === undefined ? null : { allocation: memory.reference(state.allocation), revision: state.revision })),
+      config:
+        this.currentConfig === undefined
+          ? null
+          : {
+              allocation: memory.reference(this.currentConfig.allocation),
+              path: this.currentConfig.path,
+              diagnostics: structuredClone(this.currentConfig.diagnostics),
+            },
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.weapons"), image = { generation: reader.field("generation").integer(0), setupRevision: reader.field("setupRevision").integer(0),
-      reported: reader.field("reported").list(entry => ({ origin: entry.field("origin").choice("source", "print"), severity: entry.field("severity").choice("message", "warning", "error", "fatal"), message: entry.field("message").string(),
-        location: { path: entry.field("location").field("path").string(), line: entry.field("location").field("line").integer(0), column: entry.field("location").field("column").integer(0) } })),
-      pointers: reader.field("pointers").value,
-      states: reader.field("states").list(entry => entry.nullable(state => ({ allocation: state.field("allocation").integer(0), revision: state.field("revision").integer(0) }))),
-      config: reader.field("config").nullable(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), diagnostics: entry.field("diagnostics").list(readScriptDiagnostic) })) };
-    if (this.states.some(state => state !== undefined) || this.currentConfig !== undefined || image.states.length !== MAX_WEAPON_STATES + 1
-      || image.states[0] !== null || !Number.isSafeInteger(image.generation) || image.generation < 0
-      || !Number.isSafeInteger(image.setupRevision) || image.setupRevision < 0) throw new Error("Invalid bot weapon restoration");
+    const reader = new SaveReader(value, "bot.weapons"),
+      image = {
+        generation: reader.field("generation").integer(0),
+        setupRevision: reader.field("setupRevision").integer(0),
+        reported: reader.field("reported").list(entry => ({
+          origin: entry.field("origin").choice("source", "print"),
+          severity: entry.field("severity").choice("message", "warning", "error", "fatal"),
+          message: entry.field("message").string(),
+          location: {
+            path: entry.field("location").field("path").string(),
+            line: entry.field("location").field("line").integer(0),
+            column: entry.field("location").field("column").integer(0),
+          },
+        })),
+        pointers: reader.field("pointers").value,
+        states: reader
+          .field("states")
+          .list(entry => entry.nullable(state => ({ allocation: state.field("allocation").integer(0), revision: state.field("revision").integer(0) }))),
+        config: reader.field("config").nullable(entry => ({
+          allocation: entry.field("allocation").integer(0),
+          path: entry.field("path").string(),
+          diagnostics: entry.field("diagnostics").list(readScriptDiagnostic),
+        })),
+      };
+    if (
+      this.states.some(state => state !== undefined) ||
+      this.currentConfig !== undefined ||
+      image.states.length !== MAX_WEAPON_STATES + 1 ||
+      image.states[0] !== null ||
+      !Number.isSafeInteger(image.generation) ||
+      image.generation < 0 ||
+      !Number.isSafeInteger(image.setupRevision) ||
+      image.setupRevision < 0
+    )
+      throw new Error("Invalid bot weapon restoration");
     this.pointers.restore(image.pointers, memory, this.host.weights);
     for (const [index, saved] of image.states.entries()) {
       if (saved === null) continue;
       const allocation = memory.allocation(saved.allocation);
       if (allocation.bytes.length !== 8 || !Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved bot weapon state");
-      const state = new WeaponState(allocation, this.pointers); state.revision = saved.revision;
-      void state.config; void state.indexPointer;
+      const state = new WeaponState(allocation, this.pointers);
+      state.revision = saved.revision;
+      void state.config;
+      void state.indexPointer;
       this.states[index] = state;
     }
     if (image.config !== null) {
       const allocation = memory.allocation(image.config.allocation);
       this.currentConfig = bindWeaponConfig(image.config.path, allocation, structuredClone(image.config.diagnostics), () => this.memory.free(allocation));
     }
-    this.generation = image.generation; this.setupRevision = image.setupRevision; this.reported.push(...structuredClone(image.reported));
+    this.generation = image.generation;
+    this.setupRevision = image.setupRevision;
+    this.reported.push(...structuredClone(image.reported));
   }
 
   get diagnostics(): readonly WeaponDiagnostic[] {
@@ -970,19 +1305,35 @@ export class WeaponAi {
         projectiles.value,
         {
           ...this.preprocessorOptions,
-          ...(this.host.resolver.debugEval === undefined ? {} : { debugEval: (text: string) => {
-            try { this.host.resolver.debugEval?.(text); }
-            catch (error) { diagnosticCallbackAborted = true; throw error; }
-          } }),
+          ...(this.host.resolver.debugEval === undefined
+            ? {}
+            : {
+                debugEval: (text: string) => {
+                  try {
+                    this.host.resolver.debugEval?.(text);
+                  } catch (error) {
+                    diagnosticCallbackAborted = true;
+                    throw error;
+                  }
+                },
+              }),
           report: diagnostic => {
-            try { this.preprocessorOptions.report?.(diagnostic); }
-            catch (error) { diagnosticCallbackAborted = true; throw error; }
+            try {
+              this.preprocessorOptions.report?.(diagnostic);
+            } catch (error) {
+              diagnosticCallbackAborted = true;
+              throw error;
+            }
           },
         },
         this.memory,
         diagnostics => {
-          try { return this.appendScriptDiagnostics(diagnostics, current); }
-          catch (error) { diagnosticCallbackAborted = true; throw error; }
+          try {
+            return this.appendScriptDiagnostics(diagnostics, current);
+          } catch (error) {
+            diagnosticCallbackAborted = true;
+            throw error;
+          }
         },
         () => diagnosticCallbackAborted,
       );
@@ -1123,7 +1474,8 @@ export class WeaponAi {
 
   /** Evaluate the loaded personality's existing fuzzy tree for one weapon profile. */
   evaluateFightWeapon(handle: number, weaponNumber: number, inventory: WeightInventory): number | null {
-    const state = this.state(handle), config = this.currentConfig;
+    const state = this.state(handle),
+      config = this.currentConfig;
     if (state === undefined || config === undefined || state.config === undefined || state.indexes === undefined) return null;
     const weapon = config.weapons[weaponNumber];
     if (weapon === undefined || !weapon.valid || weaponNumber < 0 || !Number.isInteger(weaponNumber)) return null;
@@ -1217,11 +1569,14 @@ export class WeaponAi {
   private appendScriptDiagnostics(diagnostics: readonly ScriptDiagnostic[], current: () => boolean): boolean {
     for (const diagnostic of diagnostics) {
       if (!current()) return false;
-      const duplicate = this.reported.some((candidate) => candidate.severity === diagnostic.severity
-        && candidate.message === diagnostic.message
-        && candidate.location.path === diagnostic.location.path
-        && candidate.location.line === diagnostic.location.line
-        && candidate.location.column === diagnostic.location.column);
+      const duplicate = this.reported.some(
+        candidate =>
+          candidate.severity === diagnostic.severity &&
+          candidate.message === diagnostic.message &&
+          candidate.location.path === diagnostic.location.path &&
+          candidate.location.line === diagnostic.location.line &&
+          candidate.location.column === diagnostic.location.column,
+      );
       const reported: WeaponDiagnostic = Object.freeze({
         origin: diagnostic instanceof WeaponPrintDiagnostic ? "print" : "source",
         severity: diagnostic.severity,

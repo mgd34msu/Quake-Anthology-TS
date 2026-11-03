@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "./save-value.ts";
 /*
  * COM_Parse, COM_ParseExt, COM_Compress, SkipWhitespace and SkipRestOfLine from game/q_shared.c.
@@ -15,7 +16,10 @@ export class CommonParseCursor {
   private readonly terminator: number;
   private currentOffset: number | null = 0;
 
-  constructor(source: string, readonly end: "terminated" | "uninitialized" = "terminated") {
+  constructor(
+    source: string,
+    readonly end: "terminated" | "uninitialized" = "terminated",
+  ) {
     for (let index = 0; index < source.length; index++) {
       if (source.charCodeAt(index) > 255) {
         throw new RangeError(`COM_Parse source is not a Latin-1 byte string at ${index}`);
@@ -51,14 +55,16 @@ function signedByte(cursor: CommonParseCursor, offset: number): number {
 /** COM_Compress preserves quoted bytes and coalesces pending whitespace before the next token. */
 export function compressCommonText(source: string, end: CommonParseCursor["end"] = "terminated"): string {
   const cursor = new CommonParseCursor(source, end);
-  let offset = 0, output = "", newline = false, whitespace = false;
+  let offset = 0,
+    output = "",
+    newline = false,
+    whitespace = false;
   let byte: number;
   while ((byte = signedByte(cursor, offset)) !== 0) {
     if (byte === 47 && signedByte(cursor, offset + 1) === 47) {
       while ((byte = signedByte(cursor, offset)) !== 0 && byte !== 10) offset++;
     } else if (byte === 47 && signedByte(cursor, offset + 1) === 42) {
-      while (signedByte(cursor, offset) !== 0
-        && (signedByte(cursor, offset) !== 42 || signedByte(cursor, offset + 1) !== 47)) offset++;
+      while (signedByte(cursor, offset) !== 0 && (signedByte(cursor, offset) !== 42 || signedByte(cursor, offset + 1) !== 47)) offset++;
       if (signedByte(cursor, offset) !== 0) offset += 2;
     } else if (byte === 10 || byte === 13) {
       newline = true;
@@ -67,8 +73,15 @@ export function compressCommonText(source: string, end: CommonParseCursor["end"]
       whitespace = true;
       offset++;
     } else {
-      if (newline) { output += "\n"; newline = false; whitespace = false; }
-      if (whitespace) { output += " "; whitespace = false; }
+      if (newline) {
+        output += "\n";
+        newline = false;
+        whitespace = false;
+      }
+      if (whitespace) {
+        output += " ";
+        whitespace = false;
+      }
       output += source.charAt(offset++);
       if (byte === 34) {
         while ((byte = signedByte(cursor, offset)) !== 0 && byte !== 34) output += source.charAt(offset++);
@@ -80,12 +93,18 @@ export function compressCommonText(source: string, end: CommonParseCursor["end"]
 }
 
 export class CommonParseState {
-  captureSaveState() { return { token: this.currentToken, line: this.currentLine, name: this.currentName }; }
+  captureSaveState() {
+    return { token: this.currentToken, line: this.currentLine, name: this.currentName };
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "common.parser");
-    const token = reader.field("token").string(), line = reader.field("line").integer(0), name = reader.field("name").string();
+    const token = reader.field("token").string(),
+      line = reader.field("line").integer(0),
+      name = reader.field("name").string();
     if (token.length >= MAX_TOKEN_CHARS || name.length >= MAX_TOKEN_CHARS) reader.fail("parser string exceeds source storage");
-    this.currentToken = token; this.currentLine = line; this.currentName = name;
+    this.currentToken = token;
+    this.currentLine = line;
+    this.currentName = name;
   }
 
   private currentToken = "";
@@ -118,7 +137,8 @@ export class CommonParseState {
 
   matchToken(cursor: CommonParseCursor, match: string): void {
     const token = this.parse(cursor);
-    const nul = match.indexOf("\0"), expected = nul < 0 ? match : match.slice(0, nul);
+    const nul = match.indexOf("\0"),
+      expected = nul < 0 ? match : match.slice(0, nul);
     if (token !== expected) throw new CommonError("drop", `MatchToken: ${token} != ${expected}`);
   }
 
@@ -163,7 +183,8 @@ export class CommonParseState {
 
   /** Callers can write through COM_Parse's shared char pointer without advancing parsing. */
   overwriteToken(text: string): void {
-    const nul = text.indexOf("\0"), value = nul < 0 ? text : text.slice(0, nul);
+    const nul = text.indexOf("\0"),
+      value = nul < 0 ? text : text.slice(0, nul);
     if (value.length >= MAX_TOKEN_CHARS) throw new RangeError("COM_Parse token write exceeds its source buffer");
     for (let index = 0; index < value.length; index++) {
       if (value.charCodeAt(index) > 255) throw new RangeError("COM_Parse token write requires source bytes");
@@ -225,8 +246,7 @@ export class CommonParseState {
         while ((c = signedByte(cursor, data)) !== 0 && c !== 10) data++;
       } else if (c === 47 && signedByte(cursor, data + 1) === 42) {
         data += 2;
-        while (signedByte(cursor, data) !== 0
-          && (signedByte(cursor, data) !== 42 || signedByte(cursor, data + 1) !== 47)) {
+        while (signedByte(cursor, data) !== 0 && (signedByte(cursor, data) !== 42 || signedByte(cursor, data + 1) !== 47)) {
           data++;
         }
         if (signedByte(cursor, data) !== 0) data += 2;
@@ -489,7 +509,6 @@ export function parseEntities(text: string, name = "<entities>"): readonly Reado
   }
 }
 
-
 /* Q1 common.c and Q2 q_shared.c donor parsers. Id Software, GPL-2.0-or-later. */
 
 export interface LegacyParseState {
@@ -569,7 +588,6 @@ export function parseQ1Token(ps: LegacyParseState, dialect: "netquake" | "quakew
   ps.index = i;
   return token;
 }
-
 
 function charAt(s: string, idx: number): number {
   // mirrors reading a C null-terminated string: past the end reads as 0

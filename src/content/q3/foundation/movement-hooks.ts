@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { OwnedActor } from "../../../contracts/identity.ts";
 import { q3SourceAnimation, q3SourceTorso } from "../../../movement/q3/animation.ts";
 import { CommandButtons, MoveFlags, PlayerAnimation, Weapon, WeaponState } from "../../../movement/q3/constants.ts";
@@ -12,8 +13,11 @@ export interface Q3ArsenalRuntimeAccess {
 }
 
 export function q3SourceArsenalControls(context: Q3HookContext): Q3ArsenalControls {
-  return { attack: (context.command.buttons & CommandButtons.ATTACK) !== 0,
-    useHoldable: (context.command.buttons & CommandButtons.USE_HOLDABLE) !== 0, requestedWeapon: context.command.weapon };
+  return {
+    attack: (context.command.buttons & CommandButtons.ATTACK) !== 0,
+    useHoldable: (context.command.buttons & CommandButtons.USE_HOLDABLE) !== 0,
+    requestedWeapon: context.command.weapon,
+  };
 }
 
 /** Source Q3 locomotion calls these at PM_Firing, PM_Animate, PM_Weapon and PM_TorsoAnimation. */
@@ -28,14 +32,30 @@ export function createQ3SourceMovementHooks(runtime: Q3ArsenalRuntimeAccess): Q3
     animation: q3SourceAnimation,
     weapon(context) {
       const previous = runtime.read(context.input.actor, context.input.execution);
-      const state = { ...previous, respawned: (context.motion.pmFlags & MoveFlags.RESPAWNED) !== 0,
-        useItemHeld: (context.motion.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0, eventSequence: context.motion.eventSequence };
-      const result = stepQ3Arsenal({ actor: context.input.actor, command: context.input.command, frame: context.frame,
-        arsenal: context.arsenal, animation: context.animation, environment: context.input.environment,
-        gauntletHit: runtime.gauntletHit(context) }, state, q3SourceArsenalControls(context));
+      const state = {
+        ...previous,
+        respawned: (context.motion.pmFlags & MoveFlags.RESPAWNED) !== 0,
+        useItemHeld: (context.motion.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0,
+        eventSequence: context.motion.eventSequence,
+      };
+      const result = stepQ3Arsenal(
+        {
+          actor: context.input.actor,
+          command: context.input.command,
+          frame: context.frame,
+          arsenal: context.arsenal,
+          animation: context.animation,
+          environment: context.input.environment,
+          gauntletHit: runtime.gauntletHit(context),
+        },
+        state,
+        q3SourceArsenalControls(context),
+      );
       runtime.write(context.input.actor, context.input.execution, result.runtime);
-      const movementFlags = (context.motion.pmFlags & ~(MoveFlags.RESPAWNED | MoveFlags.USE_ITEM_HELD))
-        | (result.runtime.respawned ? MoveFlags.RESPAWNED : 0) | (result.runtime.useItemHeld ? MoveFlags.USE_ITEM_HELD : 0);
+      const movementFlags =
+        (context.motion.pmFlags & ~(MoveFlags.RESPAWNED | MoveFlags.USE_ITEM_HELD)) |
+        (result.runtime.respawned ? MoveFlags.RESPAWNED : 0) |
+        (result.runtime.useItemHeld ? MoveFlags.USE_ITEM_HELD : 0);
       return { arsenal: result.arsenal, animation: result.animation, effects: result.effects, movementFlags };
     },
     torso(context) {

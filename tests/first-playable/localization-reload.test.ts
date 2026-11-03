@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { registerAccessibilitySettings } from "../../src/ui/settings/accessibility.ts";
 import { expect, test } from "bun:test";
@@ -27,15 +28,24 @@ async function select(binding: SettingBinding | undefined, language: string): Pr
 test("mounted language binding reloads tables per seat and preserves selection across content replacement", async () => {
   const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--dedicated"]);
   if (command.kind !== "run") throw new Error("Expected application launch");
-  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("language-reload");
+  const content = await loadApplicationContent(command.options),
+    identity = createIdentityOwner("language-reload");
   const assets = new ApplicationAssets(content, { identity: Symbol("language-reload"), session: identity.session, generation: 0 });
   const root = await tempDirectory("quake-language-");
-  const first = { seat: identity.seat(0), actor: identity.actor(0, 0) }, second = { seat: identity.seat(1), actor: identity.actor(1, 0) };
+  const first = { seat: identity.seat(0), actor: identity.actor(0, 0) },
+    second = { seat: identity.seat(1), actor: identity.actor(1, 0) };
   const contentId = content.recipe.map.entities.content;
   const errors: unknown[] = [];
   const prints = async (presentation: ApplicationRereleasePresentation, key: string): Promise<readonly string[]> => {
-    presentation.receive([{ kind: "q2-rerelease", content: contentId, sequence: 1, seconds: 0,
-      event: { kind: "localized-print", actor: null, level: "chat", text: key, args: [] } }]);
+    presentation.receive([
+      {
+        kind: "q2-rerelease",
+        content: contentId,
+        sequence: 1,
+        seconds: 0,
+        event: { kind: "localized-print", actor: null, level: "chat", text: key, args: [] },
+      },
+    ]);
     await presentation.prepare();
     return presentation.drainPrints().map(event => {
       if (event.kind !== "q2-player" || event.event.kind !== "print") throw new Error("Missing localized print");
@@ -50,7 +60,8 @@ test("mounted language binding reloads tables per seat and preserves selection a
     const english = await prints(retail, "$m_single_player");
     await select(binding, "french");
     const french = await prints(retail, "$m_single_player");
-    expect(french[0]).not.toBe(english[0]); expect(french[1]).toBe(english[1]);
+    expect(french[0]).not.toBe(english[0]);
+    expect(french[1]).toBe(english[1]);
     const rebuilt = new ApplicationRereleasePresentation(assets, [{ ...first, language: retail.selectedLanguage(first.seat) }, second]);
     expect(await prints(rebuilt, "$m_single_player")).toEqual(french);
 
@@ -61,17 +72,20 @@ test("mounted language binding reloads tables per seat and preserves selection a
     await writeFile(join(root, "localization/loc_french_mod.txt"), 'message="French mod"');
     const mount: ContentMount = { kind: "loose", identity: createMountIdentity("mount:test:language", contentId, 0), rootPath: root };
     using mounts = await openMountPlan({ id: "mount-plan:test:language", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] });
-    const provider = await assets.provider(contentId), mountedAssets = { provider: async () => ({ ...provider, mounts }) };
+    const provider = await assets.provider(contentId),
+      mountedAssets = { provider: async () => ({ ...provider, mounts }) };
     const cvars = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } } });
     registerAccessibilitySettings(cvars);
     const mounted = new ApplicationRereleasePresentation(mountedAssets, [first, second], cvars);
     const mountedBinding = await mounted.languageBinding(first.seat, contentId, error => errors.push(error));
     expect(await prints(mounted, "$message")).toEqual(["English mod", "English mod"]);
     mounted.receive([{ kind: "q2-rerelease", content: contentId, sequence: 2, seconds: 0, event: { kind: "story", text: "$story" } }]);
-    await mounted.prepare(); expect(mounted.storyActive(first.actor)).toBe(true);
+    await mounted.prepare();
+    expect(mounted.storyActive(first.actor)).toBe(true);
     await select(mountedBinding, "french");
     expect(await prints(mounted, "$message")).toEqual(["French mod", "English mod"]);
-    expect(mounted.storyActive(first.actor)).toBe(false); expect(mounted.storyActive(second.actor)).toBe(true);
+    expect(mounted.storyActive(first.actor)).toBe(false);
+    expect(mounted.storyActive(second.actor)).toBe(true);
     await writeFile(join(root, "localization/loc_french_mod.txt"), 'message="Changed mod"');
     await select(mountedBinding, "french");
     expect(await prints(mounted, "$message")).toEqual(["Changed mod", "English mod"]);
@@ -85,8 +99,13 @@ test("mounted language binding reloads tables per seat and preserves selection a
     expect(mountedBinding?.kind === "choice" ? mountedBinding.read() : "").toBe("english");
     expect(await prints(mounted, "$message")).toEqual(["English mod", "English mod"]);
     const archived = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } } });
-    registerAccessibilitySettings(archived); archived.applyArchive(cvars.archiveEntries());
+    registerAccessibilitySettings(archived);
+    archived.applyArchive(cvars.archiveEntries());
     expect(new ApplicationRereleasePresentation(mountedAssets, [first, second], archived).selectedLanguage(first.seat)).toBe("english");
     expect(errors).toEqual([]);
-  } finally { assets.close(); await content.close(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    assets.close();
+    await content.close();
+    await rm(root, { recursive: true, force: true });
+  }
 }, 60000);

@@ -2,7 +2,17 @@
 import type { GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
 import { alu, condition, shift, signedMultiply } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
-import { canonicalAddress, effectiveOperandOffset, guestAddress, operandAddress, readOperand, writeOperand, writableOperand, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
+import {
+  canonicalAddress,
+  effectiveOperandOffset,
+  guestAddress,
+  operandAddress,
+  readOperand,
+  writeOperand,
+  writableOperand,
+  X64ProcessorFault,
+  X64Unsupported,
+} from "./decoder.ts";
 import type { X64MemoryOperand, X64Operand, X64RegisterOperand } from "./decoder.ts";
 import { executeRawSse } from "../floating-point/raw-sse.ts";
 import type { RawSseOperation } from "../floating-point/raw-sse.ts";
@@ -10,8 +20,11 @@ import type { NumericOperand } from "../floating-point/contracts.ts";
 import type { NumericInstruction } from "../floating-point/contracts.ts";
 import { executeNumericInstruction } from "../floating-point/index.ts";
 
-export type X64Flow = { readonly kind: "advance" } | { readonly kind: "branch"; readonly target: bigint }
-  | { readonly kind: "halt" } | { readonly kind: "trap"; readonly vector: number };
+export type X64Flow =
+  | { readonly kind: "advance" }
+  | { readonly kind: "branch"; readonly target: bigint }
+  | { readonly kind: "halt" }
+  | { readonly kind: "trap"; readonly vector: number };
 export const x64Advance: X64Flow = { kind: "advance" };
 export type X64PlanSource = X64Operand | bigint;
 export type X64PlanOperation =
@@ -43,25 +56,39 @@ export function x64Lock(lock: boolean, destination: X64Operand | null, permitted
   if (lock && (!permitted || destination?.kind !== "memory")) throw new X64ProcessorFault(6, "LOCK requires a supported memory read-modify-write operand");
 }
 export function makeX64Plan(operation: X64PlanOperation, nextIP: bigint, lock: boolean): X64SemanticPlan {
-  const endsBlock = operation.kind === "branch" || operation.kind === "return" || operation.kind === "numeric-memory"
-    || operation.kind === "call" || operation.kind === "jump" || operation.kind === "push"
-    || operation.kind === "pop" && operation.destination.kind === "memory"
-    || operation.kind === "increment" && operation.destination.kind === "memory"
-    || (operation.kind === "shift" || operation.kind === "set-condition") && operation.destination.kind === "memory"
-    || operation.kind === "raw-sse" && operation.operation.kind === "move" && operation.operation.store && operation.operand.kind === "memory"
-    || (operation.kind === "move" || operation.kind === "alu")
-    && operation.destination.kind === "memory" && (operation.kind !== "alu" || operation.operation !== "cmp" && operation.operation !== "test");
+  const endsBlock =
+    operation.kind === "branch" ||
+    operation.kind === "return" ||
+    operation.kind === "numeric-memory" ||
+    operation.kind === "call" ||
+    operation.kind === "jump" ||
+    operation.kind === "push" ||
+    (operation.kind === "pop" && operation.destination.kind === "memory") ||
+    (operation.kind === "increment" && operation.destination.kind === "memory") ||
+    ((operation.kind === "shift" || operation.kind === "set-condition") && operation.destination.kind === "memory") ||
+    (operation.kind === "raw-sse" && operation.operation.kind === "move" && operation.operation.store && operation.operand.kind === "memory") ||
+    ((operation.kind === "move" || operation.kind === "alu") &&
+      operation.destination.kind === "memory" &&
+      (operation.kind !== "alu" || (operation.operation !== "cmp" && operation.operation !== "test")));
   return Object.freeze({ operation: Object.freeze(operation), nextIP, lock, endsBlock });
 }
 export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory, state: GuestProcessorState): X64Flow {
   const operation = plan.operation;
   switch (operation.kind) {
-    case "nop": x64Lock(plan.lock, null, false); return x64Advance;
+    case "nop":
+      x64Lock(plan.lock, null, false);
+      return x64Advance;
     case "shift": {
       const count = operation.count === "cl" ? Number(state.registers.read("rcx", 8)) : operation.count;
       x64Lock(plan.lock, null, false);
       writableOperand(memory, state, operation.destination, plan.nextIP);
-      const result = shift(operation.operation, operation.destination.width, readOperand(memory, state, operation.destination, plan.nextIP), count, state.flags);
+      const result = shift(
+        operation.operation,
+        operation.destination.width,
+        readOperand(memory, state, operation.destination, plan.nextIP),
+        count,
+        state.flags,
+      );
       writeOperand(memory, state, operation.destination, plan.nextIP, result);
       return x64Advance;
     }
@@ -76,7 +103,8 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
       x64Lock(plan.lock, null, false);
       const value = readOperand(memory, state, operation.source, plan.nextIP);
       if (condition(operation.condition, state.flags)) writeOperand(memory, state, operation.destination, plan.nextIP, value);
-      else if (operation.destination.width === 32) writeOperand(memory, state, operation.destination, plan.nextIP, readOperand(memory, state, operation.destination, plan.nextIP));
+      else if (operation.destination.width === 32)
+        writeOperand(memory, state, operation.destination, plan.nextIP, readOperand(memory, state, operation.destination, plan.nextIP));
       return x64Advance;
     }
     case "set-condition":
@@ -93,16 +121,24 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
       x64Lock(plan.lock, operation.destination, true);
       writableOperand(memory, state, operation.destination, plan.nextIP);
       const carry = state.flags.get("carry");
-      const value = alu(operation.subtract ? "sub" : "add", operation.destination.width,
-        readOperand(memory, state, operation.destination, plan.nextIP), 1n, state.flags);
+      const value = alu(
+        operation.subtract ? "sub" : "add",
+        operation.destination.width,
+        readOperand(memory, state, operation.destination, plan.nextIP),
+        1n,
+        state.flags,
+      );
       writeOperand(memory, state, operation.destination, plan.nextIP, value);
       state.flags.set("carry", carry);
       return x64Advance;
     }
-    case "numeric": case "numeric-memory": {
+    case "numeric":
+    case "numeric-memory": {
       x64Lock(plan.lock, null, false);
-      const instruction: NumericInstruction = operation.kind === "numeric" ? operation.instruction
-        : { ...operation.instruction, operand: { kind: "memory", address: operandAddress(memory, state, operation.operand, plan.nextIP) } };
+      const instruction: NumericInstruction =
+        operation.kind === "numeric"
+          ? operation.instruction
+          : { ...operation.instruction, operand: { kind: "memory", address: operandAddress(memory, state, operation.operand, plan.nextIP) } };
       const result = executeNumericInstruction({ state, memory, instruction });
       if (result.kind === "exception") throw new X64ProcessorFault(result.vector, result.detail);
       if (result.kind === "unsupported") throw new X64Unsupported(result.detail);
@@ -110,8 +146,10 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
     }
     case "raw-sse": {
       x64Lock(plan.lock, null, false);
-      const operand = operation.operand.kind === "register" ? operation.operand
-        : { kind: "memory", address: operandAddress(memory, state, operation.operand, plan.nextIP) } satisfies NumericOperand;
+      const operand =
+        operation.operand.kind === "register"
+          ? operation.operand
+          : ({ kind: "memory", address: operandAddress(memory, state, operation.operand, plan.nextIP) } satisfies NumericOperand);
       const result = executeRawSse(operation.operation, operand, state, memory);
       if (result.kind === "unsupported") throw new X64Unsupported(result.detail);
       if (result.kind === "exception") throw new X64ProcessorFault(result.vector, result.detail);
@@ -139,11 +177,12 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
     case "branch":
       x64Lock(plan.lock, null, false);
       return operation.condition === null || condition(operation.condition, state.flags)
-        ? { kind: "branch", target: canonicalAddress(plan.nextIP + operation.displacement) } : x64Advance;
-    case "jump": case "call": {
+        ? { kind: "branch", target: canonicalAddress(plan.nextIP + operation.displacement) }
+        : x64Advance;
+    case "jump":
+    case "call": {
       x64Lock(plan.lock, null, false);
-      const target = canonicalAddress(typeof operation.target === "bigint" ? operation.target
-        : readOperand(memory, state, operation.target, plan.nextIP));
+      const target = canonicalAddress(typeof operation.target === "bigint" ? operation.target : readOperand(memory, state, operation.target, plan.nextIP));
       if (operation.kind === "call") {
         const stack = BigInt.asUintN(64, state.registers.read("rsp", 64) - 8n);
         memory.writeUint64(guestAddress(memory, stack, "write"), plan.nextIP);
@@ -163,7 +202,8 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
     }
     case "pop": {
       x64Lock(plan.lock, null, false);
-      const stack = state.registers.read("rsp", 64), address = guestAddress(memory, stack);
+      const stack = state.registers.read("rsp", 64),
+        address = guestAddress(memory, stack);
       const value = operation.width === 64 ? memory.readUint64(address) : BigInt(memory.readUint16(address));
       state.registers.write("rsp", 64, stack + (operation.width === 64 ? 8n : 2n));
       writeOperand(memory, state, operation.destination, plan.nextIP, value);
@@ -171,7 +211,8 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
     }
     case "return": {
       x64Lock(plan.lock, null, false);
-      const stack = state.registers.read("rsp", 64), target = memory.readUint64(guestAddress(memory, stack));
+      const stack = state.registers.read("rsp", 64),
+        target = memory.readUint64(guestAddress(memory, stack));
       state.registers.write("rsp", 64, stack + 8n);
       const branch = canonicalAddress(target);
       state.registers.write("rsp", 64, state.registers.read("rsp", 64) + operation.discard);

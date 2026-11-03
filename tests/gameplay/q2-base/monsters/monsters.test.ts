@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import { corpusFile, corpusHasFile } from "../../../support/corpus.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -23,38 +24,142 @@ import { q2TestHost } from "../../../support/q2-host.ts";
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 function fixture() {
-  const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
+  const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")),
+    callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors);
-  const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
+  const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"),
+    player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-  bodies.create(player, { origin: { x: 500, y: 0, z: 24 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: world.id });
-  combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
-  let now = 0, rayActor: ActorId = player.id;
+  bodies.create(player, {
+    origin: { x: 500, y: 0, z: 24 },
+    angles: zero,
+    velocity: zero,
+    bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
+    ground: world.id,
+  });
+  combat.create(player, {
+    health: 1000,
+    armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+    mass: 200,
+    canTakeDamage: true,
+    invulnerable: false,
+    team: null,
+  });
+  let now = 0,
+    rayActor: ActorId = player.id;
   const random: number[] = [];
   const plane = { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 };
   const trace = (request: Q2TraceRequest): TraceResult => {
-    const clear: TraceResult = { kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0, surface: null, sourcePlane: plane, secondary: null };
+    const clear: TraceResult = {
+      kind: "q2",
+      fraction: 1,
+      startSolid: false,
+      allSolid: false,
+      end: request.end,
+      hit: { kind: "none" },
+      contact: { kind: "none" },
+      contents: 0,
+      surface: null,
+      sourcePlane: plane,
+      secondary: null,
+    };
     if (request.bounds !== null && request.end.z < request.start.z && request.end.z + request.bounds.min.z <= 0) {
       const z = -request.bounds.min.z;
-      return { ...clear, fraction: Math.max(0, (request.start.z - z) / (request.start.z - request.end.z)), end: { ...request.end, z }, hit: { kind: "world", model: 0 }, contact: { kind: "plane", plane }, contents: 1 };
+      return {
+        ...clear,
+        fraction: Math.max(0, (request.start.z - z) / (request.start.z - request.end.z)),
+        end: { ...request.end, z },
+        hit: { kind: "world", model: 0 },
+        contact: { kind: "plane", plane },
+        contents: 1,
+      };
     }
     if (request.bounds === null && (request.mask & 0x2000000) !== 0) return { ...clear, fraction: 0.8, hit: { kind: "actor", actor: rayActor } };
     return clear;
   };
-  const { host, scheduled, events, diagnostics } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) }, {
-    now: () => now, random: () => random.shift() ?? 0.5, trace, pointContents: point => point.z < 0 ? 1 : 0, nearby: () => [...game.entities.values()].map(entity => entity.actor.id), });
-  combat.register(createQ2CombatPolicy({ id: "q2:combat", armor: nativeVictimArmor(request => ({ arithmetic: "binary64", screenFacingDot: 1, q2: { product: "classic", ctf: false, alive: (combat.read(request.target)?.health ?? 0) > 0 } })),
-    context: request => ({ arithmetic: "binary64", player: request.target === player.id, monster: host.isMonster(request.target), attackerPlayer: request.attack.attacker === player.id,
-      hasEnemy: game.entity(request.target)?.enemy !== null, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false,
-      nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
-  const weapons = new Q2Ballistics({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
-  const monsters = new Q2Monsters(weapons), module = registerQ2ClassicBaseMonsters(monsters);
-  const game = new Q2Foundation(host, { edition: "classic", mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1, provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, [module]);
+  const { host, scheduled, events, diagnostics } = q2TestHost(
+    { actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) },
+    {
+      now: () => now,
+      random: () => random.shift() ?? 0.5,
+      trace,
+      pointContents: point => (point.z < 0 ? 1 : 0),
+      nearby: () => [...game.entities.values()].map(entity => entity.actor.id),
+    },
+  );
+  combat.register(
+    createQ2CombatPolicy({
+      id: "q2:combat",
+      armor: nativeVictimArmor(request => ({
+        arithmetic: "binary64",
+        screenFacingDot: 1,
+        q2: { product: "classic", ctf: false, alive: (combat.read(request.target)?.health ?? 0) > 0 },
+      })),
+      context: request => ({
+        arithmetic: "binary64",
+        player: request.target === player.id,
+        monster: host.isMonster(request.target),
+        attackerPlayer: request.attack.attacker === player.id,
+        hasEnemy: game.entity(request.target)?.enemy !== null,
+        easySkill: false,
+        deathmatch: false,
+        defenderSphere: false,
+        teamDamageEnabled: false,
+        friendlyFire: false,
+        nuke: false,
+        noKnockback: true,
+        movable: false,
+        rejectTeamDamage: false,
+        suppressPain: false,
+      }),
+    }),
+  );
+  const weapons = new Q2Ballistics({
+    emit: () => undefined,
+    noise: () => undefined,
+    dodge: () => undefined,
+    lagCompensation: { kind: "current-world" },
+    ammoChanged: () => undefined,
+    canTarget: () => true,
+  });
+  const monsters = new Q2Monsters(weapons),
+    module = registerQ2ClassicBaseMonsters(monsters);
+  const game = new Q2Foundation(
+    host,
+    {
+      edition: "classic",
+      mapName: "base1",
+      skill: 1,
+      mode: "singleplayer",
+      deathmatchFlags: 0,
+      maxClients: 1,
+      provider: "q2:game",
+      campaign: "q2:base",
+      combatProvider: "q2:combat",
+      inventoryProvider: "q2:inventory",
+      movementProvider: "q1:movement",
+    },
+    [module],
+  );
   const playerEntity = game.attachPlayer(player);
-  return { actors, callbacks, bodies, combat, inventory, player, playerEntity, game, monsters, events, random, diagnostics,
-    rayHit(actor: ActorId) { rayActor = actor; },
+  return {
+    actors,
+    callbacks,
+    bodies,
+    combat,
+    inventory,
+    player,
+    playerEntity,
+    game,
+    monsters,
+    events,
+    random,
+    diagnostics,
+    rayHit(actor: ActorId) {
+      rayActor = actor;
+    },
     spawn(classname: string, values: ReadonlyMap<string, string> = new Map([["origin", "0 0 24"]])) {
       const entity = game.spawn({ classname, ordinal: -1, values });
       const context = monsters.context(entity.actor.id);
@@ -62,11 +167,17 @@ function fixture() {
       return context;
     },
     advance(seconds: number) {
-      now = seconds; monsters.beginFrame(game);
+      now = seconds;
+      monsters.beginFrame(game);
       for (const [actor, due] of [...scheduled].sort(([a], [b]) => a.id.slot - b.id.slot)) {
         if (due > now + 1e-9 || !actors.isLive(actor.id)) continue;
         scheduled.delete(actor);
-        callbacks.think(actor, { frame: Math.round(now * 10), time: { kind: "seconds", value: now }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
+        callbacks.think(actor, {
+          frame: Math.round(now * 10),
+          time: { kind: "seconds", value: now },
+          elapsed: { kind: "seconds", value: 0.1 },
+          phase: "entity-think",
+        });
       }
     },
   };
@@ -74,7 +185,8 @@ function fixture() {
 
 describe("original Q2 base monster source behavior", () => {
   test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("retail campaign monster classnames and every base definition use the shared controller", async () => {
-    const scene = fixture(), archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
+    const scene = fixture(),
+      archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
     try {
       const representatives = new Map<string, Q2SpawnFields>();
       const maps = archive.entries.filter(entry => entry.path.startsWith("maps/") && entry.path.endsWith(".bsp"));
@@ -82,7 +194,12 @@ describe("original Q2 base monster source behavior", () => {
       for (const entry of maps) {
         for (const row of parseQ2Entities(readQ2Bsp(await archive.readEntry(entry)).entities, "classic")) {
           // The static commander corpse belongs to the base scenery module.
-          if (row.classname !== "monster_commander_body" && !inhibitQ2Spawn(row, scene.game.options) && (row.classname.startsWith("monster_") || row.classname === "misc_insane" || row.classname === "misc_actor")) representatives.set(row.classname, row);
+          if (
+            row.classname !== "monster_commander_body" &&
+            !inhibitQ2Spawn(row, scene.game.options) &&
+            (row.classname.startsWith("monster_") || row.classname === "misc_insane" || row.classname === "misc_actor")
+          )
+            representatives.set(row.classname, row);
         }
       }
       expect(representatives.size).toBeGreaterThan(20);
@@ -95,50 +212,82 @@ describe("original Q2 base monster source behavior", () => {
       const definitions = q2ClassicBaseMonsterDefinitions(scene.monsters);
       expect(definitions).toHaveLength(20);
       for (const definition of definitions) {
-        const context = scene.spawn(definition.classname, new Map([["origin", "0 0 24"], ["targetname", "actor"], ["target", "actor-path"]]));
+        const context = scene.spawn(
+          definition.classname,
+          new Map([
+            ["origin", "0 0 24"],
+            ["targetname", "actor"],
+            ["target", "actor-path"],
+          ]),
+        );
         expect(scene.combat.read(context.entity.actor.id)?.health).toBe(definition.health);
         expect(context.state.move.frames.length).toBeGreaterThanOrEqual(context.state.move.lastFrame - context.state.move.firstFrame + 1);
       }
       expect(scene.diagnostics).toEqual([]);
-    } finally { archive.close(); scene.actors.close(); }
+    } finally {
+      archive.close();
+      scene.actors.close();
+    }
   });
 
   test("Medic revives the same Brain actor and inventory after its screen has consumed cells", () => {
-    const scene = fixture(), brain = scene.spawn("monster_brain", new Map([["origin", "150 0 24"], ["target", "old-path"], ["targetname", "old-name"], ["combattarget", "old-combat"], ["deathtarget", "old-death"]]));
+    const scene = fixture(),
+      brain = scene.spawn(
+        "monster_brain",
+        new Map([
+          ["origin", "150 0 24"],
+          ["target", "old-path"],
+          ["targetname", "old-name"],
+          ["combattarget", "old-combat"],
+          ["deathtarget", "old-death"],
+        ]),
+      );
     brain.entity.enemy = scene.player.id;
     const actor = brain.entity.actor;
-    const hit = (damage: number) => scene.game.damage(actor.id, scene.playerEntity, scene.player.id, damage, 0, zero, scene.game.body(brain.entity).origin, zero, 0);
+    const hit = (damage: number) =>
+      scene.game.damage(actor.id, scene.playerEntity, scene.player.id, damage, 0, zero, scene.game.body(brain.entity).origin, zero, 0);
     hit(30);
     expect(scene.combat.read(actor.id)?.health).toBe(280);
     expect(scene.inventory.count(actor.id, "q2:monster-power")).toBe(90);
-    brain.dispatch("brain_chest_open"); hit(30);
+    brain.dispatch("brain_chest_open");
+    hit(30);
     expect(scene.combat.read(actor.id)?.health).toBe(250);
     expect(scene.inventory.count(actor.id, "q2:monster-power")).toBe(90);
-    brain.dispatch("brain_chest_closed"); hit(30);
+    brain.dispatch("brain_chest_closed");
+    hit(30);
     expect(scene.inventory.count(actor.id, "q2:monster-power")).toBe(80);
-    brain.dispatch("brain_chest_open"); hit(240); brain.dispatch("brain_dead");
+    brain.dispatch("brain_chest_open");
+    hit(240);
+    brain.dispatch("brain_dead");
     expect(brain.state.dead).toBe(true);
     const medic = scene.spawn("monster_medic");
-    medic.entity.enemy = scene.player.id; medic.run();
+    medic.entity.enemy = scene.player.id;
+    medic.run();
     expect(medic.entity.enemy).toBe(actor.id);
     expect(medic.state.medic).toBe(true);
-    scene.rayHit(actor.id); medic.entity.frame = medicFrame.attack50; medic.dispatch("medic_cable_attack");
+    scene.rayHit(actor.id);
+    medic.entity.frame = medicFrame.attack50;
+    medic.dispatch("medic_cable_attack");
     const revived = scene.monsters.context(actor.id);
     expect(revived?.entity.actor).toBe(actor);
     expect(revived?.state.dead).toBe(false);
     expect(revived?.state.resurrecting).toBe(true);
     expect(scene.combat.read(actor.id)?.health).toBe(300);
     expect(scene.inventory.count(actor.id, "q2:monster-power")).toBe(100);
-    expect(brain.entity.target).toBe(""); expect(brain.entity.targetname).toBe("");
-    expect(brain.entity.combatTarget).toBe(""); expect(brain.entity.deathTarget).toBe("");
+    expect(brain.entity.target).toBe("");
+    expect(brain.entity.targetname).toBe("");
+    expect(brain.entity.combatTarget).toBe("");
+    expect(brain.entity.deathTarget).toBe("");
     expect(brain.entity.enemy).toBe(scene.player.id);
     expect(scene.game.counters.totalMonsters).toBe(3);
-    medic.dispatch("medic_hook_retract"); expect(revived?.state.resurrecting).toBe(false);
+    medic.dispatch("medic_hook_retract");
+    expect(revived?.state.resurrecting).toBe(false);
     scene.actors.close();
   });
 
   test("Jorg's death frame launches Makron and keeps the boss explosion scheduler", () => {
-    const scene = fixture(), jorg = scene.spawn("monster_jorg");
+    const scene = fixture(),
+      jorg = scene.spawn("monster_jorg");
     expect(jorg.entity.model2).toBe("models/monsters/boss3/jorg/tris.md2");
     scene.advance(0.1);
     scene.game.damage(jorg.entity.actor.id, scene.playerEntity, scene.player.id, 4000, 0, zero, zero, zero, 0);
@@ -152,8 +301,10 @@ describe("original Q2 base monster source behavior", () => {
     expect(scene.monsters.context(makron.actor.id)).toBeNull();
     scene.advance(0.3);
     const explosions = () => scene.events.filter(event => event.kind === "effect" && event.effect === "q2:explosion1").length;
-    const initial = explosions(); expect(initial).toBeGreaterThan(0);
-    scene.advance(0.4); expect(explosions()).toBe(initial + 1);
+    const initial = explosions();
+    expect(initial).toBeGreaterThan(0);
+    scene.advance(0.4);
+    expect(explosions()).toBe(initial + 1);
     for (let frame = 5; frame <= 10; frame++) scene.advance(frame / 10);
     expect(scene.monsters.context(makron.actor.id)?.state.move.name).toBe("makron_move_sight");
     expect(scene.combat.read(makron.actor.id)?.health).toBe(3000);
@@ -162,8 +313,10 @@ describe("original Q2 base monster source behavior", () => {
   });
 
   test("Gunner bullets and grenades use the shared ballistics authority against a Q3 player", () => {
-    const scene = fixture(), gunner = scene.spawn("monster_gunner");
-    gunner.entity.enemy = scene.player.id; gunner.entity.frame = gunnerFrame.attak216;
+    const scene = fixture(),
+      gunner = scene.spawn("monster_gunner");
+    gunner.entity.enemy = scene.player.id;
+    gunner.entity.frame = gunnerFrame.attak216;
     gunner.dispatch("GunnerFire");
     expect(scene.combat.read(scene.player.id)?.health).toBe(997);
     gunner.dispatch("GunnerGrenade");
@@ -176,9 +329,12 @@ describe("original Q2 base monster source behavior", () => {
   });
 
   test("Insane crawl and crucifix flags retain their source meaning", () => {
-    const scene = fixture(), crawling = scene.spawn("misc_insane", new Map([["spawnflags", "4"]])), crucified = scene.spawn("misc_insane", new Map([["spawnflags", "8"]]));
+    const scene = fixture(),
+      crawling = scene.spawn("misc_insane", new Map([["spawnflags", "4"]])),
+      crucified = scene.spawn("misc_insane", new Map([["spawnflags", "8"]]));
     expect(crawling.entity.spawnflags).toBe(4);
-    crawling.walk(); expect(crawling.state.move.name).toBe("insane_move_crawl");
+    crawling.walk();
+    expect(crawling.state.move.name).toBe("insane_move_crawl");
     expect(crucified.state.locomotion).toBe("fly");
     expect(crucified.entity.flags & 2048).toBe(2048);
     expect(scene.game.body(crucified.entity).bounds).toEqual({ min: { x: -16, y: 0, z: 0 }, max: { x: 16, y: 8, z: 32 } });
@@ -187,7 +343,8 @@ describe("original Q2 base monster source behavior", () => {
   });
 
   test("A head gib drops the dying actor's attached models, as ThrowHead does", () => {
-    const scene = fixture(), jorg = scene.spawn("monster_jorg");
+    const scene = fixture(),
+      jorg = scene.spawn("monster_jorg");
     expect(jorg.entity.model2).not.toBe("");
     throwGib(jorg.entity, scene.game, "models/objects/gibs/gear/tris.md2", 0, { head: true });
     expect(jorg.entity.model2).toBe("");
@@ -195,25 +352,43 @@ describe("original Q2 base monster source behavior", () => {
   });
 
   test("The Iron Maiden corpse box sits on the floor, not under it", () => {
-    const scene = fixture(), chick = scene.spawn("monster_chick");
+    const scene = fixture(),
+      chick = scene.spawn("monster_chick");
     chick.dispatch("chick_dead");
     expect(scene.game.body(chick.entity).bounds).toEqual({ min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 16 } });
     scene.actors.close();
   });
 
   test("A medic whose patient is alive again stops hunting corpses, and a monster's alarm does not mark the player hostile", () => {
-    const scene = fixture(), medic = scene.spawn("monster_medic");
+    const scene = fixture(),
+      medic = scene.spawn("monster_medic");
     scene.advance(0.1);
-    medic.state.medic = true; medic.entity.enemy = scene.player.id; medic.run();
-    scene.advance(0.2); scene.advance(0.3); scene.advance(0.4);
+    medic.state.medic = true;
+    medic.entity.enemy = scene.player.id;
+    medic.run();
+    scene.advance(0.2);
+    scene.advance(0.3);
+    scene.advance(0.4);
     expect(medic.state.medic).toBe(false);
 
     // spawnflags 2 keeps the alarm monster from thinking, so only its FoundTarget call matters.
-    const alarm = scene.spawn("monster_tank", new Map([["origin", "0 0 24"], ["spawnflags", "2"]]));
+    const alarm = scene.spawn(
+      "monster_tank",
+      new Map([
+        ["origin", "0 0 24"],
+        ["spawnflags", "2"],
+      ]),
+    );
     alarm.entity.enemy = scene.player.id;
     scene.monsters.foundTarget(alarm);
     scene.advance(1);
-    const behind = scene.spawn("monster_soldier", new Map([["origin", "200 0 24"], ["angle", "180"]]));
+    const behind = scene.spawn(
+      "monster_soldier",
+      new Map([
+        ["origin", "200 0 24"],
+        ["angle", "180"],
+      ]),
+    );
     behind.findTarget();
     expect(behind.entity.enemy).toBeNull();
     scene.actors.close();

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { NumericProfile } from "../../../contracts/numeric.ts";
 import type { TraceQuery } from "../../../contracts/scene.ts";
@@ -24,23 +25,53 @@ interface ActorHostWorld {
 }
 
 export function createQ1ActorHost(bindings: Omit<Q1FoundationHost, "trace" | "contents">, world: ActorHostWorld): Q1FoundationHost {
-  return { ...bindings,
+  return {
+    ...bindings,
     trace: request => {
-      const trace = world.scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" },
-        policy: { kind: "q1", move: request.missile ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: world.numeric, passActor: request.ignore });
+      const trace = world.scene.trace({
+        start: request.start,
+        end: request.end,
+        shape: { kind: "box", bounds: request.bounds },
+        target: { kind: "world" },
+        policy: { kind: "q1", move: request.missile ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null },
+        numeric: world.numeric,
+        passActor: request.ignore,
+      });
       if (trace.kind !== "q1") throw new Error("Q1 actor trace returned another source representation");
       // Sky only matters where the trace stopped; an unobstructed trace skips the contents query.
-      const sky = ((trace.surfaceFlags ?? 0) & 4) !== 0 || trace.fraction < 1 && (() => {
-        const contents = world.scene.pointContents({ point: trace.end, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: world.numeric, passActor: request.ignore });
-        return contents.kind === "q1" && contents.contents === -6;
-      })();
-      return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal,
+      const sky =
+        ((trace.surfaceFlags ?? 0) & 4) !== 0 ||
+        (trace.fraction < 1 &&
+          (() => {
+            const contents = world.scene.pointContents({
+              point: trace.end,
+              target: { kind: "world" },
+              policy: { kind: "q1", move: "normal", hull: null },
+              numeric: world.numeric,
+              passActor: request.ignore,
+            });
+            return contents.kind === "q1" && contents.contents === -6;
+          })());
+      return {
+        fraction: trace.fraction,
+        end: trace.end,
+        normal: trace.sourcePlane.normal,
         actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? world.worldActor() : null,
-        startSolid: trace.startSolid, allSolid: trace.allSolid, sky, inOpen: trace.inOpen, inWater: trace.inWater };
+        startSolid: trace.startSolid,
+        allSolid: trace.allSolid,
+        sky,
+        inOpen: trace.inOpen,
+        inWater: trace.inWater,
+      };
     },
     contents: point => {
-      const result = world.scene.pointContents({ point, target: { kind: "world" }, passActor: null,
-        policy: { kind: "q1", move: "normal", hull: null }, numeric: world.numeric });
+      const result = world.scene.pointContents({
+        point,
+        target: { kind: "world" },
+        passActor: null,
+        policy: { kind: "q1", move: "normal", hull: null },
+        numeric: world.numeric,
+      });
       if (result.kind !== "q1") throw new Error("Q1 actor contents returned another source representation");
       const value = result.contents;
       return value === -2 ? "solid" : value === -3 ? "water" : value === -4 ? "slime" : value === -5 ? "lava" : value === -6 ? "sky" : "empty";
@@ -53,27 +84,46 @@ type Q2WorldQuery = "trace" | "pointContents" | "inPvs" | "inPhs" | "areasConnec
 export function createQ2ActorHost(bindings: Omit<Q2FoundationHost, Q2WorldQuery>, world: ActorHostWorld): Q2FoundationHost {
   const visible = (first: Parameters<Q2FoundationHost["inPvs"]>[0], second: Parameters<Q2FoundationHost["inPvs"]>[1], kind: "pvs" | "phs") =>
     // sv_game.c adds the area test ("a door blocks hearing") to both queries.
-    world.scene.clusterVisible(world.scene.leafCluster(world.scene.pointLeaf(first)), world.scene.leafCluster(world.scene.pointLeaf(second)), kind)
-      && world.scene.areasConnected(world.scene.leafArea(world.scene.pointLeaf(first)), world.scene.leafArea(world.scene.pointLeaf(second)));
-  return { ...bindings,
+    world.scene.clusterVisible(world.scene.leafCluster(world.scene.pointLeaf(first)), world.scene.leafCluster(world.scene.pointLeaf(second)), kind) &&
+    world.scene.areasConnected(world.scene.leafArea(world.scene.pointLeaf(first)), world.scene.leafArea(world.scene.pointLeaf(second)));
+  return {
+    ...bindings,
     trace: request => {
-      const query: TraceQuery = { start: request.start, end: request.end,
-        shape: request.bounds === null ? { kind: "point" } : { kind: "box", bounds: request.bounds }, target: { kind: "world" },
-        policy: { kind: "q2", contentsMask: request.mask, leafContents: world.leafContents ?? "merged" }, numeric: world.numeric, passActor: request.ignore };
+      const query: TraceQuery = {
+        start: request.start,
+        end: request.end,
+        shape: request.bounds === null ? { kind: "point" } : { kind: "box", bounds: request.bounds },
+        target: { kind: "world" },
+        policy: { kind: "q2", contentsMask: request.mask, leafContents: world.leafContents ?? "merged" },
+        numeric: world.numeric,
+        passActor: request.ignore,
+      };
       return request.exclude === undefined || request.exclude.length === 0 ? world.scene.trace(query) : world.scene.traceExcluding(query, request.exclude);
     },
     pointContents: point => {
-      const result = world.scene.pointContents({ point, target: { kind: "world" }, passActor: null,
-        policy: { kind: "q2", contentsMask: -1, leafContents: world.leafContents ?? "merged" }, numeric: world.numeric });
+      const result = world.scene.pointContents({
+        point,
+        target: { kind: "world" },
+        passActor: null,
+        policy: { kind: "q2", contentsMask: -1, leafContents: world.leafContents ?? "merged" },
+        numeric: world.numeric,
+      });
       if (result.kind !== "q2") throw new Error("Q2 actor contents returned another source representation");
       return world.leafContents === "stored" ? result.stored : result.merged;
     },
-    inPvs: (first, second) => visible(first, second, "pvs"), inPhs: (first, second) => visible(first, second, "phs"),
-    areasConnected: (first, second) => world.scene.areasConnected(world.scene.leafArea(world.scene.pointLeaf(first)), world.scene.leafArea(world.scene.pointLeaf(second))),
-    nearby: (origin, radius) => bindings.actors.observations().map(value => value.id).filter(actor => {
-      const body = bindings.bodies.read(actor);
-      return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
-    }).sort(world.sourceOrder),
+    inPvs: (first, second) => visible(first, second, "pvs"),
+    inPhs: (first, second) => visible(first, second, "phs"),
+    areasConnected: (first, second) =>
+      world.scene.areasConnected(world.scene.leafArea(world.scene.pointLeaf(first)), world.scene.leafArea(world.scene.pointLeaf(second))),
+    nearby: (origin, radius) =>
+      bindings.actors
+        .observations()
+        .map(value => value.id)
+        .filter(actor => {
+          const body = bindings.bodies.read(actor);
+          return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
+        })
+        .sort(world.sourceOrder),
     inlineModelBounds: model => world.scene.modelBounds(model),
   };
 }

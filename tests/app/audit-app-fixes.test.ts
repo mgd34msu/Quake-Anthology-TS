@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,15 +40,19 @@ test("an unmapped legacy configstring command is dropped instead of ending the c
 test("parsable but out-of-range preference files fall back to defaults with a warning", async () => {
   const root = await mkdtemp(join(tmpdir(), "bad-preferences-"));
   try {
-    const store = new ConfigStore(root), warnings: string[] = [];
+    const store = new ConfigStore(root),
+      warnings: string[] = [];
     await store.dump("audio.json", JSON.stringify({ version: 1, deviceName: null, effectsVolume: 5, musicVolume: 0.5 }));
     await store.dump("view.json", JSON.stringify({ version: 1, fieldOfView: 170 }));
     expect(await loadAudioSettings(store, text => warnings.push(text))).toEqual({});
     const view = new ApplicationViewSettings(() => undefined);
     await view.load(store, text => warnings.push(text));
     expect(view.fieldOfView).toBe(90);
-    expect(warnings.join("")).toContain("audio.json"); expect(warnings.join("")).toContain("view.json");
-  } finally { await rm(root, { recursive: true, force: true }); }
+    expect(warnings.join("")).toContain("audio.json");
+    expect(warnings.join("")).toContain("view.json");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("a rejected load is evicted so a transient failure can be retried", async () => {
@@ -61,8 +66,13 @@ test("a rejected load is evicted so a transient failure can be retried", async (
 test("a listed Q3 server whose status the cache cannot hold is saved without that status", () => {
   const rules = new Map<string, string>();
   for (let index = 0; index < 1100; index++) rules.set(`k${index}`, "v");
-  const entry: Parameters<typeof writeQ3BrowserCache>[0][number] = { address: { kind: "ipv4", host: [10, 0, 0, 1], port: 27960 }, sources: ["master"], pingMilliseconds: 5, updatedAt: 1,
-    status: { name: "big", map: "q3dm1", players: 0, maxPlayers: 8, rules, playerDetails: [], wire: { kind: "source", protocol: Q3_PROTOCOL } } };
+  const entry: Parameters<typeof writeQ3BrowserCache>[0][number] = {
+    address: { kind: "ipv4", host: [10, 0, 0, 1], port: 27960 },
+    sources: ["master"],
+    pingMilliseconds: 5,
+    updatedAt: 1,
+    status: { name: "big", map: "q3dm1", players: 0, maxPlayers: 8, rules, playerDetails: [], wire: { kind: "source", protocol: Q3_PROTOCOL } },
+  };
   const saved = writeQ3BrowserCache([entry], null);
   expect(readQ3BrowserCache(saved).entries[0]?.status).toBeNull();
 });

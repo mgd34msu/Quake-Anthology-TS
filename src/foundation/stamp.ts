@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Epoch visit marks, following the shared C foundation (include/qa/stamp.h):
  * beginning a query is one epoch increment instead of clearing a Set or a
@@ -14,8 +15,12 @@ export class StampSet {
     this.marks = new Uint32Array(capacity);
   }
 
-  get capacity(): number { return this.marks.length; }
-  get epoch(): number { return this.currentEpoch; }
+  get capacity(): number {
+    return this.marks.length;
+  }
+  get epoch(): number {
+    return this.currentEpoch;
+  }
 
   /** Starts a new query. Epoch wrap re-zeroes the marks once. */
   begin(): void {

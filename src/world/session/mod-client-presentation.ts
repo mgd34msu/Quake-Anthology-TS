@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModIdentity } from "../../contracts/mods.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
@@ -21,7 +22,11 @@ export interface NativeModCameraView extends PlayerView {
 export type ModClientPresentationFrame =
   | { readonly kind: "qvm"; readonly hud: { readonly mode: "overlay" | "replace-status" }; readonly view: null }
   | { readonly kind: "quakec"; readonly hud: { readonly health: number; readonly armor: number } | null; readonly view: PlayerView | null }
-  | { readonly kind: "native"; readonly hud: { readonly mode: "layout-overlay" | "replace-status"; readonly frame: NativeQ2HudFrame } | null; readonly view: NativeModCameraView | null };
+  | {
+      readonly kind: "native";
+      readonly hud: { readonly mode: "layout-overlay" | "replace-status"; readonly frame: NativeQ2HudFrame } | null;
+      readonly view: NativeModCameraView | null;
+    };
 
 /** Module storage remains authoritative; the returned frame contains detached source values. */
 export interface ModClientPresentationSource {

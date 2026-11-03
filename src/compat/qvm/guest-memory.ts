@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestMemory, ModuleIdentity } from "../../contracts/execution.ts";
 import type { QvmMemory } from "./memory.ts";
 
@@ -6,7 +7,10 @@ export class QvmGuestMemory implements GuestMemory {
   readonly addressSpace = Symbol("qvm-memory");
   readonly pointerBytes = 4;
 
-  constructor(readonly module: ModuleIdentity, private readonly memory: QvmMemory) {}
+  constructor(
+    readonly module: ModuleIdentity,
+    private readonly memory: QvmMemory,
+  ) {}
 
   pointer(rawValue: bigint): GuestAddress | null {
     if (rawValue < -0x80000000n || rawValue > 0xffffffffn) throw new RangeError("QVM pointer is outside its 32-bit representation");
@@ -21,8 +25,13 @@ export class QvmGuestMemory implements GuestMemory {
 
   private checked(address: GuestAddress, byteLength: number): number {
     if (address.addressSpace !== this.addressSpace) throw new Error("QVM pointer belongs to another module instance");
-    if (!Number.isSafeInteger(byteLength) || byteLength < 0 || address.byteOffset < 0
-      || address.byteOffset + BigInt(byteLength) > BigInt(this.memory.bytes.length)) throw new RangeError("QVM address range exceeds allocation");
+    if (
+      !Number.isSafeInteger(byteLength) ||
+      byteLength < 0 ||
+      address.byteOffset < 0 ||
+      address.byteOffset + BigInt(byteLength) > BigInt(this.memory.bytes.length)
+    )
+      throw new RangeError("QVM address range exceeds allocation");
     return Number(address.byteOffset);
   }
 

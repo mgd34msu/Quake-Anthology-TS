@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { NativeModClients, NativeModSourceCall, NativeModInputOutput } from "../../contracts/native-mod-callbacks.ts";
 import type { ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
@@ -8,8 +9,14 @@ import type { CommandInvocation } from "../../core/commands/index.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import { q2Userinfo } from "../../content/q2/base/player/index.ts";
 
-export interface NativeModClientSlot { readonly actor: ActorId; readonly slot: number; readonly admitted: boolean; }
-interface Entry extends NativeModClientSlot { readonly client: ClientId; }
+export interface NativeModClientSlot {
+  readonly actor: ActorId;
+  readonly slot: number;
+  readonly admitted: boolean;
+}
+interface Entry extends NativeModClientSlot {
+  readonly client: ClientId;
+}
 interface Operations {
   readonly services: ModClientServices;
   readonly declaration: NativeModClients;
@@ -32,9 +39,10 @@ export class NativeModClientsBinding {
   private unsubscribeInput: (() => undefined) | null = null;
   constructor(private readonly operations: Operations) {}
   private require(actor: ActorId): Entry {
-    const entry = this.entries.get(actor), client = this.operations.services.forActor(actor);
-    if (entry === undefined || client === null || !entry.client.equals(client)
-      || this.operations.services.actor(client)?.equals(actor) !== true) throw new Error("Native component client identity is no longer live");
+    const entry = this.entries.get(actor),
+      client = this.operations.services.forActor(actor);
+    if (entry === undefined || client === null || !entry.client.equals(client) || this.operations.services.actor(client)?.equals(actor) !== true)
+      throw new Error("Native component client identity is no longer live");
     return entry;
   }
   slot(actor: ActorId): number | null {
@@ -44,17 +52,28 @@ export class NativeModClientsBinding {
     if (client === null) return null;
     if (this.operations.services.actor(client)?.equals(actor) !== true) throw new Error("Native component client identity is no longer live");
     const occupied = new Set([...this.entries.values()].map(entry => entry.slot));
-    let slot = 0; while (occupied.has(slot)) slot++;
+    let slot = 0;
+    while (occupied.has(slot)) slot++;
     if (slot >= this.operations.declaration.maximum) throw new Error("Native component source client capacity exceeded");
     this.entries.set(actor, { actor, client, slot, admitted: false });
     return slot;
   }
-  has(actor: ActorId): boolean { return this.entries.has(actor); }
-  admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted && !this.denied.has(actor); }
-  rejects(actor: ActorId): boolean { return this.denied.has(actor); }
+  has(actor: ActorId): boolean {
+    return this.entries.has(actor);
+  }
+  admitted(actor: ActorId): boolean {
+    return this.entries.has(actor) && this.require(actor).admitted && !this.denied.has(actor);
+  }
+  rejects(actor: ActorId): boolean {
+    return this.denied.has(actor);
+  }
   private calls(calls: readonly NativeModSourceCall[], actor: ActorId): void {
     const entry = this.require(actor);
-    for (const call of calls) { if (this.entries.get(actor) !== entry) break; this.require(actor); if (this.operations.invoke(call, actor) === null) break; }
+    for (const call of calls) {
+      if (this.entries.get(actor) !== entry) break;
+      this.require(actor);
+      if (this.operations.invoke(call, actor) === null) break;
+    }
   }
   private admit(actor: ActorId): boolean {
     if (this.denied.has(actor)) return false;
@@ -70,14 +89,17 @@ export class NativeModClientsBinding {
         if (call.accepts === "nonzero" && result === 0) {
           const reason = q2Userinfo(this.userinfo(actor)).get("rejmsg") || "Connection refused";
           this.operations.services.drop(this.require(actor).client, reason, this.operations.content);
-          this.denied.add(actor); return false;
+          this.denied.add(actor);
+          return false;
         }
       }
       this.entries.set(actor, { ...this.require(actor), admitted: true });
       this.operations.admitted?.(actor);
       return true;
     } catch (error) {
-      this.operations.release(actor); this.entries.delete(actor); throw error;
+      this.operations.release(actor);
+      this.entries.delete(actor);
+      throw error;
     }
   }
   start(): void {
@@ -85,14 +107,20 @@ export class NativeModClientsBinding {
     this.unsubscribe = this.operations.services.subscribe(event => {
       const actor = event.identity.actor;
       if (event.kind === "admitted") this.admit(actor);
-      else if (event.kind === "userinfo") { if (this.admit(actor)) this.calls(this.operations.declaration.userinfo, actor); }
-      else { if (this.entries.has(actor)) this.disconnect(actor); this.denied.delete(actor); }
+      else if (event.kind === "userinfo") {
+        if (this.admit(actor)) this.calls(this.operations.declaration.userinfo, actor);
+      } else {
+        if (this.entries.has(actor)) this.disconnect(actor);
+        this.denied.delete(actor);
+      }
       return undefined;
     });
     for (const identity of this.operations.services.clients()) this.admit(identity.actor);
     this.unsubscribeInput = subscribeModClientInput(this.operations.services, this.operations.declaration.input ?? [], {
-      open: application => this.require(application.identity.actor).admitted && !this.denied.has(application.identity.actor)
-        ? this.operations.openInput(application) : () => undefined,
+      open: application =>
+        this.require(application.identity.actor).admitted && !this.denied.has(application.identity.actor)
+          ? this.operations.openInput(application)
+          : () => undefined,
       invoke: (call, application) => {
         const actor = application.identity.actor;
         if (this.require(actor).admitted && !this.denied.has(actor)) this.operations.invokeInput(call, application);
@@ -102,7 +130,11 @@ export class NativeModClientsBinding {
   }
   frame(slot: number): boolean {
     let entry: Entry | undefined;
-    for (const candidate of this.entries.values()) if (candidate.slot + 1 === slot) { entry = candidate; break; }
+    for (const candidate of this.entries.values())
+      if (candidate.slot + 1 === slot) {
+        entry = candidate;
+        break;
+      }
     if (entry === undefined) return false;
     const client = this.operations.services.forActor(entry.actor);
     if (client !== null && this.operations.services.actor(client)?.equals(entry.actor) === true && this.admitted(entry.actor))
@@ -118,11 +150,19 @@ export class NativeModClientsBinding {
     }
   }
   private disconnect(actor: ActorId): void {
-    try { if (this.require(actor).admitted) this.calls(this.operations.declaration.disconnect, actor); }
-    finally { this.operations.release(actor); this.entries.delete(actor); }
+    try {
+      if (this.require(actor).admitted) this.calls(this.operations.declaration.disconnect, actor);
+    } finally {
+      this.operations.release(actor);
+      this.entries.delete(actor);
+    }
   }
-  userinfo(actor: ActorId): string { return this.operations.services.userinfo(this.require(actor).client); }
-  setUserinfo(actor: ActorId, value: string): void { this.operations.services.setUserinfo(this.require(actor).client, value); }
+  userinfo(actor: ActorId): string {
+    return this.operations.services.userinfo(this.require(actor).client);
+  }
+  setUserinfo(actor: ActorId, value: string): void {
+    this.operations.services.setUserinfo(this.require(actor).client, value);
+  }
   invokeCommand(command: CommandInvocation): boolean {
     if (this.operations.declaration.command.length === 0) return false;
     let origin: CommandOrigin = command.source.origin;
@@ -142,27 +182,42 @@ export class NativeModClientsBinding {
   validateRestore(entries: readonly NativeModClientSlot[]): void {
     for (const entry of entries) {
       const client = this.operations.services.forActor(entry.actor);
-      if (client === null || this.operations.services.actor(client)?.equals(entry.actor) !== true) throw new Error("Saved native component client is unavailable");
+      if (client === null || this.operations.services.actor(client)?.equals(entry.actor) !== true)
+        throw new Error("Saved native component client is unavailable");
     }
   }
   restore(entries: readonly NativeModClientSlot[]): void {
-    this.validateRestore(entries); this.entries.clear(); this.denied.clear();
+    this.validateRestore(entries);
+    this.entries.clear();
+    this.denied.clear();
     for (const entry of entries) {
       const client = this.operations.services.forActor(entry.actor);
       if (client === null) throw new Error("Saved native component client is unavailable");
       this.entries.set(entry.actor, { ...entry, client });
     }
   }
-  forget(actor: ActorId): void { this.entries.delete(actor); }
+  forget(actor: ActorId): void {
+    this.entries.delete(actor);
+  }
   close(): void {
-    this.unsubscribe?.(); this.unsubscribe = null;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     const errors: unknown[] = [];
-    try { this.unsubscribeInput?.(); } catch (error) { errors.push(error); } this.unsubscribeInput = null;
-    for (const actor of [...this.entries.keys()]) {
-      try { this.operations.release(actor); }
-      catch (error) { errors.push(error); }
+    try {
+      this.unsubscribeInput?.();
+    } catch (error) {
+      errors.push(error);
     }
-    this.entries.clear(); this.denied.clear();
+    this.unsubscribeInput = null;
+    for (const actor of [...this.entries.keys()]) {
+      try {
+        this.operations.release(actor);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    this.entries.clear();
+    this.denied.clear();
     if (errors.length !== 0) throw new AggregateError(errors, "Native component client cleanup failed");
   }
 }

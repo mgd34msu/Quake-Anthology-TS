@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { MountPreparationScope } from "../../content/mounts/index.ts";
 import { startupStamp } from "./startup-timing.ts";
 import { applicationModChoices, applyApplicationMods, type ApplicationModChoice } from "./mod-selection.ts";
@@ -23,10 +24,26 @@ import type { ArchiveHandle } from "../../content/archive/index.ts";
 import { parseQ2Entities } from "../../content/q2/foundation/fields.ts";
 import { FileSource } from "../../content/archive/source.ts";
 import { parseQ1Entities, q1EntityValue } from "../../formats/q1-map/index.ts";
-import type { CampaignSelection, EnemySelection, EquipmentSelection, MonsterSelectionTarget, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
+import type {
+  CampaignSelection,
+  EnemySelection,
+  EquipmentSelection,
+  MonsterSelectionTarget,
+  ExecutableRecipe,
+  GameFamily,
+  LaunchChoice,
+  ProviderReference,
+} from "../../contracts/content.ts";
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/index.ts";
-import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment, grappleStyles, offhandGrenadeSource, type GrappleStyle } from "../../content/catalog/equipment.ts";
+import {
+  EQUIPMENT_PROVIDERS,
+  disabledEquipment,
+  nativeEquipment,
+  grappleStyles,
+  offhandGrenadeSource,
+  type GrappleStyle,
+} from "../../content/catalog/equipment.ts";
 import { applicationQvmGrappleSelection } from "./qvm-grapple-selection.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
@@ -38,14 +55,50 @@ import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
-export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "skin" | "topColor" | "bottomColor" | "weapons" | "enemies" | "grapple" | "grappleStyle" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
-export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null;
+export type StartupSelectionField =
+  | "doppler"
+  | "environment"
+  | "product"
+  | "mapProduct"
+  | "map"
+  | "movement"
+  | "character"
+  | "model"
+  | "skin"
+  | "topColor"
+  | "bottomColor"
+  | "weapons"
+  | "enemies"
+  | "grapple"
+  | "grappleStyle"
+  | "grenades"
+  | "mode"
+  | "rules"
+  | "skill"
+  | "seats"
+  | "renderer";
+export interface StartupSelectionChoice {
+  readonly id: string;
+  readonly label: string;
+  readonly unavailable: string | null;
   /** Picker category (collapsible group header); absent means ungrouped. */
   readonly group?: string;
   /** Picker edition filter; absent means the choice exists in every edition. */
-  readonly edition?: "classic" | "rerelease"; }
-export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
-export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
+  readonly edition?: "classic" | "rerelease";
+}
+export interface StartupSelectionRow {
+  readonly id: StartupSelectionField;
+  readonly label: string;
+  readonly value: string;
+  readonly choices: readonly StartupSelectionChoice[];
+}
+export interface MonsterRosterRow {
+  readonly classname: string | null;
+  readonly label: string;
+  readonly value: string;
+  readonly effectiveLabel: string;
+  readonly choices: readonly StartupSelectionChoice[];
+}
 export type StartupNativePreset = Omit<StartupSelectionChoice, "edition"> & {
   readonly family: GameFamily;
   readonly edition: string;
@@ -56,7 +109,10 @@ export type StartupNativePreset = Omit<StartupSelectionChoice, "edition"> & {
   readonly rules?: MatchRules;
   readonly mode?: "singleplayer" | "coop" | "deathmatch";
 };
-export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
+export interface StartupLaunch {
+  readonly options: ApplicationOptions;
+  readonly recipe: ExecutableRecipe;
+}
 export interface StartupCharacterPreview {
   readonly product: CatalogProduct["id"];
   readonly family: GameFamily;
@@ -71,16 +127,44 @@ export interface StartupHosting {
   readonly q1Protocol: Q1ProtocolIdentity | null;
 }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
-const q1ColorNames: readonly string[] = ["White", "Brown", "Slate", "Olive", "Red", "Ochre", "Rust", "Peach", "Mauve", "Rose", "Khaki", "Teal", "Yellow", "Blue"];
-const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
+const q1ColorNames: readonly string[] = [
+  "White",
+  "Brown",
+  "Slate",
+  "Olive",
+  "Red",
+  "Ochre",
+  "Rust",
+  "Peach",
+  "Mauve",
+  "Rose",
+  "Khaki",
+  "Teal",
+  "Yellow",
+  "Blue",
+];
+const monsterNames: Readonly<Record<string, string>> = {
+  monster_army: "Grunt",
+  monster_demon1: "Fiend",
+  monster_wizard: "Scrag",
+  monster_shalrath: "Vore",
+  monster_tarbaby: "Spawn",
+};
 function monsterLabel(classname: string): string {
-  return monsterNames[classname] ?? classname.replace("monster_", "").split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+  return (
+    monsterNames[classname] ??
+    classname
+      .replace("monster_", "")
+      .split("_")
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
 }
 function monsterProgramSuffix(program: string): string {
   return program === "id1" || program === "baseq2" ? "" : ` ${program}`;
 }
 function monsterSourceTitle(family: GameFamily, program: string, title: string | undefined): string {
-  return program === "id1" || program === "baseq2" ? family === "q1" ? "Quake" : "Quake II" : title ?? program;
+  return program === "id1" || program === "baseq2" ? (family === "q1" ? "Quake" : "Quake II") : (title ?? program);
 }
 function unavailable(product: CatalogProduct): string | null {
   const state = product.availability;
@@ -88,15 +172,19 @@ function unavailable(product: CatalogProduct): string | null {
 }
 function productChoice(product: CatalogProduct): StartupSelectionChoice {
   const edition = product.expectation.edition;
-  return { ...choice(product.expectation.id, product.expectation.title, unavailable(product)),
+  return {
+    ...choice(product.expectation.id, product.expectation.title, unavailable(product)),
     group: product.expectation.family === "q1" ? "Quake" : product.expectation.family === "q2" ? "Quake II" : "Quake III Arena",
-    ...(edition === "classic" || edition === "rerelease" ? { edition } : {}) };
+    ...(edition === "classic" || edition === "rerelease" ? { edition } : {}),
+  };
 }
 
 /** The draft stores UI choices; the existing launch resolver remains the recipe authority. */
 export class StartupSelectionModel {
   private arenaSelection: ArenaSelection | null = null;
-  baseArenas(): ArenaSelection | null { return this.arenaSelection; }
+  baseArenas(): ArenaSelection | null {
+    return this.arenaSelection;
+  }
   async refreshBaseArenas(): Promise<void> {
     const launch = await this.resolvePreset("q3-baseq3");
     this.arenaSelection = await readArenaSelection(this.catalog, launch.options);
@@ -105,7 +193,8 @@ export class StartupSelectionModel {
   private selectedTeams: TeamArenaTeams = { player: "pagans", opponent: "stroggs" };
   private selectedServerProfile: Pick<ApplicationOptions, "serverProfilePath"> | null = null;
   readonly teamArena = {
-    choices: (): readonly { readonly id: string; readonly label: string }[] => [...this.teamArenaCampaign?.teams.keys() ?? []].map(id => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) })),
+    choices: (): readonly { readonly id: string; readonly label: string }[] =>
+      [...(this.teamArenaCampaign?.teams.keys() ?? [])].map(id => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) })),
     read: (): TeamArenaTeams => this.selectedTeams,
     write: (side: "player" | "opponent", team: string): void => {
       const name = team.toLowerCase();
@@ -113,14 +202,29 @@ export class StartupSelectionModel {
       this.selectedTeams = { ...this.selectedTeams, [side]: name };
     },
   };
-  selectServerProfile(path: string | null): void { this.selectedServerProfile = path === null ? {} : { serverProfilePath: path }; }
+  selectServerProfile(path: string | null): void {
+    this.selectedServerProfile = path === null ? {} : { serverProfilePath: path };
+  }
   hosting(): StartupHosting {
     const network = this.initial.network;
     const product = this.product("product").expectation;
-    const q1Protocol = product.family === "q1" && product.edition !== "quakeworld" ? this.initial.q1Protocol ?? defaultNetQuakeProfile(15) : null;
+    const q1Protocol = product.family === "q1" && product.edition !== "quakeworld" ? (this.initial.q1Protocol ?? defaultNetQuakeProfile(15)) : null;
     if (network.kind === "native-server" || network.kind === "q2-server" || network.kind === "unified-server")
       return { kind: network.kind === "q2-server" ? "native-server" : network.kind, port: network.port, q1Protocol };
-    return { kind: "offline", port: product.family === "q3" ? 27960 : product.family === "q2" ? liveQ2Protocol(this.initial, product.edition === "rerelease").kind === "q2-kex" ? 5069 : 27910 : product.edition === "quakeworld" ? 27500 : 26000, q1Protocol };
+    return {
+      kind: "offline",
+      port:
+        product.family === "q3"
+          ? 27960
+          : product.family === "q2"
+            ? liveQ2Protocol(this.initial, product.edition === "rerelease").kind === "q2-kex"
+              ? 5069
+              : 27910
+            : product.edition === "quakeworld"
+              ? 27500
+              : 26000,
+      q1Protocol,
+    };
   }
   setHosting(value: StartupHosting): void {
     if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw new Error("Port must be a whole number from 1 to 65535.");
@@ -129,10 +233,12 @@ export class StartupSelectionModel {
     const previous = this.initial.network;
     const host = previous.kind === "native-server" || previous.kind === "q2-server" || previous.kind === "unified-server" ? previous.host : "0.0.0.0";
     const { networkTransport: _transport, q1Protocol: _q1Protocol, ...initial } = this.initial;
-    this.initial = { ...initial,
+    this.initial = {
+      ...initial,
       network: value.kind === "offline" ? { kind: "offline" } : { kind: value.kind, host, port: value.port },
       ...(value.kind === "native-server" && this.hosting().q1Protocol !== null && value.q1Protocol !== null ? { q1Protocol: value.q1Protocol } : {}),
-      ...(value.kind === "native-server" && this.initial.networkTransport !== undefined ? { networkTransport: this.initial.networkTransport } : {}) };
+      ...(value.kind === "native-server" && this.initial.networkTransport !== undefined ? { networkTransport: this.initial.networkTransport } : {}),
+    };
   }
   private applySelectedServerProfile(options: ApplicationOptions): ApplicationOptions {
     if (this.selectedServerProfile === null) return options;
@@ -177,32 +283,59 @@ export class StartupSelectionModel {
   private modStatus = "";
   private refreshingMods = false;
   readonly mods: ModMenuService = {
-    rows: () => (this.selectedMods?.entries() ?? []).filter(entry => entry.purpose === "addition").map(entry => ({
-      id: modSelectionKey(entry.selection), title: entry.title, source: entry.sourceTitle,
-      enabled: this.selectedMods?.has(entry.selection) === true,
-      unavailable: entry.availability.kind === "available" ? null : entry.availability.reason,
-    })),
+    rows: () =>
+      (this.selectedMods?.entries() ?? [])
+        .filter(entry => entry.purpose === "addition")
+        .map(entry => ({
+          id: modSelectionKey(entry.selection),
+          title: entry.title,
+          source: entry.sourceTitle,
+          enabled: this.selectedMods?.has(entry.selection) === true,
+          unavailable: entry.availability.kind === "available" ? null : entry.availability.reason,
+        })),
     setEnabled: (id, enabled) => {
       try {
         if (this.selectedMods === null) throw new Error("Mod discovery has not finished");
-        this.selectedMods.setEnabled(readModSelection(id), enabled); this.modStatus = "";
-      } catch (error) { this.modStatus = error instanceof Error ? error.message : String(error); }
+        this.selectedMods.setEnabled(readModSelection(id), enabled);
+        this.modStatus = "";
+      } catch (error) {
+        this.modStatus = error instanceof Error ? error.message : String(error);
+      }
     },
     refresh: () => {
       if (this.refreshingMods) return;
-      this.refreshingMods = true; this.modStatus = "Reading installed mods...";
-      discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, addonContentRoots: this.catalog.addonContentRoots,
-        ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true })
-        .then(async catalog => { await this.prepareMods(catalog); await this.prepareHookStyles(catalog); this.currentCatalog = catalog; this.modStatus = ""; })
-        .catch((error: unknown) => { this.modStatus = error instanceof Error ? error.message : String(error); })
-        .finally(() => { this.refreshingMods = false; });
+      this.refreshingMods = true;
+      this.modStatus = "Reading installed mods...";
+      discoverInstalledContent({
+        corpusRoot: this.catalog.corpusRoot,
+        generation: this.catalog.generation + 1,
+        addonContentRoots: this.catalog.addonContentRoots,
+        ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }),
+        discoverMods: true,
+      })
+        .then(async catalog => {
+          await this.prepareMods(catalog);
+          await this.prepareHookStyles(catalog);
+          this.currentCatalog = catalog;
+          this.modStatus = "";
+        })
+        .catch((error: unknown) => {
+          this.modStatus = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          this.refreshingMods = false;
+        });
     },
     status: () => this.modStatus,
   };
   private async prepareMods(catalog = this.catalog): Promise<void> {
-    const choices = await applicationModChoices(catalog), descriptions = choices.map(choice => choice.description);
-    if (this.selectedMods === null) this.selectedMods = new ModSelectionSet(descriptions,
-      [...this.initial.mods ?? [], ...this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]]);
+    const choices = await applicationModChoices(catalog),
+      descriptions = choices.map(choice => choice.description);
+    if (this.selectedMods === null)
+      this.selectedMods = new ModSelectionSet(descriptions, [
+        ...(this.initial.mods ?? []),
+        ...(this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]),
+      ]);
     else this.selectedMods.refresh(descriptions);
     this.modChoices = choices;
   }
@@ -217,40 +350,85 @@ export class StartupSelectionModel {
   private readonly rosters = new Map<string, { source: string; default: string; readonly byClassname: Map<string, string> }>();
   private readonly selectedModels = new Map<string, string>();
   private readonly modelChoices = new Map<string, readonly StartupSelectionChoice[]>();
-  get catalog(): InstalledCatalog { return this.currentCatalog; }
-  constructor(private currentCatalog: InstalledCatalog, private initial: ApplicationOptions) {
+  get catalog(): InstalledCatalog {
+    return this.currentCatalog;
+  }
+  constructor(
+    private currentCatalog: InstalledCatalog,
+    private initial: ApplicationOptions,
+  ) {
     const catalog = currentCatalog;
     this.display = { width: initial.width, height: initial.height, gamma: initial.gamma };
-    const product = catalog.product(initial.product), campaign = product.expectation.campaign;
+    const product = catalog.product(initial.product),
+      campaign = product.expectation.campaign;
     const playerProducts = applicationPlayerProducts(catalog, initial);
-    const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
-    this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
-      movement: playerProducts.movement, character: playerProducts.character, model: initial.characterModel,
-      skin: initial.characterSkin ?? "", topColor: String(initial.characterTopColor ?? 0), bottomColor: String(initial.characterBottomColor ?? 0),
-      doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grappleStyle: "native", grenades: "native", mode: initial.mode, rules,
-      skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
+    const rules =
+      initial.rules ??
+      (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf")
+        ? campaign
+        : "standard");
+    this.values = {
+      product: initial.product,
+      mapProduct: initial.mapProduct ?? initial.product,
+      map: initial.map,
+      movement: playerProducts.movement,
+      character: playerProducts.character,
+      model: initial.characterModel,
+      skin: initial.characterSkin ?? "",
+      topColor: String(initial.characterTopColor ?? 0),
+      bottomColor: String(initial.characterBottomColor ?? 0),
+      doppler: "source",
+      environment: "audio-content",
+      weapons: "native",
+      enemies: "native",
+      grapple: "native",
+      grappleStyle: "native",
+      grenades: "native",
+      mode: initial.mode,
+      rules,
+      skill: String(initial.skill),
+      seats: String(initial.seats),
+      renderer: initial.renderer,
+    };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
   async refreshCatalog(): Promise<void> {
-    const catalog = await discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, addonContentRoots: this.catalog.addonContentRoots, ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true });
-    const initialProduct = catalog.products.find(product => product.expectation.id === this.initial.product && product.availability.kind === "installed")
-      ?? catalog.products.find(product => product.availability.kind === "installed");
+    const catalog = await discoverInstalledContent({
+      corpusRoot: this.catalog.corpusRoot,
+      generation: this.catalog.generation + 1,
+      addonContentRoots: this.catalog.addonContentRoots,
+      ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }),
+      discoverMods: true,
+    });
+    const initialProduct =
+      catalog.products.find(product => product.expectation.id === this.initial.product && product.availability.kind === "installed") ??
+      catalog.products.find(product => product.availability.kind === "installed");
     if (initialProduct === undefined) throw new Error("No installed game content remains");
     const candidate = new StartupSelectionModel(catalog, { ...this.initial, product: initialProduct.expectation.id });
     await candidate.prepareMaps();
-    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign; this.modChoices = candidate.modChoices;
+    this.currentCatalog = candidate.catalog;
+    this.initial = candidate.initial;
+    this.teamArenaCampaign = candidate.teamArenaCampaign;
+    this.modChoices = candidate.modChoices;
     this.qvmHookStyles = candidate.qvmHookStyles;
     this.selectedMods?.refresh(this.modChoices.map(choice => choice.description));
-    this.playableMaps.clear(); for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
-    this.authoredDefaultMaps.clear(); for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
-    this.looseModels.clear(); for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
+    this.playableMaps.clear();
+    for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
+    this.authoredDefaultMaps.clear();
+    for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
+    this.looseModels.clear();
+    for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
     this.eligibleMaps.clear();
-    this.mapClassnames.clear(); for (const [id, value] of candidate.mapClassnames) this.mapClassnames.set(id, value);
-    this.monsterClasses.clear(); for (const [id, value] of candidate.monsterClasses) this.monsterClasses.set(id, value);
+    this.mapClassnames.clear();
+    for (const [id, value] of candidate.mapClassnames) this.mapClassnames.set(id, value);
+    this.monsterClasses.clear();
+    for (const [id, value] of candidate.monsterClasses) this.monsterClasses.set(id, value);
     this.modelChoices.clear();
     if (!catalog.products.some(product => product.expectation.id === this.values.mapProduct)) this.values.mapProduct = initialProduct.expectation.id;
     if (!catalog.products.some(product => product.expectation.id === this.values.product)) {
-      this.values.product = initialProduct.expectation.id; this.values.mapProduct = this.values.product; this.values.map = this.defaultMap();
+      this.values.product = initialProduct.expectation.id;
+      this.values.mapProduct = this.values.product;
+      this.values.map = this.defaultMap();
     }
   }
   async prepareMaps(): Promise<void> {
@@ -260,56 +438,77 @@ export class StartupSelectionModel {
     await this.prepareTeamArena();
     await this.prepareMods();
     await this.prepareHookStyles();
-    const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
+    const archives = new Map<string, ArchiveHandle>(),
+      files = new Map<string, FileSource>(),
+      playable = new Map<string, boolean>();
     try {
       for (const product of this.catalog.products) {
         if (unavailable(product) !== null) continue;
         if (product.expectation.family === "q2" && product.looseRoot !== null) {
-          const directory = join(product.looseRoot, "players"), models: string[] = [];
-          if (existsSync(directory)) for (const entry of await readdir(directory, { withFileTypes: true })) {
-            if (entry.isDirectory() && existsSync(join(directory, entry.name, "tris.md2"))) {
-              models.push(`players/${entry.name}/tris.md2`);
-              for (const file of await readdir(join(directory, entry.name)))
-                if (file.toLowerCase().endsWith(".pcx")) models.push(`players/${entry.name}/${file.toLowerCase()}`);
+          const directory = join(product.looseRoot, "players"),
+            models: string[] = [];
+          if (existsSync(directory))
+            for (const entry of await readdir(directory, { withFileTypes: true })) {
+              if (entry.isDirectory() && existsSync(join(directory, entry.name, "tris.md2"))) {
+                models.push(`players/${entry.name}/tris.md2`);
+                for (const file of await readdir(join(directory, entry.name)))
+                  if (file.toLowerCase().endsWith(".pcx")) models.push(`players/${entry.name}/${file.toLowerCase()}`);
+              }
             }
-          }
           this.looseModels.set(product.expectation.id, models);
         }
         const choices: StartupSelectionChoice[] = [];
         for (const map of this.catalog.mapsFor(product.id)) {
           try {
-          const key = `${map.source}:${map.memberIndex}`;
-          let accepted = playable.get(key);
-          if (accepted === undefined && product.expectation.family === "q1") {
-            let file = files.get(map.source);
-            if (file === undefined) { file = new FileSource(map.source); files.set(map.source, file); }
-            let offset = 0, length = file.byteLength, decoded: Uint8Array | null = null;
-            if (map.memberIndex !== null) {
-              let archive = archives.get(map.source);
-              if (archive === undefined) { archive = await openArchive(map.source); archives.set(map.source, archive); }
-              const entry = archive.entries[map.memberIndex];
-              if (entry === undefined) throw new Error(`Missing map archive entry: ${map.path}`);
-              length = entry.byteLength;
-              if (entry.format === "pak") offset = entry.dataOffset;
-              else decoded = await archive.readEntry(entry);
+            const key = `${map.source}:${map.memberIndex}`;
+            let accepted = playable.get(key);
+            if (accepted === undefined && product.expectation.family === "q1") {
+              let file = files.get(map.source);
+              if (file === undefined) {
+                file = new FileSource(map.source);
+                files.set(map.source, file);
+              }
+              let offset = 0,
+                length = file.byteLength,
+                decoded: Uint8Array | null = null;
+              if (map.memberIndex !== null) {
+                let archive = archives.get(map.source);
+                if (archive === undefined) {
+                  archive = await openArchive(map.source);
+                  archives.set(map.source, archive);
+                }
+                const entry = archive.entries[map.memberIndex];
+                if (entry === undefined) throw new Error(`Missing map archive entry: ${map.path}`);
+                length = entry.byteLength;
+                if (entry.format === "pak") offset = entry.dataOffset;
+                else decoded = await archive.readEntry(entry);
+              }
+              const header = decoded?.subarray(0, 12) ?? (await file.read(offset, Math.min(12, length)));
+              if (header.byteLength < 12) throw new Error(`Truncated map header: ${map.path}`);
+              const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+              if (classifyBsp(header, map.path) === "q1") {
+                const start = view.getUint32(4, true),
+                  size = view.getUint32(8, true);
+                if (start > length || size > length - start) throw new Error(`Invalid map entity lump: ${map.path}`);
+                const bytes = decoded?.subarray(start, start + size) ?? (await file.read(offset + start, size));
+                const entities = parseQ1Entities(new TextDecoder().decode(bytes));
+                this.cacheMonsterClasses(
+                  key,
+                  entities.map(entity => q1EntityValue(entity, "classname") ?? ""),
+                );
+                accepted = entities.some(entity => {
+                  const classname = q1EntityValue(entity, "classname");
+                  return (
+                    classname === "info_player_start" ||
+                    classname === "info_player_deathmatch" ||
+                    classname === "info_player_coop" ||
+                    classname === "info_player_start2"
+                  );
+                });
+              } else accepted = true;
+              playable.set(key, accepted);
             }
-            const header = decoded?.subarray(0, 12) ?? await file.read(offset, Math.min(12, length));
-            if (header.byteLength < 12) throw new Error(`Truncated map header: ${map.path}`);
-            const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
-            if (classifyBsp(header, map.path) === "q1") {
-            const start = view.getUint32(4, true), size = view.getUint32(8, true);
-            if (start > length || size > length - start) throw new Error(`Invalid map entity lump: ${map.path}`);
-            const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size);
-            const entities = parseQ1Entities(new TextDecoder().decode(bytes));
-            this.cacheMonsterClasses(key, entities.map(entity => q1EntityValue(entity, "classname") ?? ""));
-            accepted = entities.some(entity => {
-              const classname = q1EntityValue(entity, "classname");
-              return classname === "info_player_start" || classname === "info_player_deathmatch" || classname === "info_player_coop" || classname === "info_player_start2";
-            });
-            } else accepted = true;
-            playable.set(key, accepted);
-          }
-          if (accepted !== false) choices.push(choice(map.path));
+            if (accepted !== false) choices.push(choice(map.path));
           } catch (error) {
             choices.push(choice(map.path, map.path, error instanceof Error ? error.message : String(error)));
           }
@@ -319,12 +518,21 @@ export class StartupSelectionModel {
         for (const start of authored?.starts ?? []) {
           if (starts.some(choice => choice.id.toLowerCase() === start.path.toLowerCase())) continue;
           const installed = choices.find(choice => choice.id.toLowerCase() === start.path.toLowerCase());
-          starts.push(choice(installed?.id ?? start.path, start.title || start.path, installed === undefined ? `Missing authored start map: ${start.path}` : installed.unavailable));
+          starts.push(
+            choice(
+              installed?.id ?? start.path,
+              start.title || start.path,
+              installed === undefined ? `Missing authored start map: ${start.path}` : installed.unavailable,
+            ),
+          );
         }
         const first = starts[0];
         if (first !== undefined) this.authoredDefaultMaps.set(product.expectation.id, first.id);
         const authoredPaths = new Set(starts.map(start => start.id.toLowerCase()));
-        this.playableMaps.set(product.expectation.id, [...starts, ...choices.filter(map => !authoredPaths.has(map.id.toLowerCase())).sort((a, b) => a.id.localeCompare(b.id))]);
+        this.playableMaps.set(product.expectation.id, [
+          ...starts,
+          ...choices.filter(map => !authoredPaths.has(map.id.toLowerCase())).sort((a, b) => a.id.localeCompare(b.id)),
+        ]);
       }
     } finally {
       for (const archive of archives.values()) archive.close();
@@ -334,7 +542,8 @@ export class StartupSelectionModel {
   private async q3TrainingMap(product: CatalogProduct): Promise<string | null> {
     const paths = [...this.files(product)].filter(path => path === "scripts/arenas.txt" || /^scripts\/[^/]+\.arena$/.test(path));
     for (const path of paths) {
-      const parser = new CommonParseState(), cursor = new CommonParseCursor(Buffer.from(await this.catalog.read(product.id, path)).toString("latin1"));
+      const parser = new CommonParseState(),
+        cursor = new CommonParseCursor(Buffer.from(await this.catalog.read(product.id, path)).toString("latin1"));
       while (parser.parse(cursor) === "{") {
         const fields = new Map<string, string>();
         for (;;) {
@@ -349,22 +558,29 @@ export class StartupSelectionModel {
     return null;
   }
   presets(): readonly StartupNativePreset[] {
-    const campaigns = this.catalog.products.filter(product => product.availability.kind === "installed"
-      && expectedProducts.some(expected => expected.id === product.expectation.id)
-      && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
-      && product.expectation.campaign !== "ctf" && product.expectation.campaign !== "lmctf").map(product => {
-      const { family, edition } = product.expectation;
-      const difficulties = family === "q3"
-        ? [choice("1", "I Can Win"), choice("2", "Bring It On"), choice("3", "Hurt Me Plenty"), choice("4", "Hardcore"), choice("5", "Nightmare")]
-        : [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")];
-      return { ...productChoice(product), family, edition, difficulties, defaultSkill: family === "q3" ? "2" : "1",
-        unavailable: null };
-    });
+    const campaigns = this.catalog.products
+      .filter(
+        product =>
+          product.availability.kind === "installed" &&
+          expectedProducts.some(expected => expected.id === product.expectation.id) &&
+          (product.expectation.edition === "classic" || product.expectation.edition === "rerelease") &&
+          product.expectation.campaign !== "ctf" &&
+          product.expectation.campaign !== "lmctf",
+      )
+      .map(product => {
+        const { family, edition } = product.expectation;
+        const difficulties =
+          family === "q3"
+            ? [choice("1", "I Can Win"), choice("2", "Bring It On"), choice("3", "Hurt Me Plenty"), choice("4", "Hardcore"), choice("5", "Nightmare")]
+            : [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")];
+        return { ...productChoice(product), family, edition, difficulties, defaultSkill: family === "q3" ? "2" : "1", unavailable: null };
+      });
     // Mode presets: every supported mode is a first-class launch, not only a
     // custom-builder rules tweak.
     const modes: StartupNativePreset[] = [];
     for (const preset of campaigns) {
-      const product = this.catalog.product(preset.id), { family, campaign } = product.expectation;
+      const product = this.catalog.product(preset.id),
+        { family, campaign } = product.expectation;
       if (family === "q1" && (campaign === "mg1" || campaign === "dopa"))
         modes.push({ ...preset, id: `${preset.id}:horde`, label: `${preset.label} — Horde`, productId: preset.id, rules: "horde", mode: "singleplayer" });
       if (family === "q3") {
@@ -373,7 +589,14 @@ export class StartupSelectionModel {
       }
       modes.push({ ...preset, id: `${preset.id}:tag`, label: `${preset.label} — Tag`, productId: preset.id, rules: "tag", mode: "deathmatch" });
       if (family === "q2")
-        modes.push({ ...preset, id: `${preset.id}:deathball`, label: `${preset.label} — DeathBall`, productId: preset.id, rules: "deathball", mode: "deathmatch" });
+        modes.push({
+          ...preset,
+          id: `${preset.id}:deathball`,
+          label: `${preset.label} — DeathBall`,
+          productId: preset.id,
+          rules: "deathball",
+          mode: "deathmatch",
+        });
     }
     return [...campaigns, ...modes];
   }
@@ -384,11 +607,23 @@ export class StartupSelectionModel {
     const level = difficulty ?? Number(selected.defaultSkill);
     if (!selected.difficulties.some(choice => Number(choice.id) === level)) throw new Error("Invalid preset difficulty");
     const productId = selected.productId ?? id;
-    const product = this.catalog.require(productId), family = product.expectation.family;
-    const teamArenaSkirmish = product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
-      ? planTeamArenaSkirmish(this.teamArenaCampaign ?? (() => { throw new Error("Team Arena metadata is not prepared"); })(), level, undefined, this.selectedTeams) : undefined;
+    const product = this.catalog.require(productId),
+      family = product.expectation.family;
+    const teamArenaSkirmish =
+      product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
+        ? planTeamArenaSkirmish(
+            this.teamArenaCampaign ??
+              (() => {
+                throw new Error("Team Arena metadata is not prepared");
+              })(),
+            level,
+            undefined,
+            this.selectedTeams,
+          )
+        : undefined;
     const selectedArena = arenaMap === undefined ? undefined : this.arenaSelection?.rows.find(row => row.arena.map === arenaMap);
-    if (arenaMap !== undefined && (productId !== "q3-baseq3" || selectedArena?.available !== true)) throw new Error("That arena is not unlocked in this profile.");
+    if (arenaMap !== undefined && (productId !== "q3-baseq3" || selectedArena?.available !== true))
+      throw new Error("That arena is not unlocked in this profile.");
     const playable = this.playableMaps.get(productId) ?? [];
     // Mode maps are discovered from authored entities (horde_manager,
     // dm_dball_*), never guessed from filenames alone.
@@ -400,40 +635,85 @@ export class StartupSelectionModel {
         return classnames !== undefined && matchMapUnavailable({ ...product.expectation, mode: selected.mode ?? "singleplayer", rules }, classnames) === null;
       });
     };
-    const modeMap = selected.rules === "horde" ? authoredFor("horde") ?? playable.find(map => /horde/i.test(map.id))
-      : selected.rules === "deathball" ? authoredFor("deathball") ?? playable.find(map => /dball/i.test(map.id))
-      : selected.rules === "tag" ? playable.find(map => /(^|\/)(q2dm|rdm|dm)[^/]*\.bsp$/i.test(map.id))
-      : selected.rules === "ctf" ? authoredFor("ctf") ?? playable.find(map => /ctf[^/]*\.bsp$/i.test(map.id)) : undefined;
-    const preferred = modeMap?.id ?? selectedArena?.arena.map ?? teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
-      : this.authoredDefaultMaps.get(productId) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
+    const modeMap =
+      selected.rules === "horde"
+        ? (authoredFor("horde") ?? playable.find(map => /horde/i.test(map.id)))
+        : selected.rules === "deathball"
+          ? (authoredFor("deathball") ?? playable.find(map => /dball/i.test(map.id)))
+          : selected.rules === "tag"
+            ? playable.find(map => /(^|\/)(q2dm|rdm|dm)[^/]*\.bsp$/i.test(map.id))
+            : selected.rules === "ctf"
+              ? (authoredFor("ctf") ?? playable.find(map => /ctf[^/]*\.bsp$/i.test(map.id)))
+              : undefined;
+    const preferred =
+      modeMap?.id ??
+      selectedArena?.arena.map ??
+      teamArenaSkirmish?.map ??
+      (family === "q3"
+        ? await this.q3TrainingMap(product)
+        : (this.authoredDefaultMaps.get(productId) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null)));
     const map = playable.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
-    if (map === undefined || map.unavailable !== null) throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
+    if (map === undefined || map.unavailable !== null)
+      throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
     const characterModel = teamArenaSkirmish?.playerModel ?? (family === "q1" ? "player" : family === "q2" ? "male" : "sarge");
     const model = this.modelsFor(product).find(model => model.id === characterModel);
     if (model === undefined || model.unavailable !== null) throw new Error(`${selected.label}: native ${characterModel} model is unavailable`);
-    const { teamArenaSkirmish: _teamArenaSkirmish, botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
-      mapProduct: _mapProduct, quakeCProgram: _quakeCProgram, weaponBehavior: _weaponBehavior, mods: _mods, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
+    const {
+      teamArenaSkirmish: _teamArenaSkirmish,
+      botSkill: _botSkill,
+      serverProfile: _serverProfile,
+      serverProfilePath: _serverProfilePath,
+      mapProduct: _mapProduct,
+      quakeCProgram: _quakeCProgram,
+      weaponBehavior: _weaponBehavior,
+      mods: _mods,
+      remoteContent: _remoteContent,
+      q1Protocol: _q1Protocol,
+      q2Protocol: _q2Protocol,
+      ...preferences
+    } = this.initial;
     const skill = family === "q3" ? 1 : level;
     if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid campaign difficulty");
-    const bot: Pick<ApplicationOptions, "botSkill"> = family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
+    const bot: Pick<ApplicationOptions, "botSkill"> =
+      family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
     const renderer = this.values.renderer;
     if (renderer !== "gl" && renderer !== "cpu") throw new Error("Invalid renderer selection");
-    const options = this.applySelectedServerProfile({ ...preferences, ...this.display,
-      ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
+    const options = this.applySelectedServerProfile({
+      ...preferences,
+      ...this.display,
+      ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}),
+      renderer,
       ...(teamArenaSkirmish === undefined ? {} : { teamArenaSkirmish }),
-      product: productId, map: map.id, movement: family, movementProduct: product.expectation.id, character: family, characterModel, skill, ...bot,
-      mode: selected.mode ?? "singleplayer", rules: selected.rules ?? "standard", seats: 1, dedicated: false, network: { kind: "offline" } });
+      product: productId,
+      map: map.id,
+      movement: family,
+      movementProduct: product.expectation.id,
+      character: family,
+      characterModel,
+      skill,
+      ...bot,
+      mode: selected.mode ?? "singleplayer",
+      rules: selected.rules ?? "standard",
+      seats: 1,
+      dedicated: false,
+      network: { kind: "offline" },
+    });
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
     const character: ProviderReference = { provider: `${family}:character`, content: product.id };
     const preset = applicationPreset(this.catalog, options, { movement, character });
-    return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }) };
+    return {
+      options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } },
+      recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }),
+    };
   }
   private maps(): readonly StartupSelectionChoice[] {
-    const product = this.geometry(), choices = this.playableMaps.get(product.expectation.id) ?? [];
+    const product = this.geometry(),
+      choices = this.playableMaps.get(product.expectation.id) ?? [];
     const source = sourceProgramProduct(this.catalog, this.product("product").id);
     const { mode, rules = "standard" } = this.options;
     if (mode !== "deathmatch" && rules === "standard") return choices;
-    const key = `${source.id}:${product.id}:${mode}:${rules}`, cached = this.eligibleMaps.get(key);
+    const key = `${source.id}:${product.id}:${mode}:${rules}`,
+      cached = this.eligibleMaps.get(key);
     if (cached !== undefined) return cached;
     const metadata = new Map(this.catalog.mapsFor(product.id).map(map => [map.path.toLowerCase(), map]));
     const result = choices.map(option => {
@@ -446,30 +726,45 @@ export class StartupSelectionModel {
     return result;
   }
   private defaultMap(): string {
-    const product = this.geometry(), maps = this.maps();
-    const preferred = this.authoredDefaultMaps.get(product.expectation.id) ?? product.expectation.mapWitness ?? (product.expectation.family === "q1" ? "maps/start.bsp" : product.expectation.family === "q2" ? "maps/base1.bsp" : "maps/q3dm0.bsp");
+    const product = this.geometry(),
+      maps = this.maps();
+    const preferred =
+      this.authoredDefaultMaps.get(product.expectation.id) ??
+      product.expectation.mapWitness ??
+      (product.expectation.family === "q1" ? "maps/start.bsp" : product.expectation.family === "q2" ? "maps/base1.bsp" : "maps/q3dm0.bsp");
     return maps.find(map => map.id === preferred)?.id ?? "";
   }
-  private product(field: "product" | "movement" | "character"): CatalogProduct { return this.catalog.product(this.values[field]); }
-  private geometry(): CatalogProduct { return this.catalog.require(this.values.mapProduct); }
+  private product(field: "product" | "movement" | "character"): CatalogProduct {
+    return this.catalog.product(this.values[field]);
+  }
+  private geometry(): CatalogProduct {
+    return this.catalog.require(this.values.mapProduct);
+  }
   private readonly fileSets = new WeakMap<CatalogProduct, { readonly loose: readonly string[] | undefined; readonly paths: ReadonlySet<string> }>();
   /** Rebuilt only when the product object or its loose-model list changes; the menu asks every frame. */
   private files(product: CatalogProduct): ReadonlySet<string> {
-    const loose = this.looseModels.get(product.expectation.id), cached = this.fileSets.get(product);
+    const loose = this.looseModels.get(product.expectation.id),
+      cached = this.fileSets.get(product);
     if (cached !== undefined && cached.loose === loose) return cached.paths;
     const paths = this.collectFiles(product);
     this.fileSets.set(product, { loose, paths });
     return paths;
   }
   private collectFiles(product: CatalogProduct): Set<string> {
-    const paths = new Set([...product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())), ...this.looseModels.get(product.expectation.id) ?? []]);
+    const paths = new Set([
+      ...product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())),
+      ...(this.looseModels.get(product.expectation.id) ?? []),
+    ]);
     if (product.expectation.baseProduct !== null) for (const path of this.files(this.catalog.product(product.expectation.baseProduct))) paths.add(path);
     return paths;
   }
   private models(): readonly StartupSelectionChoice[] {
-    const product = this.product("character"), existing = this.modelChoices.get(product.expectation.id);
+    const product = this.product("character"),
+      existing = this.modelChoices.get(product.expectation.id);
     if (existing !== undefined) return existing;
-    const result = this.modelsFor(product); this.modelChoices.set(product.expectation.id, result); return result;
+    const result = this.modelsFor(product);
+    this.modelChoices.set(product.expectation.id, result);
+    return result;
   }
   private modelsFor(product: CatalogProduct): readonly StartupSelectionChoice[] {
     const paths = this.files(product);
@@ -479,8 +774,13 @@ export class StartupSelectionModel {
       const match = /^models\/players\/(?:characters\/)?([^/]+)\/lower\.md3$/.exec(path);
       const q2 = /^players\/([^/]+)\/tris\.md2$/.exec(path);
       const name = product.expectation.family === "q3" ? match?.[1] : q2?.[1];
-      if (name !== undefined && (product.expectation.family !== "q3" || (paths.has(`models/players/${name}/upper.md3`) || paths.has(`models/players/characters/${name}/upper.md3`))
-        && (paths.has(`models/players/${name}/head.md3`) || paths.has(`models/players/heads/${name}/${name}.md3`)))) models.add(name);
+      if (
+        name !== undefined &&
+        (product.expectation.family !== "q3" ||
+          ((paths.has(`models/players/${name}/upper.md3`) || paths.has(`models/players/characters/${name}/upper.md3`)) &&
+            (paths.has(`models/players/${name}/head.md3`) || paths.has(`models/players/heads/${name}/${name}.md3`))))
+      )
+        models.add(name);
     }
     return [...models].sort().map(name => choice(name));
   }
@@ -488,7 +788,8 @@ export class StartupSelectionModel {
     return this.skinsFor(this.product("character"), this.values.model);
   }
   private skinsFor(product: CatalogProduct, modelValue: string): readonly StartupSelectionChoice[] {
-    const family = product.expectation.family, model = modelValue.toLowerCase();
+    const family = product.expectation.family,
+      model = modelValue.toLowerCase();
     if (family === "q1" || model === "") return [choice("", "Default")];
     const skins = new Set<string>();
     for (const path of this.files(product)) {
@@ -506,7 +807,9 @@ export class StartupSelectionModel {
   private colorChoices(): readonly StartupSelectionChoice[] {
     return q1ColorNames.map((name, index) => choice(String(index), name));
   }
-  characterPreview(overrides: Partial<Pick<Record<StartupSelectionField, string>, "character" | "model" | "skin" | "topColor" | "bottomColor">> = {}): StartupCharacterPreview {
+  characterPreview(
+    overrides: Partial<Pick<Record<StartupSelectionField, string>, "character" | "model" | "skin" | "topColor" | "bottomColor">> = {},
+  ): StartupCharacterPreview {
     const product = overrides.character === undefined ? this.product("character") : this.catalog.product(overrides.character);
     const family = product.expectation.family;
     let model = overrides.model;
@@ -520,12 +823,21 @@ export class StartupSelectionModel {
     let skin = overrides.skin ?? this.values.skin;
     if (family === "q1" || !this.skinsFor(product, model).some(choice => choice.id === skin)) skin = "";
     const color = (value: string | undefined, current: string): number => Math.min(13, Math.max(0, Math.trunc(Number(value ?? current) || 0)));
-    return { product: product.id, family, model, skin,
-      topColor: color(overrides.topColor, this.values.topColor), bottomColor: color(overrides.bottomColor, this.values.bottomColor) };
+    return {
+      product: product.id,
+      family,
+      model,
+      skin,
+      topColor: color(overrides.topColor, this.values.topColor),
+      bottomColor: color(overrides.bottomColor, this.values.bottomColor),
+    };
   }
   private roster() {
     let roster = this.rosters.get(this.values.product);
-    if (roster === undefined) { roster = { source: "native", default: "native", byClassname: new Map<string, string>() }; this.rosters.set(this.values.product, roster); }
+    if (roster === undefined) {
+      roster = { source: "native", default: "native", byClassname: new Map<string, string>() };
+      this.rosters.set(this.values.product, roster);
+    }
     return roster;
   }
   private cacheMonsterClasses(key: string, classnames: readonly string[]): void {
@@ -544,20 +856,26 @@ export class StartupSelectionModel {
     const product = this.geometry();
     if (this.values.mode !== "deathmatch" && this.values.rules === "standard") return null;
     const maps = this.catalog.mapsFor(product.id);
-    const choices = this.maps().slice(offset, offset + count).filter(choice => {
-      const map = maps.find(map => map.path.toLowerCase() === choice.id.toLowerCase());
-      return choice.unavailable === null && (map === undefined || !this.mapClassnames.has(`${map.source}:${map.memberIndex}`));
-    });
+    const choices = this.maps()
+      .slice(offset, offset + count)
+      .filter(choice => {
+        const map = maps.find(map => map.path.toLowerCase() === choice.id.toLowerCase());
+        return choice.unavailable === null && (map === undefined || !this.mapClassnames.has(`${map.source}:${map.memberIndex}`));
+      });
     if (choices.length === 0) return null;
     return this.prepareMapPage(product, choices);
   }
   private async prepareMapPage(product: CatalogProduct, choices: readonly StartupSelectionChoice[]): Promise<void> {
     for (const map of choices) {
-      try { await this.prepareMapClassnames(map.id); }
-      catch (error) {
+      try {
+        await this.prepareMapClassnames(map.id);
+      } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         const current = this.playableMaps.get(product.expectation.id) ?? [];
-        this.playableMaps.set(product.expectation.id, current.map(value => value.id === map.id ? { ...value, unavailable: reason } : value));
+        this.playableMaps.set(
+          product.expectation.id,
+          current.map(value => (value.id === map.id ? { ...value, unavailable: reason } : value)),
+        );
         this.eligibleMaps.clear();
       }
     }
@@ -571,164 +889,348 @@ export class StartupSelectionModel {
     const file = new FileSource(map.source);
     let archive: ArchiveHandle | null = null;
     try {
-      let offset = 0, length = file.byteLength, decoded: Uint8Array | null = null;
+      let offset = 0,
+        length = file.byteLength,
+        decoded: Uint8Array | null = null;
       if (map.memberIndex !== null) {
         archive = await openArchive(map.source);
         const entry = archive.entries[map.memberIndex];
         if (entry === undefined) throw new Error("Selected map archive entry is unavailable");
         length = entry.byteLength;
-        if (entry.format === "pak") offset = entry.dataOffset; else decoded = await archive.readEntry(entry);
+        if (entry.format === "pak") offset = entry.dataOffset;
+        else decoded = await archive.readEntry(entry);
       }
-      const header = decoded?.subarray(0, 16) ?? await file.read(offset, Math.min(length, 16));
+      const header = decoded?.subarray(0, 16) ?? (await file.read(offset, Math.min(length, 16)));
       if (header.byteLength < 16) throw new Error("Truncated map header");
-      const codec = classifyBsp(header, map.path), q1 = codec === "q1";
+      const codec = classifyBsp(header, map.path),
+        q1 = codec === "q1";
       const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
-      const start = view.getUint32(q1 ? 4 : 8, true), declaredSize = view.getUint32(q1 ? 8 : 12, true);
+      const start = view.getUint32(q1 ? 4 : 8, true),
+        declaredSize = view.getUint32(q1 ? 8 : 12, true);
       const size = codec === "q2" && start < length ? Math.min(declaredSize, length - start) : declaredSize;
       if (start > length || size > length - start) throw new Error("Invalid map entity lump");
-      const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size), text = new TextDecoder().decode(bytes).replace(/\0+$/, "");
-      this.cacheMonsterClasses(key, codec === "q2" ? parseQ2Entities(text, product.expectation.edition === "rerelease" ? "rerelease" : "classic").map(entity => entity.classname)
-        : codec === "q3" ? parseQ3Entities(text, map.path).map(entity => entity.get("classname") ?? "")
-        : parseQ1Entities(text).map(entity => q1EntityValue(entity, "classname") ?? ""));
-    } finally { archive?.close(); file.close(); }
+      const bytes = decoded?.subarray(start, start + size) ?? (await file.read(offset + start, size)),
+        text = new TextDecoder().decode(bytes).replace(/\0+$/, "");
+      this.cacheMonsterClasses(
+        key,
+        codec === "q2"
+          ? parseQ2Entities(text, product.expectation.edition === "rerelease" ? "rerelease" : "classic").map(entity => entity.classname)
+          : codec === "q3"
+            ? parseQ3Entities(text, map.path).map(entity => entity.get("classname") ?? "")
+            : parseQ1Entities(text).map(entity => q1EntityValue(entity, "classname") ?? ""),
+      );
+    } finally {
+      archive?.close();
+      file.close();
+    }
   }
   private monsterChoices(): readonly StartupSelectionChoice[] {
-    return [choice("native", "Keep native"), ...monsterSources.flatMap(source => {
-      const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
-      const paths = product === undefined ? new Set<string>() : this.files(product);
-      return Object.entries(source.creatures).map(([classname, creature]) => choice(`${source.provider}/${classname}`,
-        `${monsterLabel(classname)} (${source.family.toUpperCase()}${monsterProgramSuffix(source.program)}, ${source.edition})`,
-        product === undefined ? "Source content unavailable" : unavailable(product) ?? (creature.resources.every(path => paths.has(path.toLowerCase())) ? null : "Creature resources are not installed")));
-    })];
+    return [
+      choice("native", "Keep native"),
+      ...monsterSources.flatMap(source => {
+        const product = this.catalog.products.find(
+          product =>
+            product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program,
+        );
+        const paths = product === undefined ? new Set<string>() : this.files(product);
+        return Object.entries(source.creatures).map(([classname, creature]) =>
+          choice(
+            `${source.provider}/${classname}`,
+            `${monsterLabel(classname)} (${source.family.toUpperCase()}${monsterProgramSuffix(source.program)}, ${source.edition})`,
+            product === undefined
+              ? "Source content unavailable"
+              : (unavailable(product) ?? (creature.resources.every(path => paths.has(path.toLowerCase())) ? null : "Creature resources are not installed")),
+          ),
+        );
+      }),
+    ];
   }
   monsterSourceRow(): { readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[] } {
-    return { label: "Monster source", value: this.roster().source, choices: [choice("native", "Authored campaign monsters"), ...monsterSources.map(source => {
-      const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
-      return { ...choice(source.provider, monsterSourceTitle(source.family, source.program, product?.expectation.title), product === undefined ? "Source content unavailable" : unavailable(product)),
-        group: source.family === "q1" ? "Quake" : source.family === "q2" ? "Quake II" : "Quake III Arena", edition: source.edition };
-    })] };
+    return {
+      label: "Monster source",
+      value: this.roster().source,
+      choices: [
+        choice("native", "Authored campaign monsters"),
+        ...monsterSources.map(source => {
+          const product = this.catalog.products.find(
+            product =>
+              product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program,
+          );
+          return {
+            ...choice(
+              source.provider,
+              monsterSourceTitle(source.family, source.program, product?.expectation.title),
+              product === undefined ? "Source content unavailable" : unavailable(product),
+            ),
+            group: source.family === "q1" ? "Quake" : source.family === "q2" ? "Quake II" : "Quake III Arena",
+            edition: source.edition,
+          };
+        }),
+      ],
+    };
   }
   selectMonsterSource(id: string): void {
     if (this.geometry().expectation.family === "q3") throw new Error("This map has no supported authored monster roster");
     const selected = this.monsterSourceRow().choices.find(choice => choice.id === id);
     if (selected === undefined) throw new Error("Unknown monster source");
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
-    this.roster().source = id; this.values.enemies = "custom";
+    this.roster().source = id;
+    this.values.enemies = "custom";
   }
   private effectiveMonsterRoster(includeOverrides = true): Extract<EnemySelection, { readonly kind: "replace" }> {
-    const roster = this.roster(), family = this.geometry().expectation.family;
+    const roster = this.roster(),
+      family = this.geometry().expectation.family;
     const byClassname: Record<string, MonsterSelectionTarget> = {};
     if (includeOverrides) for (const [classname, id] of roster.byClassname) byClassname[classname] = this.monsterTarget(id);
     const fallback = this.monsterTarget(roster.default);
     if (roster.source === "native" || family === "q3") return { kind: "replace", default: fallback, byClassname };
     const source = monsterSources.find(source => source.provider === roster.source);
     if (source === undefined) throw new Error("Unknown monster source");
-    const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
+    const product = this.catalog.products.find(
+      product =>
+        product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program,
+    );
     if (product === undefined) throw new Error("Monster source content unavailable");
     return { ...defaultMonsterRoster(family, { provider: source.provider, content: product.id }, byClassname), default: fallback };
   }
   monsterRosterRows(): readonly MonsterRosterRow[] {
     const map = this.catalog.mapsFor(this.geometry().id).find(map => map.path === this.values.map);
-    const counts = map === undefined ? undefined : this.monsterClasses.get(`${map.source}:${map.memberIndex}`), roster = this.roster(), choices = this.monsterChoices();
-    const defaults = this.effectiveMonsterRoster(false), effective = this.effectiveMonsterRoster(), slots = new Set([...campaignMonsterSlots(this.geometry().expectation.family).map(slot => slot.classname), ...counts?.keys() ?? [], ...roster.byClassname.keys()]);
+    const counts = map === undefined ? undefined : this.monsterClasses.get(`${map.source}:${map.memberIndex}`),
+      roster = this.roster(),
+      choices = this.monsterChoices();
+    const defaults = this.effectiveMonsterRoster(false),
+      effective = this.effectiveMonsterRoster(),
+      slots = new Set([
+        ...campaignMonsterSlots(this.geometry().expectation.family).map(slot => slot.classname),
+        ...(counts?.keys() ?? []),
+        ...roster.byClassname.keys(),
+      ]);
     const targetLabel = (target: MonsterSelectionTarget): string => {
       if ("kind" in target) return "Keep native";
       const source = monsterSources.find(source => source.provider === target.source.provider);
       return `${monsterLabel(target.classname)} (${source?.family.toUpperCase() ?? target.source.provider}${source === undefined ? "" : monsterProgramSuffix(source.program)} ${source?.edition ?? ""})`;
     };
-    return [{ classname: null, label: "Unmatched classes", value: roster.default, effectiveLabel: targetLabel(defaults.default), choices }, ...[...slots].sort((left, right) => Number((counts?.get(right) ?? 0) > 0) - Number((counts?.get(left) ?? 0) > 0) || left.localeCompare(right)).map(classname => {
-      const value = roster.byClassname.get(classname) ?? "default", target = effective.byClassname[classname] ?? effective.default;
-      const label = targetLabel(target);
-      return { classname, label: `${monsterLabel(classname)} (${counts?.get(classname) ?? 0})`, value,
-        effectiveLabel: `${label}${value === "default" ? "" : " *"}`, choices: [choice("default", `Use default: ${targetLabel(defaults.byClassname[classname] ?? defaults.default)}`), ...choices] };
-    })];
+    return [
+      { classname: null, label: "Unmatched classes", value: roster.default, effectiveLabel: targetLabel(defaults.default), choices },
+      ...[...slots]
+        .sort((left, right) => Number((counts?.get(right) ?? 0) > 0) - Number((counts?.get(left) ?? 0) > 0) || left.localeCompare(right))
+        .map(classname => {
+          const value = roster.byClassname.get(classname) ?? "default",
+            target = effective.byClassname[classname] ?? effective.default;
+          const label = targetLabel(target);
+          return {
+            classname,
+            label: `${monsterLabel(classname)} (${counts?.get(classname) ?? 0})`,
+            value,
+            effectiveLabel: `${label}${value === "default" ? "" : " *"}`,
+            choices: [choice("default", `Use default: ${targetLabel(defaults.byClassname[classname] ?? defaults.default)}`), ...choices],
+          };
+        }),
+    ];
   }
   selectMonster(classname: string | null, id: string): void {
-    const row = this.monsterRosterRows().find(row => row.classname === classname), selected = row?.choices.find(choice => choice.id === id);
+    const row = this.monsterRosterRows().find(row => row.classname === classname),
+      selected = row?.choices.find(choice => choice.id === id);
     if (selected === undefined) throw new Error("Unknown monster roster choice");
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
     const roster = this.roster();
     if (classname === null) roster.default = id;
-    else if (id === "default") roster.byClassname.delete(classname); else roster.byClassname.set(classname, id);
+    else if (id === "default") roster.byClassname.delete(classname);
+    else roster.byClassname.set(classname, id);
   }
   private monsterTarget(id: string): MonsterSelectionTarget {
     if (id === "native") return { kind: "map-defined" };
     const source = monsterSources.find(source => id.startsWith(`${source.provider}/`));
     if (source === undefined) throw new Error("Unknown monster source");
-    const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
+    const product = this.catalog.products.find(
+      product =>
+        product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program,
+    );
     if (product === undefined) throw new Error("Monster source content unavailable");
     return { source: { provider: source.provider, content: product.id }, classname: id.slice(source.provider.length + 1) };
   }
   private baseChoices(): readonly StartupSelectionChoice[] {
-    return this.catalog.products.filter(product => (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
-      && (product.expectation.family === "q1" && product.expectation.campaign === "id1" || product.expectation.family === "q2" && product.expectation.campaign === "baseq2")
-      || product.expectation.id === "q3-baseq3").map(productChoice);
+    return this.catalog.products
+      .filter(
+        product =>
+          ((product.expectation.edition === "classic" || product.expectation.edition === "rerelease") &&
+            ((product.expectation.family === "q1" && product.expectation.campaign === "id1") ||
+              (product.expectation.family === "q2" && product.expectation.campaign === "baseq2"))) ||
+          product.expectation.id === "q3-baseq3",
+      )
+      .map(productChoice);
   }
   rows(): readonly StartupSelectionRow[] {
-    const current = this.product("product"), currentLabel = productChoice(current).label;
-    const defaultsPlayer = applicationPlayerProducts(this.catalog, { product: this.values.product,
-      movement: current.expectation.family, character: current.expectation.family, network: this.initial.network });
+    const current = this.product("product"),
+      currentLabel = productChoice(current).label;
+    const defaultsPlayer = applicationPlayerProducts(this.catalog, {
+      product: this.values.product,
+      movement: current.expectation.family,
+      character: current.expectation.family,
+      network: this.initial.network,
+    });
     const quakeworld = this.catalog.product("q1-quakeworld");
-    const quakeworldChoice = { ...productChoice(quakeworld),
-      unavailable: unavailable(quakeworld) === null ? null : unavailable(this.catalog.product(quakeworld.expectation.baseProduct ?? "q1-classic-id1")) };
+    const quakeworldChoice = {
+      ...productChoice(quakeworld),
+      unavailable: unavailable(quakeworld) === null ? null : unavailable(this.catalog.product(quakeworld.expectation.baseProduct ?? "q1-classic-id1")),
+    };
     const movementChoices = [...this.baseChoices(), quakeworldChoice];
     const characterChoices = [...this.baseChoices()];
     for (const id of [defaultsPlayer.movement, this.values.movement])
       if (!movementChoices.some(choice => choice.id === id)) movementChoices.push(productChoice(this.catalog.product(id)));
     for (const id of [defaultsPlayer.character, this.values.character])
       if (!characterChoices.some(choice => choice.id === id)) characterChoices.push(productChoice(this.catalog.product(id)));
-    const roster = this.roster(), monsterSource = this.monsterSourceRow();
+    const roster = this.roster(),
+      monsterSource = this.monsterSourceRow();
     const sourceLabel = monsterSource.choices.find(source => source.id === roster.source)?.label ?? "Authored campaign monsters";
     const customized = roster.default !== "native" || roster.byClassname.size > 0;
     const monsterValue = this.values.enemies === "custom" && roster.source !== "native" && !customized ? roster.source : this.values.enemies;
-    const row = (id: StartupSelectionField, label: string, choices: readonly StartupSelectionChoice[], value = id === "enemies" ? monsterValue : this.values[id]): StartupSelectionRow => ({ id, label, value, choices });
+    const row = (
+      id: StartupSelectionField,
+      label: string,
+      choices: readonly StartupSelectionChoice[],
+      value = id === "enemies" ? monsterValue : this.values[id],
+    ): StartupSelectionRow => ({ id, label, value, choices });
     const provider: ProviderReference = { provider: `${current.expectation.family}:official`, content: current.id };
     const rules = this.values.rules === "ctf" || this.values.rules === "lmctf" ? this.catalog.product(`q2-classic-${this.values.rules}`) : current;
-    const defaults = unavailable(current) !== null || unavailable(rules) !== null ? disabledEquipment()
-      : nativeEquipment(this.catalog, provider, this.values.rules === "standard" ? provider : { provider: `${current.expectation.family}:${this.values.rules}`, content: rules.id });
+    const defaults =
+      unavailable(current) !== null || unavailable(rules) !== null
+        ? disabledEquipment()
+        : nativeEquipment(
+            this.catalog,
+            provider,
+            this.values.rules === "standard" ? provider : { provider: `${current.expectation.family}:${this.values.rules}`, content: rules.id },
+          );
     const nativeWeapons = choice("native", `${currentLabel} weapons`);
     const nativeMonsters = choice("native", `${currentLabel} authored monsters`);
     const styles = this.hookStyles();
-    const placement = this.values.grapple === "native" ? defaults.grapple.kind === "enabled" ? defaults.grapple.binding : "disabled" : this.values.grapple;
-    const defaultStyle = defaults.grapple.kind === "enabled" ? defaults.grapple.mechanic === "q3-qvm" ? defaults.grapple.profile.id : defaults.grapple.mechanic : styles.find(style => style.unavailable === null)?.id ?? styles[0]?.id ?? "";
+    const placement = this.values.grapple === "native" ? (defaults.grapple.kind === "enabled" ? defaults.grapple.binding : "disabled") : this.values.grapple;
+    const defaultStyle =
+      defaults.grapple.kind === "enabled"
+        ? defaults.grapple.mechanic === "q3-qvm"
+          ? defaults.grapple.profile.id
+          : defaults.grapple.mechanic
+        : (styles.find(style => style.unavailable === null)?.id ?? styles[0]?.id ?? "");
     const style = this.values.grappleStyle === "native" ? defaultStyle : this.values.grappleStyle;
     const hookUnavailable = styles.some(style => style.unavailable === null) ? null : "Install a game or mod that provides a hook";
     const grenadeSource = offhandGrenadeSource(this.catalog, current);
-    const grenades = this.values.grenades === "native" ? defaults.handGrenades.kind === "enabled" ? "enabled" : "disabled" : this.values.grenades;
+    const grenades = this.values.grenades === "native" ? (defaults.handGrenades.kind === "enabled" ? "enabled" : "disabled") : this.values.grenades;
     const environmentProduct = this.catalog.product("q2-rerelease-baseq2");
-    return [row("environment", "Environment", [choice("disabled", "Off"), choice("audio-content", "Game default"),
-      choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]), row("product", "Game / mod", this.catalog.products.map(productChoice)),
+    return [
+      row("environment", "Environment", [
+        choice("disabled", "Off"),
+        choice("audio-content", "Game default"),
+        choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data"),
+      ]),
+      row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]),
+      row("product", "Game / mod", this.catalog.products.map(productChoice)),
       row("mapProduct", "Map content", this.catalog.products.map(productChoice)),
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", movementChoices),
-      row("character", "Character source", characterChoices), row("model", "Character model", this.models()),
+      row("character", "Character source", characterChoices),
+      row("model", "Character model", this.models()),
       ...(this.product("character").expectation.family === "q1"
         ? [row("topColor", "Shirt color", this.colorChoices()), row("bottomColor", "Pants color", this.colorChoices())]
         : [row("skin", "Skin", this.skins())]),
-      row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice)]),
+      row("weapons", "Weapons", [
+        nativeWeapons,
+        ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice),
+      ]),
       this.geometry().expectation.family === "q3"
         ? row("enemies", "Enemies", [choice("native", `${productChoice(this.geometry()).label} enemies`), ...characterChoices], this.values.enemies)
-        : row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
-      row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
-      ...(placement === "disabled" ? [] : [row("grappleStyle", "Hook style", styles.map(style => choice(style.id, style.title, style.unavailable)), style)]),
-      row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
+        : row("enemies", "Monsters", [
+            nativeMonsters,
+            choice(
+              "custom",
+              this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster",
+              current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null,
+            ),
+            ...this.monsterSourceRow()
+              .choices.filter(source => source.id !== "native")
+              .map(source => ({
+                ...source,
+                unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable,
+              })),
+          ]),
+      row(
+        "grapple",
+        "Hook",
+        [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)],
+        placement,
+      ),
+      ...(placement === "disabled"
+        ? []
+        : [
+            row(
+              "grappleStyle",
+              "Hook style",
+              styles.map(style => choice(style.id, style.title, style.unavailable)),
+              style,
+            ),
+          ]),
+      row(
+        "grenades",
+        "Offhand grenades",
+        [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)],
+        grenades,
+      ),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
-      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Capture the Flag" : "Loki's Minions CTF",
-        rule === "ctf" && this.product("product").expectation.family === "q3" ? null
-        : rule === "ctf" && this.product("product").expectation.family === "q1" ? unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`))
-        : rule === "lmctf" ? unavailable(this.catalog.product(`q2-${sourceProgramProduct(this.catalog, this.product("product").id).expectation.edition === "rerelease" ? "rerelease" : "classic"}-lmctf`))
-        : this.product("product").expectation.family !== "q2" ? "Requires a Quake II campaign"
-          : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
+      row("rules", "Match rules", [
+        choice("standard", "Standard"),
+        ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule =>
+          choice(
+            rule,
+            rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde",
+            matchModeUnavailable({
+              ...sourceProgramProduct(this.catalog, this.product("product").id).expectation,
+              mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer",
+              rules: rule,
+            }),
+          ),
+        ),
+        ...["ctf", "lmctf"].map(rule =>
+          choice(
+            rule,
+            rule === "ctf" ? "Capture the Flag" : "Loki's Minions CTF",
+            rule === "ctf" && this.product("product").expectation.family === "q3"
+              ? null
+              : rule === "ctf" && this.product("product").expectation.family === "q1"
+                ? unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`))
+                : rule === "lmctf"
+                  ? unavailable(
+                      this.catalog.product(
+                        `q2-${sourceProgramProduct(this.catalog, this.product("product").id).expectation.edition === "rerelease" ? "rerelease" : "classic"}-lmctf`,
+                      ),
+                    )
+                  : this.product("product").expectation.family !== "q2"
+                    ? "Requires a Quake II campaign"
+                    : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`)),
+          ),
+        ),
+      ]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
-      row("seats", "Local players", [1, 2, 3, 4].map(value => choice(String(value)))),
-      row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")])];
+      row(
+        "seats",
+        "Local players",
+        [1, 2, 3, 4].map(value => choice(String(value))),
+      ),
+      row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")]),
+    ];
   }
   select(field: StartupSelectionField, id: string): void {
-    const selected = this.rows().find(row => row.id === field)?.choices.find(option => option.id === id);
+    const selected = this.rows()
+      .find(row => row.id === field)
+      ?.choices.find(option => option.id === id);
     if (selected === undefined) throw new Error(`Unknown ${field} selection: ${id}`);
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
-    if (field === "enemies" && this.geometry().expectation.family === "q3") { this.values.enemies = id; return; }
-    if (field === "enemies" && id !== "native" && id !== "custom") { this.selectMonsterSource(id); return; }
+    if (field === "enemies" && this.geometry().expectation.family === "q3") {
+      this.values.enemies = id;
+      return;
+    }
+    if (field === "enemies" && id !== "native" && id !== "custom") {
+      this.selectMonsterSource(id);
+      return;
+    }
     this.values[field] = id;
     if (field === "product") {
       const selectedProduct = this.product("product").expectation;
@@ -736,16 +1238,25 @@ export class StartupSelectionModel {
         const { q1Protocol: _q1Protocol, ...initial } = this.initial;
         this.initial = initial;
       }
-      this.values.mapProduct = id; this.values.map = this.defaultMap();
+      this.values.mapProduct = id;
+      this.values.map = this.defaultMap();
       if (this.product("product").expectation.family === "q3") this.values.enemies = "native";
     }
     if (field === "mapProduct") this.values.map = this.defaultMap();
-    if (field === "mapProduct" && this.geometry().expectation.family !== "q3" && this.values.enemies !== "native" && this.values.enemies !== "custom") this.values.enemies = "native";
+    if (field === "mapProduct" && this.geometry().expectation.family !== "q3" && this.values.enemies !== "native" && this.values.enemies !== "custom")
+      this.values.enemies = "native";
     if (field === "mode" || field === "product") {
       const product = sourceProgramProduct(this.catalog, this.product("product").id);
       const rules = this.values.rules;
       if (rules === "standard" || rules === "ctf" || rules === "lmctf" || rules === "tag" || rules === "deathball" || rules === "horde")
-        if (matchModeUnavailable({ ...product.expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules }) !== null) this.values.rules = "standard";
+        if (
+          matchModeUnavailable({
+            ...product.expectation,
+            mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer",
+            rules,
+          }) !== null
+        )
+          this.values.rules = "standard";
     }
     if (field === "model") this.selectedModels.set(this.values.character, id);
     if (field === "model" || field === "character") {
@@ -759,55 +1270,105 @@ export class StartupSelectionModel {
     }
   }
   setDisplay(display: Pick<ApplicationOptions, "width" | "height" | "gamma">): void {
-    if (![display.width, display.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 16384)
-      || !Number.isFinite(display.gamma) || display.gamma < 0.5 || display.gamma > 3) throw new RangeError("Invalid display settings");
+    if (
+      ![display.width, display.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 16384) ||
+      !Number.isFinite(display.gamma) ||
+      display.gamma < 0.5 ||
+      display.gamma > 3
+    )
+      throw new RangeError("Invalid display settings");
     this.display = { ...display };
     this.displayOverridesConsumed = true;
   }
   get options(): ApplicationOptions {
-    const rules = this.values.rules, renderer = this.values.renderer, skill = Number(this.values.skill);
+    const rules = this.values.rules,
+      renderer = this.values.renderer,
+      skill = Number(this.values.skill);
     // PvP mods are modes of their own; the session follows the selected rules.
     const mode = rules === "ctf" || rules === "lmctf" || rules === "tag" || rules === "deathball" ? "deathmatch" : this.values.mode;
-    if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
-      || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
+    if (
+      (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch") ||
+      (renderer !== "gl" && renderer !== "cpu") ||
+      (rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde") ||
+      (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3)
+    )
+      throw new Error("Invalid startup settings");
     const { q1Protocol, weaponBehavior: _initialWeaponBehavior, mods: _initialMods, ...initial } = this.initial;
     const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
-    const mods = this.selectedMods?.enabled() ?? [...this.initial.mods ?? [], ...this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]];
-    return this.applySelectedServerProfile({ ...initial, mods, ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family, movementProduct: this.product("movement").expectation.id,
-      character: this.product("character").expectation.family, characterModel: this.values.model,
+    const mods = this.selectedMods?.enabled() ?? [
+      ...(this.initial.mods ?? []),
+      ...(this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]),
+    ];
+    return this.applySelectedServerProfile({
+      ...initial,
+      mods,
+      ...protocol,
+      product: this.values.product,
+      mapProduct: this.values.mapProduct,
+      map: this.values.map,
+      movement: this.product("movement").expectation.family,
+      movementProduct: this.product("movement").expectation.id,
+      character: this.product("character").expectation.family,
+      characterModel: this.values.model,
       ...(this.values.skin === "" ? {} : { characterSkin: this.values.skin }),
-      characterTopColor: Number(this.values.topColor), characterBottomColor: Number(this.values.bottomColor), mode, rules, skill,
-      seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
+      characterTopColor: Number(this.values.topColor),
+      characterBottomColor: Number(this.values.bottomColor),
+      mode,
+      rules,
+      skill,
+      seats: Number(this.values.seats),
+      renderer,
+      ...this.display,
+      ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}),
+    });
   }
   summary(): readonly string[] {
-    return [...this.rows().filter(row => row.id !== "renderer").map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
-      "Pickups: authored map items supply the selected arsenal through its admitted mappings. Independent pickup replacement is not implemented."];
+    return [
+      ...this.rows()
+        .filter(row => row.id !== "renderer")
+        .map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
+      "Pickups: authored map items supply the selected arsenal through its admitted mappings. Independent pickup replacement is not implemented.",
+    ];
   }
-  private bindingProduct() { return this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons); }
+  private bindingProduct() {
+    return this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons);
+  }
   bindingItems(): readonly WeaponBindingItem[] {
     const product = this.bindingProduct();
     return baseWeaponBindingItems(product.expectation.family, product.expectation.campaign);
   }
   /** What bindingItems depends on, cheap enough to compare every frame. */
-  bindingItemsKey(): string { const { expectation } = this.bindingProduct(); return `${expectation.family}:${String(expectation.campaign)}`; }
+  bindingItemsKey(): string {
+    const { expectation } = this.bindingProduct();
+    return `${expectation.family}:${String(expectation.campaign)}`;
+  }
   bindingCapabilities(): BindingCapabilities {
-    const base = applicationPreset(this.catalog, this.options), equipment = this.selectedEquipment(base.equipment);
+    const base = applicationPreset(this.catalog, this.options),
+      equipment = this.selectedEquipment(base.equipment);
     const family = this.catalog.require(base.engineBehavior.content).expectation.family;
-    return { chat: family !== "q1", scoreCommand: family === "q2" ? "score" : family === "q3" ? "+scores" : null,
+    return {
+      chat: family !== "q1",
+      scoreCommand: family === "q2" ? "score" : family === "q3" ? "+scores" : null,
       offhandGrapple: equipment.grapple.kind === "enabled" && equipment.grapple.binding === "offhand",
-      offhandGrenades: equipment.handGrenades.kind === "enabled" };
+      offhandGrenades: equipment.handGrenades.kind === "enabled",
+    };
   }
   private selectedEquipment(baseline: EquipmentSelection): EquipmentSelection {
     let equipment = baseline;
     if (this.values.grapple === "disabled") equipment = { ...equipment, grapple: disabledEquipment().grapple };
     else {
-      const binding = this.values.grapple === "native" ? baseline.grapple.kind === "enabled" ? baseline.grapple.binding : "disabled" : this.values.grapple;
+      const binding = this.values.grapple === "native" ? (baseline.grapple.kind === "enabled" ? baseline.grapple.binding : "disabled") : this.values.grapple;
       if (binding !== "disabled") {
         if (binding !== "slot" && binding !== "offhand") throw new Error("Invalid hook placement");
         const styles = this.hookStyles();
-        const id = this.values.grappleStyle === "native" ? baseline.grapple.kind === "enabled"
-          ? baseline.grapple.mechanic === "q3-qvm" ? baseline.grapple.profile.id : baseline.grapple.mechanic
-          : styles.find(style => style.unavailable === null)?.id : this.values.grappleStyle;
+        const id =
+          this.values.grappleStyle === "native"
+            ? baseline.grapple.kind === "enabled"
+              ? baseline.grapple.mechanic === "q3-qvm"
+                ? baseline.grapple.profile.id
+                : baseline.grapple.mechanic
+              : styles.find(style => style.unavailable === null)?.id
+            : this.values.grappleStyle;
         const style = styles.find(style => style.id === id);
         if (style === undefined || style.unavailable !== null) throw new Error(style?.unavailable ?? "Select an installed hook style");
         equipment = { ...equipment, grapple: { ...style.selection, binding } };
@@ -819,46 +1380,84 @@ export class StartupSelectionModel {
       if (product === null) throw new Error("Offhand grenades require Quake II grenade assets");
       const edition = product.expectation.edition;
       if (edition !== "classic" && edition !== "rerelease") throw new Error("Invalid grenade asset source");
-      equipment = { ...equipment, handGrenades: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: product.id }, edition, binding: "offhand", initialAmmo: 5, capacity: 50 } };
+      equipment = {
+        ...equipment,
+        handGrenades: {
+          kind: "enabled",
+          source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: product.id },
+          edition,
+          binding: "offhand",
+          initialAmmo: 5,
+          capacity: 50,
+        },
+      };
     }
     return equipment;
   }
   async resolve(): Promise<StartupLaunch> {
-    if (this.values.mode === "deathmatch" || this.values.rules !== "standard")
-      await this.prepareMapClassnames();
+    if (this.values.mode === "deathmatch" || this.values.rules !== "standard") await this.prepareMapClassnames();
     for (const row of this.rows()) {
       const selected = row.choices.find(choice => choice.id === row.value);
       if (selected === undefined || selected.unavailable !== null) throw new Error(`${row.label}: ${selected?.unavailable ?? "choose an installed option"}`);
     }
-    const options = this.options, base = applicationPreset(this.catalog, options), mapContent = this.geometry();
-    const movementProduct = this.product("movement"), characterProduct = this.product("character");
-    const movement: ProviderReference = { provider: `${movementProduct.expectation.family}:movement`, content: movementContentProduct(this.catalog, movementProduct.expectation.id).id };
+    const options = this.options,
+      base = applicationPreset(this.catalog, options),
+      mapContent = this.geometry();
+    const movementProduct = this.product("movement"),
+      characterProduct = this.product("character");
+    const movement: ProviderReference = {
+      provider: `${movementProduct.expectation.family}:movement`,
+      content: movementContentProduct(this.catalog, movementProduct.expectation.id).id,
+    };
     const character: ProviderReference = { provider: `${characterProduct.expectation.family}:character`, content: characterProduct.id };
     const movementTiming = nativeProviderTiming(movement, movementProduct.expectation.family, movementProduct.expectation.edition === "rerelease");
     const characterTiming = nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease");
-    const timing = base.timing.map(profile => profile.provider === movement.provider
-      ? movementProduct.expectation.edition === "quakeworld" ? { ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number] : movementTiming
-      : profile.provider === character.provider ? characterProduct.expectation.edition === "quakeworld"
-        ? { ...characterTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } } satisfies ExecutableRecipe["timing"][number] : characterTiming : profile);
-    const environment: ExecutableRecipe["presentation"]["environment"] = this.values.environment === "audio-content" || this.values.environment === "disabled"
-      ? { kind: this.values.environment }
-      : { kind: "selected", resource: { content: this.catalog.require(this.values.environment).id, path: "sound/default.environments" } };
+    const timing = base.timing.map(profile =>
+      profile.provider === movement.provider
+        ? movementProduct.expectation.edition === "quakeworld"
+          ? ({ ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number])
+          : movementTiming
+        : profile.provider === character.provider
+          ? characterProduct.expectation.edition === "quakeworld"
+            ? ({ ...characterTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } } satisfies ExecutableRecipe["timing"][number])
+            : characterTiming
+          : profile,
+    );
+    const environment: ExecutableRecipe["presentation"]["environment"] =
+      this.values.environment === "audio-content" || this.values.environment === "disabled"
+        ? { kind: this.values.environment }
+        : { kind: "selected", resource: { content: this.catalog.require(this.values.environment).id, path: "sound/default.environments" } };
     const doppler = this.values.doppler;
     if (doppler !== "source" && doppler !== "disabled") throw new Error("Invalid Doppler selection");
     const dopplerSelection: ExecutableRecipe["presentation"]["doppler"] = { kind: doppler };
     const preset = { ...base, timing, presentation: { ...base.presentation, environment, doppler: dopplerSelection } };
-    let selections: LaunchChoice = { ...presetChoice(preset.id), map: { kind: "selected", value: { geometry: { content: mapContent.id, path: options.map }, entities: base.map.entities } },
-      movement: { kind: "selected", value: movement }, character: { kind: "selected", value: { definition: character, appearance: { provider: `${options.character}:model/${options.characterModel}`, content: character.content } } } };
+    let selections: LaunchChoice = {
+      ...presetChoice(preset.id),
+      map: { kind: "selected", value: { geometry: { content: mapContent.id, path: options.map }, entities: base.map.entities } },
+      movement: { kind: "selected", value: movement },
+      character: {
+        kind: "selected",
+        value: { definition: character, appearance: { provider: `${options.character}:model/${options.characterModel}`, content: character.content } },
+      },
+    };
     const campaign: CampaignSelection = options.mode === "deathmatch" ? { kind: "none" } : base.campaign;
     selections = { ...selections, campaign: { kind: "selected", value: campaign } };
     if (this.values.weapons !== "native") {
       const product = this.catalog.require(this.values.weapons);
-      selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
+      selections = {
+        ...selections,
+        weapons: {
+          kind: "selected",
+          value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)],
+        },
+      };
     }
     if (mapContent.expectation.family === "q3" && this.values.enemies !== "native") {
       const product = this.catalog.require(this.values.enemies);
-      selections = { ...selections, enemies: { kind: "selected", value: { kind: "players",
-        character: { provider: `${product.expectation.family}:character`, content: product.id } } } };
+      selections = {
+        ...selections,
+        enemies: { kind: "selected", value: { kind: "players", character: { provider: `${product.expectation.family}:character`, content: product.id } } },
+      };
     } else if (this.values.enemies === "custom") {
       selections = { ...selections, enemies: { kind: "selected", value: this.effectiveMonsterRoster() } };
     }
@@ -869,7 +1468,15 @@ export class StartupSelectionModel {
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
-  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), discoverMods: true }), options);
+  const model = new StartupSelectionModel(
+    await discoverInstalledContent({
+      corpusRoot: options.corpusRoot,
+      userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+      addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(),
+      discoverMods: true,
+    }),
+    options,
+  );
   startupStamp("discover-installed-content");
   await model.prepareMaps();
   return model;

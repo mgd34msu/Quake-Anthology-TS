@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModClientOutputChannel } from "../../contracts/mod-client-outputs.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { ModClientOutputLease } from "./mod-client-outputs.ts";

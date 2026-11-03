@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SceneModelGroup, SceneShadowGroup, SourceEntityOrder, SourceSceneOrder } from "../submissions.ts";
 /* Model submission adapted from Q1 r_alias/r_sprite, Q2 gl_mesh and Q3 tr_mesh.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -10,15 +11,24 @@ import type { sampleMd5Pose, skinMd5Mesh } from "../../../formats/q3-model/md5.t
 import type { ShadowSphere } from "../shadows.ts";
 
 export interface ModelSkinningFrame {
-  readonly meshes: WeakMap<Parameters<typeof skinMd5Mesh>[0],
-    WeakMap<Parameters<typeof skinMd5Mesh>[1], readonly (ReturnType<typeof skinMd5Mesh>[number] & { readonly texCoord: Vec2 })[]>>;
-  readonly poses: WeakMap<Parameters<typeof sampleMd5Pose>[0],
-    Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>>;
+  readonly meshes: WeakMap<
+    Parameters<typeof skinMd5Mesh>[0],
+    WeakMap<Parameters<typeof skinMd5Mesh>[1], readonly (ReturnType<typeof skinMd5Mesh>[number] & { readonly texCoord: Vec2 })[]>
+  >;
+  readonly poses: WeakMap<Parameters<typeof sampleMd5Pose>[0], Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>>;
 }
 
-export type ModelImageSelection = { readonly kind: "external"; readonly name: string }
-  | { readonly kind: "indexed"; readonly name: string; readonly width: number; readonly height: number;
-      readonly pixels: Uint8Array; readonly transparentIndex: number | null; readonly fullbright: boolean }
+export type ModelImageSelection =
+  | { readonly kind: "external"; readonly name: string }
+  | {
+      readonly kind: "indexed";
+      readonly name: string;
+      readonly width: number;
+      readonly height: number;
+      readonly pixels: Uint8Array;
+      readonly transparentIndex: number | null;
+      readonly fullbright: boolean;
+    }
   | { readonly kind: "white" }
   | { readonly kind: "default"; readonly reason: "missing-skin-surface" | "no-skin" };
 
@@ -113,11 +123,19 @@ export interface ModelGroupContext {
   draw(surface: PreparedModelSurface, personalModel: boolean): readonly (SceneModelGroup | SceneShadowGroup)[];
 }
 
-export function modelImage(selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>,
-  palette: Extract<RenderImage, { readonly kind: "indexed8" }>["palette"], translation: Uint8Array | null = null): RenderImage {
-  return { kind: "indexed8", levels: [{ width: selection.width, height: selection.height, pixels: selection.pixels }], palette,
+export function modelImage(
+  selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>,
+  palette: Extract<RenderImage, { readonly kind: "indexed8" }>["palette"],
+  translation: Uint8Array | null = null,
+): RenderImage {
+  return {
+    kind: "indexed8",
+    levels: [{ width: selection.width, height: selection.height, pixels: selection.pixels }],
+    palette,
     transparency: selection.transparentIndex === null ? { kind: "opaque" } : { kind: "index", index: selection.transparentIndex },
-    fullbright: selection.fullbright ? { first: 224, last: selection.transparentIndex === 255 ? 254 : 255 } : null, translation };
+    fullbright: selection.fullbright ? { first: 224, last: selection.transparentIndex === 255 ? 254 : 255 } : null,
+    translation,
+  };
 }
 
 export function byteColor(color: Vec4): Vec4 {

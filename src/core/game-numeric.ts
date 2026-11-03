@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Ported from id Software's code/game/bg_lib.c and q_shared.h.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -16,7 +17,10 @@ export interface GameFloatScan {
 class NumberInput {
   offset: number;
 
-  constructor(readonly text: string, offset = 0) {
+  constructor(
+    readonly text: string,
+    offset = 0,
+  ) {
     if (!Number.isInteger(offset) || offset < 0 || offset > text.length) {
       throw new RangeError("Game number cursor is outside its backing string");
     }
@@ -54,7 +58,8 @@ function readFloat(input: NumberInput, mode: "scalar" | "scan"): number {
   input.skipWhitespace();
   if (input.byte() === 0) return 0;
   const sign = input.sign();
-  let value = 0, character = mode === "scalar" ? input.byte() : 48;
+  let value = 0,
+    character = mode === "scalar" ? input.byte() : 48;
   if (input.byte() !== 46) {
     while (true) {
       character = input.take();
@@ -109,7 +114,9 @@ export function scanGameFloat(text: string, offset = 0): GameFloatScan {
 /** QVM sscanf("%f %f %f") always writes all three destinations; components missing from a short string are zero. */
 export function scanGameVector(text: string): Vec3 {
   const input = new NumberInput(text);
-  const x = readFloat(input, "scan"), y = readFloat(input, "scan"), z = readFloat(input, "scan");
+  const x = readFloat(input, "scan"),
+    y = readFloat(input, "scan"),
+    z = readFloat(input, "scan");
   return vec3(x, y, z);
 }
 
@@ -117,9 +124,13 @@ export function scanGameVector(text: string): Vec3 {
 export class GameRandom {
   #seed = 0;
 
-  constructor(seed = 0) { this.reset(seed); }
+  constructor(seed = 0) {
+    this.reset(seed);
+  }
 
-  get seed(): number { return this.#seed; }
+  get seed(): number {
+    return this.#seed;
+  }
 
   reset(seed: number): void {
     if (!Number.isSafeInteger(seed)) throw new RangeError("Game random seed must be a safe integer");
@@ -131,7 +142,11 @@ export class GameRandom {
     return this.#seed & 0x7fff;
   }
 
-  random(): number { return Math.fround(this.rand() / 0x7fff); }
+  random(): number {
+    return Math.fround(this.rand() / 0x7fff);
+  }
 
-  crandom(): number { return Math.fround(2 * Math.fround(this.random() - 0.5)); }
+  crandom(): number {
+    return Math.fround(2 * Math.fround(this.random() - 0.5));
+  }
 }

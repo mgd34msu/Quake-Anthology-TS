@@ -28,8 +28,12 @@ export function loadGlPrograms(context: Pick<SdlRenderContext, "getGlProcAddress
     glUniformMatrix4fv: { args: ["i32", "i32", "u8", "buffer"], returns: "void", ptr: context.getGlProcAddress("glUniformMatrix4fv") },
   });
   let release: () => void;
-  try { release = context.retainProcedures(); }
-  catch (error) { table.close(); throw error; }
+  try {
+    release = context.retainProcedures();
+  } catch (error) {
+    table.close();
+    throw error;
+  }
   const sources = new Set<Uint8Array>();
   let closed = false;
   return {
@@ -45,8 +49,11 @@ export function loadGlPrograms(context: Pick<SdlRenderContext, "getGlProcAddress
       const lengths = new Int32Array([length]);
       context.makeCurrent();
       sources.add(bytes);
-      try { table.symbols.glShaderSource(shader, 1, pointers, lengths); }
-      finally { sources.delete(bytes); }
+      try {
+        table.symbols.glShaderSource(shader, 1, pointers, lengths);
+      } finally {
+        sources.delete(bytes);
+      }
     },
     close(): void {
       if (closed) return;
@@ -54,6 +61,8 @@ export function loadGlPrograms(context: Pick<SdlRenderContext, "getGlProcAddress
       closed = true;
       release();
     },
-    [Symbol.dispose](): void { this.close(); },
+    [Symbol.dispose](): void {
+      this.close();
+    },
   };
 }

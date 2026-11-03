@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // win32/win_input.c MidiInProc, MIDI_NoteOn and MIDI_NoteOff.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { KeyCode } from "../core/key-codes.ts";
@@ -7,11 +8,13 @@ export class SourceMidiDecoder {
   private status = 0;
   private first: number | null = null;
 
-  reset(): void { this.status = 0; this.first = null; }
+  reset(): void {
+    this.status = 0;
+    this.first = null;
+  }
 
   /** Time is the host message time, not the MIDI driver's relative timestamp. */
-  feed(bytes: Uint8Array, channel: number, time: number,
-    queueKey: (key: number, down: boolean, time: number) => undefined): void {
+  feed(bytes: Uint8Array, channel: number, time: number, queueKey: (key: number, down: boolean, time: number) => undefined): void {
     for (const byte of bytes) {
       // System realtime messages can interrupt either a message or running status.
       if (byte >= 0xf8) continue;
@@ -24,7 +27,10 @@ export class SourceMidiDecoder {
       const command = this.status & 0xf0;
       // Program change and channel pressure each have one data byte.
       if (command === 0xc0 || command === 0xd0) continue;
-      if (this.first === null) { this.first = byte; continue; }
+      if (this.first === null) {
+        this.first = byte;
+        continue;
+      }
       const note = this.first;
       this.first = null;
       if ((this.status & 0x0f) + 1 !== channel) continue;

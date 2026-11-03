@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Grapple motion and cable placement from bg_pmove.c and cg_weapons.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";

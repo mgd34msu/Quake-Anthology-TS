@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Packet entity presentation from id Software's code/cgame/cg_ents.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { lerpModelTag } from "./model-access.ts";
@@ -20,7 +21,8 @@ import type { ClientEntity, ClientGameState } from "./state.ts";
 
 const f = Math.fround;
 const SOLID_BMODEL = 0xffffff;
-const CHAN_ITEM = 4, CHAN_BODY = 5;
+const CHAN_ITEM = 4,
+  CHAN_BODY = 5;
 
 export type MissileTrail = "rocket" | "grenade" | "grapple" | "nail" | "plasma";
 
@@ -101,8 +103,12 @@ function indexed<T>(values: readonly T[], index: number, name: string): T {
   return value;
 }
 
-function identityAxis(): Axis { return [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]; }
-function scaleAxis(axis: Axis, scale: number): Axis { return [scale3(axis[0], scale), scale3(axis[1], scale), scale3(axis[2], scale)]; }
+function identityAxis(): Axis {
+  return [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
+}
+function scaleAxis(axis: Axis, scale: number): Axis {
+  return [scale3(axis[0], scale), scale3(axis[1], scale), scale3(axis[2], scale)];
+}
 function multiplyAxis(left: Axis, right: Axis): Axis {
   const x = vec3(right[0].x, right[1].x, right[2].x);
   const y = vec3(right[0].y, right[1].y, right[2].y);
@@ -148,7 +154,6 @@ export function adjustPositionForMover(state: ClientGameState, input: Vec3, move
   return add3(input, sub3(origin, oldOrigin));
 }
 
-
 function interpolate(from: Vec3, to: Vec3, fraction: number): Vec3 {
   return add3(from, scale3(sub3(to, from), fraction));
 }
@@ -169,46 +174,76 @@ export class PacketEntityPresenter {
   private body(entity: ClientEntity, reference: RefEntity): void {
     if (this.imports.bodyHidden?.(entity.currentState.number) !== true) this.imports.addRefEntity(reference);
   }
-  constructor(readonly state: ClientGameState, readonly media: PacketEntityMedia, readonly imports: PacketEntityImports) {
+  constructor(
+    readonly state: ClientGameState,
+    readonly media: PacketEntityMedia,
+    readonly imports: PacketEntityImports,
+  ) {
     if (state.product !== media.variant.product) throw new Error("packet entity media product differs from cgame state");
   }
 
   setEntitySoundPosition(entity: ClientEntity): void {
     const current = entity.currentState;
-    const origin = current.solid === SOLID_BMODEL
-      ? add3(entity.lerpOrigin, indexed(this.media.inlineModels, current.modelindex, "inline model").midpoint)
-      : entity.lerpOrigin;
+    const origin =
+      current.solid === SOLID_BMODEL
+        ? add3(entity.lerpOrigin, indexed(this.media.inlineModels, current.modelindex, "inline model").midpoint)
+        : entity.lerpOrigin;
     this.imports.updateSoundPosition(current.number, origin);
   }
 
   calculateLerpPositions(entity: ClientEntity, smoothClients: boolean): void {
-    const state = this.state, snap = state.snap;
+    const state = this.state,
+      snap = state.snap;
     if (snap === null) throw new Error("CG_CalcEntityLerpPositions: cg.snap == NULL");
     const current = entity.currentState;
     if (!smoothClients && current.number < 64) {
       current.pos = { ...current.pos, type: TrajectoryType.TR_INTERPOLATE };
       entity.nextState.pos = { ...entity.nextState.pos, type: TrajectoryType.TR_INTERPOLATE };
     }
-    if (entity.interpolate && (current.pos.type === TrajectoryType.TR_INTERPOLATE || (current.pos.type === TrajectoryType.TR_LINEAR_STOP && current.number < 64))) {
+    if (
+      entity.interpolate &&
+      (current.pos.type === TrajectoryType.TR_INTERPOLATE || (current.pos.type === TrajectoryType.TR_LINEAR_STOP && current.number < 64))
+    ) {
       const next = state.nextSnap;
       if (next === null) throw new CommonError("drop", "CG_InterpoateEntityPosition: cg.nextSnap == NULL");
-      entity.lerpOrigin = interpolate(evaluateTrajectory(current.pos, snap.serverTime), evaluateTrajectory(entity.nextState.pos, next.serverTime), state.frameInterpolation);
-      const a = evaluateTrajectory(current.apos, snap.serverTime), b = evaluateTrajectory(entity.nextState.apos, next.serverTime);
-      entity.lerpAngles = vec3(lerpAngleRule(a.x, b.x, state.frameInterpolation, "float"), lerpAngleRule(a.y, b.y, state.frameInterpolation, "float"), lerpAngleRule(a.z, b.z, state.frameInterpolation, "float"));
+      entity.lerpOrigin = interpolate(
+        evaluateTrajectory(current.pos, snap.serverTime),
+        evaluateTrajectory(entity.nextState.pos, next.serverTime),
+        state.frameInterpolation,
+      );
+      const a = evaluateTrajectory(current.apos, snap.serverTime),
+        b = evaluateTrajectory(entity.nextState.apos, next.serverTime);
+      entity.lerpAngles = vec3(
+        lerpAngleRule(a.x, b.x, state.frameInterpolation, "float"),
+        lerpAngleRule(a.y, b.y, state.frameInterpolation, "float"),
+        lerpAngleRule(a.z, b.z, state.frameInterpolation, "float"),
+      );
       return;
     }
     entity.lerpOrigin = evaluateTrajectory(current.pos, state.time);
     entity.lerpAngles = evaluateTrajectory(current.apos, state.time);
-    if (entity !== state.predictedPlayerEntity) entity.lerpOrigin = adjustPositionForMover(state, entity.lerpOrigin, current.groundEntityNum, snap.serverTime, state.time);
+    if (entity !== state.predictedPlayerEntity)
+      entity.lerpOrigin = adjustPositionForMover(state, entity.lerpOrigin, current.groundEntityNum, snap.serverTime, state.time);
   }
 
   private effects(entity: ClientEntity): void {
     this.setEntitySoundPosition(entity);
     const current = entity.currentState;
-    if (current.loopSound !== 0) this.imports.addLoopSound(current.number, entity.lerpOrigin, vec3(0, 0, 0), indexed(this.media.gameSounds, current.loopSound, "sound"), current.eType === EntityType.ET_SPEAKER);
+    if (current.loopSound !== 0)
+      this.imports.addLoopSound(
+        current.number,
+        entity.lerpOrigin,
+        vec3(0, 0, 0),
+        indexed(this.media.gameSounds, current.loopSound, "sound"),
+        current.eType === EntityType.ET_SPEAKER,
+      );
     if (current.constantLight !== 0) {
       const light = current.constantLight;
-      this.imports.addLight({ origin: entity.lerpOrigin, radius: ((light >> 24) & 255) * 4, color: vec3(light & 255, (light >> 8) & 255, (light >> 16) & 255) });
+      this.imports.addLight({
+        origin: entity.lerpOrigin,
+        radius: ((light >> 24) & 255) * 4,
+        color: vec3(light & 255, (light >> 8) & 255, (light >> 16) & 255),
+      });
     }
   }
 
@@ -216,8 +251,10 @@ export class PacketEntityPresenter {
     const current = entity.currentState;
     if (current.modelindex === 0) return;
     const ref = createModelEntity(indexed(this.media.gameModels, current.modelindex, "game model"));
-    ref.frame = current.frame; ref.oldFrame = current.frame;
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin;
+    ref.frame = current.frame;
+    ref.oldFrame = current.frame;
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = entity.lerpOrigin;
     if (this.state.snap !== null && current.number === this.state.snap.playerState.clientNum) ref.renderFlags |= RF_THIRD_PERSON;
     ref.axis = qvmAnglesToAxis(entity.lerpAngles);
     this.body(entity, ref);
@@ -240,7 +277,10 @@ export class PacketEntityPresenter {
     const visual = indexed(this.media.items, current.modelindex, "item visual");
     if (options.simpleItems && item.type !== ItemType.IT_TEAM) {
       const ref = createSpriteEntity();
-      ref.origin = entity.lerpOrigin; ref.radius = 14; ref.customShader = visual.icon; ref.shaderRGBA = vec4(255, 255, 255, 255);
+      ref.origin = entity.lerpOrigin;
+      ref.radius = 14;
+      ref.customShader = visual.icon;
+      ref.shaderRGBA = vec4(255, 255, 255, 255);
       this.body(entity, ref);
       return;
     }
@@ -257,30 +297,43 @@ export class PacketEntityPresenter {
       const offset = add3(add3(scale3(ref.axis[0], midpoint.x), scale3(ref.axis[1], midpoint.y)), scale3(ref.axis[2], midpoint.z));
       entity.lerpOrigin = add3(sub3(entity.lerpOrigin, offset), vec3(0, 0, 8));
     }
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin;
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = entity.lerpOrigin;
     const msec = (this.state.time - entity.miscTime) | 0;
     let fraction = 1;
     if (msec >= 0 && msec < 1000) {
       fraction = f(f(msec) / 1000);
-      ref.axis = scaleAxis(ref.axis, fraction); ref.nonNormalizedAxes = true;
+      ref.axis = scaleAxis(ref.axis, fraction);
+      ref.nonNormalizedAxes = true;
     }
     if (item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_ARMOR) ref.renderFlags |= RF_MINLIGHT;
     if (item.type === ItemType.IT_WEAPON) {
-      ref.axis = scaleAxis(ref.axis, 1.5); ref.nonNormalizedAxes = true;
-      if (this.media.variant.product === "missionpack") this.imports.addLoopSound(current.number, entity.lerpOrigin, vec3(0, 0, 0), this.media.variant.media.weaponHoverSound, false);
+      ref.axis = scaleAxis(ref.axis, 1.5);
+      ref.nonNormalizedAxes = true;
+      if (this.media.variant.product === "missionpack")
+        this.imports.addLoopSound(current.number, entity.lerpOrigin, vec3(0, 0, 0), this.media.variant.media.weaponHoverSound, false);
     }
     if (this.media.variant.product === "missionpack" && item.type === ItemType.IT_HOLDABLE && item.tag === Holdable.HI_KAMIKAZE) {
-      ref.axis = scaleAxis(ref.axis, 2); ref.nonNormalizedAxes = true;
+      ref.axis = scaleAxis(ref.axis, 2);
+      ref.nonNormalizedAxes = true;
     }
     this.body(entity, { ...ref });
     if (this.media.variant.product === "missionpack" && weapon !== null && weapon.barrelModel !== null && weapon.barrelModel.kind !== "default") {
       const barrel = createModelEntity(weapon.barrelModel);
-      barrel.lightingOrigin = ref.lightingOrigin; barrel.shadowPlane = ref.shadowPlane; barrel.renderFlags = ref.renderFlags;
+      barrel.lightingOrigin = ref.lightingOrigin;
+      barrel.shadowPlane = ref.shadowPlane;
+      barrel.renderFlags = ref.renderFlags;
       positionRotatedEntityOnTag(barrel, ref, weapon.weaponModel, "tag_barrel");
-      barrel.axis = ref.axis; barrel.nonNormalizedAxes = ref.nonNormalizedAxes;
+      barrel.axis = ref.axis;
+      barrel.nonNormalizedAxes = ref.nonNormalizedAxes;
       this.body(entity, barrel);
     }
-    if (!options.simpleItems && (item.type === ItemType.IT_HEALTH || item.type === ItemType.IT_POWERUP) && visual.models[1] !== null && visual.models[1].kind !== "default") {
+    if (
+      !options.simpleItems &&
+      (item.type === ItemType.IT_HEALTH || item.type === ItemType.IT_POWERUP) &&
+      visual.models[1] !== null &&
+      visual.models[1].kind !== "default"
+    ) {
       ref.model = visual.models[1];
       let yaw = 0;
       if (item.type === ItemType.IT_POWERUP) {
@@ -288,7 +341,10 @@ export class PacketEntityPresenter {
         yaw = f(((this.state.time & 1023) * 360) / -1024);
       }
       ref.axis = qvmAnglesToAxis(vec3(0, yaw, 0));
-      if (fraction !== 1) { ref.axis = scaleAxis(ref.axis, fraction); ref.nonNormalizedAxes = true; }
+      if (fraction !== 1) {
+        ref.axis = scaleAxis(ref.axis, fraction);
+        ref.nonNormalizedAxes = true;
+      }
       this.body(entity, ref);
     }
   }
@@ -301,21 +357,28 @@ export class PacketEntityPresenter {
   }
 
   private missile(entity: ClientEntity): void {
-    const current = entity.currentState, weapon = this.weapon(entity);
+    const current = entity.currentState,
+      weapon = this.weapon(entity);
     entity.lerpAngles = vec3(current.angles.x, current.angles.y, current.angles.z);
     if (weapon.missileTrail !== null) this.imports.missileTrail(weapon.missileTrail, entity, weapon);
     if (weapon.missileDlight !== 0) this.imports.addLight({ origin: entity.lerpOrigin, radius: weapon.missileDlight, color: weapon.missileDlightColor });
-    if (weapon.missileSound !== null) this.imports.addLoopSound(current.number, entity.lerpOrigin, evaluateTrajectoryDelta(current.pos, this.state.time), weapon.missileSound, false);
+    if (weapon.missileSound !== null)
+      this.imports.addLoopSound(current.number, entity.lerpOrigin, evaluateTrajectoryDelta(current.pos, this.state.time), weapon.missileSound, false);
     if (current.weapon === Weapon.WP_PLASMAGUN) {
       const ref = createSpriteEntity();
-      ref.origin = entity.lerpOrigin; ref.radius = 16; ref.customShader = this.media.plasmaBallShader;
+      ref.origin = entity.lerpOrigin;
+      ref.radius = 16;
+      ref.customShader = this.media.plasmaBallShader;
       this.body(entity, ref);
       return;
     }
     const ref = createModelEntity(weapon.missileModel);
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin;
-    ref.skinNum = this.state.clientFrame & 1; ref.renderFlags = weapon.missileRenderfx | RF_NOSHADOW;
-    if (this.media.variant.product === "missionpack" && current.weapon === Weapon.WP_PROX_LAUNCHER && current.generic1 === Team.TEAM_BLUE) ref.model = this.media.variant.media.blueProxMine;
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = entity.lerpOrigin;
+    ref.skinNum = this.state.clientFrame & 1;
+    ref.renderFlags = weapon.missileRenderfx | RF_NOSHADOW;
+    if (this.media.variant.product === "missionpack" && current.weapon === Weapon.WP_PROX_LAUNCHER && current.generic1 === Team.TEAM_BLUE)
+      ref.model = this.media.variant.media.blueProxMine;
     const direction = missileDirection(current.pos.delta);
     if (current.pos.type !== TrajectoryType.TR_STATIONARY) ref.axis = directionAxis(direction, (this.state.time / 4) | 0);
     else if (this.state.product === "missionpack" && current.weapon === Weapon.WP_PROX_LAUNCHER) ref.axis = qvmAnglesToAxis(entity.lerpAngles);
@@ -324,12 +387,15 @@ export class PacketEntityPresenter {
   }
 
   private grapple(entity: ClientEntity): void {
-    const current = entity.currentState, weapon = this.weapon(entity);
+    const current = entity.currentState,
+      weapon = this.weapon(entity);
     entity.lerpAngles = vec3(current.angles.x, current.angles.y, current.angles.z);
     this.imports.grappleTrail(entity, weapon);
     const ref = createModelEntity(weapon.missileModel);
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin;
-    ref.skinNum = this.state.clientFrame & 1; ref.renderFlags = weapon.missileRenderfx | RF_NOSHADOW;
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = entity.lerpOrigin;
+    ref.skinNum = this.state.clientFrame & 1;
+    ref.renderFlags = weapon.missileRenderfx | RF_NOSHADOW;
     // CG_Grapple only fills axis[0]; the two cleared axes remain zero.
     ref.axis = [missileDirection(current.pos.delta), ref.axis[1], ref.axis[2]];
     this.body(entity, ref);
@@ -337,30 +403,43 @@ export class PacketEntityPresenter {
 
   private mover(entity: ClientEntity): void {
     const current = entity.currentState;
-    const model = current.solid === SOLID_BMODEL ? indexed(this.media.inlineModels, current.modelindex, "inline model").model : indexed(this.media.gameModels, current.modelindex, "game model");
+    const model =
+      current.solid === SOLID_BMODEL
+        ? indexed(this.media.inlineModels, current.modelindex, "inline model").model
+        : indexed(this.media.gameModels, current.modelindex, "game model");
     const ref = createModelEntity(model);
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin; ref.axis = qvmAnglesToAxis(entity.lerpAngles);
-    ref.renderFlags = RF_NOSHADOW; ref.skinNum = (this.state.time >> 6) & 1;
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = entity.lerpOrigin;
+    ref.axis = qvmAnglesToAxis(entity.lerpAngles);
+    ref.renderFlags = RF_NOSHADOW;
+    ref.skinNum = (this.state.time >> 6) & 1;
     this.body(entity, { ...ref });
     if (current.modelindex2 !== 0) {
-      ref.skinNum = 0; ref.model = indexed(this.media.gameModels, current.modelindex2, "game model");
+      ref.skinNum = 0;
+      ref.model = indexed(this.media.gameModels, current.modelindex2, "game model");
       this.body(entity, ref);
     }
   }
 
   beam(entity: ClientEntity): void {
     const ref = createBeamEntity();
-    ref.origin = entity.currentState.pos.base; ref.oldOrigin = entity.currentState.origin2; ref.renderFlags = RF_NOSHADOW;
+    ref.origin = entity.currentState.pos.base;
+    ref.oldOrigin = entity.currentState.origin2;
+    ref.renderFlags = RF_NOSHADOW;
     ref.axis = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
     this.body(entity, ref);
   }
 
   private portal(entity: ClientEntity): void {
-    const current = entity.currentState, ref = createPortalEntity();
-    ref.origin = entity.lerpOrigin; ref.oldOrigin = current.origin2;
-    const forward = byteToDirection(current.eventParm), side = sub3(vec3(0, 0, 0), perpendicularVector(forward));
+    const current = entity.currentState,
+      ref = createPortalEntity();
+    ref.origin = entity.lerpOrigin;
+    ref.oldOrigin = current.origin2;
+    const forward = byteToDirection(current.eventParm),
+      side = sub3(vec3(0, 0, 0), perpendicularVector(forward));
     ref.axis = [forward, side, cross3(forward, side)];
-    ref.oldFrame = current.powerups; ref.frame = current.frame;
+    ref.oldFrame = current.powerups;
+    ref.frame = current.frame;
     ref.skinNum = qvmFloatToInt(f(f(f(current.clientNum) / 256) * 360));
     this.body(entity, ref);
   }
@@ -368,9 +447,16 @@ export class PacketEntityPresenter {
   private team(entity: ClientEntity, options: PacketEntityOptions): void {
     const current = entity.currentState;
     const ref = createModelEntity();
-    ref.origin = entity.lerpOrigin; ref.lightingOrigin = entity.lerpOrigin; ref.axis = qvmAnglesToAxis(current.angles);
+    ref.origin = entity.lerpOrigin;
+    ref.lightingOrigin = entity.lerpOrigin;
+    ref.axis = qvmAnglesToAxis(current.angles);
     if (options.gameType === GameType.GT_CTF || (this.state.product === "missionpack" && options.gameType === GameType.GT_1FCTF)) {
-      ref.model = current.modelindex === Team.TEAM_RED ? this.media.redFlagBaseModel : current.modelindex === Team.TEAM_BLUE ? this.media.blueFlagBaseModel : this.media.neutralFlagBaseModel;
+      ref.model =
+        current.modelindex === Team.TEAM_RED
+          ? this.media.redFlagBaseModel
+          : current.modelindex === Team.TEAM_BLUE
+            ? this.media.blueFlagBaseModel
+            : this.media.neutralFlagBaseModel;
       this.body(entity, ref);
       return;
     }
@@ -387,22 +473,28 @@ export class PacketEntityPresenter {
     this.body(entity, { ...ref });
     const health = qvmFloatToInt(f(current.modelindex2)) & 255;
     if (current.frame === 1) {
-      ref.shaderRGBA = vec4(255, health, health, 255); ref.model = media.overloadEnergyModel;
+      ref.shaderRGBA = vec4(255, health, health, 255);
+      ref.model = media.overloadEnergyModel;
       this.body(entity, { ...ref });
     }
     if (current.frame !== 2) {
-      entity.miscTime = 0; entity.muzzleFlashTime = 0;
-      ref.shaderRGBA = vec4(255, health, health, 255); ref.model = media.overloadLightsModel;
+      entity.miscTime = 0;
+      entity.muzzleFlashTime = 0;
+      ref.shaderRGBA = vec4(255, health, health, 255);
+      ref.model = media.overloadLightsModel;
       this.body(entity, { ...ref });
-      ref.origin = add3(ref.origin, vec3(0, 0, 56)); ref.model = media.overloadTargetModel;
+      ref.origin = add3(ref.origin, vec3(0, 0, 56));
+      ref.model = media.overloadTargetModel;
       this.body(entity, ref);
       return;
     }
     if (entity.miscTime === 0) entity.miscTime = this.state.time;
-    const elapsed = (this.state.time - entity.miscTime) | 0, threshold = Math.imul((options.obeliskRespawnDelay - 5) | 0, 1000);
+    const elapsed = (this.state.time - entity.miscTime) | 0,
+      threshold = Math.imul((options.obeliskRespawnDelay - 5) | 0, 1000);
     const scale = elapsed > threshold ? Math.min(1, f(f((elapsed - threshold) | 0) / f(threshold))) : 0;
     const color = qvmFloatToInt(f(scale * 255)) & 255;
-    ref.shaderRGBA = vec4(color, color, color, color); ref.model = media.overloadLightsModel;
+    ref.shaderRGBA = vec4(color, color, color, color);
+    ref.model = media.overloadLightsModel;
     this.body(entity, { ...ref });
     if (elapsed > threshold) {
       if (entity.muzzleFlashTime === 0) {
@@ -413,7 +505,8 @@ export class PacketEntityPresenter {
       ref.axis = scaleAxis(qvmAnglesToAxis(vec3(current.angles.x, f(current.angles.y + spin), current.angles.z)), scale);
       // Source leaves nonNormalizedAxes false even while scaling this target.
       ref.shaderRGBA = vec4(255, 255, 255, 255);
-      ref.origin = add3(ref.origin, vec3(0, 0, 56)); ref.model = media.overloadTargetModel;
+      ref.origin = add3(ref.origin, vec3(0, 0, 56));
+      ref.model = media.overloadTargetModel;
       this.body(entity, ref);
     }
   }
@@ -425,29 +518,55 @@ export class PacketEntityPresenter {
     this.imports.pose?.(entity);
     this.effects(entity);
     switch (type) {
-      case EntityType.ET_INVISIBLE: case EntityType.ET_PUSH_TRIGGER: case EntityType.ET_TELEPORT_TRIGGER: return;
-      case EntityType.ET_GENERAL: this.general(entity); return;
-      case EntityType.ET_PLAYER: this.imports.player(entity); return;
-      case EntityType.ET_ITEM: this.item(entity, options); return;
-      case EntityType.ET_MISSILE: this.missile(entity); return;
-      case EntityType.ET_MOVER: this.mover(entity); return;
-      case EntityType.ET_BEAM: this.beam(entity); return;
-      case EntityType.ET_PORTAL: this.portal(entity); return;
-      case EntityType.ET_SPEAKER: this.speaker(entity); return;
-      case EntityType.ET_GRAPPLE: this.grapple(entity); return;
-      case EntityType.ET_TEAM: this.team(entity, options); return;
-      default: throw new CommonError("drop", `Bad entity type: ${type}\n`);
+      case EntityType.ET_INVISIBLE:
+      case EntityType.ET_PUSH_TRIGGER:
+      case EntityType.ET_TELEPORT_TRIGGER:
+        return;
+      case EntityType.ET_GENERAL:
+        this.general(entity);
+        return;
+      case EntityType.ET_PLAYER:
+        this.imports.player(entity);
+        return;
+      case EntityType.ET_ITEM:
+        this.item(entity, options);
+        return;
+      case EntityType.ET_MISSILE:
+        this.missile(entity);
+        return;
+      case EntityType.ET_MOVER:
+        this.mover(entity);
+        return;
+      case EntityType.ET_BEAM:
+        this.beam(entity);
+        return;
+      case EntityType.ET_PORTAL:
+        this.portal(entity);
+        return;
+      case EntityType.ET_SPEAKER:
+        this.speaker(entity);
+        return;
+      case EntityType.ET_GRAPPLE:
+        this.grapple(entity);
+        return;
+      case EntityType.ET_TEAM:
+        this.team(entity, options);
+        return;
+      default:
+        throw new CommonError("drop", `Bad entity type: ${type}\n`);
     }
   }
 
   addPacketEntities(options: PacketEntityOptions): void {
-    const state = this.state, snap = state.snap;
+    const state = this.state,
+      snap = state.snap;
     if (snap === null) throw new Error("CG_AddPacketEntities: cg.snap == NULL");
     const delta = state.nextSnap === null ? 0 : (state.nextSnap.serverTime - snap.serverTime) | 0;
     state.frameInterpolation = delta === 0 ? 0 : f(f((state.time - snap.serverTime) | 0) / f(delta));
-    state.autoAngles = vec3(0, f((state.time & 2047) * 360 / 2048), 0);
-    state.autoAnglesFast = vec3(0, f((state.time & 1023) * 360 / 1024), 0);
-    state.autoAxis = qvmAnglesToAxis(state.autoAngles); state.autoAxisFast = qvmAnglesToAxis(state.autoAnglesFast);
+    state.autoAngles = vec3(0, f(((state.time & 2047) * 360) / 2048), 0);
+    state.autoAnglesFast = vec3(0, f(((state.time & 1023) * 360) / 1024), 0);
+    state.autoAxis = qvmAnglesToAxis(state.autoAngles);
+    state.autoAxisFast = qvmAnglesToAxis(state.autoAnglesFast);
     playerStateToEntityState(state.predictedPlayerState, state.predictedPlayerEntity.currentState, false);
     this.addEntity(state.predictedPlayerEntity, options);
     this.calculateLerpPositions(state.entityAt(snap.playerState.clientNum), options.smoothClients);

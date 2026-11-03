@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { OwnedActor } from "../../../../contracts/identity.ts";
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
 

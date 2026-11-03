@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Entity, Q2GameServices } from "../../foundation/host.ts";
@@ -18,7 +19,17 @@ export interface Q2MissionPackMonsterServices {
 export interface Q2MissionPackMonsterWeapons {
   fireIonRipper(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity;
   fireBlueBlaster(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity;
-  fireHeatRocket(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number, turnFraction?: number): Q2Entity;
+  fireHeatRocket(
+    self: Q2Entity,
+    game: Q2GameServices,
+    start: Vec3,
+    direction: Vec3,
+    damage: number,
+    speed: number,
+    radius: number,
+    radiusDamage: number,
+    turnFraction?: number,
+  ): Q2Entity;
   firePlasma(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity;
   fireBlaster2(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity;
   fireTracker(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, enemy: ActorId | null): Q2Entity;

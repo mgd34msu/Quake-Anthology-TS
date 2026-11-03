@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { BoundedQueue } from "../foundation/bounded-queue.ts";
 import { KeyCode } from "../core/key-codes.ts";
 export { EditField, type FieldControls, type FieldClipboard } from "./source-field.ts";
@@ -9,8 +10,13 @@ export class ConsoleField {
   cursor = 0;
   scroll = 0;
   overstrike = false;
-  constructor(readonly maximumLength = 1023, public widthInChars = 78) {}
-  get text(): string { return this.characters.join(""); }
+  constructor(
+    readonly maximumLength = 1023,
+    public widthInChars = 78,
+  ) {}
+  get text(): string {
+    return this.characters.join("");
+  }
   get selectedCompletion(): string | null {
     return this.completion?.text === this.text && this.completion.cursor === this.cursor ? this.completion.selected : null;
   }
@@ -19,8 +25,11 @@ export class ConsoleField {
     if (cycle === null || cycle.text !== this.text || cycle.cursor !== this.cursor) {
       this.completion = null;
       const match = /^([\\/]?)([^\s]*)(.*)$/s.exec(this.text);
-      const marker = match?.[1] ?? "", token = match?.[2] ?? "", tail = match?.[3] ?? "";
-      const tokenStart = [...marker].length, tokenEnd = tokenStart + [...token].length;
+      const marker = match?.[1] ?? "",
+        token = match?.[2] ?? "",
+        tail = match?.[3] ?? "";
+      const tokenStart = [...marker].length,
+        tokenEnd = tokenStart + [...token].length;
       if (this.cursor < tokenStart || this.cursor > tokenEnd) return;
       const prefix = [...token].slice(0, this.cursor - tokenStart).join("");
       const matches = completionMatches(prefix, names);
@@ -40,9 +49,15 @@ export class ConsoleField {
   setText(text: string): void {
     this.completion = null;
     this.characters = [...text.replace(/[\x00-\x1f\x7f]/g, "")].slice(0, this.maximumLength);
-    this.cursor = this.characters.length; this.keepVisible();
+    this.cursor = this.characters.length;
+    this.keepVisible();
   }
-  clear(): void { this.completion = null; this.characters = []; this.cursor = 0; this.scroll = 0; }
+  clear(): void {
+    this.completion = null;
+    this.characters = [];
+    this.cursor = 0;
+    this.scroll = 0;
+  }
   insert(text: string): void {
     this.completion = null;
     for (const character of text) {
@@ -55,18 +70,36 @@ export class ConsoleField {
   key(code: number, control: boolean, shift: boolean, clipboard: () => string | null): boolean {
     if (code !== KeyCode.Shift && code !== KeyCode.Control) this.completion = null;
     if ((code === 118 && control) || ((code === KeyCode.Insert || code === KeyCode.KeypadInsert) && shift)) {
-      const text = clipboard(); if (text !== null) this.insert(text.split(/[\r\n\0]/, 1)[0] ?? ""); return true;
+      const text = clipboard();
+      if (text !== null) this.insert(text.split(/[\r\n\0]/, 1)[0] ?? "");
+      return true;
     }
     if (control) {
       switch (code) {
-        case 97: this.cursor = 0; break;
-        case 101: this.cursor = this.characters.length; break;
-        case 99: case 117: this.clear(); break;
-        case 107: this.characters.splice(this.cursor); break;
-        case 119: { const start = this.word(-1); this.characters.splice(start, this.cursor - start); this.cursor = start; break; }
-        default: return this.navigation(code, true);
+        case 97:
+          this.cursor = 0;
+          break;
+        case 101:
+          this.cursor = this.characters.length;
+          break;
+        case 99:
+        case 117:
+          this.clear();
+          break;
+        case 107:
+          this.characters.splice(this.cursor);
+          break;
+        case 119: {
+          const start = this.word(-1);
+          this.characters.splice(start, this.cursor - start);
+          this.cursor = start;
+          break;
+        }
+        default:
+          return this.navigation(code, true);
       }
-      this.keepVisible(); return true;
+      this.keepVisible();
+      return true;
     }
     return this.navigation(code, false);
   }
@@ -79,16 +112,32 @@ export class ConsoleField {
   }
   private navigation(code: number, control: boolean): boolean {
     switch (code) {
-      case KeyCode.Backspace: if (this.cursor > 0) this.characters.splice(--this.cursor, 1); break;
-      case KeyCode.Delete: this.characters.splice(this.cursor, 1); break;
-      case KeyCode.Left: this.cursor = control ? this.word(-1) : Math.max(0, this.cursor - 1); break;
-      case KeyCode.Right: this.cursor = control ? this.word(1) : Math.min(this.characters.length, this.cursor + 1); break;
-      case KeyCode.Home: this.cursor = 0; break;
-      case KeyCode.End: this.cursor = this.characters.length; break;
-      case KeyCode.Insert: this.overstrike = !this.overstrike; break;
-      default: return false;
+      case KeyCode.Backspace:
+        if (this.cursor > 0) this.characters.splice(--this.cursor, 1);
+        break;
+      case KeyCode.Delete:
+        this.characters.splice(this.cursor, 1);
+        break;
+      case KeyCode.Left:
+        this.cursor = control ? this.word(-1) : Math.max(0, this.cursor - 1);
+        break;
+      case KeyCode.Right:
+        this.cursor = control ? this.word(1) : Math.min(this.characters.length, this.cursor + 1);
+        break;
+      case KeyCode.Home:
+        this.cursor = 0;
+        break;
+      case KeyCode.End:
+        this.cursor = this.characters.length;
+        break;
+      case KeyCode.Insert:
+        this.overstrike = !this.overstrike;
+        break;
+      default:
+        return false;
     }
-    this.keepVisible(); return true;
+    this.keepVisible();
+    return true;
   }
   private keepVisible(): void {
     this.scroll = Math.max(0, Math.min(this.scroll, this.cursor));
@@ -96,7 +145,10 @@ export class ConsoleField {
   }
 }
 
-export interface CompletionResult { readonly text: string; readonly matches: readonly string[]; }
+export interface CompletionResult {
+  readonly text: string;
+  readonly matches: readonly string[];
+}
 const foldCompletion = (value: string): string => value.replace(/[A-Z]/g, character => character.toLowerCase());
 function completionMatches(prefix: string, names: readonly string[]): readonly string[] {
   const unique = new Map<string, string>();
@@ -104,11 +156,13 @@ function completionMatches(prefix: string, names: readonly string[]): readonly s
     const folded = foldCompletion(name);
     if (folded.startsWith(foldCompletion(prefix)) && !unique.has(folded)) unique.set(folded, name);
   }
-  return [...unique.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, name]) => name);
+  return [...unique.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)).map(([, name]) => name);
 }
 export function completeCommand(text: string, names: readonly string[]): CompletionResult {
   const match = /^([\\/]?)([^\s]*)(.*)$/s.exec(text);
-  const marker = match?.[1] ?? "", prefix = match?.[2] ?? "", tail = match?.[3] ?? "";
+  const marker = match?.[1] ?? "",
+    prefix = match?.[2] ?? "",
+    tail = match?.[3] ?? "";
   if (prefix === "") return { text, matches: [] };
   const fold = (value: string): string => value.replace(/[A-Z]/g, character => character.toLowerCase());
   const matches = [...new Set(names)].filter(name => fold(name).startsWith(fold(prefix)));
@@ -127,18 +181,30 @@ export class ConsoleHistory {
   private readonly entries: BoundedQueue<string>;
   private position = 0;
   private draft = "";
-  constructor(readonly capacity = 32) { this.entries = new BoundedQueue<string>(capacity); }
-  get lines(): readonly string[] { return this.entries.toArray(); }
-  replace(lines: readonly string[]): void { this.entries.clear(); for (const line of lines) if (line.length > 0) this.entries.push(line); this.position = this.entries.length; }
+  constructor(readonly capacity = 32) {
+    this.entries = new BoundedQueue<string>(capacity);
+  }
+  get lines(): readonly string[] {
+    return this.entries.toArray();
+  }
+  replace(lines: readonly string[]): void {
+    this.entries.clear();
+    for (const line of lines) if (line.length > 0) this.entries.push(line);
+    this.position = this.entries.length;
+  }
   add(line: string): void {
     if (line.length === 0) return;
     this.entries.push(line);
-    this.position = this.entries.length; this.draft = "";
+    this.position = this.entries.length;
+    this.draft = "";
   }
   previous(current: string): string {
     if (this.position === this.entries.length) this.draft = current;
     this.position = Math.max(0, this.position - 1);
     return this.entries.at(this.position) ?? current;
   }
-  next(): string { this.position = Math.min(this.entries.length, this.position + 1); return this.entries.at(this.position) ?? this.draft; }
+  next(): string {
+    this.position = Math.min(this.entries.length, this.position + 1);
+    return this.entries.at(this.position) ?? this.draft;
+  }
 }

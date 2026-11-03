@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/client/cl_cin.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -12,9 +13,7 @@ export type RoqEvent =
   | { readonly kind: "audio"; readonly samples: Int16Array; readonly channels: 1 | 2; readonly sampleRate: 22050 }
   | { readonly kind: "end" };
 
-export type RoqChunkEvent = RoqEvent
-  | { readonly kind: "info"; readonly width: number; readonly height: number }
-  | { readonly kind: "metadata" };
+export type RoqChunkEvent = RoqEvent | { readonly kind: "info"; readonly width: number; readonly height: number } | { readonly kind: "metadata" };
 
 export interface RoqDecoderOptions {
   readonly endPolicy?: "complete" | "cinematic-lookahead";
@@ -42,9 +41,15 @@ export class RoqDecoderScratch {
   }
 
   /** A new CIN_PlayCinematic clears cinematics_t, but the separate global codebooks survive. */
-  clearMovieState(): void { this.file.fill(0); this.frames.fill(0); }
+  clearMovieState(): void {
+    this.file.fill(0);
+    this.frames.fill(0);
+  }
 
-  clear(): void { this.clearMovieState(); this.codebooks.clear(); }
+  clear(): void {
+    this.clearMovieState();
+    this.codebooks.clear();
+  }
 
   /** Shared physical view: the second image starts at this movie's screenDelta, not a fixed half-buffer offset. */
   frame(byteLength: number, index: 0 | 1): Uint8Array {
@@ -54,8 +59,8 @@ export class RoqDecoderScratch {
 
   /** CIN_UploadCinematic may read beyond the published frame into the same global linbuf. */
   view(offset: number, byteLength: number): Uint8Array {
-    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(byteLength) || offset < 0 || byteLength < 0
-      || offset + byteLength > this.frames.length) throw new RangeError("Invalid RoQ physical buffer range");
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(byteLength) || offset < 0 || byteLength < 0 || offset + byteLength > this.frames.length)
+      throw new RangeError("Invalid RoQ physical buffer range");
     return this.frames.subarray(offset, offset + byteLength);
   }
 }
@@ -115,31 +120,60 @@ export class RoqDecoder {
   }
 
   captureCheckpoint() {
-    return { rate: this.rate, width: this.width, height: this.height, frameIndex: this.frameIndex,
-      unknownChunk: this.unknownChunk, cinematicLookahead: this.cinematicLookahead, silent: this.silent,
-      scratch: this.scratch.captureCheckpoint(), stream: this.stream.captureCheckpoint() };
+    return {
+      rate: this.rate,
+      width: this.width,
+      height: this.height,
+      frameIndex: this.frameIndex,
+      unknownChunk: this.unknownChunk,
+      cinematicLookahead: this.cinematicLookahead,
+      silent: this.silent,
+      scratch: this.scratch.captureCheckpoint(),
+      stream: this.stream.captureCheckpoint(),
+    };
   }
   restoreCheckpoint(value: unknown): void {
     const r = new SaveReader(value, "roq-decoder");
-    r.field("cinematicLookahead").literal(this.cinematicLookahead); r.field("silent").literal(this.silent);
-    const width = r.field("width").integer(0), height = r.field("height").integer(0);
+    r.field("cinematicLookahead").literal(this.cinematicLookahead);
+    r.field("silent").literal(this.silent);
+    const width = r.field("width").integer(0),
+      height = r.field("height").integer(0);
     if ((width === 0) !== (height === 0) || width % 8 !== 0 || height % 8 !== 0 || width * height > 512 * 512) r.fail("invalid frame dimensions");
-    this.rate = r.field("rate").integer(1); this.frameIndex = r.field("frameIndex").integer(-1);
+    this.rate = r.field("rate").integer(1);
+    this.frameIndex = r.field("frameIndex").integer(-1);
     this.unknownChunk = r.field("unknownChunk").choice("none", "interrupt", "run-tail");
-    this.scratch.restoreCheckpoint(r.field("scratch").value); this.stream.restoreCheckpoint(r.field("stream").value);
-    this.frameWidth = width; this.frameHeight = height;
+    this.scratch.restoreCheckpoint(r.field("scratch").value);
+    this.stream.restoreCheckpoint(r.field("stream").value);
+    this.frameWidth = width;
+    this.frameHeight = height;
     this.firstBuffer = width === 0 ? new Uint8Array(0) : this.scratch.frame(width * height * 4, 0);
     this.secondBuffer = width === 0 ? new Uint8Array(0) : this.scratch.frame(width * height * 4, 1);
   }
 
-  get frameRate(): number { return this.rate; }
-  get width(): number { return this.frameWidth; }
-  get height(): number { return this.frameHeight; }
-  get inPacket(): boolean { return this.stream.inPacket; }
-  get hasInvalidLookahead(): boolean { return this.unknownChunk !== "none" || this.stream.hasInvalidLookahead; }
-  get resetAfterRun(): boolean { return this.unknownChunk === "run-tail"; }
-  private get front(): Uint8Array { return (this.frameIndex & 1) === 0 ? this.firstBuffer : this.secondBuffer; }
-  private get back(): Uint8Array { return (this.frameIndex & 1) === 0 ? this.secondBuffer : this.firstBuffer; }
+  get frameRate(): number {
+    return this.rate;
+  }
+  get width(): number {
+    return this.frameWidth;
+  }
+  get height(): number {
+    return this.frameHeight;
+  }
+  get inPacket(): boolean {
+    return this.stream.inPacket;
+  }
+  get hasInvalidLookahead(): boolean {
+    return this.unknownChunk !== "none" || this.stream.hasInvalidLookahead;
+  }
+  get resetAfterRun(): boolean {
+    return this.unknownChunk === "run-tail";
+  }
+  private get front(): Uint8Array {
+    return (this.frameIndex & 1) === 0 ? this.firstBuffer : this.secondBuffer;
+  }
+  private get back(): Uint8Array {
+    return (this.frameIndex & 1) === 0 ? this.secondBuffer : this.firstBuffer;
+  }
 
   /** RoQReset retains both physical image buffers and the codebooks between loops. */
   rewind(): void {
@@ -159,8 +193,11 @@ export class RoqDecoder {
     }
   }
 
-  nextChunk(beforeStereoDecode?: () => undefined, afterInfoDecode?: () => undefined,
-    afterAudioDecode?: (audio: Extract<RoqEvent, { readonly kind: "audio" }>) => undefined): RoqChunkEvent {
+  nextChunk(
+    beforeStereoDecode?: () => undefined,
+    afterInfoDecode?: () => undefined,
+    afterAudioDecode?: (audio: Extract<RoqEvent, { readonly kind: "audio" }>) => undefined,
+  ): RoqChunkEvent {
     if (this.unknownChunk !== "none") return { kind: "end" };
     const streamed = this.stream.nextChunk();
     if (streamed === null) return { kind: "end" };
@@ -219,8 +256,7 @@ export class RoqDecoder {
     const height = reader.u16();
     reader.u16(); // Stored maxsize and minsize do not control the source's fixed 8/4 traversal.
     reader.u16();
-    if (width === 0 || height === 0 || width % 8 !== 0 || height % 8 !== 0
-      || width * height > 512 * 512) {
+    if (width === 0 || height === 0 || width % 8 !== 0 || height % 8 !== 0 || width * height > 512 * 512) {
       this.fail(reader, "invalid RoQ quad dimensions");
     }
     this.frameWidth = width;
@@ -231,8 +267,7 @@ export class RoqDecoder {
   }
 
   private readCodebook(reader: BinaryReader, flags: number): void {
-    this.scratch.codebooks.decode(reader, flags, "normal", { samplesPerPixel: 4 },
-      this.cinematicLookahead ? "source" : "diagnostic-2x2");
+    this.scratch.codebooks.decode(reader, flags, "normal", { samplesPerPixel: 4 }, this.cinematicLookahead ? "source" : "diagnostic-2x2");
   }
 
   private readAudio(reader: BinaryReader, flags: number, channels: 1 | 2): RoqEvent {
@@ -259,7 +294,7 @@ export class RoqDecoder {
       }
     }
     // The source stops at the final quad; retail streams include trailing control padding.
-    const event: RoqEvent = { kind: "frame", rgba: this.front.slice(), index: this.frameIndex, time: this.frameIndex * 1000 / this.frameRate };
+    const event: RoqEvent = { kind: "frame", rgba: this.front.slice(), index: this.frameIndex, time: (this.frameIndex * 1000) / this.frameRate };
     if (this.frameIndex === 0) this.back.set(this.front);
     this.frameIndex++;
     return event;
@@ -267,15 +302,15 @@ export class RoqDecoder {
 
   private block(vq: VqReader, x: number, y: number, size: 4 | 8, flags: number): void {
     switch (vq.code()) {
-      case 0: return;
+      case 0:
+        return;
       case 1: {
         const motion = vq.reader.u8();
         const meanX = (flags << 16) >> 24;
         const meanY = (flags << 24) >> 24;
         const scale = this.width === this.height * 4 ? 2 : 1;
         const reference = (this.frameIndex & 1) === 0 ? this.front.length : 0;
-        const offset = reference + ((y + (8 - (motion & 15) - meanY) * scale) * this.width
-          + x + (8 - (motion >>> 4) - meanX) * scale) * 4;
+        const offset = reference + ((y + (8 - (motion & 15) - meanY) * scale) * this.width + x + (8 - (motion >>> 4) - meanX) * scale) * 4;
         const length = ((size - 1) * this.width + size) * 4;
         // Source motion addresses the full linbuf, including the current image and unused tail.
         if (offset < 0 || offset + length > 512 * 512 * 4 * 2) {

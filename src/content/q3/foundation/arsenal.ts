@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Independent adapter for the source PM_Weapon stage and ClientSpawn loadout.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
@@ -56,7 +57,8 @@ export interface Q3ArsenalRuntimeState {
 }
 
 export function q3RequestWeapon(runtime: Q3ArsenalRuntimeState, weapon: number): Q3ArsenalRuntimeState {
-  if (!Q3_WEAPON_ITEMS.some(entry => entry.weapon === weapon && (runtime.product === "missionpack" || weapon <= 10))) throw new Error("Requested weapon does not belong to the Q3 product");
+  if (!Q3_WEAPON_ITEMS.some(entry => entry.weapon === weapon && (runtime.product === "missionpack" || weapon <= 10)))
+    throw new Error("Requested weapon does not belong to the Q3 product");
   return { ...runtime, requestedWeapon: weapon };
 }
 
@@ -77,7 +79,12 @@ export interface Q3ArsenalStep extends WeaponStepResult {
 }
 
 /** The selected input adapter supplies Q3 actions; foreign button words are never reinterpreted. */
-export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeState, controls: Q3ArsenalControls, firingDelay?: (milliseconds: number) => number): Q3ArsenalStep {
+export function stepQ3Arsenal(
+  input: WeaponStepInput,
+  runtime: Q3ArsenalRuntimeState,
+  controls: Q3ArsenalControls,
+  firingDelay?: (milliseconds: number) => number,
+): Q3ArsenalStep {
   if (input.arsenal.state.kind !== "q3") throw new TypeError("Q3 arsenal adapter requires Q3 weapon state");
   const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
   const clock = elapsed + runtime.fractionalMilliseconds;
@@ -95,7 +102,10 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   let currentTime = input.arsenal.state.timeMilliseconds;
   const externalSlot = { phase: runtime.externalSlot };
   const weaponSnapshot = (): Extract<ArsenalState["state"], { readonly kind: "q3" }> => ({
-    kind: "q3", sourceWeapon: currentWeapon, state: currentState, timeMilliseconds: currentTime,
+    kind: "q3",
+    sourceWeapon: currentWeapon,
+    state: currentState,
+    timeMilliseconds: currentTime,
   });
   const changed = (before: Extract<ArsenalState["state"], { readonly kind: "q3" }>): void => {
     const after = weaponSnapshot();
@@ -104,25 +114,52 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
     }
   };
   const state: Q3SourceWeaponState = {
-    product: runtime.product, pmFlags: (runtime.respawned ? MoveFlags.RESPAWNED : 0) | (runtime.useItemHeld ? MoveFlags.USE_ITEM_HELD : 0),
-    get weapon() { return currentWeapon; },
-    set weapon(value) {
-      const before = weaponSnapshot(); currentWeapon = value; changed(before);
-      if (before.sourceWeapon !== value) effects.push({ kind: "weapon-selection", provider: input.arsenal.provider,
-        before: q3WeaponItem(before.sourceWeapon)?.item ?? null, after: q3WeaponItem(value)?.item ?? null });
+    product: runtime.product,
+    pmFlags: (runtime.respawned ? MoveFlags.RESPAWNED : 0) | (runtime.useItemHeld ? MoveFlags.USE_ITEM_HELD : 0),
+    get weapon() {
+      return currentWeapon;
     },
-    get weaponState() { return currentState; },
-    set weaponState(value) { const before = weaponSnapshot(); currentState = value; changed(before); },
-    get weaponTime() { return currentTime; },
-    set weaponTime(value) { const before = weaponSnapshot(); currentTime = value; changed(before); },
-    ownedWeapons, health: input.environment.health, maxHealth: runtime.maxHealth, spectator: runtime.spectator,
-    haste: input.environment.haste, persistentPowerupTag: runtime.persistentPowerupTag,
-    holdableItem: runtime.holdableItem, holdableTag: runtime.holdableTag,
+    set weapon(value) {
+      const before = weaponSnapshot();
+      currentWeapon = value;
+      changed(before);
+      if (before.sourceWeapon !== value)
+        effects.push({
+          kind: "weapon-selection",
+          provider: input.arsenal.provider,
+          before: q3WeaponItem(before.sourceWeapon)?.item ?? null,
+          after: q3WeaponItem(value)?.item ?? null,
+        });
+    },
+    get weaponState() {
+      return currentState;
+    },
+    set weaponState(value) {
+      const before = weaponSnapshot();
+      currentState = value;
+      changed(before);
+    },
+    get weaponTime() {
+      return currentTime;
+    },
+    set weaponTime(value) {
+      const before = weaponSnapshot();
+      currentTime = value;
+      changed(before);
+    },
+    ownedWeapons,
+    health: input.environment.health,
+    maxHealth: runtime.maxHealth,
+    spectator: runtime.spectator,
+    haste: input.environment.haste,
+    persistentPowerupTag: runtime.persistentPowerupTag,
+    holdableItem: runtime.holdableItem,
+    holdableTag: runtime.holdableTag,
     ammo: {
       get(weapon) {
         const item = q3WeaponItem(weapon);
         if (item === null) return 0;
-        return item.ammo === null ? -1 : entries.get(item.ammo)?.count ?? 0;
+        return item.ammo === null ? -1 : (entries.get(item.ammo)?.count ?? 0);
       },
       set(weapon, count) {
         const item = q3WeaponItem(weapon);
@@ -136,31 +173,66 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   };
   // PMF_RESPAWNED clears when both source actions are released, even under foreign movement.
   if (input.environment.health > 0 && !controls.attack && !controls.useHoldable) state.pmFlags &= ~MoveFlags.RESPAWNED;
-  runQ3WeaponStep(state, { buttons: (controls.attack ? CommandButtons.ATTACK : 0) | (controls.useHoldable ? CommandButtons.USE_HOLDABLE : 0),
-    weapon: runtime.requestedWeapon ?? controls.requestedWeapon }, {
-    msec, gauntletHit: input.gauntletHit, externalSlot, ...(firingDelay === undefined ? {} : { firingDelay }),
-    event(event) { effects.push({ kind: "event", value: { provider: input.arsenal.provider, sequence: eventSequence++, event, parameter: 0 } }); },
-    startTorso(torso) {
-      torsoAnimations.push(torso);
-      // A foreign character consumes these semantic source requests through its own pose adapter.
-      if (animation.state.kind !== "q3" || input.environment.health <= 0) return;
-      const result = runQ3TorsoOperation(torso, { animation, dead: false, elapsedMilliseconds: msec,
-        buttons: 0, product: runtime.product, eventSequence });
-      effects.push(...result.effects);
-      animation = result.animation;
+  runQ3WeaponStep(
+    state,
+    {
+      buttons: (controls.attack ? CommandButtons.ATTACK : 0) | (controls.useHoldable ? CommandButtons.USE_HOLDABLE : 0),
+      weapon: runtime.requestedWeapon ?? controls.requestedWeapon,
     },
-  });
+    {
+      msec,
+      gauntletHit: input.gauntletHit,
+      externalSlot,
+      ...(firingDelay === undefined ? {} : { firingDelay }),
+      event(event) {
+        effects.push({ kind: "event", value: { provider: input.arsenal.provider, sequence: eventSequence++, event, parameter: 0 } });
+      },
+      startTorso(torso) {
+        torsoAnimations.push(torso);
+        // A foreign character consumes these semantic source requests through its own pose adapter.
+        if (animation.state.kind !== "q3" || input.environment.health <= 0) return;
+        const result = runQ3TorsoOperation(torso, { animation, dead: false, elapsedMilliseconds: msec, buttons: 0, product: runtime.product, eventSequence });
+        effects.push(...result.effects);
+        animation = result.animation;
+      },
+    },
+  );
   const weapon = weaponSnapshot();
   const activeWeapon = q3WeaponItem(state.weapon)?.item ?? null;
-  return { arsenal: { ...input.arsenal, activeWeapon, state: weapon, ammo: [...entries.values()] }, animation, effects, torsoAnimations,
-    runtime: { ...runtime, holdableItem: state.holdableItem, holdableTag: state.holdableTag,
-      respawned: (state.pmFlags & MoveFlags.RESPAWNED) !== 0, useItemHeld: (state.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0,
-      fractionalMilliseconds: clock - msec, eventSequence, externalSlot: externalSlot.phase, requestedWeapon: runtime.requestedWeapon === state.weapon ? null : runtime.requestedWeapon } };
+  return {
+    arsenal: { ...input.arsenal, activeWeapon, state: weapon, ammo: [...entries.values()] },
+    animation,
+    effects,
+    torsoAnimations,
+    runtime: {
+      ...runtime,
+      holdableItem: state.holdableItem,
+      holdableTag: state.holdableTag,
+      respawned: (state.pmFlags & MoveFlags.RESPAWNED) !== 0,
+      useItemHeld: (state.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0,
+      fractionalMilliseconds: clock - msec,
+      eventSequence,
+      externalSlot: externalSlot.phase,
+      requestedWeapon: runtime.requestedWeapon === state.weapon ? null : runtime.requestedWeapon,
+    },
+  };
 }
 
 export function q3SpawnArsenalRuntime(product: "baseq3" | "missionpack", maxHealth: number, eventSequence = 0): Q3ArsenalRuntimeState {
-  return { product, maxHealth, spectator: false, persistentPowerupTag: 0, holdableItem: 0, holdableTag: 0,
-    respawned: true, useItemHeld: false, eventSequence, fractionalMilliseconds: 0, externalSlot: "active", requestedWeapon: null };
+  return {
+    product,
+    maxHealth,
+    spectator: false,
+    persistentPowerupTag: 0,
+    holdableItem: 0,
+    holdableTag: 0,
+    respawned: true,
+    useItemHeld: false,
+    eventSequence,
+    fractionalMilliseconds: 0,
+    externalSlot: "active",
+    requestedWeapon: null,
+  };
 }
 
 export function q3SpawnLoadout(provider: ProviderId, product: "baseq3" | "missionpack", teamDeathmatch: boolean): ArsenalState {
@@ -168,10 +240,14 @@ export function q3SpawnLoadout(provider: ProviderId, product: "baseq3" | "missio
   for (const weapon of Q3_WEAPON_ITEMS) {
     if (product === "baseq3" && weapon.weapon >= Weapon.WP_NAILGUN) continue;
     ammo.push({ item: weapon.item, count: weapon.weapon === Weapon.WP_GAUNTLET || weapon.weapon === Weapon.WP_MACHINEGUN ? 1 : 0, capacity: 1 });
-    if (weapon.ammo !== null) ammo.push({ item: weapon.ammo, count: weapon.weapon === Weapon.WP_MACHINEGUN ? teamDeathmatch ? 50 : 100 : 0, capacity: 200 });
+    if (weapon.ammo !== null) ammo.push({ item: weapon.ammo, count: weapon.weapon === Weapon.WP_MACHINEGUN ? (teamDeathmatch ? 50 : 100) : 0, capacity: 200 });
   }
-  return { provider, activeWeapon: "q3:weapon/machinegun", state: { kind: "q3", sourceWeapon: Weapon.WP_MACHINEGUN,
-    state: WeaponState.WEAPON_READY, timeMilliseconds: 0 }, ammo };
+  return {
+    provider,
+    activeWeapon: "q3:weapon/machinegun",
+    state: { kind: "q3", sourceWeapon: Weapon.WP_MACHINEGUN, state: WeaponState.WEAPON_READY, timeMilliseconds: 0 },
+    ammo,
+  };
 }
 
 export function q3SpawnAnimation(): Extract<AnimationState, { readonly kind: "q3" }> {

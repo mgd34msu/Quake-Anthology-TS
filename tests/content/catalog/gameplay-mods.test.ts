@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,32 +12,47 @@ import { digestBytes, openMountPlan } from "../../../src/content/mounts/index.ts
 test("broken independent components keep their identities without hiding healthy components", async () => {
   const root = await mkdtemp(join(tmpdir(), "gameplay-mod-discovery-"));
   try {
-    const directory = join(root, "q1/id1"), bytes = Uint8Array.of(1, 2, 3);
+    const directory = join(root, "q1/id1"),
+      bytes = Uint8Array.of(1, 2, 3);
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, "progs.dat"), bytes);
     const declaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: digestBytes(bytes) }, actorFields: [], callbacks: [] };
     await writeFile(join(directory, "healthy.json"), JSON.stringify(declaration));
-    await writeFile(join(directory, "stale.json"), JSON.stringify({ ...declaration,
-      program: { ...declaration.program, digest: digestBytes(Uint8Array.of(4)) } }));
+    await writeFile(
+      join(directory, "stale.json"),
+      JSON.stringify({ ...declaration, program: { ...declaration.program, digest: digestBytes(Uint8Array.of(4)) } }),
+    );
     const addition = (id: string, callbacks: string) => ({ id, title: id, purpose: "addition", callbacks, requires: [], conflicts: [] });
     const components = [
       { id: "rules", title: "Whole game rules", purpose: "game-type" },
-      addition("missing", "absent.json"), addition("healthy", "healthy.json"), addition("stale", "stale.json"),
+      addition("missing", "absent.json"),
+      addition("healthy", "healthy.json"),
+      addition("stale", "stale.json"),
     ];
     await writeFile(join(directory, "gameplay-mods.json"), JSON.stringify({ version: 1, components }));
-    const products = expectedProducts.filter(product => product.id === "q1-classic-id1")
+    const products = expectedProducts
+      .filter(product => product.id === "q1-classic-id1")
       .map(product => ({ ...product, requiredContentArchives: [], requiredPrograms: [], mapWitness: null }));
     const catalog = await discoverInstalledContent({ corpusRoot: root, products });
-    const product = catalog.require("q1-classic-id1"), mounts = await catalog.mountsFor(product.id);
-    using mounted = await openMountPlan({ id: "mount-plan:test:gameplay-mods", mounts,
-      defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const product = catalog.require("q1-classic-id1"),
+      mounts = await catalog.mountsFor(product.id);
+    using mounted = await openMountPlan({
+      id: "mount-plan:test:gameplay-mods",
+      mounts,
+      defaultOrder: mounts.map(mount => mount.identity.id),
+      prefixOrders: [],
+    });
     const discovered = await discoverGameplayMods(product, mounted);
     expect(discovered).toHaveLength(3);
-    expect(discovered[0]).toMatchObject({ kind: "unavailable", description: { selection: { id: "missing" },
-      availability: { kind: "unavailable", reason: "Missing callback declaration absent.json" } } });
+    expect(discovered[0]).toMatchObject({
+      kind: "unavailable",
+      description: { selection: { id: "missing" }, availability: { kind: "unavailable", reason: "Missing callback declaration absent.json" } },
+    });
     expect(discovered[1]).toMatchObject({ kind: "available", mod: { selection: { id: "healthy" } } });
-    expect(discovered[2]).toMatchObject({ kind: "unavailable", description: { selection: { id: "stale" },
-      availability: { kind: "unavailable", reason: "Executable differs from its callback declaration" } } });
+    expect(discovered[2]).toMatchObject({
+      kind: "unavailable",
+      description: { selection: { id: "stale" }, availability: { kind: "unavailable", reason: "Executable differs from its callback declaration" } },
+    });
     const choices = await applicationModChoices(catalog);
     const selection = new ModSelectionSet(choices.map(choice => choice.description));
     selection.setEnabled({ product: product.expectation.id, id: "healthy" }, true);
@@ -45,5 +61,7 @@ test("broken independent components keep their identities without hiding healthy
     expect(choices.some(choice => choice.description.selection.id === "rules")).toBe(false);
     await writeFile(join(directory, "gameplay-mods.json"), JSON.stringify({ version: 1, components: [...components, addition("healthy", "healthy.json")] }));
     await expect(discoverGameplayMods(product, mounted)).rejects.toThrow("Duplicate mod component");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

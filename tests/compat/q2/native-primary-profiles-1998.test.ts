@@ -17,7 +17,10 @@ import { classicPickupProfile } from "../../../src/compat/q2/classic/pickup-prof
 const path = "q2/xatrix/gamex86.dll";
 const base = 0x20000000;
 
-interface Image { readonly bytes: Uint8Array; readonly pe: PeFile }
+interface Image {
+  readonly bytes: Uint8Array;
+  readonly pe: PeFile;
+}
 function image(): Image {
   const bytes = new Uint8Array(readFileSync(corpusFile(path)));
   return { bytes, pe: parsePe(bytes) };
@@ -28,8 +31,13 @@ function slice(file: Image, rva: number, length: number): number[] {
   const start = section.rawOffset + rva - section.rva;
   return [...file.bytes.subarray(start, start + length)];
 }
-function le32(value: number): number[] { return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]; }
-function u32(file: Image, rva: number): number { const [a = 0, b = 0, c = 0, d = 0] = slice(file, rva, 4); return (a | b << 8 | c << 16 | d << 24) >>> 0; }
+function le32(value: number): number[] {
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+}
+function u32(file: Image, rva: number): number {
+  const [a = 0, b = 0, c = 0, d = 0] = slice(file, rva, 4);
+  return (a | (b << 8) | (c << 16) | (d << 24)) >>> 0;
+}
 function contains(haystack: readonly number[], needle: readonly number[]): boolean {
   for (let i = 0; i + needle.length <= haystack.length; i++) if (needle.every((byte, j) => haystack[i + j] === byte)) return true;
   return false;
@@ -37,9 +45,12 @@ function contains(haystack: readonly number[], needle: readonly number[]): boole
 /** Target RVA of the `call rel32` at an RVA, or null when the byte there is not E8. */
 function callTarget(file: Image, rva: number): number | null {
   const [opcode = 0] = slice(file, rva, 1);
-  return opcode === 0xe8 ? (rva + 5 + (u32(file, rva + 1) | 0)) : null;
+  return opcode === 0xe8 ? rva + 5 + (u32(file, rva + 1) | 0) : null;
 }
-function required<T>(value: T | null): T { if (value === null) throw new Error("1998 Xatrix has no native primary profile"); return value; }
+function required<T>(value: T | null): T {
+  if (value === null) throw new Error("1998 Xatrix has no native primary profile");
+  return value;
+}
 const digest = xatrix1998CombatProfile.digest;
 const epilogue = [0x5f, 0x5e, 0x5d, 0x5b, 0xc3];
 
@@ -54,23 +65,47 @@ corpusTest(path)("1998 Xatrix has a complete native primary that validates again
 
 corpusTest(path)("1998 Xatrix item table, client records and entity fields match the shipped PE", () => {
   const file = image();
-  const commands = required(nativePrimaryCommandProfile(digest)), pickups = required(classicPickupProfile(digest));
+  const commands = required(nativePrimaryCommandProfile(digest)),
+    pickups = required(classicPickupProfile(digest));
   const items = commands.items;
   expect(items.stride).toBe(72);
   const text = (rva: number): string => {
     const bytes: number[] = [];
-    for (let at = rva; ; at++) { const [byte = 0] = slice(file, at, 1); if (byte === 0) break; bytes.push(byte); }
+    for (let at = rva; ; at++) {
+      const [byte = 0] = slice(file, at, 1);
+      if (byte === 0) break;
+      bytes.push(byte);
+    }
     return String.fromCharCode(...bytes);
   };
   const field = (index: number, offset: number): number => u32(file, items.table + index * items.stride + offset);
-  const name = (index: number, offset: number): string | null => { const pointer = field(index, offset); return pointer === 0 ? null : text(pointer - base); };
+  const name = (index: number, offset: number): string | null => {
+    const pointer = field(index, offset);
+    return pointer === 0 ? null : text(pointer - base);
+  };
   const classnames = Array.from({ length: items.count }, (_, index) => name(index, items.classname));
-  expect(classnames[0]).toBeNull(); expect(classnames[1]).toBe("item_armor_body"); expect(classnames[46]).toBe("key_airstrike_target"); expect(classnames[47]).toBeNull();
+  expect(classnames[0]).toBeNull();
+  expect(classnames[1]).toBe("item_armor_body");
+  expect(classnames[46]).toBe("key_airstrike_target");
+  expect(classnames[47]).toBeNull();
   expect(name(47, items.ammo.kind === "name" ? items.ammo.label : 0)).toBe("Health");
   expect(field(items.count, 0)).toBe(0);
-  expect(classnames.flatMap((value, index) => value !== null && (field(index, items.flags) & items.weaponFlag) !== 0 ? [value] : []))
-    .toEqual(["weapon_blaster", "weapon_shotgun", "weapon_supershotgun", "weapon_machinegun", "weapon_chaingun", "ammo_grenades", "ammo_trap", "weapon_grenadelauncher",
-      "weapon_rocketlauncher", "weapon_hyperblaster", "weapon_boomer", "weapon_railgun", "weapon_phalanx", "weapon_bfg"]);
+  expect(classnames.flatMap((value, index) => (value !== null && (field(index, items.flags) & items.weaponFlag) !== 0 ? [value] : []))).toEqual([
+    "weapon_blaster",
+    "weapon_shotgun",
+    "weapon_supershotgun",
+    "weapon_machinegun",
+    "weapon_chaingun",
+    "ammo_grenades",
+    "ammo_trap",
+    "weapon_grenadelauncher",
+    "weapon_rocketlauncher",
+    "weapon_hyperblaster",
+    "weapon_boomer",
+    "weapon_railgun",
+    "weapon_phalanx",
+    "weapon_bfg",
+  ]);
   expect(name(8, items.ammo.kind === "name" ? items.ammo.offset : 0)).toBe("Shells");
   expect(name(8, items.icon)).toBe("w_shotgun");
   // Ammo tags select the pers.max_* slot and sit eight bytes before the end of each record.
@@ -95,7 +130,9 @@ corpusTest(path)("1998 Xatrix item table, client records and entity fields match
 
 corpusTest(path)("1998 Xatrix command, inventory and drop entries sit on the original g_cmds and p_weapon bodies", () => {
   const file = image();
-  const commands = required(nativePrimaryCommandProfile(digest)), inventory = required(nativePrimaryInventoryProfile(digest)), drop = required(nativePrimaryDropProfile(digest));
+  const commands = required(nativePrimaryCommandProfile(digest)),
+    inventory = required(nativePrimaryInventoryProfile(digest)),
+    drop = required(nativePrimaryDropProfile(digest));
   const give = commands.give;
   // Cmd_Give_f: the weapon and ammo categories each begin with `test ebp,ebp` after their item loops; the grants write inventory[index].
   expect(slice(file, give.weapons, 2)).toEqual([0x85, 0xed]);
@@ -120,13 +157,17 @@ corpusTest(path)("1998 Xatrix command, inventory and drop entries sit on the ori
   expect(slice(file, eligibility.join, 1)).toEqual([0xa1]);
 
   // SelectNextItem and SelectPrevItem: scan regions are the item loops; the cursor store is skipped and the final epilogue is the join.
-  for (const [entry, scan, join, head, edi] of [[inventory.next.entry, inventory.next.scan, inventory.next.join, [0x8b, 0xc6, 0x99], 0x87], [inventory.previous.entry, inventory.previous.scan, inventory.previous.join, [0x8b, 0xc1, 0x99], 0x86]] as const) {
+  for (const [entry, scan, join, head, edi] of [
+    [inventory.next.entry, inventory.next.scan, inventory.next.join, [0x8b, 0xc6, 0x99], 0x87],
+    [inventory.previous.entry, inventory.previous.scan, inventory.previous.join, [0x8b, 0xc1, 0x99], 0x86],
+  ] as const) {
     const span = slice(file, entry, join - entry);
     expect(slice(file, scan, 3)).toEqual([...head]);
     expect(slice(file, join, 6)).toEqual([...epilogue, 0x90]);
     expect(contains(span, [0xc7, edi, ...le32(inventory.cursor), 0xff, 0xff, 0xff, 0xff])).toBe(true);
     expect(contains(span, [0x89, edi, ...le32(inventory.cursor)])).toBe(true);
-    expect(scan).toBeGreaterThan(entry); expect(join).toBeGreaterThan(scan);
+    expect(scan).toBeGreaterThan(entry);
+    expect(join).toBeGreaterThan(scan);
   }
   // ValidateSelectedItem reloads the cursor and calls SelectNextItem(ent, -1).
   expect(callTarget(file, inventory.validate.entry + 0x1c)).toBe(inventory.next.entry);
@@ -165,13 +206,16 @@ corpusTest(path)("1998 Xatrix command, inventory and drop entries sit on the ori
 
 corpusTest(path)("1998 Xatrix pickup entries sit on Touch_Item and the original grant bodies", () => {
   const file = image();
-  const pickups = required(classicPickupProfile(digest)), drop = required(nativePrimaryDropProfile(digest));
+  const pickups = required(classicPickupProfile(digest)),
+    drop = required(nativePrimaryDropProfile(digest));
   // Touch_Item: item->pickup(ent, other) is called through eax and returns into `mov ebp,eax`; G_UseTargets returns to the spawnflags update.
   expect(slice(file, pickups.touch, 7)).toEqual([0x55, 0x56, 0x8b, 0x74, 0x24, 0x10, 0x57]);
   expect(slice(file, pickups.grantReturn - 2, 4)).toEqual([0xff, 0xd0, 0x8b, 0xe8]);
   expect(callTarget(file, pickups.targetsReturn - 5)).toBe(0x181b0);
   expect(slice(file, pickups.targetsReturn, 2)).toEqual([0x8b, 0x87]);
-  expect(contains(slice(file, pickups.touch, pickups.targetsReturn - pickups.touch), [0xf7, 0x87, ...le32(pickups.entity.spawnflags), 0x00, 0x00, 0x04, 0x00])).toBe(true);
+  expect(
+    contains(slice(file, pickups.touch, pickups.targetsReturn - pickups.touch), [0xf7, 0x87, ...le32(pickups.entity.spawnflags), 0x00, 0x00, 0x04, 0x00]),
+  ).toBe(true);
   expect(contains(slice(file, pickups.touch, 0x60), [0x8b, 0x87, ...le32(pickups.entity.item)])).toBe(true);
   expect([pickups.entity.item, pickups.entity.count, pickups.entity.spawnflags]).toEqual([0x288, 0x214, 0x11c]);
   // Level time is the float after level.framenum.
@@ -182,7 +226,8 @@ corpusTest(path)("1998 Xatrix pickup entries sit on Touch_Item and the original 
   expect(contains(slice(file, pickups.supply.ammo.entry, 0x40), [0x8b, 0x42, pickups.supply.ammo.tag])).toBe(true);
   for (const offset of pickups.supply.ammo.capacities) expect(contains(slice(file, pickups.supply.ammo.entry, 0x90), [0x8b, 0x8e, ...le32(offset)])).toBe(true);
   const [armor, ammo, weapon, bandolier, pack] = pickups.grants;
-  if (armor === undefined || ammo === undefined || weapon === undefined || bandolier === undefined || pack === undefined) throw new Error("Expected five grants");
+  if (armor === undefined || ammo === undefined || weapon === undefined || bandolier === undefined || pack === undefined)
+    throw new Error("Expected five grants");
   const respawnTail = (flags: number): number[] => [0x00, 0x00, flags, 0x00];
   // Pickup_Armor: the region opens at the ArmorIndex call and joins the respawn tail (test ent->spawnflags, 0x10000).
   expect(slice(file, armor.recipient.entry, 1)).toEqual([0x57]);
@@ -203,7 +248,13 @@ corpusTest(path)("1998 Xatrix pickup entries sit on Touch_Item and the original 
   expect(slice(file, weapon.supply.settle, 5)).toEqual([0xa9, ...respawnTail(2)]);
   expect(slice(file, weapon.supply.autoswitch.entry, 3)).toEqual([0x8b, 0x7b, 0x54]);
   expect(slice(file, weapon.supply.autoswitch.join, 3)).toEqual(epilogue.slice(0, 3));
-  expect(contains(slice(file, weapon.supply.autoswitch.entry, weapon.supply.autoswitch.join - weapon.supply.autoswitch.entry), [0x89, 0x97, ...le32(drop.client.pending)])).toBe(true);
+  expect(
+    contains(slice(file, weapon.supply.autoswitch.entry, weapon.supply.autoswitch.join - weapon.supply.autoswitch.entry), [
+      0x89,
+      0x97,
+      ...le32(drop.client.pending),
+    ]),
+  ).toBe(true);
   // Pickup_Bandolier and Pickup_Pack raise pers.max_* and add ammo before the respawn tail.
   for (const grant of [bandolier, pack]) {
     expect(grant.recipient.entry).toBe(grant.entry + 0xb);

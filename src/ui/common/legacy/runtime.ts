@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Team Arena shared-menu runtime translated from id Software's
  * code/ui/ui_shared.c and ui_shared.h. Copyright (C) 1999-2005 Id Software, Inc.
@@ -45,10 +46,7 @@ const PULSE_DIVISOR = 75;
 const BLINK_DIVISOR = 200;
 const f = Math.fround;
 
-
-export type UiKeyEvent =
-  | { readonly kind: "key"; readonly code: number; readonly down: boolean }
-  | { readonly kind: "character"; readonly code: number };
+export type UiKeyEvent = { readonly kind: "key"; readonly code: number; readonly down: boolean } | { readonly kind: "character"; readonly code: number };
 
 export interface UiRuntimeAudio {
   playLocal(sound: PcmSound | number | undefined): void;
@@ -57,12 +55,14 @@ export interface UiRuntimeAudio {
 }
 
 export interface UiRuntimeResources {
-  readonly handles: { readonly kind: "diagnostic" } | {
-    readonly kind: "source";
-    pictureHandle(value: PictureAsset | undefined): number;
-    pictureForHandle(handle: number): PictureAsset | undefined;
-    modelForHandle(handle: number): SceneModel;
-  };
+  readonly handles:
+    | { readonly kind: "diagnostic" }
+    | {
+        readonly kind: "source";
+        pictureHandle(value: PictureAsset | undefined): number;
+        pictureForHandle(handle: number): PictureAsset | undefined;
+        modelForHandle(handle: number): SceneModel;
+      };
   registerFont(path: string | null, pointSize: number): Promise<void>;
   registerPicture(path: string | null): Promise<PictureAsset | undefined>;
   registeredPicture(path: string | null): PictureAsset | undefined;
@@ -73,8 +73,13 @@ export interface UiRuntimeResources {
   prepareCinematic(path: string): Promise<UiCinematicAsset>;
 }
 
-export interface UiCinematicAsset { readonly path: string }
-export interface UiCinematicInstance { readonly asset: UiCinematicAsset; readonly handle: { readonly index: number } }
+export interface UiCinematicAsset {
+  readonly path: string;
+}
+export interface UiCinematicInstance {
+  readonly asset: UiCinematicAsset;
+  readonly handle: { readonly index: number };
+}
 
 export interface UiRuntimeCinematics {
   play(asset: UiCinematicAsset, rect: UiRect): UiCinematicInstance | undefined;
@@ -135,7 +140,10 @@ export interface UiRuntimeFeeder {
   select(feeder: number, index: number): void | Promise<void>;
 }
 
-export interface UiOwnerDrawKeyResult { readonly handled: boolean; readonly special: number }
+export interface UiOwnerDrawKeyResult {
+  readonly handled: boolean;
+  readonly special: number;
+}
 
 export interface UiRuntimeOwnerDraw {
   visible(flags: number): boolean;
@@ -230,8 +238,23 @@ export interface UiRuntimeFrame {
   readonly draw: Draw2D;
 }
 
-interface WindowState extends Pick<UiWindowDefinition,
-  "rect" | "clientRect" | "rectEffects" | "rectEffects2" | "flags" | "foreColor" | "backColor" | "borderColor" | "nextTime" | "offsetTime" | "cinematicHandle" | "backgroundHandle" | "setBackground"> {
+interface WindowState
+  extends Pick<
+    UiWindowDefinition,
+    | "rect"
+    | "clientRect"
+    | "rectEffects"
+    | "rectEffects2"
+    | "flags"
+    | "foreColor"
+    | "backColor"
+    | "borderColor"
+    | "nextTime"
+    | "offsetTime"
+    | "cinematicHandle"
+    | "backgroundHandle"
+    | "setBackground"
+  > {
   readonly backgroundPath: string | null | undefined;
 }
 
@@ -270,12 +293,12 @@ interface ScriptOwner {
 type CaptureState =
   | { readonly kind: "idle" }
   | {
-    readonly kind: "list-auto" | "list-thumb" | "slider-thumb";
-    readonly item: ItemState;
-    readonly key: number;
-    xStart: number;
-    yStart: number;
-  };
+      readonly kind: "list-auto" | "list-thumb" | "slider-thumb";
+      readonly item: ItemState;
+      readonly key: number;
+      xStart: number;
+      yStart: number;
+    };
 
 class RuntimeScriptCursor implements UiScriptCursor {
   private index = 0;
@@ -285,11 +308,16 @@ class RuntimeScriptCursor implements UiScriptCursor {
     text: string,
     private readonly parser: CommonParseState,
     private readonly memory: UiMenuMemoryOwnership,
-  ) { this.cursor = new CommonParseCursor(quakeString(text).slice(0, 1023)); }
+  ) {
+    this.cursor = new CommonParseCursor(quakeString(text).slice(0, 1023));
+  }
 
-  get position(): number { return this.index; }
+  get position(): number {
+    return this.index;
+  }
   get remaining(): number {
-    const cursor = this.lookaheadCursor(), parser = new CommonParseState();
+    const cursor = this.lookaheadCursor(),
+      parser = new CommonParseState();
     let count = 0;
     while (parser.parse(cursor, false).length !== 0) count++;
     return count;
@@ -373,31 +401,81 @@ function copyColor(value: Vec4): Vec4 {
 
 function windowState(definition: UiWindowDefinition): WindowState {
   return {
-    get rect(): UiWindowDefinition["rect"] { return definition.rect; },
-    set rect(value: UiRect) { definition.rect = value; },
-    get clientRect(): UiWindowDefinition["clientRect"] { return definition.clientRect; },
-    set clientRect(value: UiRect) { definition.clientRect = value; },
-    get rectEffects(): UiWindowDefinition["rectEffects"] { return definition.rectEffects; },
-    set rectEffects(value: UiRect) { definition.rectEffects = value; },
-    get rectEffects2(): UiWindowDefinition["rectEffects2"] { return definition.rectEffects2; },
-    set rectEffects2(value: UiRect) { definition.rectEffects2 = value; },
-    get flags(): number { return definition.flags; },
-    set flags(value: number) { definition.flags = value; },
-    get foreColor(): UiWindowDefinition["foreColor"] { return definition.foreColor; },
-    set foreColor(value: Vec4) { definition.foreColor = value; },
-    get backColor(): UiWindowDefinition["backColor"] { return definition.backColor; },
-    set backColor(value: Vec4) { definition.backColor = value; },
-    get borderColor(): UiWindowDefinition["borderColor"] { return definition.borderColor; },
-    set borderColor(value: Vec4) { definition.borderColor = value; },
-    get backgroundPath(): string | null | undefined { return definition.backgroundHandle === undefined ? definition.background?.path : undefined; },
-    get nextTime(): number { return definition.nextTime; },
-    set nextTime(value: number) { definition.nextTime = value; },
-    get offsetTime(): number { return definition.offsetTime; },
-    set offsetTime(value: number) { definition.offsetTime = value; },
-    get cinematicHandle(): number { return definition.cinematicHandle; },
-    set cinematicHandle(value: number) { definition.cinematicHandle = value; },
-    get backgroundHandle(): number | undefined { return definition.backgroundHandle; },
-    setBackground(value, handle): void { definition.setBackground(value, handle); },
+    get rect(): UiWindowDefinition["rect"] {
+      return definition.rect;
+    },
+    set rect(value: UiRect) {
+      definition.rect = value;
+    },
+    get clientRect(): UiWindowDefinition["clientRect"] {
+      return definition.clientRect;
+    },
+    set clientRect(value: UiRect) {
+      definition.clientRect = value;
+    },
+    get rectEffects(): UiWindowDefinition["rectEffects"] {
+      return definition.rectEffects;
+    },
+    set rectEffects(value: UiRect) {
+      definition.rectEffects = value;
+    },
+    get rectEffects2(): UiWindowDefinition["rectEffects2"] {
+      return definition.rectEffects2;
+    },
+    set rectEffects2(value: UiRect) {
+      definition.rectEffects2 = value;
+    },
+    get flags(): number {
+      return definition.flags;
+    },
+    set flags(value: number) {
+      definition.flags = value;
+    },
+    get foreColor(): UiWindowDefinition["foreColor"] {
+      return definition.foreColor;
+    },
+    set foreColor(value: Vec4) {
+      definition.foreColor = value;
+    },
+    get backColor(): UiWindowDefinition["backColor"] {
+      return definition.backColor;
+    },
+    set backColor(value: Vec4) {
+      definition.backColor = value;
+    },
+    get borderColor(): UiWindowDefinition["borderColor"] {
+      return definition.borderColor;
+    },
+    set borderColor(value: Vec4) {
+      definition.borderColor = value;
+    },
+    get backgroundPath(): string | null | undefined {
+      return definition.backgroundHandle === undefined ? definition.background?.path : undefined;
+    },
+    get nextTime(): number {
+      return definition.nextTime;
+    },
+    set nextTime(value: number) {
+      definition.nextTime = value;
+    },
+    get offsetTime(): number {
+      return definition.offsetTime;
+    },
+    set offsetTime(value: number) {
+      definition.offsetTime = value;
+    },
+    get cinematicHandle(): number {
+      return definition.cinematicHandle;
+    },
+    set cinematicHandle(value: number) {
+      definition.cinematicHandle = value;
+    },
+    get backgroundHandle(): number | undefined {
+      return definition.backgroundHandle;
+    },
+    setBackground(value, handle): void {
+      definition.setBackground(value, handle);
+    },
   };
 }
 
@@ -417,7 +495,8 @@ function setItemScreenCoords(item: ItemState, x: number, y: number): void {
 function updateItemPosition(item: ItemState): void {
   const parent = item.definition.parent;
   if (parent === undefined) return;
-  let x = parent.window.rect.x, y = parent.window.rect.y;
+  let x = parent.window.rect.x,
+    y = parent.window.rect.y;
   if (parent.window.border !== 0) {
     x = f(x + parent.window.borderSize);
     y = f(y + parent.window.borderSize);
@@ -434,50 +513,66 @@ function newItem(definition: UiItemDefinition): ItemState {
   const item: ItemState = {
     definition,
     window: windowState(definition.window),
-    get cursorPosition(): number { return this.definition.cursorPosition; },
-    set cursorPosition(value: number) { this.definition.cursorPosition = value; },
-    get special(): number { return this.definition.special; },
-    set special(value: number) { this.definition.special = value; },
-    get textRect(): UiItemDefinition["textRect"] { return this.definition.textRect; },
-    set textRect(value: UiRect) { this.definition.textRect = value; },
+    get cursorPosition(): number {
+      return this.definition.cursorPosition;
+    },
+    set cursorPosition(value: number) {
+      this.definition.cursorPosition = value;
+    },
+    get special(): number {
+      return this.definition.special;
+    },
+    set special(value: number) {
+      this.definition.special = value;
+    },
+    get textRect(): UiItemDefinition["textRect"] {
+      return this.definition.textRect;
+    },
+    set textRect(value: UiRect) {
+      this.definition.textRect = value;
+    },
   };
   return item;
 }
 
-function populateMenu(
-  menu: MenuState,
-  definition: UiMenuDefinition,
-): void {
+function populateMenu(menu: MenuState, definition: UiMenuDefinition): void {
   menu.definition = definition;
   menu.window = windowState(definition.window);
   menu.captureHandle.definition = definition;
 }
 
-function makeMenu(
-  definition: UiMenuDefinition,
-  allocateItem: (definition: UiItemDefinition) => ItemState,
-): MenuState {
+function makeMenu(definition: UiMenuDefinition, allocateItem: (definition: UiItemDefinition) => ItemState): MenuState {
   const captureHandle = { definition };
   const menu: MenuState = {
     definition,
     window: windowState(definition.window),
-    get itemCount(): number { return this.definition.itemCount; },
+    get itemCount(): number {
+      return this.definition.itemCount;
+    },
     itemAt(index): ItemState | undefined {
       const item = this.definition.itemAt(index);
       return item === undefined ? undefined : allocateItem(item);
     },
-    get cursorItem(): number { return this.definition.cursorItem; },
-    set cursorItem(value: number) { this.definition.cursorItem = value; },
+    get cursorItem(): number {
+      return this.definition.cursorItem;
+    },
+    set cursorItem(value: number) {
+      this.definition.cursorItem = value;
+    },
     captureHandle,
   };
   return menu;
 }
 
 function parsedRect(cursor: RuntimeScriptCursor): UiRect | undefined {
-  const x = cursor.rawString(); if (x === undefined) return undefined;
-  const y = cursor.rawString(); if (y === undefined) return undefined;
-  const width = cursor.rawString(); if (width === undefined) return undefined;
-  const height = cursor.rawString(); if (height === undefined) return undefined;
+  const x = cursor.rawString();
+  if (x === undefined) return undefined;
+  const y = cursor.rawString();
+  if (y === undefined) return undefined;
+  const width = cursor.rawString();
+  if (width === undefined) return undefined;
+  const height = cursor.rawString();
+  if (height === undefined) return undefined;
   return { x: gameAtof(x), y: gameAtof(y), width: gameAtof(width), height: gameAtof(height) };
 }
 
@@ -580,34 +675,24 @@ export class UiRuntime {
         if (!completed) await options.resources.registerFont(event.reference.path, event.reference.pointSize);
         return;
       case "picture": {
-        const picture = completed
-          ? options.resources.registeredPicture(event.reference.path)
-          : await options.resources.registerPicture(event.reference.path);
+        const picture = completed ? options.resources.registeredPicture(event.reference.path) : await options.resources.registerPicture(event.reference.path);
         pictures.set(resourceKey(event.reference.path), picture);
         return;
       }
       case "sound": {
-        const sound = completed
-          ? options.resources.registeredSound(event.reference.path)
-          : await options.resources.registerSound(event.reference.path);
+        const sound = completed ? options.resources.registeredSound(event.reference.path) : await options.resources.registerSound(event.reference.path);
         sounds.set(resourceKey(event.reference.path), sound);
         return;
       }
       case "model": {
-        const model = completed
-          ? options.resources.registeredModel(event.reference.path)
-          : await options.resources.registerModel(event.reference.path);
+        const model = completed ? options.resources.registeredModel(event.reference.path) : await options.resources.registerModel(event.reference.path);
         if (model === undefined) throw new Error(`Completed UI model registration is missing ${event.reference.path}`);
         models.set(resourceKey(event.reference.path), model);
       }
     }
   }
 
-  private static async cacheWindowCinematic(
-    options: UiRuntimeOptions,
-    window: UiWindowDefinition,
-    cinematics: Map<string, UiCinematicAsset>,
-  ): Promise<void> {
+  private static async cacheWindowCinematic(options: UiRuntimeOptions, window: UiWindowDefinition, cinematics: Map<string, UiCinematicAsset>): Promise<void> {
     if (window.cinematic === undefined) return;
     cinematics.set(window.cinematic, await options.resources.prepareCinematic(window.cinematic));
   }
@@ -625,13 +710,19 @@ export class UiRuntime {
     this.opened();
     const key = resourceKey(event.reference.path);
     switch (event.kind) {
-      case "font": return;
-      case "picture": this.pictures.set(key, this.options.resources.registeredPicture(event.reference.path)); return;
-      case "sound": this.sounds.set(key, this.options.resources.registeredSound(event.reference.path)); return;
+      case "font":
+        return;
+      case "picture":
+        this.pictures.set(key, this.options.resources.registeredPicture(event.reference.path));
+        return;
+      case "sound":
+        this.sounds.set(key, this.options.resources.registeredSound(event.reference.path));
+        return;
       case "model": {
         const model = this.options.resources.registeredModel(event.reference.path);
         if (model === undefined) throw new Error(`Completed UI model registration is missing ${event.reference.path}`);
-        this.models.set(key, model); return;
+        this.models.set(key, model);
+        return;
       }
     }
   }
@@ -640,7 +731,8 @@ export class UiRuntime {
     this.opened();
     if (event.field === "cursorStr") return;
     if (event.field === "fontRegistered") {
-      this.definitions = { ...this.definitions, fontRegistered: event.value }; return;
+      this.definitions = { ...this.definitions, fontRegistered: event.value };
+      return;
     }
     const assets = this.definitions.assets;
     if (event.field === "shadowColorComponent") {
@@ -664,7 +756,8 @@ export class UiRuntime {
     let menu = this.menus[index];
     if (menu === undefined) {
       menu = makeMenu(definition, allocateItem);
-      this.menus.push(menu); this.capturedMenus.set(menu.captureHandle, menu);
+      this.menus.push(menu);
+      this.capturedMenus.set(menu.captureHandle, menu);
     } else populateMenu(menu, definition);
     if (memory.kind === "unaccounted") for (const item of definition.items) this.allocateItem(item);
     this.activeMenuCount++;
@@ -674,8 +767,11 @@ export class UiRuntime {
   assertMenuMemory(nextMemory: UiMenuMemoryOwnership): void {
     this.opened();
     const previousMemory = this.definitions.memory;
-    if (previousMemory.kind !== nextMemory.kind || previousMemory.kind === "qvm32" && nextMemory.kind === "qvm32"
-      && previousMemory.memory !== nextMemory.memory) throw new Error("UI reload cannot replace its source memory owner");
+    if (
+      previousMemory.kind !== nextMemory.kind ||
+      (previousMemory.kind === "qvm32" && nextMemory.kind === "qvm32" && previousMemory.memory !== nextMemory.memory)
+    )
+      throw new Error("UI reload cannot replace its source memory owner");
   }
 
   async reloadDefinitions(definitions: UiMenuDefinitions): Promise<void> {
@@ -715,8 +811,7 @@ export class UiRuntime {
     let activated: MenuState | undefined;
     for (const menu of this.liveMenus()) {
       // Q_stricmp does not read its second buffer when the menu name is NULL.
-      const requested = menu.definition.window.name === undefined || name === null
-        ? null : quakeString(typeof name === "function" ? name() : name);
+      const requested = menu.definition.window.name === undefined || name === null ? null : quakeString(typeof name === "function" ? name() : name);
       if (requested !== null && equalName(menu.definition.window.name, requested)) {
         activated = menu;
         await this.activateMenu(menu);
@@ -794,7 +889,8 @@ export class UiRuntime {
 
   async handleCapturedKey(handle: UiCapturedMenu, event: UiKeyEvent): Promise<boolean> {
     this.opened();
-    const menu = this.capturedMenu(handle), key = event.code;
+    const menu = this.capturedMenu(handle),
+      key = event.code;
     if (!Number.isInteger(key) || key < 0 || key > 0x7fff) throw new RangeError("UI key code must be an integer in 0..32767");
     if (event.kind === "character" && key > 255) throw new RangeError("UI character code must fit one byte");
     return this.handleMenuKey(menu, event.kind === "character" ? key | KEY_CHAR_FLAG : key, event.kind === "character" || event.down);
@@ -805,8 +901,17 @@ export class UiRuntime {
     this.setFrameTime(frame);
     await this.runCapture();
     for (const menu of this.liveMenus()) await this.paintMenu(menu, frame.draw, false);
-    if (this.debug) textPaint(frame.draw, this.options.fonts, { x: 5, y: 25, scale: 0.5,
-      color: { x: 1, y: 1, z: 1, w: 1 }, text: gameFormat("fps: %f", [f(framesPerSecond)]), adjust: 0, limit: 0, style: 0 });
+    if (this.debug)
+      textPaint(frame.draw, this.options.fonts, {
+        x: 5,
+        y: 25,
+        scale: 0.5,
+        color: { x: 1, y: 1, z: 1, w: 1 },
+        text: gameFormat("fps: %f", [f(framesPerSecond)]),
+        adjust: 0,
+        limit: 0,
+        style: 0,
+      });
   }
 
   /** Display_CacheAll registers reached sounds and plays/stops each window movie without changing its state. */
@@ -815,16 +920,24 @@ export class UiRuntime {
     const cacheWindow = async (definition: UiWindowDefinition): Promise<void> => {
       const path = definition.cinematic;
       if (path === undefined) return;
-      const asset = await this.cinematicAsset(path); this.opened();
-      const instance = this.options.cinematics.play(asset, { x: 0, y: 0, width: 0, height: 0 }); this.opened();
-      this.options.cinematics.stop(instance?.handle.index ?? -1); this.opened();
+      const asset = await this.cinematicAsset(path);
+      this.opened();
+      const instance = this.options.cinematics.play(asset, { x: 0, y: 0, width: 0, height: 0 });
+      this.opened();
+      this.options.cinematics.stop(instance?.handle.index ?? -1);
+      this.opened();
     };
     for (const menu of this.liveMenus()) {
-      await cacheWindow(menu.definition.window); this.opened();
-      for (const item of menuItems(menu)) { await cacheWindow(item.definition.window); this.opened(); }
+      await cacheWindow(menu.definition.window);
+      this.opened();
+      for (const item of menuItems(menu)) {
+        await cacheWindow(item.definition.window);
+        this.opened();
+      }
       const sound = menu.definition.soundLoop;
       if (sound !== undefined && sound.path !== null && quakeString(sound.path).length > 0) {
-        await this.options.resources.registerSound(sound.path); this.opened();
+        await this.options.resources.registerSound(sound.path);
+        this.opened();
       }
     }
   }
@@ -890,7 +1003,8 @@ export class UiRuntime {
   paintItemImage(item: UiItemDefinition | null, draw: Draw2D): void {
     this.opened();
     if (item === null) return;
-    const rect = item.window.rect, handle = item.assetHandle;
+    const rect = item.window.rect,
+      handle = item.assetHandle;
     let picture: PictureAsset | (() => PictureAsset) = this.options.zeroPicture;
     if (handle !== undefined && handle !== 0) picture = () => this.sourceHandles().pictureForHandle(handle) ?? this.options.zeroPicture;
     else if (handle === undefined && item.asset !== undefined) {
@@ -906,7 +1020,8 @@ export class UiRuntime {
     const menu = this.capturedMenu(handle);
     menu.window.rect.x = f(menu.window.rect.x + f(deltaX));
     menu.window.rect.y = f(menu.window.rect.y + f(deltaY));
-    let x = menu.window.rect.x, y = menu.window.rect.y;
+    let x = menu.window.rect.x,
+      y = menu.window.rect.y;
     if (menu.definition.window.border !== 0) {
       x = f(x + menu.definition.window.borderSize);
       y = f(y + menu.definition.window.borderSize);
@@ -941,7 +1056,8 @@ export class UiRuntime {
       list.startPosition = 0;
     }
     item.cursorPosition = index | 0;
-    await this.options.feeder.select(item.special, item.cursorPosition); this.opened();
+    await this.options.feeder.select(item.special, item.cursorPosition);
+    this.opened();
   }
 
   async scrollFeeder(feeder: number, down: boolean, menuName?: string): Promise<void> {
@@ -993,28 +1109,36 @@ export class UiRuntime {
     return Object.freeze({
       focusedMenu: focused?.definition.window.name,
       openStack: Object.freeze(this.openStack.map(menu => menu.definition.window.name)),
-      menus: Object.freeze(this.activeMenus().map(menu => Object.freeze({
-        name: menu.definition.window.name,
-        flags: menu.window.flags,
-        rect: copyRect(menu.window.rect),
-        cursorItem: menu.cursorItem,
-        items: Object.freeze(Array.from(menuItems(menu), item => Object.freeze({
-          name: item.definition.window.name,
-          group: item.definition.window.group,
-          flags: item.window.flags,
-          rect: copyRect(item.window.rect),
-          clientRect: copyRect(item.window.clientRect),
-          foreColor: copyColor(item.window.foreColor),
-          backColor: copyColor(item.window.backColor),
-          borderColor: copyColor(item.window.borderColor),
-          background: this.windowPicture(item.window),
-          cursorPosition: item.cursorPosition,
-          special: item.special,
-          enabled: this.itemPassesCvar(item, "enable"),
-          shown: this.itemPassesCvar(item, "show"),
-          behavior: this.behaviorSnapshot(item),
-        }))),
-      }))),
+      menus: Object.freeze(
+        this.activeMenus().map(menu =>
+          Object.freeze({
+            name: menu.definition.window.name,
+            flags: menu.window.flags,
+            rect: copyRect(menu.window.rect),
+            cursorItem: menu.cursorItem,
+            items: Object.freeze(
+              Array.from(menuItems(menu), item =>
+                Object.freeze({
+                  name: item.definition.window.name,
+                  group: item.definition.window.group,
+                  flags: item.window.flags,
+                  rect: copyRect(item.window.rect),
+                  clientRect: copyRect(item.window.clientRect),
+                  foreColor: copyColor(item.window.foreColor),
+                  backColor: copyColor(item.window.backColor),
+                  borderColor: copyColor(item.window.borderColor),
+                  background: this.windowPicture(item.window),
+                  cursorPosition: item.cursorPosition,
+                  special: item.special,
+                  enabled: this.itemPassesCvar(item, "enable"),
+                  shown: this.itemPassesCvar(item, "show"),
+                  behavior: this.behaviorSnapshot(item),
+                }),
+              ),
+            ),
+          }),
+        ),
+      ),
     });
   }
 
@@ -1084,7 +1208,8 @@ export class UiRuntime {
   }
 
   private setFrameTime(frame: UiRuntimeFrame): void {
-    if (!Number.isInteger(frame.frameTime) || frame.frameTime < -0x8000_0000 || frame.frameTime > 0x7fff_ffff) throw new RangeError("UI frameTime must be a signed 32-bit value");
+    if (!Number.isInteger(frame.frameTime) || frame.frameTime < -0x8000_0000 || frame.frameTime > 0x7fff_ffff)
+      throw new RangeError("UI frameTime must be a signed 32-bit value");
     this.setDisplayTime(frame.time);
   }
 
@@ -1094,9 +1219,7 @@ export class UiRuntime {
   }
 
   private focusedMenu(): MenuState | undefined {
-    return this.activeMenus().find(menu =>
-      (menu.window.flags & UiWindowFlag.HasFocus) !== 0 && (menu.window.flags & UiWindowFlag.Visible) !== 0,
-    );
+    return this.activeMenus().find(menu => (menu.window.flags & UiWindowFlag.HasFocus) !== 0 && (menu.window.flags & UiWindowFlag.Visible) !== 0);
   }
 
   private async activateMenu(menu: MenuState): Promise<void> {
@@ -1166,7 +1289,10 @@ export class UiRuntime {
 
   private async runScript(owner: ScriptOwner, script: UiScript): Promise<void> {
     if (script.text.length === 0) return;
-    if (this.scriptDepth >= MAX_SCRIPT_DEPTH) { this.options.print?.("menu script nesting limit reached\n"); return; }
+    if (this.scriptDepth >= MAX_SCRIPT_DEPTH) {
+      this.options.print?.("menu script nesting limit reached\n");
+      return;
+    }
     this.scriptDepth++;
     try {
       const cursor = new RuntimeScriptCursor(script.text, this.sourceParser, this.definitions.memory);
@@ -1175,40 +1301,85 @@ export class UiRuntime {
         if (command === undefined) return;
         if (command === null) throw new Error("Item_RunScript dereferences NULL command after String_Alloc");
         if (command === ";") continue;
-        if (!await this.runSharedCommand(owner, asciiLower(command), cursor)) {
+        if (!(await this.runSharedCommand(owner, asciiLower(command), cursor))) {
           await this.options.externalScript.run(cursor, {
             menuName: this.scriptMenu(owner)?.definition.window.name,
             itemName: owner.item?.definition.window.name,
           });
         }
       }
-    } finally { this.scriptDepth--; }
+    } finally {
+      this.scriptDepth--;
+    }
   }
 
   private async runSharedCommand(owner: ScriptOwner, command: string, cursor: RuntimeScriptCursor): Promise<boolean> {
     switch (command) {
-      case "fadein": this.scriptFade(owner, cursor, false); return true;
-      case "fadeout": this.scriptFade(owner, cursor, true); return true;
-      case "show": this.scriptShow(owner, cursor, true); return true;
-      case "hide": this.scriptShow(owner, cursor, false); return true;
-      case "setcolor": this.scriptSetColor(owner.item, cursor); return true;
-      case "open": await this.scriptOpen(cursor); return true;
-      case "conditionalopen": await this.scriptConditionalOpen(cursor); return true;
-      case "close": await this.scriptClose(cursor); return true;
-      case "setasset": cursor.string(); return true;
-      case "setbackground": await this.scriptSetBackground(owner.item, cursor); return true;
-      case "setitemcolor": this.scriptSetItemColor(owner, cursor); return true;
-      case "setteamcolor": this.scriptSetTeamColor(owner.item); return true;
-      case "setfocus": await this.scriptSetFocus(owner, cursor); return true;
-      case "setplayermodel": this.scriptSetCvar(cursor, "team_model"); return true;
-      case "setplayerhead": this.scriptSetCvar(cursor, "team_headmodel"); return true;
-      case "transition": this.scriptTransition(owner, cursor); return true;
-      case "setcvar": this.scriptSetCvar(cursor); return true;
-      case "exec": this.scriptExec(cursor); return true;
-      case "play": await this.scriptPlay(cursor); return true;
-      case "playlooped": await this.scriptPlayLooped(cursor); return true;
-      case "orbit": this.scriptOrbit(owner, cursor); return true;
-      default: return false;
+      case "fadein":
+        this.scriptFade(owner, cursor, false);
+        return true;
+      case "fadeout":
+        this.scriptFade(owner, cursor, true);
+        return true;
+      case "show":
+        this.scriptShow(owner, cursor, true);
+        return true;
+      case "hide":
+        this.scriptShow(owner, cursor, false);
+        return true;
+      case "setcolor":
+        this.scriptSetColor(owner.item, cursor);
+        return true;
+      case "open":
+        await this.scriptOpen(cursor);
+        return true;
+      case "conditionalopen":
+        await this.scriptConditionalOpen(cursor);
+        return true;
+      case "close":
+        await this.scriptClose(cursor);
+        return true;
+      case "setasset":
+        cursor.string();
+        return true;
+      case "setbackground":
+        await this.scriptSetBackground(owner.item, cursor);
+        return true;
+      case "setitemcolor":
+        this.scriptSetItemColor(owner, cursor);
+        return true;
+      case "setteamcolor":
+        this.scriptSetTeamColor(owner.item);
+        return true;
+      case "setfocus":
+        await this.scriptSetFocus(owner, cursor);
+        return true;
+      case "setplayermodel":
+        this.scriptSetCvar(cursor, "team_model");
+        return true;
+      case "setplayerhead":
+        this.scriptSetCvar(cursor, "team_headmodel");
+        return true;
+      case "transition":
+        this.scriptTransition(owner, cursor);
+        return true;
+      case "setcvar":
+        this.scriptSetCvar(cursor);
+        return true;
+      case "exec":
+        this.scriptExec(cursor);
+        return true;
+      case "play":
+        await this.scriptPlay(cursor);
+        return true;
+      case "playlooped":
+        await this.scriptPlayLooped(cursor);
+        return true;
+      case "orbit":
+        this.scriptOrbit(owner, cursor);
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -1247,7 +1418,10 @@ export class UiRuntime {
     if (name === undefined) return;
     for (const item of this.matching(this.scriptMenu(owner), name)) {
       if (visible) item.window.flags |= UiWindowFlag.Visible;
-      else { item.window.flags &= ~UiWindowFlag.Visible; this.closeWindowCinematic(item.window); }
+      else {
+        item.window.flags &= ~UiWindowFlag.Visible;
+        this.closeWindowCinematic(item.window);
+      }
     }
   }
 
@@ -1277,7 +1451,8 @@ export class UiRuntime {
     }
     const components: readonly (keyof Vec4)[] = ["x", "y", "z", "w"];
     for (const component of components) {
-      const value = cursor.rawString(); if (value === undefined) return;
+      const value = cursor.rawString();
+      if (value === undefined) return;
       if (item !== undefined) item.window[field][component] = gameAtof(value);
     }
   }
@@ -1288,9 +1463,12 @@ export class UiRuntime {
   }
 
   private async scriptConditionalOpen(cursor: RuntimeScriptCursor): Promise<void> {
-    const cvar = cursor.string(); if (cvar === undefined) return;
-    const first = cursor.string(); if (first === undefined) return;
-    const second = cursor.string(); if (second === undefined) return;
+    const cvar = cursor.string();
+    if (cvar === undefined) return;
+    const first = cursor.string();
+    if (first === undefined) return;
+    const second = cursor.string();
+    if (second === undefined) return;
     if (cvar === null) throw new Error("Cvar_VariableValue hashes NULL in Cvar_FindVar");
     const value = this.cvarValue(cvar);
     const selected = value === 0 ? second : first;
@@ -1314,13 +1492,19 @@ export class UiRuntime {
   }
 
   private scriptSetItemColor(owner: ScriptOwner, cursor: RuntimeScriptCursor): void {
-    const itemName = cursor.string(); if (itemName === undefined) return;
-    const target = cursor.string(); if (target === undefined) return;
+    const itemName = cursor.string();
+    if (itemName === undefined) return;
+    const target = cursor.string();
+    if (target === undefined) return;
     const count = this.itemsMatchingGroup(this.scriptMenu(owner), itemName);
-    const x = cursor.rawString(); if (x === undefined) return;
-    const y = cursor.rawString(); if (y === undefined) return;
-    const z = cursor.rawString(); if (z === undefined) return;
-    const w = cursor.rawString(); if (w === undefined) return;
+    const x = cursor.rawString();
+    if (x === undefined) return;
+    const y = cursor.rawString();
+    if (y === undefined) return;
+    const z = cursor.rawString();
+    if (z === undefined) return;
+    const w = cursor.rawString();
+    if (w === undefined) return;
     const color = { x: gameAtof(x), y: gameAtof(y), z: gameAtof(z), w: gameAtof(w) };
     if (target === null) return;
     const name = asciiLower(target);
@@ -1399,14 +1583,18 @@ export class UiRuntime {
   private scriptTransition(owner: ScriptOwner, cursor: RuntimeScriptCursor): void {
     const name = cursor.string();
     if (name === undefined) return;
-    const from = parsedRect(cursor); if (from === undefined) return;
-    const to = parsedRect(cursor); if (to === undefined) return;
-    const timeText = cursor.rawString(); if (timeText === undefined) return;
-    const amountText = cursor.rawString(); if (amountText === undefined) return;
+    const from = parsedRect(cursor);
+    if (from === undefined) return;
+    const to = parsedRect(cursor);
+    if (to === undefined) return;
+    const timeText = cursor.rawString();
+    if (timeText === undefined) return;
+    const amountText = cursor.rawString();
+    if (amountText === undefined) return;
     const amount = gameAtof(amountText);
     const step = (start: number, end: number): number => {
       const difference = qvmFloatToInt(f(end - start));
-      const absolute = difference < 0 ? (-difference) | 0 : difference;
+      const absolute = difference < 0 ? -difference | 0 : difference;
       return f(f(absolute) / amount);
     };
     for (const item of this.matching(this.scriptMenu(owner), name)) {
@@ -1425,12 +1613,18 @@ export class UiRuntime {
   }
 
   private scriptOrbit(owner: ScriptOwner, cursor: RuntimeScriptCursor): void {
-    const name = cursor.string(); if (name === undefined) return;
-    const x = cursor.rawString(); if (x === undefined) return;
-    const y = cursor.rawString(); if (y === undefined) return;
-    const cx = cursor.rawString(); if (cx === undefined) return;
-    const cy = cursor.rawString(); if (cy === undefined) return;
-    const time = cursor.rawString(); if (time === undefined) return;
+    const name = cursor.string();
+    if (name === undefined) return;
+    const x = cursor.rawString();
+    if (x === undefined) return;
+    const y = cursor.rawString();
+    if (y === undefined) return;
+    const cx = cursor.rawString();
+    if (cx === undefined) return;
+    const cy = cursor.rawString();
+    if (cy === undefined) return;
+    const time = cursor.rawString();
+    if (time === undefined) return;
     for (const item of this.matching(this.scriptMenu(owner), name)) {
       item.window.flags |= UiWindowFlag.Orbiting | UiWindowFlag.Visible;
       item.window.offsetTime = gameAtoi(time);
@@ -1444,15 +1638,22 @@ export class UiRuntime {
 
   private behaviorSnapshot(item: ItemState): UiRuntimeItemBehaviorSnapshot {
     const behavior = item.definition.behavior;
-    if (behavior.kind === "list-box") return Object.freeze({
-      kind: "list-box",
-      startPosition: behavior.list.startPosition,
-      endPosition: behavior.list.endPosition,
-      cursorPosition: behavior.list.cursorPosition,
-      drawPadding: behavior.list.drawPadding,
-    });
-    if (behavior.kind === "edit-field" || behavior.kind === "numeric-field" || behavior.kind === "slider"
-      || behavior.kind === "yes-no" || behavior.kind === "bind" || behavior.kind === "text") {
+    if (behavior.kind === "list-box")
+      return Object.freeze({
+        kind: "list-box",
+        startPosition: behavior.list.startPosition,
+        endPosition: behavior.list.endPosition,
+        cursorPosition: behavior.list.cursorPosition,
+        drawPadding: behavior.list.drawPadding,
+      });
+    if (
+      behavior.kind === "edit-field" ||
+      behavior.kind === "numeric-field" ||
+      behavior.kind === "slider" ||
+      behavior.kind === "yes-no" ||
+      behavior.kind === "bind" ||
+      behavior.kind === "text"
+    ) {
       const edit = behavior.edit;
       if (edit !== undefined) return Object.freeze({ kind: "edit", paintOffset: edit.paintOffset });
     }
@@ -1487,9 +1688,7 @@ export class UiRuntime {
   }
 
   private correctedTextRect(item: ItemState): UiRect {
-    return item.textRect.width === 0
-      ? copyRect(item.textRect)
-      : { ...item.textRect, y: f(item.textRect.y - item.textRect.height) };
+    return item.textRect.width === 0 ? copyRect(item.textRect) : { ...item.textRect, y: f(item.textRect.y - item.textRect.height) };
   }
 
   private async mouseEnter(menu: MenuState, item: ItemState, x: number, y: number): Promise<void> {
@@ -1526,10 +1725,7 @@ export class UiRuntime {
   }
 
   private async setItemFocus(menu: MenuState, item: ItemState, x: number, y: number): Promise<boolean> {
-    if (
-      (item.window.flags & (UiWindowFlag.Decoration | UiWindowFlag.HasFocus)) !== 0
-      || (item.window.flags & UiWindowFlag.Visible) === 0
-    ) return false;
+    if ((item.window.flags & (UiWindowFlag.Decoration | UiWindowFlag.HasFocus)) !== 0 || (item.window.flags & UiWindowFlag.Visible) === 0) return false;
     const parent = this.parentMenu(item);
     if (!this.itemPassesCvar(item, "enable") || !this.itemPassesCvar(item, "show")) return false;
     const oldFocus = await this.clearFocus(this.parentMenu(item));
@@ -1538,8 +1734,7 @@ export class UiRuntime {
       if (rectContains(this.correctedTextRect(item), x, y)) {
         item.window.flags |= UiWindowFlag.HasFocus;
         playSound = true;
-      }
-      else if (oldFocus !== undefined) {
+      } else if (oldFocus !== undefined) {
         oldFocus.window.flags |= UiWindowFlag.HasFocus;
         if (oldFocus.definition.onFocus !== undefined) await this.runScript({ menu, item: oldFocus }, oldFocus.definition.onFocus);
       }
@@ -1561,7 +1756,10 @@ export class UiRuntime {
     }
     if (parent === undefined) throw new Error("Item_SetFocus dereferences a NULL parent menu at itemCount");
     for (let index = 0; index < parent.itemCount; index++) {
-      if (parent.itemAt(index) === item) { parent.cursorItem = index; break; }
+      if (parent.itemAt(index) === item) {
+        parent.cursorItem = index;
+        break;
+      }
     }
     return true;
   }
@@ -1584,7 +1782,7 @@ export class UiRuntime {
       }
       if (menu.cursorItem < 0 || menu.cursorItem >= menu.itemCount) break; // Already wrapped once and nothing took focus.
       const item = menu.itemAt(menu.cursorItem);
-      if (item !== undefined && await this.setItemFocus(menu, item, this.displayCursorX, this.displayCursorY)) {
+      if (item !== undefined && (await this.setItemFocus(menu, item, this.displayCursorX, this.displayCursorY))) {
         await this.mouseMoveMenu(menu, f(item.window.rect.x + 1), f(item.window.rect.y + 1));
         return menu.itemAt(menu.cursorItem);
       }
@@ -1594,13 +1792,18 @@ export class UiRuntime {
   }
 
   private async handleMenuKey(menu: MenuState, key: number, down: boolean): Promise<boolean> {
-    if (down && (menu.window.flags & UiWindowFlag.Popup) === 0 && !rectContains(menu.window.rect, this.displayCursorX, this.displayCursorY) && isMouseKey(key)) {
+    if (
+      down &&
+      (menu.window.flags & UiWindowFlag.Popup) === 0 &&
+      !rectContains(menu.window.rect, this.displayCursorX, this.displayCursorY) &&
+      isMouseKey(key)
+    ) {
       await this.handleOutOfBounds(menu, key, down);
       return true;
     }
     let item: ItemState | undefined;
     for (const candidate of menuItems(menu)) if ((candidate.window.flags & UiWindowFlag.HasFocus) !== 0) item = candidate;
-    if (item !== undefined && await this.handleItemKey(item, key, down)) {
+    if (item !== undefined && (await this.handleItemKey(item, key, down))) {
       if (item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
       return true;
     }
@@ -1609,15 +1812,22 @@ export class UiRuntime {
       if (this.cvarValue("developer") !== 0) this.debug = !this.debug;
       return true;
     }
-    if (key === KeyCode.Up || key === KeyCode.KeypadUp) { await this.focusRelative(menu, -1); return true; }
-    if (key === KeyCode.Down || key === KeyCode.KeypadDown || key === KeyCode.Tab) { await this.focusRelative(menu, 1); return true; }
+    if (key === KeyCode.Up || key === KeyCode.KeypadUp) {
+      await this.focusRelative(menu, -1);
+      return true;
+    }
+    if (key === KeyCode.Down || key === KeyCode.KeypadDown || key === KeyCode.Tab) {
+      await this.focusRelative(menu, 1);
+      return true;
+    }
     if (key === KeyCode.Escape) {
       if (menu.definition.onEscape !== undefined) await this.runScript({ menu, item: undefined }, menu.definition.onEscape);
       return true;
     }
     if ((key === KeyCode.Mouse1 || key === KeyCode.Mouse2) && item !== undefined) {
       if (item.definition.behavior.kind === "text") {
-        if (rectContains(this.correctedTextRect(item), this.displayCursorX, this.displayCursorY) && item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
+        if (rectContains(this.correctedTextRect(item), this.displayCursorX, this.displayCursorY) && item.definition.action !== undefined)
+          await this.runScript({ menu, item }, item.definition.action);
       } else if (item.definition.behavior.kind === "edit-field" || item.definition.behavior.kind === "numeric-field") {
         // Edit fields are inert in the cgame menu runtime: no key-binding or overstrike host exists.
       } else if (rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) && item.definition.action !== undefined) {
@@ -1626,7 +1836,8 @@ export class UiRuntime {
       return true;
     }
     if ((key === KeyCode.Enter || key === KeyCode.KeypadEnter) && item !== undefined) {
-      if (item.definition.behavior.kind !== "edit-field" && item.definition.behavior.kind !== "numeric-field" && item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
+      if (item.definition.behavior.kind !== "edit-field" && item.definition.behavior.kind !== "numeric-field" && item.definition.action !== undefined)
+        await this.runScript({ menu, item }, item.definition.action);
       return true;
     }
     return false;
@@ -1659,18 +1870,24 @@ export class UiRuntime {
     else if (down && isMouseKey(key)) this.startCapture(item, key);
     if (!down) return false;
     switch (item.definition.behavior.kind) {
-      case "list-box": return this.handleListKey(item, key, false);
-      case "yes-no": return this.handleYesNoKey(item, key);
-      case "multi": return this.handleMultiKey(item, key);
+      case "list-box":
+        return this.handleListKey(item, key, false);
+      case "yes-no":
+        return this.handleYesNoKey(item, key);
+      case "multi":
+        return this.handleMultiKey(item, key);
       case "owner-draw": {
         const result = await this.options.ownerDraw.handleKey(item.definition.window.ownerDraw, item.definition.window.ownerDrawFlags, item.special, key);
         this.opened();
         item.special = f(result.special);
         return result.handled;
       }
-      case "bind": return false;
-      case "slider": return this.handleSliderKey(item, key);
-      default: return false;
+      case "bind":
+        return false;
+      case "slider":
+        return this.handleSliderKey(item, key);
+      default:
+        return false;
     }
   }
 
@@ -1688,8 +1905,10 @@ export class UiRuntime {
   }
 
   private handleMultiKey(item: ItemState, key: number): boolean {
-    const cvar = item.definition.cvar, behavior = item.definition.behavior;
-    if (behavior.kind !== "multi" || cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !this.activatesAtPointer(item, key)) return false;
+    const cvar = item.definition.cvar,
+      behavior = item.definition.behavior;
+    if (behavior.kind !== "multi" || cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !this.activatesAtPointer(item, key))
+      return false;
     const multi = behavior.multi;
     if (multi === undefined) return false;
     const count = multi.count;
@@ -1697,12 +1916,18 @@ export class UiRuntime {
     if (multi.stringDefinition) {
       const value = this.cvarBuffer(cvar);
       for (let index = 0; index < count; index++) {
-        if (equalName(multi.stringValue(index), value)) { current = index; break; }
+        if (equalName(multi.stringValue(index), value)) {
+          current = index;
+          break;
+        }
       }
     } else {
       const value = this.cvarValue(cvar);
       for (let index = 0; index < count; index++) {
-        if (multi.numberValue(index) === value) { current = index; break; }
+        if (multi.numberValue(index) === value) {
+          current = index;
+          break;
+        }
       }
     }
     current++;
@@ -1738,17 +1963,14 @@ export class UiRuntime {
   private async handleListKey(item: ItemState, key: number, force: boolean): Promise<boolean> {
     const list = item.definition.listData();
     const count = this.options.feeder.count(item.special);
-    if (!force && (!rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) || (item.window.flags & UiWindowFlag.HasFocus) === 0)) return false;
+    if (!force && (!rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) || (item.window.flags & UiWindowFlag.HasFocus) === 0))
+      return false;
     const maximum = this.listMaximum(item);
     const horizontal = (item.window.flags & UiWindowFlag.Horizontal) !== 0;
     if (list === undefined) throw new Error("Item_ListBox_HandleKey dereferences NULL list data");
     const view = qvmFloatToInt(f(horizontal ? item.window.rect.width / list.elementWidth : item.window.rect.height / list.elementHeight));
-    const backward = horizontal
-      ? key === KeyCode.Left || key === KeyCode.KeypadLeft
-      : key === KeyCode.Up || key === KeyCode.KeypadUp;
-    const forward = horizontal
-      ? key === KeyCode.Right || key === KeyCode.KeypadRight
-      : key === KeyCode.Down || key === KeyCode.KeypadDown;
+    const backward = horizontal ? key === KeyCode.Left || key === KeyCode.KeypadLeft : key === KeyCode.Up || key === KeyCode.KeypadUp;
+    const forward = horizontal ? key === KeyCode.Right || key === KeyCode.KeypadRight : key === KeyCode.Down || key === KeyCode.KeypadDown;
     if (backward) {
       if (!list.notSelectable) {
         list.cursorPosition--;
@@ -1798,8 +2020,14 @@ export class UiRuntime {
       }
       return true;
     }
-    if (key === KeyCode.Home || key === KeyCode.KeypadHome) { list.startPosition = 0; return true; }
-    if (key === KeyCode.End || key === KeyCode.KeypadEnd) { list.startPosition = maximum; return true; }
+    if (key === KeyCode.Home || key === KeyCode.KeypadHome) {
+      list.startPosition = 0;
+      return true;
+    }
+    if (key === KeyCode.End || key === KeyCode.KeypadEnd) {
+      list.startPosition = maximum;
+      return true;
+    }
     const pageUp = key === KeyCode.PageUp || key === KeyCode.KeypadPageUp;
     const pageDown = key === KeyCode.PageDown || key === KeyCode.KeypadPageDown;
     if (pageUp || pageDown) {
@@ -1823,7 +2051,8 @@ export class UiRuntime {
 
   private async selectList(item: ItemState, list: UiListBoxDefinition): Promise<void> {
     item.cursorPosition = list.cursorPosition;
-    await this.options.feeder.select(item.special, item.cursorPosition); this.opened();
+    await this.options.feeder.select(item.special, item.cursorPosition);
+    this.opened();
   }
 
   private parentMenu(item: ItemState): MenuState | undefined {
@@ -1899,18 +2128,36 @@ export class UiRuntime {
 
   private listMouseEnter(item: ItemState, x: number, y: number): void {
     const list = item.definition.listData();
-    item.window.flags &= ~(UiWindowFlag.ListLeftArrow | UiWindowFlag.ListRightArrow | UiWindowFlag.ListThumb | UiWindowFlag.ListPageUp | UiWindowFlag.ListPageDown);
+    item.window.flags &= ~(
+      UiWindowFlag.ListLeftArrow |
+      UiWindowFlag.ListRightArrow |
+      UiWindowFlag.ListThumb |
+      UiWindowFlag.ListPageUp |
+      UiWindowFlag.ListPageDown
+    );
     item.window.flags |= this.listHit(item, x, y);
     const controls = UiWindowFlag.ListLeftArrow | UiWindowFlag.ListRightArrow | UiWindowFlag.ListThumb | UiWindowFlag.ListPageUp | UiWindowFlag.ListPageDown;
     if ((item.window.flags & controls) !== 0) return;
     if (list === undefined) throw new Error("Item_ListBox_MouseEnter dereferences NULL list data");
     if ((item.window.flags & UiWindowFlag.Horizontal) !== 0) {
       if (list.elementStyle !== 1) return;
-      const rect = { x: item.window.rect.x, y: item.window.rect.y, width: f(item.window.rect.width - list.drawPadding), height: f(item.window.rect.height - SCROLLBAR_SIZE) };
-      if (rectContains(rect, x, y)) list.cursorPosition = Math.min(list.endPosition, (qvmFloatToInt(f(f(x - rect.x) / list.elementWidth)) + list.startPosition) | 0);
+      const rect = {
+        x: item.window.rect.x,
+        y: item.window.rect.y,
+        width: f(item.window.rect.width - list.drawPadding),
+        height: f(item.window.rect.height - SCROLLBAR_SIZE),
+      };
+      if (rectContains(rect, x, y))
+        list.cursorPosition = Math.min(list.endPosition, (qvmFloatToInt(f(f(x - rect.x) / list.elementWidth)) + list.startPosition) | 0);
     } else {
-      const rect = { x: item.window.rect.x, y: item.window.rect.y, width: f(item.window.rect.width - SCROLLBAR_SIZE), height: f(item.window.rect.height - list.drawPadding) };
-      if (rectContains(rect, x, y)) list.cursorPosition = Math.min(list.endPosition, (qvmFloatToInt(f(f(f(y - 2) - rect.y) / list.elementHeight)) + list.startPosition) | 0);
+      const rect = {
+        x: item.window.rect.x,
+        y: item.window.rect.y,
+        width: f(item.window.rect.width - SCROLLBAR_SIZE),
+        height: f(item.window.rect.height - list.drawPadding),
+      };
+      if (rectContains(rect, x, y))
+        list.cursorPosition = Math.min(list.endPosition, (qvmFloatToInt(f(f(f(y - 2) - rect.y) / list.elementHeight)) + list.startPosition) | 0);
     }
   }
 
@@ -1920,7 +2167,8 @@ export class UiRuntime {
 
   private sliderThumbPosition(item: ItemState): number {
     const edit = item.definition.editData();
-    const x = this.sliderX(item), cvar = item.definition.cvar;
+    const x = this.sliderX(item),
+      cvar = item.definition.cvar;
     if (edit === undefined && cvar !== undefined) return x;
     if (cvar === undefined) throw new Error("Item_Slider_ThumbPosition hashes NULL cvar in Cvar_FindVar");
     let value = this.cvarValue(cvar);
@@ -1939,12 +2187,18 @@ export class UiRuntime {
     if (cvar !== undefined && (item.window.flags & UiWindowFlag.HasFocus) !== 0 && (key === KeyCode.Left || key === KeyCode.Right)) {
       const edit = item.definition.editData();
       if (edit !== undefined && edit.maximum > edit.minimum) {
-        const step = f(f(edit.maximum - edit.minimum) / 20), value = f(this.cvarValue(cvar) + (key === KeyCode.Right ? step : -step));
+        const step = f(f(edit.maximum - edit.minimum) / 20),
+          value = f(this.cvarValue(cvar) + (key === KeyCode.Right ? step : -step));
         this.options.cvars.set(cvar, gameFormat("%f", [Math.max(edit.minimum, Math.min(edit.maximum, value))]), true);
         return true;
       }
     }
-    if (cvar !== undefined && (item.window.flags & UiWindowFlag.HasFocus) !== 0 && rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) && isActivateKey(key)) {
+    if (
+      cvar !== undefined &&
+      (item.window.flags & UiWindowFlag.HasFocus) !== 0 &&
+      rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) &&
+      isActivateKey(key)
+    ) {
       const edit = item.definition.editData();
       if (edit !== undefined) {
         const x = this.sliderX(item);
@@ -1975,7 +2229,13 @@ export class UiRuntime {
       }
     } else if (item.definition.behavior.kind === "slider") {
       const thumb = this.sliderThumbPosition(item);
-      if (rectContains({ x: f(thumb - SLIDER_THUMB_WIDTH / 2), y: f(item.window.rect.y - 2), width: SLIDER_THUMB_WIDTH, height: 20 }, this.displayCursorX, this.displayCursorY)) {
+      if (
+        rectContains(
+          { x: f(thumb - SLIDER_THUMB_WIDTH / 2), y: f(item.window.rect.y - 2), width: SLIDER_THUMB_WIDTH, height: 20 },
+          this.displayCursorX,
+          this.displayCursorY,
+        )
+      ) {
         this.capture = { kind: "slider-thumb", item, key, xStart: this.displayCursorX, yStart: this.displayCursorY };
       }
     }
@@ -2003,8 +2263,10 @@ export class UiRuntime {
         const maximum = this.listMaximum(capture.item);
         const denominator = f(width - SCROLLBAR_SIZE);
         if (list === undefined) throw new Error("Scroll_ListBox_ThumbFunc dereferences NULL list data");
-        list.startPosition = Math.max(0, Math.min(maximum,
-          qvmFloatToInt(f(f(f(f(this.displayCursorX - start) - SCROLLBAR_SIZE / 2) * f(maximum)) / denominator))));
+        list.startPosition = Math.max(
+          0,
+          Math.min(maximum, qvmFloatToInt(f(f(f(f(this.displayCursorX - start) - SCROLLBAR_SIZE / 2) * f(maximum)) / denominator))),
+        );
         capture.xStart = this.displayCursorX;
       } else if (this.displayCursorY !== capture.yStart) {
         const height = f(f(capture.item.window.rect.height - SCROLLBAR_SIZE * 2) - 2);
@@ -2012,8 +2274,10 @@ export class UiRuntime {
         const maximum = this.listMaximum(capture.item);
         const denominator = f(height - SCROLLBAR_SIZE);
         if (list === undefined) throw new Error("Scroll_ListBox_ThumbFunc dereferences NULL list data");
-        list.startPosition = Math.max(0, Math.min(maximum,
-          qvmFloatToInt(f(f(f(f(this.displayCursorY - start) - SCROLLBAR_SIZE / 2) * f(maximum)) / denominator))));
+        list.startPosition = Math.max(
+          0,
+          Math.min(maximum, qvmFloatToInt(f(f(f(f(this.displayCursorY - start) - SCROLLBAR_SIZE / 2) * f(maximum)) / denominator))),
+        );
         capture.yStart = this.displayCursorY;
       }
     }
@@ -2032,38 +2296,54 @@ export class UiRuntime {
     if (menu.definition.window.ownerDrawFlags !== 0 && !this.options.ownerDraw.visible(menu.definition.window.ownerDrawFlags)) return;
     if (force) menu.window.flags |= UiWindowFlag.Forced;
     if (menu.definition.fullScreen !== 0) draw.drawHandlePic({ x: 0, y: 0, width: 640, height: 480 }, this.backgroundOrZero(menu.window));
-    await this.paintWindow(menu.window, menu.definition.window, menu.definition.fadeAmount, menu.definition.fadeClamp, menu.definition.fadeCycle, draw); this.opened();
+    await this.paintWindow(menu.window, menu.definition.window, menu.definition.fadeAmount, menu.definition.fadeClamp, menu.definition.fadeCycle, draw);
+    this.opened();
     for (const item of menuItems(menu)) await this.paintItem(item, draw);
     if (this.debug) this.drawRect(draw, menu.window.rect, 1, { x: 1, y: 0, z: 1, w: 1 });
   }
 
-  private async paintWindow(window: WindowState, definition: UiWindowDefinition, fadeAmount: number, fadeClamp: number, fadeCycle: number, draw: Draw2D): Promise<void> {
+  private async paintWindow(
+    window: WindowState,
+    definition: UiWindowDefinition,
+    fadeAmount: number,
+    fadeClamp: number,
+    fadeCycle: number,
+    draw: Draw2D,
+  ): Promise<void> {
     if (this.debug) this.drawRect(draw, window.rect, 1, { x: 1, y: 1, z: 1, w: 1 });
     if (definition.style === 0 && definition.border === 0) return;
     let fill = copyRect(window.rect);
-    if (definition.border !== 0) fill = {
-      x: f(fill.x + definition.borderSize), y: f(fill.y + definition.borderSize),
-      width: f(fill.width - f(definition.borderSize + 1)), height: f(fill.height - f(definition.borderSize + 1)),
-    };
+    if (definition.border !== 0)
+      fill = {
+        x: f(fill.x + definition.borderSize),
+        y: f(fill.y + definition.borderSize),
+        width: f(fill.width - f(definition.borderSize + 1)),
+        height: f(fill.height - f(definition.borderSize + 1)),
+      };
     let teamColor: Vec4 | undefined;
     if (definition.style === 1) {
       if (this.hasWindowBackground(window)) {
         this.fade(window, "back", fadeClamp, fadeCycle, true, fadeAmount);
-        draw.setColor(window.backColor); draw.drawHandlePic(fill, this.backgroundOrZero(window)); draw.setColor(null);
+        draw.setColor(window.backColor);
+        draw.drawHandlePic(fill, this.backgroundOrZero(window));
+        draw.setColor(null);
       } else draw.fillRect(fill, window.backColor, this.options.widgetAssets.whiteShader);
     } else if (definition.style === 2) this.gradient(draw, fill, window.backColor);
     else if (definition.style === 3) {
       if ((window.flags & UiWindowFlag.ForeColorSet) !== 0) draw.setColor(window.foreColor);
-      draw.drawHandlePic(fill, this.backgroundOrZero(window)); draw.setColor(null);
+      draw.drawHandlePic(fill, this.backgroundOrZero(window));
+      draw.setColor(null);
     } else if (definition.style === 4) {
-      teamColor = copyColor(this.options.getTeamColor()); draw.fillRect(fill, teamColor, this.options.widgetAssets.whiteShader);
-    } else if (definition.style === 5) { await this.paintCinematic(window, definition, fill, draw); this.opened(); }
+      teamColor = copyColor(this.options.getTeamColor());
+      draw.fillRect(fill, teamColor, this.options.widgetAssets.whiteShader);
+    } else if (definition.style === 5) {
+      await this.paintCinematic(window, definition, fill, draw);
+      this.opened();
+    }
 
     if (definition.border === 1) {
       if (definition.style === 4 && teamColor !== undefined) {
-        const color = teamColor.x > 0
-          ? { x: 1, y: .5, z: .5, w: 1 }
-          : { x: .5, y: .5, z: 1, w: 1 };
+        const color = teamColor.x > 0 ? { x: 1, y: 0.5, z: 0.5, w: 1 } : { x: 0.5, y: 0.5, z: 1, w: 1 };
         this.drawRect(draw, window.rect, definition.borderSize, color);
       } else this.drawRect(draw, window.rect, definition.borderSize, window.borderColor);
     } else if (definition.border === 2) {
@@ -2102,13 +2382,16 @@ export class UiRuntime {
   }
 
   private gradient(draw: Draw2D, rect: UiRect, color: Vec4): void {
-    draw.setColor(color); draw.drawHandlePic(rect, this.options.widgetAssets.gradientBar); draw.setColor(null);
+    draw.setColor(color);
+    draw.drawHandlePic(rect, this.options.widgetAssets.gradientBar);
+    draw.setColor(null);
   }
 
   private async cinematicAsset(path: string): Promise<UiCinematicAsset> {
     const cached = this.cinematics.get(path);
     if (cached !== undefined) return cached;
-    const asset = await this.options.resources.prepareCinematic(path); this.opened();
+    const asset = await this.options.resources.prepareCinematic(path);
+    this.opened();
     this.cinematics.set(path, asset);
     return asset;
   }
@@ -2117,7 +2400,8 @@ export class UiRuntime {
     if (window.cinematicHandle === -1) {
       const path = definition.cinematic;
       if (path === undefined) throw new Error("cinematic window has no cinematic path");
-      const asset = await this.cinematicAsset(path); this.opened();
+      const asset = await this.cinematicAsset(path);
+      this.opened();
       const instance = this.options.cinematics.play(asset, rect);
       window.cinematicHandle = instance === undefined ? -2 : instance.handle.index;
     }
@@ -2152,29 +2436,57 @@ export class UiRuntime {
     }
     if (!this.itemPassesCvar(item, "show") || (item.window.flags & UiWindowFlag.Visible) === 0) return;
     if (menu === undefined) throw new Error("Item_Paint dereferences a NULL parent menu at fadeAmount");
-    await this.paintWindow(item.window, item.definition.window, menu.definition.fadeAmount, menu.definition.fadeClamp, menu.definition.fadeCycle, draw); this.opened();
+    await this.paintWindow(item.window, item.definition.window, menu.definition.fadeAmount, menu.definition.fadeClamp, menu.definition.fadeCycle, draw);
+    this.opened();
     if (this.debug) this.drawRect(draw, this.correctedTextRect(item), 1, { x: 0, y: 1, z: 0, w: 1 });
     switch (item.definition.behavior.kind) {
-      case "owner-draw": await this.paintOwnerDraw(item, draw); break;
-      case "text": case "button": this.paintText(item, draw); break;
-      case "edit-field": case "numeric-field": this.paintTextField(item, draw); break;
-      case "list-box": await this.paintList(item, draw); break;
-      case "model": this.paintModel(item, draw); break;
-      case "yes-no": this.paintYesNo(item, draw); break;
-      case "multi": this.paintMulti(item, draw); break;
-      case "bind": this.paintBind(item, draw); break;
-      case "slider": this.paintSlider(item, draw); break;
-      case "radio-button": case "check-box": case "combo": case "unknown": break;
+      case "owner-draw":
+        await this.paintOwnerDraw(item, draw);
+        break;
+      case "text":
+      case "button":
+        this.paintText(item, draw);
+        break;
+      case "edit-field":
+      case "numeric-field":
+        this.paintTextField(item, draw);
+        break;
+      case "list-box":
+        await this.paintList(item, draw);
+        break;
+      case "model":
+        this.paintModel(item, draw);
+        break;
+      case "yes-no":
+        this.paintYesNo(item, draw);
+        break;
+      case "multi":
+        this.paintMulti(item, draw);
+        break;
+      case "bind":
+        this.paintBind(item, draw);
+        break;
+      case "slider":
+        this.paintSlider(item, draw);
+        break;
+      case "radio-button":
+      case "check-box":
+      case "combo":
+      case "unknown":
+        break;
     }
   }
 
   private advanceItemAnimation(item: ItemState): void {
     if ((item.window.flags & UiWindowFlag.Orbiting) !== 0 && this.realTime > item.window.nextTime) {
       item.window.nextTime = (this.realTime + item.window.offsetTime) | 0;
-      const halfWidth = f(item.window.clientRect.width / 2), halfHeight = f(item.window.clientRect.height / 2);
+      const halfWidth = f(item.window.clientRect.width / 2),
+        halfHeight = f(item.window.clientRect.height / 2);
       const rx = f(f(item.window.clientRect.x + halfWidth) - item.window.rectEffects.x);
       const ry = f(f(item.window.clientRect.y + halfHeight) - item.window.rectEffects.y);
-      const angle = f(3 * Math.PI / 180), cosine = f(Math.cos(angle)), sine = f(Math.sin(angle));
+      const angle = f((3 * Math.PI) / 180),
+        cosine = f(Math.cos(angle)),
+        sine = f(Math.sin(angle));
       item.window.clientRect.x = f(f(f(f(rx * cosine) - f(ry * sine)) + item.window.rectEffects.x) - halfWidth);
       item.window.clientRect.y = f(f(f(f(rx * sine) + f(ry * cosine)) + item.window.rectEffects.y) - halfHeight);
       updateItemPosition(item);
@@ -2184,8 +2496,12 @@ export class UiRuntime {
       let done = 0;
       const components: readonly (keyof UiRect)[] = ["x", "y", "width", "height"];
       for (const component of components) {
-        const current = item.window.clientRect[component], target = item.window.rectEffects[component];
-        if (current === target) { done++; continue; }
+        const current = item.window.clientRect[component],
+          target = item.window.rectEffects[component];
+        if (current === target) {
+          done++;
+          continue;
+        }
         const stepped = this.transitionValue(current, target, item.window.rectEffects2[component]);
         item.window.clientRect[component] = stepped.value;
         if (stepped.done) done++;
@@ -2242,16 +2558,17 @@ export class UiRuntime {
   }
 
   private pulse(color: Vec4): Vec4 {
-    return this.lerpColor(color, { x: f(f(.8) * color.x), y: f(f(.8) * color.y),
-      z: f(f(.8) * color.z), w: f(f(.8) * color.w) });
+    return this.lerpColor(color, { x: f(f(0.8) * color.x), y: f(f(0.8) * color.y), z: f(f(0.8) * color.z), w: f(f(0.8) * color.w) });
   }
 
   private lerpColor(color: Vec4, lowLight: Vec4): Vec4 {
-    const amount = f(.5 + f(.5 * f(Math.sin(f(Math.trunc(this.realTime / PULSE_DIVISOR))))));
+    const amount = f(0.5 + f(0.5 * f(Math.sin(f(Math.trunc(this.realTime / PULSE_DIVISOR))))));
     const component = (from: number, to: number): number => Math.max(0, Math.min(1, f(from + f(amount * f(to - from)))));
     return {
-      x: component(color.x, lowLight.x), y: component(color.y, lowLight.y),
-      z: component(color.z, lowLight.z), w: component(color.w, lowLight.w),
+      x: component(color.x, lowLight.x),
+      y: component(color.y, lowLight.y),
+      z: component(color.z, lowLight.z),
+      w: component(color.w, lowLight.w),
     };
   }
 
@@ -2274,7 +2591,16 @@ export class UiRuntime {
       const lines = text.split("\r");
       for (const [index, line] of lines.entries()) {
         if (index < lines.length - 1 && line.length >= 1024) throw new RangeError("Item_Text_Wrapped_Paint writes outside local char[1024]");
-        textPaint(draw, this.options.fonts, { x: item.textRect.x, y, scale: item.definition.textScale, color, text: line, adjust: 0, limit: 0, style: item.definition.textStyle });
+        textPaint(draw, this.options.fonts, {
+          x: item.textRect.x,
+          y,
+          scale: item.definition.textScale,
+          color,
+          text: line,
+          adjust: 0,
+          limit: 0,
+          style: item.definition.textStyle,
+        });
         y = f(y + f((qvmFloatToInt(item.textRect.height) + 5) | 0));
       }
       return;
@@ -2283,15 +2609,30 @@ export class UiRuntime {
       this.paintAutoWrapped(item, draw, text, color);
       return;
     }
-    textPaint(draw, this.options.fonts, { x: item.textRect.x, y: item.textRect.y, scale: item.definition.textScale, color, text, adjust: 0, limit: 0, style: item.definition.textStyle });
+    textPaint(draw, this.options.fonts, {
+      x: item.textRect.x,
+      y: item.textRect.y,
+      scale: item.definition.textScale,
+      color,
+      text,
+      adjust: 0,
+      limit: 0,
+      style: item.definition.textStyle,
+    });
   }
 
   private paintAutoWrapped(item: ItemState, draw: Draw2D, text: string, color: Vec4): void {
-    let buffer = "", length = 0, position = 0, width = 0;
-    let lineBreak = 0, nextLine = 0, lineWidth = 0;
+    let buffer = "",
+      length = 0,
+      position = 0,
+      width = 0;
+    let lineBreak = 0,
+      nextLine = 0,
+      lineWidth = 0;
     let y = item.definition.textAlignY;
     // The source measures the growing buffer every character; the width is only read at a break character (from the previous measurement), once a break exists, and at a line end, so earlier measurements are deferred.
-    let measured = "", stale = false;
+    let measured = "",
+      stale = false;
     const measure = (value: string): number => textWidth(this.options.fonts, value, item.definition.textScale, 0);
     while (true) {
       const character = text.charAt(position);
@@ -2304,7 +2645,10 @@ export class UiRuntime {
       }
       stale = false;
       if (lineBreak !== 0 || character === "\n" || character === "") width = measure(buffer);
-      else { measured = buffer; stale = true; }
+      else {
+        measured = buffer;
+        stale = true;
+      }
       if ((lineBreak !== 0 && width > item.window.rect.width) || character === "\n" || character === "") {
         if (length !== 0) {
           let x = item.textRect.x;
@@ -2319,8 +2663,16 @@ export class UiRuntime {
           item.textRect.x = f(x + item.window.rect.x);
           item.textRect.y = f(baseline + item.window.rect.y);
           buffer = buffer.slice(0, lineBreak);
-          textPaint(draw, this.options.fonts, { x: item.textRect.x, y: item.textRect.y, scale: item.definition.textScale,
-            color, text: buffer, adjust: 0, limit: 0, style: item.definition.textStyle });
+          textPaint(draw, this.options.fonts, {
+            x: item.textRect.x,
+            y: item.textRect.y,
+            scale: item.definition.textScale,
+            color,
+            text: buffer,
+            adjust: 0,
+            limit: 0,
+            style: item.definition.textStyle,
+          });
         }
         if (character === "") return;
         y = f(y + f((qvmFloatToInt(item.textRect.height) + 5) | 0));
@@ -2349,8 +2701,15 @@ export class UiRuntime {
     const color = this.valueColor(item);
     const offset = item.definition.text !== undefined && item.definition.text.length > 0 ? 8 : 0;
     if (edit === undefined) throw new Error("Item_TextField_Paint dereferences NULL edit data");
-    const options = { x: f(f(item.textRect.x + item.textRect.width) + offset), y: item.textRect.y, scale: item.definition.textScale,
-      color, text: value.slice(edit.paintOffset), limit: edit.maxPaintChars, style: item.definition.textStyle };
+    const options = {
+      x: f(f(item.textRect.x + item.textRect.width) + offset),
+      y: item.textRect.y,
+      scale: item.definition.textScale,
+      color,
+      text: value.slice(edit.paintOffset),
+      limit: edit.maxPaintChars,
+      style: item.definition.textStyle,
+    };
     textPaint(draw, this.options.fonts, { ...options, adjust: 0 });
   }
 
@@ -2362,12 +2721,21 @@ export class UiRuntime {
       this.paintText(item, draw);
       x = f(f(item.textRect.x + item.textRect.width) + 8);
     }
-    textPaint(draw, this.options.fonts, { x, y: item.textRect.y, scale: item.definition.textScale, color,
-      text: value !== 0 ? "Yes" : "No", adjust: 0, limit: 0, style: item.definition.textStyle });
+    textPaint(draw, this.options.fonts, {
+      x,
+      y: item.textRect.y,
+      scale: item.definition.textScale,
+      color,
+      text: value !== 0 ? "Yes" : "No",
+      adjust: 0,
+      limit: 0,
+      style: item.definition.textStyle,
+    });
   }
 
   private multiSetting(item: ItemState): string | undefined {
-    const cvar = item.definition.cvar, behavior = item.definition.behavior;
+    const cvar = item.definition.cvar,
+      behavior = item.definition.behavior;
     if (cvar === undefined || behavior.kind !== "multi" || behavior.multi === undefined) return "";
     const multi = behavior.multi;
     if (multi.stringDefinition) {
@@ -2393,8 +2761,16 @@ export class UiRuntime {
       x = f(f(item.textRect.x + item.textRect.width) + 8);
     }
     if (text === undefined) return;
-    textPaint(draw, this.options.fonts, { x, y: item.textRect.y, scale: item.definition.textScale, color,
-      text, adjust: 0, limit: 0, style: item.definition.textStyle });
+    textPaint(draw, this.options.fonts, {
+      x,
+      y: item.textRect.y,
+      scale: item.definition.textScale,
+      color,
+      text,
+      adjust: 0,
+      limit: 0,
+      style: item.definition.textStyle,
+    });
   }
 
   private paintBind(item: ItemState, draw: Draw2D): void {
@@ -2404,20 +2780,30 @@ export class UiRuntime {
     if (cvar !== undefined) this.cvarValue(cvar);
     const color = this.valueColor(item);
     // "FIXME" is id's literal in Item_Bind_Paint (ui_shared.c) for a bind item without text; it is not a leftover.
-    let x = item.textRect.x, text = "FIXME";
+    let x = item.textRect.x,
+      text = "FIXME";
     if (item.definition.text !== undefined) {
       this.paintText(item, draw);
       text = "???";
       x = f(f(item.textRect.x + item.textRect.width) + 8);
     }
-    textPaint(draw, this.options.fonts, { x, y: item.textRect.y, scale: item.definition.textScale, color,
-      text, adjust: 0, limit: maxChars, style: item.definition.textStyle });
+    textPaint(draw, this.options.fonts, {
+      x,
+      y: item.textRect.y,
+      scale: item.definition.textScale,
+      color,
+      text,
+      adjust: 0,
+      limit: maxChars,
+      style: item.definition.textStyle,
+    });
   }
 
   private paintSlider(item: ItemState, draw: Draw2D): void {
     const cvar = item.definition.cvar;
     if (cvar !== undefined) this.cvarValue(cvar);
-    const color = this.valueColor(item), y = item.window.rect.y;
+    const color = this.valueColor(item),
+      y = item.window.rect.y;
     let x: number;
     if (item.definition.text !== undefined) {
       this.paintText(item, draw);
@@ -2426,7 +2812,10 @@ export class UiRuntime {
     draw.setColor(color);
     draw.drawHandlePic({ x, y, width: SLIDER_WIDTH, height: 16 }, this.widgetPicture(this.options.widgetAssets.sliderBar));
     x = this.sliderThumbPosition(item);
-    draw.drawHandlePic({ x: f(x - SLIDER_THUMB_WIDTH / 2), y: f(y - 2), width: SLIDER_THUMB_WIDTH, height: 20 }, this.widgetPicture(this.options.widgetAssets.sliderThumb));
+    draw.drawHandlePic(
+      { x: f(x - SLIDER_THUMB_WIDTH / 2), y: f(y - 2), width: SLIDER_THUMB_WIDTH, height: 20 },
+      this.widgetPicture(this.options.widgetAssets.sliderThumb),
+    );
   }
 
   private paintModel(item: ItemState, draw: Draw2D): void {
@@ -2436,14 +2825,23 @@ export class UiRuntime {
       item.window.nextTime = (this.realTime + modelData.rotationSpeed) | 0;
       modelData.angle = ((modelData.angle + 1) | 0) % 360;
     }
-    const handle = item.definition.assetHandle, asset = handle === undefined ? item.definition.asset : undefined;
-    const model = handle === undefined ? asset?.kind === "model" ? this.models.get(resourceKey(asset.path)) : undefined
-      : handle === 0 && this.options.resources.handles.kind === "diagnostic" ? DEFAULT_MODEL : this.sourceHandles().modelForHandle(handle);
+    const handle = item.definition.assetHandle,
+      asset = handle === undefined ? item.definition.asset : undefined;
+    const model =
+      handle === undefined
+        ? asset?.kind === "model"
+          ? this.models.get(resourceKey(asset.path))
+          : undefined
+        : handle === 0 && this.options.resources.handles.kind === "diagnostic"
+          ? DEFAULT_MODEL
+          : this.sourceHandles().modelForHandle(handle);
     if (model === undefined) throw new Error(`UI model ${asset?.path ?? "NULL"} was not resolved before runtime use`);
     this.options.paintModel({
-      draw, model,
+      draw,
+      model,
       rect: { x: f(item.window.rect.x + 1), y: f(item.window.rect.y + 1), width: f(item.window.rect.width - 2), height: f(item.window.rect.height - 2) },
-      time: this.realTime, angle: modelData.angle,
+      time: this.realTime,
+      angle: modelData.angle,
       fieldOfViewX: modelData.fieldOfViewX,
       fieldOfViewY: modelData.fieldOfViewY,
     });
@@ -2455,21 +2853,36 @@ export class UiRuntime {
     let color = copyColor(item.window.foreColor);
     if (item.definition.colorRanges.length > 0) {
       const value = this.options.ownerDraw.value(item.definition.window.ownerDraw);
-      for (const range of item.definition.colorRanges) if (value >= range.low && value <= range.high) { color = copyColor(range.color); break; }
+      for (const range of item.definition.colorRanges)
+        if (value >= range.low && value <= range.high) {
+          color = copyColor(range.color);
+          break;
+        }
     }
     if ((item.window.flags & UiWindowFlag.HasFocus) !== 0) color = this.pulse(menu.definition.focusColor);
     else if (item.definition.textStyle === 1 && (Math.trunc(this.realTime / BLINK_DIVISOR) & 1) === 0) color = this.pulse(item.window.foreColor);
     if (!this.itemPassesCvar(item, "enable")) color = copyColor(menu.definition.disableColor);
-    let rect = copyRect(item.window.rect), textX = item.definition.textAlignX;
+    let rect = copyRect(item.window.rect),
+      textX = item.definition.textAlignX;
     if (item.definition.text !== undefined) {
       this.paintText(item, draw);
       rect = { ...rect, x: f(f(item.textRect.x + item.textRect.width) + (item.definition.text.length > 0 ? 8 : 0)) };
       textX = 0;
     }
-    await this.options.ownerDraw.paint({ draw, rect, textX, textY: item.definition.textAlignY,
-      ownerDraw: item.definition.window.ownerDraw, ownerDrawFlags: item.definition.window.ownerDrawFlags,
-      alignment: item.definition.alignment, special: item.special, textScale: item.definition.textScale,
-      color, background: this.windowBackground(item.window), textStyle: item.definition.textStyle });
+    await this.options.ownerDraw.paint({
+      draw,
+      rect,
+      textX,
+      textY: item.definition.textAlignY,
+      ownerDraw: item.definition.window.ownerDraw,
+      ownerDrawFlags: item.definition.window.ownerDrawFlags,
+      alignment: item.definition.alignment,
+      special: item.special,
+      textScale: item.definition.textScale,
+      color,
+      background: this.windowBackground(item.window),
+      textStyle: item.definition.textStyle,
+    });
   }
 
   private async paintList(item: ItemState, draw: Draw2D): Promise<void> {
@@ -2477,83 +2890,144 @@ export class UiRuntime {
     const count = f(this.options.feeder.count(item.special));
     let x: number, y: number, size: number;
     if ((item.window.flags & UiWindowFlag.Horizontal) !== 0) {
-      x = f(item.window.rect.x + 1); y = f(f(f(item.window.rect.y + item.window.rect.height) - SCROLLBAR_SIZE) - 1);
+      x = f(item.window.rect.x + 1);
+      y = f(f(f(item.window.rect.y + item.window.rect.height) - SCROLLBAR_SIZE) - 1);
       draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowLeft);
-      x = f(x + SCROLLBAR_SIZE - 1); size = f(item.window.rect.width - SCROLLBAR_SIZE * 2);
+      x = f(x + SCROLLBAR_SIZE - 1);
+      size = f(item.window.rect.width - SCROLLBAR_SIZE * 2);
       draw.drawHandlePic({ x, y, width: f(size + 1), height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBar);
-      x = f(x + f(size - 1)); draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowRight);
+      x = f(x + f(size - 1));
+      draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowRight);
       const thumb = Math.min(f(this.listThumbDrawPosition(item)), f(f(x - SCROLLBAR_SIZE) - 1));
       draw.drawHandlePic({ x: thumb, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarThumb);
       if (list === undefined) throw new Error("Item_ListBox_Paint dereferences NULL list data");
-      list.endPosition = list.startPosition; size = f(item.window.rect.width - 2);
+      list.endPosition = list.startPosition;
+      size = f(item.window.rect.width - 2);
       if (list.elementStyle !== 1) return;
-      x = f(item.window.rect.x + 1); y = f(item.window.rect.y + 1);
+      x = f(item.window.rect.x + 1);
+      y = f(item.window.rect.y + 1);
       for (let i = f(list.startPosition); i < count; i = f(i + 1)) {
-        const picture = await this.options.feeder.image(item.special, qvmFloatToInt(i)); this.opened();
-        if (picture !== undefined) draw.drawHandlePic({ x: f(x + 1), y: f(y + 1), width: f(list.elementWidth - 2), height: f(list.elementHeight - 2) }, picture);
-        if (i === f(item.cursorPosition)) this.drawRect(draw, { x, y, width: f(list.elementWidth - 1), height: f(list.elementHeight - 1) }, item.definition.window.borderSize, item.window.borderColor);
+        const picture = await this.options.feeder.image(item.special, qvmFloatToInt(i));
+        this.opened();
+        if (picture !== undefined)
+          draw.drawHandlePic({ x: f(x + 1), y: f(y + 1), width: f(list.elementWidth - 2), height: f(list.elementHeight - 2) }, picture);
+        if (i === f(item.cursorPosition))
+          this.drawRect(
+            draw,
+            { x, y, width: f(list.elementWidth - 1), height: f(list.elementHeight - 1) },
+            item.definition.window.borderSize,
+            item.window.borderColor,
+          );
         size = f(size - list.elementWidth);
-        if (size < list.elementWidth) { list.drawPadding = qvmFloatToInt(size); break; }
-        x = f(x + list.elementWidth); list.endPosition++;
+        if (size < list.elementWidth) {
+          list.drawPadding = qvmFloatToInt(size);
+          break;
+        }
+        x = f(x + list.elementWidth);
+        list.endPosition++;
       }
       return;
     }
-    x = f(f(f(item.window.rect.x + item.window.rect.width) - SCROLLBAR_SIZE) - 1); y = f(item.window.rect.y + 1);
+    x = f(f(f(item.window.rect.x + item.window.rect.width) - SCROLLBAR_SIZE) - 1);
+    y = f(item.window.rect.y + 1);
     draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowUp);
     y = f(y + SCROLLBAR_SIZE - 1);
     if (list === undefined) throw new Error("Item_ListBox_Paint dereferences NULL list data");
     list.endPosition = list.startPosition;
     size = f(item.window.rect.height - SCROLLBAR_SIZE * 2);
     draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: f(size + 1) }, this.options.widgetAssets.scrollBar);
-    y = f(y + f(size - 1)); draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowDown);
+    y = f(y + f(size - 1));
+    draw.drawHandlePic({ x, y, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarArrowDown);
     const thumb = Math.min(f(this.listThumbDrawPosition(item)), f(f(y - SCROLLBAR_SIZE) - 1));
     draw.drawHandlePic({ x, y: thumb, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarThumb);
-    size = f(item.window.rect.height - 2); x = f(item.window.rect.x + 1); y = f(item.window.rect.y + 1);
-    const imageStyle = list.elementStyle === 1, columns = list.columns;
+    size = f(item.window.rect.height - 2);
+    x = f(item.window.rect.x + 1);
+    y = f(item.window.rect.y + 1);
+    const imageStyle = list.elementStyle === 1,
+      columns = list.columns;
     for (let i = f(list.startPosition); i < count; i = f(i + 1)) {
       if (imageStyle) {
-        const picture = await this.options.feeder.image(item.special, qvmFloatToInt(i)); this.opened();
-        if (picture !== undefined) draw.drawHandlePic({ x: f(x + 1), y: f(y + 1), width: f(list.elementWidth - 2), height: f(list.elementHeight - 2) }, picture);
-        if (i === f(item.cursorPosition)) this.drawRect(draw, { x, y, width: f(list.elementWidth - 1), height: f(list.elementHeight - 1) }, item.definition.window.borderSize, item.window.borderColor);
+        const picture = await this.options.feeder.image(item.special, qvmFloatToInt(i));
+        this.opened();
+        if (picture !== undefined)
+          draw.drawHandlePic({ x: f(x + 1), y: f(y + 1), width: f(list.elementWidth - 2), height: f(list.elementHeight - 2) }, picture);
+        if (i === f(item.cursorPosition))
+          this.drawRect(
+            draw,
+            { x, y, width: f(list.elementWidth - 1), height: f(list.elementHeight - 1) },
+            item.definition.window.borderSize,
+            item.window.borderColor,
+          );
         list.endPosition++;
         size = f(size - list.elementWidth);
       } else {
         if (columns.length > 0) {
           for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-            const column = columns[columnIndex], entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), columnIndex);
+            const column = columns[columnIndex],
+              entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), columnIndex);
             this.opened();
             if (column === undefined || entry === undefined) continue;
-            if (entry.picture !== undefined) draw.drawHandlePic({ x: f(f(x + 4) + f(column.position)), y: f(f(y - 1) + f(list.elementHeight / 2)), width: f(column.width), height: f(column.width) }, entry.picture);
-            else if (entry.text !== null) textPaint(draw, this.options.fonts, { x: f(f(x + 4) + f(column.position)), y: f(y + list.elementHeight), scale: item.definition.textScale,
-              color: item.window.foreColor, text: quakeString(entry.text), adjust: 0, limit: column.maxChars, style: item.definition.textStyle });
+            if (entry.picture !== undefined)
+              draw.drawHandlePic(
+                { x: f(f(x + 4) + f(column.position)), y: f(f(y - 1) + f(list.elementHeight / 2)), width: f(column.width), height: f(column.width) },
+                entry.picture,
+              );
+            else if (entry.text !== null)
+              textPaint(draw, this.options.fonts, {
+                x: f(f(x + 4) + f(column.position)),
+                y: f(y + list.elementHeight),
+                scale: item.definition.textScale,
+                color: item.window.foreColor,
+                text: quakeString(entry.text),
+                adjust: 0,
+                limit: column.maxChars,
+                style: item.definition.textStyle,
+              });
           }
         } else {
-          const entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), 0); this.opened();
-          if (entry !== undefined && entry.picture === undefined && entry.text !== null) textPaint(draw, this.options.fonts, { x: f(x + 4), y: f(y + list.elementHeight), scale: item.definition.textScale,
-            color: item.window.foreColor, text: quakeString(entry.text), adjust: 0, limit: 0, style: item.definition.textStyle });
+          const entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), 0);
+          this.opened();
+          if (entry !== undefined && entry.picture === undefined && entry.text !== null)
+            textPaint(draw, this.options.fonts, {
+              x: f(x + 4),
+              y: f(y + list.elementHeight),
+              scale: item.definition.textScale,
+              color: item.window.foreColor,
+              text: quakeString(entry.text),
+              adjust: 0,
+              limit: 0,
+              style: item.definition.textStyle,
+            });
         }
-        if (i === f(item.cursorPosition)) draw.fillRect({ x: f(x + 2), y: f(y + 2), width: f(f(item.window.rect.width - SCROLLBAR_SIZE) - 4), height: list.elementHeight }, item.definition.window.outlineColor, this.options.widgetAssets.whiteShader);
+        if (i === f(item.cursorPosition))
+          draw.fillRect(
+            { x: f(x + 2), y: f(y + 2), width: f(f(item.window.rect.width - SCROLLBAR_SIZE) - 4), height: list.elementHeight },
+            item.definition.window.outlineColor,
+            this.options.widgetAssets.whiteShader,
+          );
         size = f(size - list.elementHeight);
       }
       const exhausted = size < list.elementHeight;
-      if (exhausted) { list.drawPadding = qvmFloatToInt(f(list.elementHeight - size)); break; }
+      if (exhausted) {
+        list.drawPadding = qvmFloatToInt(f(list.elementHeight - size));
+        break;
+      }
       if (!imageStyle) list.endPosition++;
       y = f(y + list.elementHeight);
     }
   }
 
   private cvarValue(name: string): number {
-    return this.options.cvarValue === undefined ? this.options.cvars.get(name)?.numericValue ?? 0 : this.options.cvarValue(name);
+    return this.options.cvarValue === undefined ? (this.options.cvars.get(name)?.numericValue ?? 0) : this.options.cvarValue(name);
   }
 
   private readonly cvarScriptTokens = new Map<string, (string | null)[]>();
 
   private itemPassesCvar(item: ItemState, purpose: "enable" | "show"): boolean {
     const flag = purpose === "enable" ? 1 : 4;
-    if ((item.definition.cvarFlags & (flag | flag << 1)) === 0) return true;
+    if ((item.definition.cvarFlags & (flag | (flag << 1))) === 0) return true;
     const script = item.definition.cvarScript;
-    if (script === undefined || script.text.length === 0 || item.definition.cvarTest === undefined
-      || item.definition.cvarTest.length === 0) return true;
+    if (script === undefined || script.text.length === 0 || item.definition.cvarTest === undefined || item.definition.cvarTest.length === 0) return true;
     const current = this.cvarBuffer(item.definition.cvarTest);
     let tokens = this.cvarScriptTokens.get(script.text);
     if (tokens === undefined) {

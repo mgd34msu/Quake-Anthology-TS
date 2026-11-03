@@ -3,8 +3,14 @@ import { IdIndex } from "../../foundation/id-index.ts";
 import { StringTable } from "../../foundation/strings.ts";
 import type { NavigationEdge, NavigationGraph } from "./types.ts";
 
-export interface EstimateTail { readonly seconds: number; readonly firstEdge: NavigationEdge | null; }
-export interface AasEstimateCache { readonly times: Uint16Array; readonly reaches: Uint8Array; }
+export interface EstimateTail {
+  readonly seconds: number;
+  readonly firstEdge: NavigationEdge | null;
+}
+export interface AasEstimateCache {
+  readonly times: Uint16Array;
+  readonly reaches: Uint8Array;
+}
 
 const NO_SLOT = -1;
 
@@ -30,11 +36,17 @@ export class EstimateStore<V> {
   private liveCount = 0;
   private tick = 0;
 
-  get size(): number { return this.liveCount; }
+  get size(): number {
+    return this.liveCount;
+  }
 
   private grow(): void {
     const capacity = Math.max(64, this.live.length * 2);
-    const widen = <T extends Uint8Array | Uint32Array | Float64Array>(source: T, make: (length: number) => T): T => { const next = make(capacity); next.set(source); return next; };
+    const widen = <T extends Uint8Array | Uint32Array | Float64Array>(source: T, make: (length: number) => T): T => {
+      const next = make(capacity);
+      next.set(source);
+      return next;
+    };
     this.scopeIds = widen(this.scopeIds, length => new Uint32Array(length));
     this.tags = widen(this.tags, length => new Uint32Array(length));
     this.keysA = widen(this.keysA, length => new Uint32Array(length));
@@ -50,7 +62,10 @@ export class EstimateStore<V> {
     if (scopeId === 0) return undefined;
     const cursor = this.index.begin(a, b);
     for (let slot = this.index.next(cursor); slot !== NO_SLOT; slot = this.index.next(cursor)) {
-      if (this.scopeIds[slot] === scopeId && this.tags[slot] === (tag >>> 0)) { this.stamps[slot] = ++this.tick; return this.values[slot]; }
+      if (this.scopeIds[slot] === scopeId && this.tags[slot] === tag >>> 0) {
+        this.stamps[slot] = ++this.tick;
+        return this.values[slot];
+      }
     }
     return undefined;
   }
@@ -78,7 +93,8 @@ export class EstimateStore<V> {
   /** Drops the least recently used entry and returns its cost, or 0 when empty. */
   evictOldest(): void {
     let oldest = NO_SLOT;
-    for (let slot = 0; slot < this.slotCount; slot++) if (this.live[slot] === 1 && (oldest === NO_SLOT || (this.stamps[slot] ?? 0) < (this.stamps[oldest] ?? 0))) oldest = slot;
+    for (let slot = 0; slot < this.slotCount; slot++)
+      if (this.live[slot] === 1 && (oldest === NO_SLOT || (this.stamps[slot] ?? 0) < (this.stamps[oldest] ?? 0))) oldest = slot;
     if (oldest === NO_SLOT) return;
     this.index.removeValue(this.keysA[oldest] ?? 0, this.keysB[oldest] ?? 0, oldest);
     this.used -= this.costs[oldest] ?? 0;
@@ -121,6 +137,9 @@ export class GraphEstimateIndex {
 const indexes = new WeakMap<readonly NavigationEdge[], GraphEstimateIndex>();
 export function graphEstimateIndex(graph: NavigationGraph): GraphEstimateIndex {
   let index = indexes.get(graph.edges);
-  if (index === undefined) { index = new GraphEstimateIndex(graph); indexes.set(graph.edges, index); }
+  if (index === undefined) {
+    index = new GraphEstimateIndex(graph);
+    indexes.set(graph.edges, index);
+  }
   return index;
 }

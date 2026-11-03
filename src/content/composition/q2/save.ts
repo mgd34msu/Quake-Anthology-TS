@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ProviderCheckpoint } from "../../../contracts/session.ts";
 import { decodeQ2FoundationCheckpoint, encodeQ2FoundationCheckpoint } from "../../../persistence/q2-foundation.ts";
 import { decodeQ2ItemsCheckpoint, encodeQ2ItemsCheckpoint } from "../../../persistence/q2-items.ts";
@@ -5,8 +6,18 @@ import { decodeQ2MoversCheckpoint, encodeQ2MoversCheckpoint } from "../../../per
 import { decodeQ2MonstersCheckpoint, encodeQ2MonstersCheckpoint } from "../../../persistence/q2-monsters.ts";
 import { decodeQ2WeaponsCheckpoint, encodeQ2WeaponsCheckpoint } from "../../../persistence/q2-weapons.ts";
 import { decodeQ2PlayersCheckpoint, encodeQ2PlayersCheckpoint } from "../../../persistence/q2-players.ts";
-import { decodeQ2MissionPackItemsCheckpoint, encodeQ2MissionPackItemsCheckpoint, decodeQ2MissionPackMonstersCheckpoint, encodeQ2MissionPackMonstersCheckpoint } from "../../../persistence/q2-missionpacks.ts";
-import { decodeQ2RereleasePlayersCheckpoint, encodeQ2RereleasePlayersCheckpoint, decodeQ2RereleaseModuleCheckpoint, encodeQ2RereleaseModuleCheckpoint } from "../../../persistence/q2-rerelease-state.ts";
+import {
+  decodeQ2MissionPackItemsCheckpoint,
+  encodeQ2MissionPackItemsCheckpoint,
+  decodeQ2MissionPackMonstersCheckpoint,
+  encodeQ2MissionPackMonstersCheckpoint,
+} from "../../../persistence/q2-missionpacks.ts";
+import {
+  decodeQ2RereleasePlayersCheckpoint,
+  encodeQ2RereleasePlayersCheckpoint,
+  decodeQ2RereleaseModuleCheckpoint,
+  encodeQ2RereleaseModuleCheckpoint,
+} from "../../../persistence/q2-rerelease-state.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
 import { Q2Ctf, decodeQ2CtfCheckpoint } from "../../q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../q2/multiplayer/lmctf/runtime.ts";
@@ -20,9 +31,18 @@ import { encodeQ2BaseEntitiesCheckpoint, decodeQ2BaseEntitiesCheckpoint } from "
 export function captureQ2Product(source: Q2ProductRuntime): readonly ProviderCheckpoint[] {
   const records: ProviderCheckpoint[] = [];
   const add = (schema: ProviderCheckpoint["schema"], bytes: Uint8Array): undefined => {
-    records.push({ provider: source.game.options.provider, schema, version: 1, bytes }); return undefined;
+    records.push({ provider: source.game.options.provider, schema, version: 1, bytes });
+    return undefined;
   };
-  add("q2:composition", encodeCheckpointValue({ edition: source.configuration.edition, program: source.configuration.program, match: source.match.selection, deathmatchFlags: source.game.options.deathmatchFlags }));
+  add(
+    "q2:composition",
+    encodeCheckpointValue({
+      edition: source.configuration.edition,
+      program: source.configuration.program,
+      match: source.match.selection,
+      deathmatchFlags: source.game.options.deathmatchFlags,
+    }),
+  );
   add("q2:foundation", encodeQ2FoundationCheckpoint(source.game.capture()));
   add("q2:items", encodeQ2ItemsCheckpoint(source.items.capture(source.game)));
   add("q2:movers", encodeQ2MoversCheckpoint(source.movers.capture(source.game)));
@@ -52,12 +72,20 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
     return record.bytes;
   };
   const selection = new SaveReader(decodeCheckpointValue(read("q2:composition")), "q2-composition");
-  if (selection.field("edition").choice("classic", "rerelease") !== source.configuration.edition || selection.field("program").choice("baseq2", "xatrix", "rogue", "mg2", "n64") !== source.configuration.program)
+  if (
+    selection.field("edition").choice("classic", "rerelease") !== source.configuration.edition ||
+    selection.field("program").choice("baseq2", "xatrix", "rogue", "mg2", "n64") !== source.configuration.program
+  )
     throw new Error("Q2 checkpoint belongs to a different source product");
   const matchSelection = selection.field("match");
-  if (matchSelection.field("kind").choice("standard", "tag", "deathball", "ctf", "lmctf", "horde") !== source.match.selection.kind) throw new Error("Q2 checkpoint belongs to a different source match mode");
-  if (source.match.selection.kind === "deathball" && (matchSelection.field("team1Skin").string() !== source.match.selection.team1Skin
-    || matchSelection.field("team2Skin").string() !== source.match.selection.team2Skin || matchSelection.field("goalLimit").number() !== source.match.selection.goalLimit))
+  if (matchSelection.field("kind").choice("standard", "tag", "deathball", "ctf", "lmctf", "horde") !== source.match.selection.kind)
+    throw new Error("Q2 checkpoint belongs to a different source match mode");
+  if (
+    source.match.selection.kind === "deathball" &&
+    (matchSelection.field("team1Skin").string() !== source.match.selection.team1Skin ||
+      matchSelection.field("team2Skin").string() !== source.match.selection.team2Skin ||
+      matchSelection.field("goalLimit").number() !== source.match.selection.goalLimit)
+  )
     throw new Error("Q2 checkpoint belongs to different DeathBall rules");
   const deathmatchFlags = selection.field("deathmatchFlags").integer(0);
   const foundation = decodeQ2FoundationCheckpoint(read("q2:foundation"));
@@ -68,18 +96,56 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
   const players = decodeQ2PlayersCheckpoint(read("q2:players"));
   const baseEntities = decodeQ2BaseEntitiesCheckpoint(read("q2:base-entities"));
   const armory = source.armory === null ? null : { module: source.armory.items, checkpoint: decodeQ2MissionPackItemsCheckpoint(read("q2:missionpack-items")) };
-  const expansions = source.expansions.map(expansion => ({ module: expansion,
+  const expansions = source.expansions.map(expansion => ({
+    module: expansion,
     monsters: decodeQ2MissionPackMonstersCheckpoint(read(`q2:${expansion.pack}-monsters`)),
     entities: { steamId: new SaveReader(decodeCheckpointValue(read(`q2:${expansion.pack}-entities`)), "q2-missionpack-entities").field("steamId").integer() },
   }));
-  const rerelease = source.rerelease === null ? null : { module: source.rerelease,
-    players: decodeQ2RereleasePlayersCheckpoint(read("q2:rerelease-players")),
-    entities: decodeQ2RereleaseModuleCheckpoint(read("q2:rerelease-entities")),
-  };
-  const match = source.match.source === null ? null : { module: source.match.source, reader: new SaveReader(decodeCheckpointValue(read("q2:match")), "q2-match") };
-  const tag = match?.module instanceof Q2Tag ? { module: match.module, state: { token: match.reader.field("token").nullable(readSavedActor), owner: match.reader.field("owner").nullable(readSavedActor), count: match.reader.field("count").integer(0) } } : null;
-  const ball = match?.module instanceof Q2DeathBall ? { module: match.module, state: { ball: match.reader.field("ball").nullable(readSavedActor), starts: match.reader.field("starts").integer(0), team1Score: match.reader.field("team1Score").integer(), team2Score: match.reader.field("team2Score").integer() } } : null;
-  const horde = match?.module instanceof Q2Horde ? { module: match.module, state: { wave: match.reader.field("wave").integer(0), spawned: match.reader.field("spawned").integer(0), intermission: match.reader.field("intermission").integer(0), monsters: match.reader.field("monsters").list(readSavedActor) } } : null;
+  const rerelease =
+    source.rerelease === null
+      ? null
+      : {
+          module: source.rerelease,
+          players: decodeQ2RereleasePlayersCheckpoint(read("q2:rerelease-players")),
+          entities: decodeQ2RereleaseModuleCheckpoint(read("q2:rerelease-entities")),
+        };
+  const match =
+    source.match.source === null ? null : { module: source.match.source, reader: new SaveReader(decodeCheckpointValue(read("q2:match")), "q2-match") };
+  const tag =
+    match?.module instanceof Q2Tag
+      ? {
+          module: match.module,
+          state: {
+            token: match.reader.field("token").nullable(readSavedActor),
+            owner: match.reader.field("owner").nullable(readSavedActor),
+            count: match.reader.field("count").integer(0),
+          },
+        }
+      : null;
+  const ball =
+    match?.module instanceof Q2DeathBall
+      ? {
+          module: match.module,
+          state: {
+            ball: match.reader.field("ball").nullable(readSavedActor),
+            starts: match.reader.field("starts").integer(0),
+            team1Score: match.reader.field("team1Score").integer(),
+            team2Score: match.reader.field("team2Score").integer(),
+          },
+        }
+      : null;
+  const horde =
+    match?.module instanceof Q2Horde
+      ? {
+          module: match.module,
+          state: {
+            wave: match.reader.field("wave").integer(0),
+            spawned: match.reader.field("spawned").integer(0),
+            intermission: match.reader.field("intermission").integer(0),
+            monsters: match.reader.field("monsters").list(readSavedActor),
+          },
+        }
+      : null;
   source.registerCallbacks();
   source.setDeathmatchFlags(deathmatchFlags);
   source.game.restore(foundation);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { add3Double, angleVectorsRule, dot3Double, hypot3, normalize3DoubleHypot, scale3Double, sub3Double } from "../../../core/math.ts";
 import { nativeAtof, nativeAtoi } from "../../../core/numeric.ts";
 import { parseQ2Token } from "../../../core/common-parse.ts";
@@ -20,9 +21,14 @@ export function vectorField(fields: Q2SpawnFields, key: string): Vec3 {
 }
 
 /** ED_NewString changes backslash-n to LF and removes other escape introducers. */
-function entityString(value: string): string { return value.replace(/\\(.)/gs, (_match, escaped: string) => escaped === "n" ? "\n" : "\\"); }
+function entityString(value: string): string {
+  return value.replace(/\\(.)/gs, (_match, escaped: string) => (escaped === "n" ? "\n" : "\\"));
+}
 
-function entityToken(state: { readonly data: string; index: number }, limit: number): { readonly kind: "eof" } | { readonly kind: "token"; readonly value: string } {
+function entityToken(
+  state: { readonly data: string; index: number },
+  limit: number,
+): { readonly kind: "eof" } | { readonly kind: "token"; readonly value: string } {
   let index = state.index;
   for (;;) {
     while (index < state.data.length && state.data.charCodeAt(index) > 0 && state.data.charCodeAt(index) <= 32) index++;

@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Command parsing from Quake common.c, Quake II q_shared.c/cmd.c and
  * Quake III cmd.c; adapted from the reference port
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { CommandDialect } from "../../contracts/common.ts";
 
 export function sourceCommandText(input: string): string {
-  const nul = input.indexOf("\0"), text = nul < 0 ? input : input.slice(0, nul);
+  const nul = input.indexOf("\0"),
+    text = nul < 0 ? input : input.slice(0, nul);
   for (let index = 0; index < text.length; index++) {
     if (text.charCodeAt(index) > 255) throw new RangeError("Command text requires source bytes");
   }
@@ -24,24 +26,28 @@ export function isQ2(dialect: CommandDialect): boolean {
 }
 
 export function commandSeparatorOffset(text: string, dialect: CommandDialect): number {
-  let quoted = false, offset = 0;
+  let quoted = false,
+    offset = 0;
   while (offset < text.length) {
     const character = text.charAt(offset);
     if (character === '"') quoted = !quoted;
-    if ((!quoted && character === ";") || character === "\n" || dialect === "q3" && character === "\r") break;
+    if ((!quoted && character === ";") || character === "\n" || (dialect === "q3" && character === "\r")) break;
     offset++;
   }
   return offset;
 }
 
-interface ParsedToken { readonly value: string; readonly end: number; }
+interface ParsedToken {
+  readonly value: string;
+  readonly end: number;
+}
 
 export type CommandTextMode = "source" | "console";
 
 /** Original signed-char lexers skip high bytes; direct console input keeps extended glyphs. */
 function whitespace(text: string, index: number, mode: CommandTextMode): boolean {
   const byte = text.charCodeAt(index);
-  return byte <= 32 || mode === "source" && byte >= 128;
+  return byte <= 32 || (mode === "source" && byte >= 128);
 }
 
 function parseToken(text: string, start: number, dialect: CommandDialect, mode: CommandTextMode): ParsedToken | undefined {
@@ -87,10 +93,20 @@ function parseToken(text: string, start: number, dialect: CommandDialect, mode: 
 }
 
 /** Q2 expands unquoted $cvars repeatedly and rejects unmatched quotes. */
-export function expandCommandMacros(input: string, variable: (name: string) => string, print: (text: string) => void, mode: CommandTextMode = "source"): string | undefined {
-  let text = sourceCommandText(input), budgetLength = text.length;
-  if (budgetLength >= 1024) { print("Line exceeded 1024 chars, discarded.\n"); return undefined; }
-  let quoted = false, count = 0;
+export function expandCommandMacros(
+  input: string,
+  variable: (name: string) => string,
+  print: (text: string) => void,
+  mode: CommandTextMode = "source",
+): string | undefined {
+  let text = sourceCommandText(input),
+    budgetLength = text.length;
+  if (budgetLength >= 1024) {
+    print("Line exceeded 1024 chars, discarded.\n");
+    return undefined;
+  }
+  let quoted = false,
+    count = 0;
   for (let offset = 0; offset < text.length; offset++) {
     if (text.charAt(offset) === '"') quoted = !quoted;
     if (quoted || text.charAt(offset) !== "$") continue;
@@ -98,12 +114,21 @@ export function expandCommandMacros(input: string, variable: (name: string) => s
     if (token === undefined) continue;
     const value = variable(token.value);
     budgetLength += value.length;
-    if (budgetLength >= 1024) { print("Expanded line exceeded 1024 chars, discarded.\n"); return undefined; }
+    if (budgetLength >= 1024) {
+      print("Expanded line exceeded 1024 chars, discarded.\n");
+      return undefined;
+    }
     text = text.slice(0, offset) + value + text.slice(token.end);
     offset--;
-    if (++count === 100) { print("Macro expansion loop, discarded.\n"); return undefined; }
+    if (++count === 100) {
+      print("Macro expansion loop, discarded.\n");
+      return undefined;
+    }
   }
-  if (quoted) { print("Line has unmatched quote, discarded.\n"); return undefined; }
+  if (quoted) {
+    print("Line has unmatched quote, discarded.\n");
+    return undefined;
+  }
   return text;
 }
 
@@ -128,9 +153,12 @@ export function commandTextTail(input: string, dialect: CommandDialect, count: n
 }
 
 export function tokenizeCommand(input: string, dialect: CommandDialect, mode: CommandTextMode = "source"): CommandTokens {
-  const text = sourceCommandText(input), argv: string[] = [];
+  const text = sourceCommandText(input),
+    argv: string[] = [];
   const maximumTokens = dialect === "q3" ? 1024 : 80;
-  let offset = 0, argsText = "", storedBytes = 0;
+  let offset = 0,
+    argsText = "",
+    storedBytes = 0;
   while (offset < text.length) {
     while (offset < text.length && whitespace(text, offset, mode) && (dialect === "q3" || text.charAt(offset) !== "\n")) offset++;
     if (dialect !== "q3" && text.charAt(offset) === "\n") break;

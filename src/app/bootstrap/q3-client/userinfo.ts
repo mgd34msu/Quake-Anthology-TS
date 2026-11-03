@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarFlag } from "../../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 
@@ -9,8 +10,7 @@ export function q3ClientModel(character: string, model: string): string {
 /** Keep a retained/configured foreign model name out of Q3 CS_PLAYERS. */
 export function applyQ3ProxyModel(cvars: CvarRegistry, character: string): void {
   if (character === "q3") return;
-  for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
-    if (cvars.find(name) !== undefined) cvars.set(name, "sarge/default", true);
+  for (const name of ["model", "headmodel", "team_model", "team_headmodel"]) if (cvars.find(name) !== undefined) cvars.set(name, "sarge/default", true);
 }
 
 export function initializeQ3ClientCvars(cvars: CvarRegistry, identity: { readonly name: string; readonly model: string }): void {
@@ -22,7 +22,13 @@ export function initializeQ3ClientCvars(cvars: CvarRegistry, identity: { readonl
   cvars.register("name", identity.name, CvarFlag.Archive | CvarFlag.UserInfo);
   for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
     cvars.register(name, `${identity.model}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
-  for (const [name, value] of [["color1", "4"], ["color2", "5"], ["sex", "male"], ["cl_anonymous", "0"], ["cg_predictItems", "1"]] satisfies readonly (readonly [string, string])[])
+  for (const [name, value] of [
+    ["color1", "4"],
+    ["color2", "5"],
+    ["sex", "male"],
+    ["cl_anonymous", "0"],
+    ["cg_predictItems", "1"],
+  ] satisfies readonly (readonly [string, string])[])
     cvars.register(name, value, CvarFlag.Archive | CvarFlag.UserInfo);
   cvars.register("teamtask", "0", CvarFlag.UserInfo);
   cvars.register("password", "", CvarFlag.UserInfo);
@@ -36,7 +42,8 @@ export function initializeQ3ClientCvars(cvars: CvarRegistry, identity: { readonl
 export function applyServerSystemInfo(cvars: CvarRegistry, info: string, skip: (name: string) => boolean): void {
   const fields = info.split("\\");
   for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
-    const name = fields[index], value = fields[index + 1];
+    const name = fields[index],
+      value = fields[index + 1];
     if (name === undefined || name.length === 0 || value === undefined || name.toLowerCase() === "cl_allowdownload" || skip(name)) continue;
     if (((cvars.find(name)?.flags ?? 0) & CvarFlag.Archive) !== 0) continue;
     cvars.set(name, value, true);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { Deque } from "./deque.ts";
 import type { ClientId } from "../../contracts/identity.ts";
 /* Shared command storage and dispatch adapted from the reference port
@@ -9,7 +10,17 @@ import { CvarFlag, Q2CvarFlag } from "../cvars/index.ts";
 import type { CvarRead, CvarRegistry, CvarSnapshot } from "../cvars/index.ts";
 import { cvarValueText } from "../cvars/numbers.ts";
 import { nativeAtof, nativeAtoi } from "../numeric.ts";
-import { asciiFold, commandSeparatorOffset, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand, type CommandTextMode, type CommandTokens } from "./text.ts";
+import {
+  asciiFold,
+  commandSeparatorOffset,
+  expandCommandMacros,
+  isQ1,
+  isQ2,
+  sourceCommandText,
+  tokenizeCommand,
+  type CommandTextMode,
+  type CommandTokens,
+} from "./text.ts";
 import { sourceFilter } from "./filter.ts";
 import type { CommandDocumentation } from "./documentation.ts";
 export { asciiFold, sourceCommandText, tokenizeCommand, expandCommandMacros } from "./text.ts";
@@ -72,16 +83,49 @@ export interface CommandBufferOptions {
   readonly builtins?: boolean;
 }
 
-interface RegisteredEntry { readonly ownership: "world" | "engine"; readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
-interface AliasEntry { readonly name: string; readonly instance: symbol | undefined; value: string; textMode: CommandTextMode; dialect: CommandDialect; }
-interface TextChunk { readonly dialect: CommandDialect; readonly kind: "text"; readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
-type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
-interface ExecutionFrame { readonly dialect: CommandDialect; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
+interface RegisteredEntry {
+  readonly ownership: "world" | "engine";
+  readonly name: string;
+  readonly handler: CommandHandler | null;
+  readonly documentation: CommandDocumentation | undefined;
+  next: RegisteredEntry | undefined;
+}
+interface AliasEntry {
+  readonly name: string;
+  readonly instance: symbol | undefined;
+  value: string;
+  textMode: CommandTextMode;
+  dialect: CommandDialect;
+}
+interface TextChunk {
+  readonly dialect: CommandDialect;
+  readonly kind: "text";
+  readonly text: string;
+  readonly source: CommandContext;
+  readonly direct: boolean;
+  readonly textMode: CommandTextMode;
+}
+type CommandChunk =
+  | TextChunk
+  | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
+interface ExecutionFrame {
+  readonly dialect: CommandDialect;
+  readonly source: CommandContext;
+  readonly direct: boolean;
+  readonly textMode: CommandTextMode;
+  readonly parent: ExecutionFrame | undefined;
+  active: boolean;
+}
 interface ProgramTail {
-  readonly chunks: Deque<CommandChunk>; readonly deferred: Deque<CommandChunk>;
-  readonly waitFrames: number; readonly waitDialect: CommandDialect | undefined; readonly waitSource: CommandContext | undefined;
-  readonly scriptRead: ScriptRead | undefined; readonly tokens: readonly string[];
-  readonly aliasCount: number; readonly startupCommandText: string | undefined;
+  readonly chunks: Deque<CommandChunk>;
+  readonly deferred: Deque<CommandChunk>;
+  readonly waitFrames: number;
+  readonly waitDialect: CommandDialect | undefined;
+  readonly waitSource: CommandContext | undefined;
+  readonly scriptRead: ScriptRead | undefined;
+  readonly tokens: readonly string[];
+  readonly aliasCount: number;
+  readonly startupCommandText: string | undefined;
   readonly preparationTail: ProgramTail | undefined;
 }
 function chunkRing(records?: Iterable<CommandChunk, undefined, unknown>): Deque<CommandChunk> {
@@ -93,19 +137,31 @@ function chunkRing(records?: Iterable<CommandChunk, undefined, unknown>): Deque<
 class RetiredClients {
   private readonly buckets = new Map<string, ClientId[]>();
   private count = 0;
-  get size(): number { return this.count; }
-  private key(client: ClientId): string { return `${client.slot}:${client.generation}`; }
-  has(client: ClientId): boolean { return this.buckets.get(this.key(client))?.some(retired => retired.equals(client)) === true; }
+  get size(): number {
+    return this.count;
+  }
+  private key(client: ClientId): string {
+    return `${client.slot}:${client.generation}`;
+  }
+  has(client: ClientId): boolean {
+    return this.buckets.get(this.key(client))?.some(retired => retired.equals(client)) === true;
+  }
   add(client: ClientId): void {
     if (this.has(client)) return;
-    const key = this.key(client), bucket = this.buckets.get(key);
-    if (bucket === undefined) this.buckets.set(key, [client]); else bucket.push(client);
+    const key = this.key(client),
+      bucket = this.buckets.get(key);
+    if (bucket === undefined) this.buckets.set(key, [client]);
+    else bucket.push(client);
     this.count++;
   }
 }
-function cloneChunks(ring: Deque<CommandChunk>): Deque<CommandChunk> { return chunkRing(ring.snapshot()); }
+function cloneChunks(ring: Deque<CommandChunk>): Deque<CommandChunk> {
+  return chunkRing(ring.snapshot());
+}
 function cloneProgramTail(tail: ProgramTail | undefined): ProgramTail | undefined {
-  return tail === undefined ? undefined : { ...tail, chunks: cloneChunks(tail.chunks), deferred: cloneChunks(tail.deferred), preparationTail: cloneProgramTail(tail.preparationTail) };
+  return tail === undefined
+    ? undefined
+    : { ...tail, chunks: cloneChunks(tail.chunks), deferred: cloneChunks(tail.deferred), preparationTail: cloneProgramTail(tail.preparationTail) };
 }
 interface ScriptRead {
   readonly dialect: CommandDialect;
@@ -119,23 +175,31 @@ interface ScriptRead {
 
 function sameOrigin(left: CommandOrigin, right: CommandOrigin): boolean {
   switch (left.kind) {
-    case "local-console": case "server-console": return right.kind === left.kind;
-    case "local-seat": return right.kind === "local-seat" && left.seat.equals(right.seat) && left.client.equals(right.client);
-    case "remote-client": return right.kind === "remote-client" && left.client.equals(right.client);
-    case "script": return right.kind === "script" && left.name === right.name && sameOrigin(left.caller, right.caller);
+    case "local-console":
+    case "server-console":
+      return right.kind === left.kind;
+    case "local-seat":
+      return right.kind === "local-seat" && left.seat.equals(right.seat) && left.client.equals(right.client);
+    case "remote-client":
+      return right.kind === "remote-client" && left.client.equals(right.client);
+    case "script":
+      return right.kind === "script" && left.name === right.name && sameOrigin(left.caller, right.caller);
   }
 }
 
 function copyOrigin(origin: CommandOrigin, context: CommandContext): CommandOrigin {
   switch (origin.kind) {
-    case "local-console": case "server-console": return Object.freeze({ kind: origin.kind });
+    case "local-console":
+    case "server-console":
+      return Object.freeze({ kind: origin.kind });
     case "local-seat":
       if (origin.seat.session !== context.session || origin.client.session !== context.session) throw new RangeError("Command seat belongs to another session");
       return Object.freeze({ kind: origin.kind, seat: origin.seat, client: origin.client });
     case "remote-client":
       if (origin.client.session !== context.session) throw new RangeError("Command client belongs to another session");
       return Object.freeze({ kind: origin.kind, client: origin.client });
-    case "script": return Object.freeze({ kind: origin.kind, name: origin.name, caller: copyOrigin(origin.caller, context) });
+    case "script":
+      return Object.freeze({ kind: origin.kind, name: origin.name, caller: copyOrigin(origin.caller, context) });
   }
 }
 
@@ -145,16 +209,32 @@ function positiveInteger(value: number, label: string): number {
 }
 
 function copyContext(context: CommandContext, origin = context.origin): CommandContext {
-  return Object.freeze({ session: context.session, origin: copyOrigin(origin, context),
-    ...(context.producer === undefined ? {} : { producer: Object.freeze({ kind: context.producer.kind,
-      module: Object.freeze({ ...context.producer.module }), ...(context.producer.instance === undefined ? {} : { instance: context.producer.instance }) }) }) });
+  return Object.freeze({
+    session: context.session,
+    origin: copyOrigin(origin, context),
+    ...(context.producer === undefined
+      ? {}
+      : {
+          producer: Object.freeze({
+            kind: context.producer.kind,
+            module: Object.freeze({ ...context.producer.module }),
+            ...(context.producer.instance === undefined ? {} : { instance: context.producer.instance }),
+          }),
+        }),
+  });
 }
 
 function sameProducer(left: CommandContext, right: CommandContext): boolean {
-  const first = left.producer, second = right.producer;
+  const first = left.producer,
+    second = right.producer;
   if (first === undefined || second === undefined) return first === second;
-  return first.instance === second.instance && first.module.id === second.module.id && first.module.digest === second.module.digest
-    && first.module.artifactPath === second.module.artifactPath && first.module.revision === second.module.revision;
+  return (
+    first.instance === second.instance &&
+    first.module.id === second.module.id &&
+    first.module.digest === second.module.digest &&
+    first.module.artifactPath === second.module.artifactPath &&
+    first.module.revision === second.module.revision
+  );
 }
 
 /** A bad argument to an otherwise valid command: printed to the console instead of ending the frame loop. */
@@ -162,8 +242,12 @@ export class CommandUsageError extends Error {}
 
 export class CommandBuffer {
   private currentDialect: CommandDialect;
-  get dialect(): CommandDialect { return this.currentDialect; }
-  private get executionDialect(): CommandDialect { return this.frame?.dialect ?? this.currentDialect; }
+  get dialect(): CommandDialect {
+    return this.currentDialect;
+  }
+  private get executionDialect(): CommandDialect {
+    return this.frame?.dialect ?? this.currentDialect;
+  }
   private builtinDialect: CommandDialect | undefined;
   private afterDispatch = false;
   private programRevision = 0;
@@ -207,22 +291,35 @@ export class CommandBuffer {
     if (options.builtins !== false) this.registerBuiltins();
   }
 
-  get programComplete(): boolean { return this.preparationTail === undefined && this.preparationComplete; }
-  get hasPreparationPrefix(): boolean { return this.preparationTail !== undefined; }
+  get programComplete(): boolean {
+    return this.preparationTail === undefined && this.preparationComplete;
+  }
+  get hasPreparationPrefix(): boolean {
+    return this.preparationTail !== undefined;
+  }
   get preparationComplete(): boolean {
-    return this.frame === undefined && !this.asyncDraining && this.batchBudget === undefined && this.scriptRead === undefined
-      && this.chunks.live === 0 && this.deferred.live === 0 && this.waitFrames === 0;
+    return (
+      this.frame === undefined &&
+      !this.asyncDraining &&
+      this.batchBudget === undefined &&
+      this.scriptRead === undefined &&
+      this.chunks.live === 0 &&
+      this.deferred.live === 0 &&
+      this.waitFrames === 0
+    );
   }
   async advanceProgramFrame(): Promise<void> {
     if (this.frame !== undefined || this.asyncDraining || this.batchBudget !== undefined) throw new Error("Command program is already executing");
     if (this.deferred.live !== 0) this.insertFromDefer();
     if (this.chunks.live === 0 && this.scriptRead === undefined && this.waitFrames !== 0) {
-      this.programRevision++; this.waitFrames = (this.waitFrames - 1) | 0; return;
+      this.programRevision++;
+      this.waitFrames = (this.waitFrames - 1) | 0;
+      return;
     }
     await this.executeScriptsAsync(async () => {});
   }
   validateProfile(dialect: CommandDialect, cvars: CvarRegistry | undefined): void {
-    if (this.frame !== undefined || this.batchBudget !== undefined || this.asyncDraining && !this.afterDispatch)
+    if (this.frame !== undefined || this.batchBudget !== undefined || (this.asyncDraining && !this.afterDispatch))
       throw new Error("Command profile requires a completed program or after-dispatch boundary");
     if (cvars !== undefined && (cvars.context.session !== this.context.session || cvars.dialect !== dialect))
       throw new Error("Command profile registry belongs to another session or dialect");
@@ -230,7 +327,8 @@ export class CommandBuffer {
   setProfile(dialect: CommandDialect, cvars: CvarRegistry | undefined): void {
     this.validateProfile(dialect, cvars);
     const sameProfile = this.currentDialect === dialect;
-    this.currentDialect = dialect; this.fallbackCvars = cvars;
+    this.currentDialect = dialect;
+    this.fallbackCvars = cvars;
     this.maximumBuffer = this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192);
     if (sameProfile && this.options.builtins !== false) this.registerBuiltins(dialect);
     else this.selectBuiltins(dialect);
@@ -239,21 +337,27 @@ export class CommandBuffer {
   private selectBuiltins(dialect: CommandDialect): void {
     if (this.options.builtins === false || this.builtinDialect === dialect) return;
     for (const [name, handler] of this.builtinHandlers) {
-      for (let entry = this.handlers; entry !== undefined; entry = entry.next) if (entry.name === name && entry.handler === handler) {
-        this.unregister(name); break;
-      }
+      for (let entry = this.handlers; entry !== undefined; entry = entry.next)
+        if (entry.name === name && entry.handler === handler) {
+          this.unregister(name);
+          break;
+        }
     }
     this.builtinHandlers.clear();
     this.registerBuiltins(dialect);
   }
 
   prepareProgram(options: CommandBufferOptions): {
-    readonly commands: CommandBuffer; preparePrefix(run: () => Promise<boolean>): Promise<boolean>; validatePublication(): void; publish(): void;
+    readonly commands: CommandBuffer;
+    preparePrefix(run: () => Promise<boolean>): Promise<boolean>;
+    validatePublication(): void;
+    publish(): void;
   } {
     this.validateProfile(this.currentDialect, this.fallbackCvars);
     if (options.context.session !== this.context.session || !sameOrigin(options.context.origin, this.context.origin))
       throw new Error("Prepared command program requires the same owner");
-    const commands = new CommandBuffer(options), revision = this.programRevision;
+    const commands = new CommandBuffer(options),
+      revision = this.programRevision;
     commands.copyProgramState(this);
     commands.inheritedAsyncDrain = this.asyncDraining;
     let phase: "ready" | "preparing" | "failed" | "published" = "ready";
@@ -268,48 +372,90 @@ export class CommandBuffer {
     const preparePrefix = async (run: () => Promise<boolean>): Promise<boolean> => {
       validatePublication();
       const inheritedAsyncDrain = commands.inheritedAsyncDrain;
-      const pending: ProgramTail = { chunks: commands.chunks, deferred: commands.deferred, waitFrames: commands.waitFrames,
-        waitDialect: commands.waitDialect, waitSource: commands.waitSource, scriptRead: commands.scriptRead, tokens: commands.tokens,
-        aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText, preparationTail: commands.preparationTail };
+      const pending: ProgramTail = {
+        chunks: commands.chunks,
+        deferred: commands.deferred,
+        waitFrames: commands.waitFrames,
+        waitDialect: commands.waitDialect,
+        waitSource: commands.waitSource,
+        scriptRead: commands.scriptRead,
+        tokens: commands.tokens,
+        aliasCount: commands.aliasCount,
+        startupCommandText: commands.startupCommandText,
+        preparationTail: commands.preparationTail,
+      };
       phase = "preparing";
       commands.preparationTail = pending;
-      commands.chunks = chunkRing(); commands.deferred = chunkRing(); commands.waitFrames = 0;
-      commands.waitDialect = undefined; commands.waitSource = undefined; commands.scriptRead = undefined; commands.tokens = [];
-      commands.aliasCount = 0; commands.startupCommandText = options.startupCommandText; commands.inheritedAsyncDrain = false;
+      commands.chunks = chunkRing();
+      commands.deferred = chunkRing();
+      commands.waitFrames = 0;
+      commands.waitDialect = undefined;
+      commands.waitSource = undefined;
+      commands.scriptRead = undefined;
+      commands.tokens = [];
+      commands.aliasCount = 0;
+      commands.startupCommandText = options.startupCommandText;
+      commands.inheritedAsyncDrain = false;
       try {
         const complete = await run();
         if (complete) commands.finishPreparation();
         phase = "ready";
         return complete;
-      } catch (error) { commands.restoreTail(pending); phase = "failed"; throw error; }
-      finally { commands.inheritedAsyncDrain = inheritedAsyncDrain; }
+      } catch (error) {
+        commands.restoreTail(pending);
+        phase = "failed";
+        throw error;
+      } finally {
+        commands.inheritedAsyncDrain = inheritedAsyncDrain;
+      }
     };
-    return { commands, validatePublication, preparePrefix,
-      publish: () => { validatePublication(); this.copyProgramState(commands); this.programRevision++; phase = "published"; } };
+    return {
+      commands,
+      validatePublication,
+      preparePrefix,
+      publish: () => {
+        validatePublication();
+        this.copyProgramState(commands);
+        this.programRevision++;
+        phase = "published";
+      },
+    };
   }
 
   private restoreTail(tail: ProgramTail): void {
-    this.chunks = tail.chunks; this.deferred = tail.deferred; this.waitFrames = tail.waitFrames;
-    this.waitDialect = tail.waitDialect; this.waitSource = tail.waitSource; this.scriptRead = tail.scriptRead; this.tokens = tail.tokens;
-    this.aliasCount = tail.aliasCount; this.startupCommandText = tail.startupCommandText; this.preparationTail = tail.preparationTail;
+    this.chunks = tail.chunks;
+    this.deferred = tail.deferred;
+    this.waitFrames = tail.waitFrames;
+    this.waitDialect = tail.waitDialect;
+    this.waitSource = tail.waitSource;
+    this.scriptRead = tail.scriptRead;
+    this.tokens = tail.tokens;
+    this.aliasCount = tail.aliasCount;
+    this.startupCommandText = tail.startupCommandText;
+    this.preparationTail = tail.preparationTail;
     this.discardRetiredWork();
   }
   finishPreparation(): void {
     const tail = this.preparationTail;
     if (tail === undefined) throw new Error("Command program has no preparation prefix");
     if (!this.preparationComplete) throw new Error("Prepared configuration has unfinished commands");
-    this.restoreTail(tail); this.programRevision++;
+    this.restoreTail(tail);
+    this.programRevision++;
   }
 
   private copyProgramState(previous: CommandBuffer): void {
-    this.chunks = cloneChunks(previous.chunks); this.deferred = cloneChunks(previous.deferred);
+    this.chunks = cloneChunks(previous.chunks);
+    this.deferred = cloneChunks(previous.deferred);
     this.preparationTail = cloneProgramTail(previous.preparationTail);
-    this.waitFrames = previous.waitFrames; this.waitDialect = previous.waitDialect;
+    this.waitFrames = previous.waitFrames;
+    this.waitDialect = previous.waitDialect;
     this.waitSource = previous.waitSource;
     this.retiredProducers = previous.retiredProducers;
     this.retiredClients = previous.retiredClients;
-    this.aliasCount = previous.aliasCount; this.tokens = previous.tokens;
-    this.startupCommandText = previous.startupCommandText; this.scriptRead = previous.scriptRead;
+    this.aliasCount = previous.aliasCount;
+    this.tokens = previous.tokens;
+    this.startupCommandText = previous.startupCommandText;
+    this.scriptRead = previous.scriptRead;
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
     this.discardRetiredWork();
   }
@@ -320,11 +466,13 @@ export class CommandBuffer {
     if (this.context.session !== previous.context.session) throw new Error("Commands belong to another session");
     if (previous.pendingText.length + previous.deferredText.length >= this.maximumBuffer)
       throw new Error("Replacement command buffer cannot hold pending commands");
-    this.copyProgramState(previous); this.programRevision++;
+    this.copyProgramState(previous);
+    this.programRevision++;
   }
 
   private sourceClient(source: CommandContext): ClientId | null {
-    let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+    let origin = source.origin;
+    while (origin.kind === "script") origin = origin.caller;
     return origin.kind === "local-seat" || origin.kind === "remote-client" ? origin.client : null;
   }
   private retiredClient(source: CommandContext): boolean {
@@ -337,19 +485,29 @@ export class CommandBuffer {
     const retained = (chunk: CommandChunk): boolean => !retired(chunk.kind === "text" ? chunk.source : chunk.event.source);
     const discardRead = (read: ScriptRead | undefined): ScriptRead | undefined => {
       if (read === undefined || !retired(read.source)) return read;
-      read.cancel(); return undefined;
+      read.cancel();
+      return undefined;
     };
     const discardTail = (tail: ProgramTail | undefined): ProgramTail | undefined => {
       if (tail === undefined) return undefined;
-      tail.chunks.filterLive(retained); tail.deferred.filterLive(retained);
+      tail.chunks.filterLive(retained);
+      tail.deferred.filterLive(retained);
       return {
-      ...tail, scriptRead: discardRead(tail.scriptRead),
-      ...(tail.waitSource !== undefined && retired(tail.waitSource) ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
-      preparationTail: discardTail(tail.preparationTail),
-    }; };
-    this.chunks.filterLive(retained); this.deferred.filterLive(retained);
-    this.scriptRead = discardRead(this.scriptRead); this.preparationTail = discardTail(this.preparationTail);
-    if (this.waitSource !== undefined && retired(this.waitSource)) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
+        ...tail,
+        scriptRead: discardRead(tail.scriptRead),
+        ...(tail.waitSource !== undefined && retired(tail.waitSource) ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
+        preparationTail: discardTail(tail.preparationTail),
+      };
+    };
+    this.chunks.filterLive(retained);
+    this.deferred.filterLive(retained);
+    this.scriptRead = discardRead(this.scriptRead);
+    this.preparationTail = discardTail(this.preparationTail);
+    if (this.waitSource !== undefined && retired(this.waitSource)) {
+      this.waitFrames = 0;
+      this.waitDialect = undefined;
+      this.waitSource = undefined;
+    }
     this.programRevision++;
   }
   producerPending(instance: symbol): boolean {
@@ -363,14 +521,20 @@ export class CommandBuffer {
   bindProducer(instance: symbol, services: CommandProducerServices): () => void {
     if (this.producers.has(instance) || this.retiredProducers.has(instance)) throw new Error("Command producer is already bound or retired");
     this.producers.set(instance, services);
-    return () => { if (this.producers.get(instance) === services) { this.producers.delete(instance); this.discardProducer(instance); } };
+    return () => {
+      if (this.producers.get(instance) === services) {
+        this.producers.delete(instance);
+        this.discardProducer(instance);
+      }
+    };
   }
   private producer(source: CommandContext): CommandProducerServices | undefined {
     const instance = source.producer?.instance;
     if (instance === undefined || source.producer?.kind !== "client-module") return undefined;
     const services = this.producers.get(instance);
     if (services === undefined) throw new Error("Component client command producer is not admitted");
-    services.cvars(source); return services;
+    services.cvars(source);
+    return services;
   }
 
   /** Release only this component instance, including suspended preparation and script work. */
@@ -385,44 +549,80 @@ export class CommandBuffer {
     this.discardSources(source => this.sourceClient(source)?.equals(client) === true);
   }
   private discardRetiredWork(): void {
-    const retired = new Set<symbol>(), clients = new Set<ClientId>();
+    const retired = new Set<symbol>(),
+      clients = new Set<ClientId>();
     const remember = (source: CommandContext | undefined): void => {
-      if (source !== undefined && this.retiredClient(source)) { const client = this.sourceClient(source); if (client !== null) clients.add(client); }
+      if (source !== undefined && this.retiredClient(source)) {
+        const client = this.sourceClient(source);
+        if (client !== null) clients.add(client);
+      }
       const instance = source?.producer?.instance;
       if (instance !== undefined && this.retiredProducers.has(instance)) retired.add(instance);
     };
-    const scan = (chunks: Deque<CommandChunk>): void => { chunks.forEachLive(chunk => { remember(chunk.kind === "text" ? chunk.source : chunk.event.source); }); };
-    scan(this.chunks); scan(this.deferred); remember(this.waitSource); remember(this.scriptRead?.source);
+    const scan = (chunks: Deque<CommandChunk>): void => {
+      chunks.forEachLive(chunk => {
+        remember(chunk.kind === "text" ? chunk.source : chunk.event.source);
+      });
+    };
+    scan(this.chunks);
+    scan(this.deferred);
+    remember(this.waitSource);
+    remember(this.scriptRead?.source);
     for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) {
-      scan(tail.chunks); scan(tail.deferred); remember(tail.waitSource); remember(tail.scriptRead?.source);
+      scan(tail.chunks);
+      scan(tail.deferred);
+      remember(tail.waitSource);
+      remember(tail.scriptRead?.source);
     }
     for (const alias of this.aliases) if (alias.instance !== undefined && this.retiredProducers.has(alias.instance)) retired.add(alias.instance);
     for (const instance of retired) this.discardProducer(instance);
     for (const client of clients) this.discardClient(client);
   }
 
-  get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.live > 0 || this.scriptRead !== undefined; }
+  get hasPendingCommands(): boolean {
+    return this.preparationTail !== undefined || this.chunks.live > 0 || this.scriptRead !== undefined;
+  }
   private programText(kind: "chunks" | "deferred"): string {
     let text = "";
-    const collect = (chunks: Deque<CommandChunk>): void => { chunks.forEachLive(chunk => { if (chunk.kind === "text") text += chunk.text; }); };
+    const collect = (chunks: Deque<CommandChunk>): void => {
+      chunks.forEachLive(chunk => {
+        if (chunk.kind === "text") text += chunk.text;
+      });
+    };
     collect(this[kind]);
     for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) collect(tail[kind]);
     return text;
   }
-  get pendingText(): string { return this.programText("chunks"); }
-  get deferredText(): string { return this.programText("deferred"); }
-  get tokenizedArguments(): readonly string[] { return this.tokens; }
-  get maximumCommandLength(): number { return this.maximumCommand; }
-  get maximumBufferLength(): number { return this.maximumBuffer; }
-  get executionContext(): CommandContext | undefined { return this.frame?.source; }
+  get pendingText(): string {
+    return this.programText("chunks");
+  }
+  get deferredText(): string {
+    return this.programText("deferred");
+  }
+  get tokenizedArguments(): readonly string[] {
+    return this.tokens;
+  }
+  get maximumCommandLength(): number {
+    return this.maximumCommand;
+  }
+  get maximumBufferLength(): number {
+    return this.maximumBuffer;
+  }
+  get executionContext(): CommandContext | undefined {
+    return this.frame?.source;
+  }
   bindOutput(print: (text: string, source?: CommandContext) => void): () => void {
     const binding = { print };
     this.outputBindings.add(binding);
-    return () => { this.outputBindings.delete(binding); };
+    return () => {
+      this.outputBindings.delete(binding);
+    };
   }
   bindScriptCompletion(listener: (event: ScriptCompletion) => void): () => void {
     this.scriptListeners.add(listener);
-    return () => { this.scriptListeners.delete(listener); };
+    return () => {
+      this.scriptListeners.delete(listener);
+    };
   }
   private print(text: string, source = this.frame?.source): void {
     let output = this.options.print;
@@ -439,27 +639,32 @@ export class CommandBuffer {
   }
   private visibleCvars(source: CommandContext): readonly CvarRegistry[] {
     const producer = this.producer(source);
-    const registries = producer === undefined ? this.options.cvarRouting?.visible(source) ?? (this.fallbackCvars === undefined ? [] : [this.fallbackCvars]) : [producer.cvars(source)];
-    for (const registry of registries) if (registry.context.session !== source.session) {
-      throw new RangeError("Visible cvar owner belongs to another session");
-    }
+    const registries =
+      producer === undefined
+        ? (this.options.cvarRouting?.visible(source) ?? (this.fallbackCvars === undefined ? [] : [this.fallbackCvars]))
+        : [producer.cvars(source)];
+    for (const registry of registries)
+      if (registry.context.session !== source.session) {
+        throw new RangeError("Visible cvar owner belongs to another session");
+      }
     return registries;
   }
   findCvar(name: string, source?: CommandContext): CvarRead | undefined {
     return this.cvarOwner(name, this.inputContext(source))?.find(name);
   }
   cvarSnapshots(source?: CommandContext): readonly CvarSnapshot[] {
-    const context = this.inputContext(source), result: CvarSnapshot[] = [];
-    for (const registry of this.visibleCvars(context)) for (const variable of registry.snapshots()) {
-      if (this.cvarOwner(variable.name, context) === registry) result.push(variable);
-    }
+    const context = this.inputContext(source),
+      result: CvarSnapshot[] = [];
+    for (const registry of this.visibleCvars(context))
+      for (const variable of registry.snapshots()) {
+        if (this.cvarOwner(variable.name, context) === registry) result.push(variable);
+      }
     return Object.freeze(result);
   }
 
   archiveCommands(source?: CommandContext): readonly string[] {
     const context = this.inputContext(source);
-    return Object.freeze(this.visibleCvars(context).flatMap(registry =>
-      registry.archiveCommands(name => this.cvarOwner(name, context) === registry)));
+    return Object.freeze(this.visibleCvars(context).flatMap(registry => registry.archiveCommands(name => this.cvarOwner(name, context) === registry)));
   }
 
   register(nameInput: string, handler: CommandHandler | null, documentation?: CommandDocumentation, ownership: "world" | "engine" = "world"): boolean {
@@ -469,7 +674,8 @@ export class CommandBuffer {
       return false;
     }
     if (this.executionDialect !== "q3" && this.cvarOwner(name, this.frame?.source ?? this.context)?.variableString(name)) {
-      this.print(`Cmd_AddCommand: ${name} already defined as a var\n`); return false;
+      this.print(`Cmd_AddCommand: ${name} already defined as a var\n`);
+      return false;
     }
     this.handlers = { name, handler, documentation, ownership, next: this.handlers };
     return true;
@@ -477,7 +683,9 @@ export class CommandBuffer {
   registerEngine(name: string, handler: CommandHandler, documentation?: CommandDocumentation): boolean {
     return this.register(name, handler, documentation, "engine");
   }
-  registerFallbackName(name: string): boolean { return this.register(name, null); }
+  registerFallbackName(name: string): boolean {
+    return this.register(name, null);
+  }
   exists(nameInput: string): boolean {
     const name = sourceCommandText(nameInput);
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) if (entry.name === name) return true;
@@ -489,7 +697,8 @@ export class CommandBuffer {
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) {
       if (entry.name === name) {
         if (expectedHandler !== undefined && entry.handler !== expectedHandler) return false;
-        if (previous === undefined) this.handlers = entry.next; else previous.next = entry.next;
+        if (previous === undefined) this.handlers = entry.next;
+        else previous.next = entry.next;
         return true;
       }
       previous = entry;
@@ -508,33 +717,52 @@ export class CommandBuffer {
   cvarDocumentation(name: string, source?: CommandContext): CommandDocumentation | undefined {
     return this.cvarOwner(name, this.inputContext(source))?.documentation(name);
   }
-  private visibleAliases(): readonly AliasEntry[] { return this.aliases.filter(alias => alias.instance === this.frame?.source.producer?.instance); }
-  aliasValue(name: string): string | undefined { return this.visibleAliases().find(alias => asciiFold(alias.name) === asciiFold(name))?.value; }
+  private visibleAliases(): readonly AliasEntry[] {
+    return this.aliases.filter(alias => alias.instance === this.frame?.source.producer?.instance);
+  }
+  aliasValue(name: string): string | undefined {
+    return this.visibleAliases().find(alias => asciiFold(alias.name) === asciiFold(name))?.value;
+  }
   completeNames(visitor: (name: string) => undefined): void {
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) visitor(entry.name);
   }
   complete(partialInput: string): string | undefined {
     const partial = sourceCommandText(partialInput);
     if (partial.length === 0) return undefined;
-    const names = [...this.registeredNames(), ...(isQ2(this.executionDialect) || this.executionDialect === "q1-quakeworld" ? this.visibleAliases().map(alias => alias.name) : [])];
+    const names = [
+      ...this.registeredNames(),
+      ...(isQ2(this.executionDialect) || this.executionDialect === "q1-quakeworld" ? this.visibleAliases().map(alias => alias.name) : []),
+    ];
     if (this.executionDialect !== "q1-netquake") {
       const exact = names.find(name => name === partial);
       if (exact !== undefined) return exact;
     }
-    return names.find(name => this.executionDialect === "q3" ? asciiFold(name).startsWith(asciiFold(partial)) : name.startsWith(partial));
+    return names.find(name => (this.executionDialect === "q3" ? asciiFold(name).startsWith(asciiFold(partial)) : name.startsWith(partial)));
   }
 
   defineAlias(nameInput: string, textInput: string): boolean {
     if (this.executionDialect === "q3") throw new Error("Quake III uses vstr instead of console aliases");
-    const name = sourceCommandText(nameInput), text = sourceCommandText(textInput);
-    if (name.length >= 32) { this.print("Alias name is too long\n"); return false; }
+    const name = sourceCommandText(nameInput),
+      text = sourceCommandText(textInput);
+    if (name.length >= 32) {
+      this.print("Alias name is too long\n");
+      return false;
+    }
     this.programRevision++;
-    const instance = this.frame?.source.producer?.instance, existing = this.aliases.find(alias => alias.name === name && alias.instance === instance);
+    const instance = this.frame?.source.producer?.instance,
+      existing = this.aliases.find(alias => alias.name === name && alias.instance === instance);
     const textMode = this.frame?.textMode ?? "source";
-    if (existing === undefined) this.aliases.unshift({ name, instance, value: text, textMode, dialect: this.executionDialect }); else { existing.value = text; existing.textMode = textMode; existing.dialect = this.executionDialect; }
+    if (existing === undefined) this.aliases.unshift({ name, instance, value: text, textMode, dialect: this.executionDialect });
+    else {
+      existing.value = text;
+      existing.textMode = textMode;
+      existing.dialect = this.executionDialect;
+    }
     return true;
   }
-  aliasNames(): readonly string[] { return Object.freeze(this.executionDialect === "q3" ? [] : this.visibleAliases().map(alias => alias.name)); }
+  aliasNames(): readonly string[] {
+    return Object.freeze(this.executionDialect === "q3" ? [] : this.visibleAliases().map(alias => alias.name));
+  }
 
   append(text: string, source?: CommandContext, dialect?: CommandDialect): void {
     this.appendFor(text, this.inputContext(source), undefined, undefined, dialect);
@@ -543,7 +771,9 @@ export class CommandBuffer {
     if (this.preparationTail === undefined) throw new Error("Command program has no preparation prefix");
     this.appendFor(text, this.inputContext(source), undefined, undefined, dialect, true);
   }
-  insert(text: string, source?: CommandContext, dialect?: CommandDialect): void { this.insertFor(text, this.inputContext(source), undefined, undefined, undefined, dialect); }
+  insert(text: string, source?: CommandContext, dialect?: CommandDialect): void {
+    this.insertFor(text, this.inputContext(source), undefined, undefined, undefined, dialect);
+  }
   private inputContext(source: CommandContext | undefined): CommandContext {
     const context = source ?? this.frame?.source ?? this.context;
     if (context.session !== this.context.session) throw new RangeError("Command input belongs to another session");
@@ -556,39 +786,80 @@ export class CommandBuffer {
     if (source.origin.kind !== "local-seat" && source.origin.kind !== "local-console") return "source";
     return this.frame?.textMode ?? (direct ? "console" : "source");
   }
-  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct), dialect = this.executionDialect, preparation = false): void {
+  private appendFor(
+    input: string,
+    source: CommandContext,
+    direct = this.frame === undefined && source.origin.kind !== "script",
+    textMode = this.inputTextMode(source, direct),
+    dialect = this.executionDialect,
+    preparation = false,
+  ): void {
     let tail = this.preparationTail;
     while (tail?.preparationTail !== undefined) tail = tail.preparationTail;
     const target = !preparation && this.frame === undefined && tail !== undefined ? tail.chunks : this.chunks;
     const text = this.sourceText(input);
     if (text === undefined) return;
-    if (this.pendingText.length + text.length >= (this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192))) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) { target.admit({ kind: "text", text, source, direct, textMode, dialect }); this.programRevision++; }
+    if (this.pendingText.length + text.length >= (this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192))) {
+      this.print("Cbuf_AddText: overflow\n");
+      return;
+    }
+    if (text.length > 0) {
+      target.admit({ kind: "text", text, source, direct, textMode, dialect });
+      this.programRevision++;
+    }
   }
-  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", completion?: ScriptCompletion, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect): void {
+  private insertFor(
+    input: string,
+    source: CommandContext,
+    direct = this.frame === undefined && source.origin.kind !== "script",
+    completion?: ScriptCompletion,
+    textMode = this.inputTextMode(source, direct),
+    dialect = this.executionDialect,
+  ): void {
     const body = this.sourceText(input);
     if (body === undefined) return;
     const text = body + (dialect === "q1-quakeworld" || dialect === "q3" ? "\n" : "");
     const limit = this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192);
     if (dialect === "q3") {
-      if (this.pendingText.length + text.length > limit) { this.print("Cbuf_InsertText overflowed\n"); return; }
+      if (this.pendingText.length + text.length > limit) {
+        this.print("Cbuf_InsertText overflowed\n");
+        return;
+      }
     } else {
-      if (text.length >= limit) { this.print("Cbuf_AddText: overflow\n"); return; }
-      if (this.pendingText.length + text.length > limit) { this.print("Cbuf_InsertText overflowed\n"); return; }
+      if (text.length >= limit) {
+        this.print("Cbuf_AddText: overflow\n");
+        return;
+      }
+      if (this.pendingText.length + text.length > limit) {
+        this.print("Cbuf_InsertText overflowed\n");
+        return;
+      }
     }
     if (completion !== undefined || text.length > 0) this.programRevision++;
     if (completion !== undefined) this.chunks.prepend([{ kind: "completion", event: completion, dialect, textMode }]);
     if (text.length === 0) return;
     const head = this.chunks.head();
     // Adjacent inserts from one source read as a single buffer, so a self-expanding alias stays one chunk.
-    if (completion === undefined && head?.kind === "text" && head.source === source && head.direct === direct && head.textMode === textMode && head.dialect === dialect)
+    if (
+      completion === undefined &&
+      head?.kind === "text" &&
+      head.source === source &&
+      head.direct === direct &&
+      head.textMode === textMode &&
+      head.dialect === dialect
+    )
       this.chunks.replaceAtOffset(0, { ...head, text: text + head.text });
     else this.chunks.prepend([{ kind: "text", text, source, direct, textMode, dialect }]);
   }
   /** Text that cannot be source bytes is dropped with a message, as bad input must not end the process. */
   private sourceText(input: string): string | undefined {
-    try { return sourceCommandText(input); }
-    catch (error) { if (!(error instanceof RangeError)) throw error; this.print(`${error.message}\n`); return undefined; }
+    try {
+      return sourceCommandText(input);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      this.print(`${error.message}\n`);
+      return undefined;
+    }
   }
   copyToDefer(): void {
     if (!isQ2(this.executionDialect)) throw new Error("Deferred command buffers belong to Quake II");
@@ -598,7 +869,10 @@ export class CommandBuffer {
   }
   insertFromDefer(): void {
     if (!isQ2(this.executionDialect)) throw new Error("Deferred command buffers belong to Quake II");
-    if (this.pendingText.length + this.deferredText.length > this.maximumBuffer) { this.print("Cbuf_InsertText overflowed\n"); return; }
+    if (this.pendingText.length + this.deferredText.length > this.maximumBuffer) {
+      this.print("Cbuf_InsertText overflowed\n");
+      return;
+    }
     this.programRevision++;
     this.chunks.prepend(this.deferred.snapshot());
     this.deferred = chunkRing();
@@ -630,8 +904,13 @@ export class CommandBuffer {
       let firstDrain = true;
       do {
         for (const count of this.drain(firstDrain, canContinue)) {
-          executed += count; this.afterDispatch = true;
-          try { await afterDispatch(); } finally { this.afterDispatch = false; }
+          executed += count;
+          this.afterDispatch = true;
+          try {
+            await afterDispatch();
+          } finally {
+            this.afterDispatch = false;
+          }
         }
         const read = this.scriptRead;
         if (!awaitScripts || read === undefined || !canContinue()) break;
@@ -639,7 +918,9 @@ export class CommandBuffer {
         firstDrain = false;
       } while (true);
       return executed;
-    } finally { this.asyncDraining = false; }
+    } finally {
+      this.asyncDraining = false;
+    }
   }
 
   private *drain(resetAliases = true, shouldContinue?: () => boolean): Generator<number, void, void> {
@@ -650,27 +931,52 @@ export class CommandBuffer {
       const script = this.scriptRead;
       if (script !== undefined) {
         if (script.result.kind === "pending") return;
-        this.programRevision++; this.scriptRead = undefined;
+        this.programRevision++;
+        this.scriptRead = undefined;
         if (script.result.kind === "failed") {
-          this.print(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
-          this.chunks.prepend([{ kind: "completion", event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }), dialect: script.dialect, textMode: script.textMode }]);
-        }
-        else this.insertScript(script.name, script.result.text, script.source, script.dialect, script.textMode);
+          this.print(
+            `couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`,
+            script.source,
+          );
+          this.chunks.prepend([
+            {
+              kind: "completion",
+              event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }),
+              dialect: script.dialect,
+              textMode: script.textMode,
+            },
+          ]);
+        } else this.insertScript(script.name, script.result.text, script.source, script.dialect, script.textMode);
         continue;
       }
-      if (this.waitDialect === "q3" && this.waitFrames !== 0) { this.programRevision++; this.waitFrames = (this.waitFrames - 1) | 0; break; }
+      if (this.waitDialect === "q3" && this.waitFrames !== 0) {
+        this.programRevision++;
+        this.waitFrames = (this.waitFrames - 1) | 0;
+        break;
+      }
       const first = this.chunks.head();
       if (first === null) break;
       if (first.kind === "completion") {
-        this.programRevision++; this.chunks.shift();
-        const frame: ExecutionFrame = { dialect: first.dialect, source: first.event.source, direct: false,
-          textMode: first.textMode, parent: this.frame, active: true };
-        this.frame = frame; this.selectBuiltins(first.dialect);
+        this.programRevision++;
+        this.chunks.shift();
+        const frame: ExecutionFrame = {
+          dialect: first.dialect,
+          source: first.event.source,
+          direct: false,
+          textMode: first.textMode,
+          parent: this.frame,
+          active: true,
+        };
+        this.frame = frame;
+        this.selectBuiltins(first.dialect);
         try {
           this.options.onScriptComplete?.(first.event);
           for (const listener of this.scriptListeners) listener(first.event);
+        } finally {
+          frame.active = false;
+          this.frame = frame.parent;
+          this.selectBuiltins(this.executionDialect);
         }
-        finally { frame.active = false; this.frame = frame.parent; this.selectBuiltins(this.executionDialect); }
         continue;
       }
       const buffer = this.commandText(first);
@@ -683,12 +989,20 @@ export class CommandBuffer {
         }
         offset = this.maximumCommand - 1;
       }
-      const line = buffer.slice(0, offset), consumed = offset === buffer.length ? offset : offset + 1;
+      const line = buffer.slice(0, offset),
+        consumed = offset === buffer.length ? offset : offset + 1;
       this.consume(consumed);
       const count = this.dispatch(line, first.source, first.direct, first.textMode, first.dialect);
-      if (--budget <= 0) { this.print("Command buffer exceeded its dispatch budget; pending commands discarded\n"); this.consume(Infinity); }
+      if (--budget <= 0) {
+        this.print("Command buffer exceeded its dispatch budget; pending commands discarded\n");
+        this.consume(Infinity);
+      }
       if (count !== 0) yield count;
-      if (this.waitDialect !== "q3" && this.waitFrames !== 0) { this.programRevision++; this.waitFrames = 0; break; }
+      if (this.waitDialect !== "q3" && this.waitFrames !== 0) {
+        this.programRevision++;
+        this.waitFrames = 0;
+        break;
+      }
     }
   }
 
@@ -699,22 +1013,44 @@ export class CommandBuffer {
   /** Execute a bounded batch without draining another seat's pending input. */
   executeBatch(text: string, source: CommandContext, signal?: AbortSignal): number {
     const restore = this.beginBatch(text, source, signal);
-    try { const count = this.execute(); this.completeBatch(); return count; } finally { restore(); }
+    try {
+      const count = this.execute();
+      this.completeBatch();
+      return count;
+    } finally {
+      restore();
+    }
   }
   /** Same bounded program, awaiting exec reads and the caller's ordinary request dispatch. */
   async executeBatchAsync(text: string, source: CommandContext, afterDispatch: () => Promise<void>, signal?: AbortSignal): Promise<number> {
     const restore = this.beginBatch(text, source, signal);
-    try { const count = await this.executeScriptsAsync(afterDispatch); this.completeBatch(); return count; } finally { restore(); }
+    try {
+      const count = await this.executeScriptsAsync(afterDispatch);
+      this.completeBatch();
+      return count;
+    } finally {
+      restore();
+    }
   }
   /** Native rcon executes one initial command; derived exec and alias work remains ordered. */
-  async executeCommandAsync(text: string, source: CommandContext, afterDispatch: () => Promise<void>, macroExpansion: "source" | "none" = "source", signal?: AbortSignal): Promise<number> {
+  async executeCommandAsync(
+    text: string,
+    source: CommandContext,
+    afterDispatch: () => Promise<void>,
+    macroExpansion: "source" | "none" = "source",
+    signal?: AbortSignal,
+  ): Promise<number> {
     if (text.length >= this.maximumCommand) throw new RangeError("Command line exceeds the engine line limit.");
     const restore = this.beginBatch(text, source, signal, false);
     try {
       let count = this.dispatch(text, this.inputContext(source), false, undefined, undefined, macroExpansion === "source");
       await afterDispatch();
-      count += await this.executeScriptsAsync(afterDispatch); this.completeBatch(); return count;
-    } finally { restore(); }
+      count += await this.executeScriptsAsync(afterDispatch);
+      this.completeBatch();
+      return count;
+    } finally {
+      restore();
+    }
   }
   private completeBatch(): void {
     if (this.chunks.live > 0 || this.deferred.live > 0 || this.scriptRead !== undefined || this.waitFrames !== 0)
@@ -722,24 +1058,44 @@ export class CommandBuffer {
   }
   private beginBatch(text: string, source: CommandContext, signal?: AbortSignal, append = true): () => void {
     if (this.asyncDraining || this.inheritedAsyncDrain || this.frame !== undefined) throw new Error("Command buffer is already executing");
-    const context = this.inputContext(source), value = sourceCommandText(text);
+    const context = this.inputContext(source),
+      value = sourceCommandText(text);
     if (value !== text || value.length >= this.maximumBuffer) throw new RangeError("Command batch exceeds the engine buffer limit.");
-    let quoted = false, length = 0;
+    let quoted = false,
+      length = 0;
     for (const character of value) {
       if (character === '"') quoted = !quoted;
-      if ((!quoted && character === ";") || character === "\n" || this.executionDialect === "q3" && character === "\r") length = 0;
+      if ((!quoted && character === ";") || character === "\n" || (this.executionDialect === "q3" && character === "\r")) length = 0;
       else if (++length >= this.maximumCommand) throw new RangeError("Command batch line exceeds the engine line limit.");
     }
     if (this.batchBudget !== undefined) throw new Error("Nested command batches are not supported.");
-    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, waitDialect: this.waitDialect, waitSource: this.waitSource, aliasCount: this.aliasCount, tokens: this.tokens, scriptRead: this.scriptRead };
+    const saved = {
+      chunks: this.chunks,
+      deferred: this.deferred,
+      waitFrames: this.waitFrames,
+      waitDialect: this.waitDialect,
+      waitSource: this.waitSource,
+      aliasCount: this.aliasCount,
+      tokens: this.tokens,
+      scriptRead: this.scriptRead,
+    };
     this.scriptRead = undefined;
-    this.chunks = chunkRing(); this.deferred = chunkRing(); this.waitFrames = 0; this.waitSource = undefined; this.aliasCount = 0;
+    this.chunks = chunkRing();
+    this.deferred = chunkRing();
+    this.waitFrames = 0;
+    this.waitSource = undefined;
+    this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
     if (append) this.appendFor(value, context, false, undefined, undefined, true);
     return () => {
-      this.chunks = saved.chunks; this.deferred = saved.deferred; this.waitFrames = saved.waitFrames; this.waitDialect = saved.waitDialect;
+      this.chunks = saved.chunks;
+      this.deferred = saved.deferred;
+      this.waitFrames = saved.waitFrames;
+      this.waitDialect = saved.waitDialect;
       this.waitSource = saved.waitSource;
-      this.aliasCount = saved.aliasCount; this.tokens = saved.tokens; this.batchBudget = undefined;
+      this.aliasCount = saved.aliasCount;
+      this.tokens = saved.tokens;
+      this.batchBudget = undefined;
       this.scriptRead = saved.scriptRead;
       this.discardRetiredWork();
     };
@@ -755,8 +1111,8 @@ export class CommandBuffer {
       if (chunk.dialect !== first.dialect || chunk.textMode !== first.textMode) break;
       if (!sameProducer(first.source, chunk.kind === "text" ? chunk.source : chunk.event.source)) break;
       if (chunk.kind === "completion") {
-        if (!isQ2(first.dialect) || origin.kind !== "script" || chunk.event.result.kind !== "completed"
-          || !sameOrigin(chunk.event.source.origin, origin)) break;
+        if (!isQ2(first.dialect) || origin.kind !== "script" || chunk.event.result.kind !== "completed" || !sameOrigin(chunk.event.source.origin, origin))
+          break;
         origin = origin.caller;
         resumedCaller = true;
         continue;
@@ -773,7 +1129,10 @@ export class CommandBuffer {
     while (count > 0) {
       const chunk = this.chunks.atOffset(index);
       if (chunk === null) return;
-      if (chunk.kind === "completion") { index++; continue; }
+      if (chunk.kind === "completion") {
+        index++;
+        continue;
+      }
       if (chunk.text.length > count) {
         this.chunks.replaceAtOffset(index, { ...chunk, text: chunk.text.slice(count) });
         return;
@@ -783,44 +1142,110 @@ export class CommandBuffer {
     }
   }
 
-  private dispatch(raw: string, source: CommandContext, direct = false, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect, macroExpansion = true): number {
+  private dispatch(
+    raw: string,
+    source: CommandContext,
+    direct = false,
+    textMode = this.inputTextMode(source, direct),
+    dialect = this.executionDialect,
+    macroExpansion = true,
+  ): number {
     this.programRevision++;
     if (this.batchBudget?.signal?.aborted) throw new Error("Command batch cancelled; remaining batch discarded.");
-    if (this.batchBudget !== undefined && --this.batchBudget.remaining < 0) throw new Error("Command batch exceeded 128 dispatched commands; remaining batch discarded.");
+    if (this.batchBudget !== undefined && --this.batchBudget.remaining < 0)
+      throw new Error("Command batch exceeded 128 dispatched commands; remaining batch discarded.");
     let tokens: CommandTokens | undefined;
     try {
-      const expanded = isQ2(dialect) && macroExpansion ? expandCommandMacros(raw, name => {
-        const owner = this.cvarOwner(name, source), variable = owner?.find(name);
-        return owner !== undefined && isQ2(owner.dialect) && variable !== undefined && (variable.flags & Q2CvarFlag.Private) !== 0 ? "" : variable?.value ?? "";
-      }, text => this.print(text), textMode) : raw;
+      const expanded =
+        isQ2(dialect) && macroExpansion
+          ? expandCommandMacros(
+              raw,
+              name => {
+                const owner = this.cvarOwner(name, source),
+                  variable = owner?.find(name);
+                return owner !== undefined && isQ2(owner.dialect) && variable !== undefined && (variable.flags & Q2CvarFlag.Private) !== 0
+                  ? ""
+                  : (variable?.value ?? "");
+              },
+              text => this.print(text),
+              textMode,
+            )
+          : raw;
       tokens = expanded === undefined ? undefined : tokenizeCommand(expanded, dialect, textMode);
     } catch (error) {
       // An oversized token ends only its own line, as the source prints and carries on.
       if (!(error instanceof RangeError)) throw error;
       this.print(`${error.message}; command ignored\n`);
     }
-    if (tokens === undefined) { this.tokens = []; return 0; }
+    if (tokens === undefined) {
+      this.tokens = [];
+      return 0;
+    }
     const name = tokens.argv[0];
     this.tokens = tokens.argv;
     if (name === undefined) return 0;
-    const frame: ExecutionFrame = { dialect, source, direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"), textMode, parent: this.frame, active: true };
+    const frame: ExecutionFrame = {
+      dialect,
+      source,
+      direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"),
+      textMode,
+      parent: this.frame,
+      active: true,
+    };
     this.frame = frame;
     this.selectBuiltins(dialect);
-    const requireActive = (): void => { if (this.retiredClient(source)) throw new Error("Command client is disconnected"); if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active"); };
-    const command: CommandInvocation = Object.freeze({ source, direct: frame.direct, dialect: this.executionDialect, argv: tokens.argv,
-      args: Object.freeze(tokens.argv.slice(1)), argsText: tokens.argsText, raw,
-      append: (text: string): void => { requireActive(); this.appendFor(text, source); },
-      insert: (text: string): void => { requireActive(); this.insertFor(text, source); },
-      executeNow: (text: string): number => { requireActive(); return this.executeNow(text); },
-      executeScript: (): void => { requireActive(); this.executeScript(command); }, assertActive: requireActive });
+    const requireActive = (): void => {
+      if (this.retiredClient(source)) throw new Error("Command client is disconnected");
+      if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active");
+    };
+    const command: CommandInvocation = Object.freeze({
+      source,
+      direct: frame.direct,
+      dialect: this.executionDialect,
+      argv: tokens.argv,
+      args: Object.freeze(tokens.argv.slice(1)),
+      argsText: tokens.argsText,
+      raw,
+      append: (text: string): void => {
+        requireActive();
+        this.appendFor(text, source);
+      },
+      insert: (text: string): void => {
+        requireActive();
+        this.insertFor(text, source);
+      },
+      executeNow: (text: string): number => {
+        requireActive();
+        return this.executeNow(text);
+      },
+      executeScript: (): void => {
+        requireActive();
+        this.executeScript(command);
+      },
+      assertActive: requireActive,
+    });
     try {
       if (this.options.allowCommand?.(command) === false) return 1;
       const builtin = this.builtinHandlers.get(asciiFold(name));
       let selected = this.handlers;
       while (selected !== undefined && asciiFold(selected.name) !== asciiFold(name)) selected = selected.next;
       const producer = this.producer(source);
-      if (producer !== undefined && selected !== undefined && selected.ownership !== "engine" && (builtin === undefined || selected.handler !== builtin) && !producer.engineCommand(name)) { producer.command(command); return 1; }
-      if (selected?.ownership !== "engine" && (builtin === undefined || selected?.handler !== builtin) && this.options.sourceCommand?.(command, selected !== undefined) === true) return 1;
+      if (
+        producer !== undefined &&
+        selected !== undefined &&
+        selected.ownership !== "engine" &&
+        (builtin === undefined || selected.handler !== builtin) &&
+        !producer.engineCommand(name)
+      ) {
+        producer.command(command);
+        return 1;
+      }
+      if (
+        selected?.ownership !== "engine" &&
+        (builtin === undefined || selected?.handler !== builtin) &&
+        this.options.sourceCommand?.(command, selected !== undefined) === true
+      )
+        return 1;
       for (let entry = this.handlers; entry !== undefined; entry = entry.next) {
         if (asciiFold(entry.name) !== asciiFold(name)) continue;
         if (this.executionDialect === "q3") this.touch(entry);
@@ -833,7 +1258,10 @@ export class CommandBuffer {
       if (this.executionDialect !== "q3") {
         const alias = this.visibleAliases().find(value => asciiFold(value.name) === asciiFold(name));
         if (alias !== undefined) {
-          if (isQ2(this.executionDialect) && ++this.aliasCount === 16) { this.print("ALIAS_LOOP_COUNT\n"); return 1; }
+          if (isQ2(this.executionDialect) && ++this.aliasCount === 16) {
+            this.print("ALIAS_LOOP_COUNT\n");
+            return 1;
+          }
           this.insertFor(alias.value, source, false, undefined, alias.textMode, alias.dialect);
           return 1;
         }
@@ -844,40 +1272,66 @@ export class CommandBuffer {
       if (!(error instanceof CommandUsageError)) throw error;
       this.print(`${error.message}\n`);
       return 1;
-    } finally { frame.active = false; this.frame = frame.parent; this.selectBuiltins(this.executionDialect); }
+    } finally {
+      frame.active = false;
+      this.frame = frame.parent;
+      this.selectBuiltins(this.executionDialect);
+    }
   }
   private touch(entry: RegisteredEntry): void {
     if (entry === this.handlers) return;
     for (let previous = this.handlers; previous !== undefined; previous = previous.next) {
       if (previous.next !== entry) continue;
-      previous.next = entry.next; entry.next = this.handlers; this.handlers = entry; return;
+      previous.next = entry.next;
+      entry.next = this.handlers;
+      this.handlers = entry;
+      return;
     }
   }
   forwardToServer(command: CommandInvocation): undefined {
     command.assertActive();
     const producer = this.producer(command.source);
-    if (producer !== undefined) { producer.command(command); return undefined; }
+    if (producer !== undefined) {
+      producer.command(command);
+      return undefined;
+    }
     return this.options.forwardToServer?.(command);
   }
 
   private fallback(command: CommandInvocation): void {
-    const name = command.argv[0] ?? "", cvars = this.cvarOwner(name, command.source), variable = cvars?.find(name);
+    const name = command.argv[0] ?? "",
+      cvars = this.cvarOwner(name, command.source),
+      variable = cvars?.find(name);
     if (variable !== undefined && cvars !== undefined) {
       const value = command.argv[1];
       if (value === undefined) {
-        this.print(this.executionDialect === "q3" ? `"${variable.name}" is:"${variable.value}^7" default:"${variable.resetValue}^7"\n` : `"${variable.name}" is "${variable.value}"\n`);
+        this.print(
+          this.executionDialect === "q3"
+            ? `"${variable.name}" is:"${variable.value}^7" default:"${variable.resetValue}^7"\n`
+            : `"${variable.name}" is "${variable.value}"\n`,
+        );
         if (this.executionDialect === "q3" && variable.latchedValue !== undefined) this.print(`latched: "${variable.latchedValue}"\n`);
-      }
-      else cvars.set(variable.name, value);
+      } else cvars.set(variable.name, value);
       return;
     }
     const producer = this.producer(command.source);
-    if (producer !== undefined) { producer.command(command); return; }
+    if (producer !== undefined) {
+      producer.command(command);
+      return;
+    }
     if (this.executionDialect === "q3") {
       if (this.options.clientGame?.(command) || this.options.serverGame?.(command) || this.options.ui?.(command)) return;
     }
-    if (this.executionDialect === "q3" || isQ2(this.executionDialect)) { this.forwardToServer(command); return; }
-    if (this.executionDialect !== "q1-quakeworld" || this.findCvar("cl_warncmd", command.source)?.numericValue || this.findCvar("developer", command.source)?.numericValue) this.print(`Unknown command "${name}"\n`);
+    if (this.executionDialect === "q3" || isQ2(this.executionDialect)) {
+      this.forwardToServer(command);
+      return;
+    }
+    if (
+      this.executionDialect !== "q1-quakeworld" ||
+      this.findCvar("cl_warncmd", command.source)?.numericValue ||
+      this.findCvar("developer", command.source)?.numericValue
+    )
+      this.print(`Unknown command "${name}"\n`);
   }
 
   private scriptCompletion(name: string, caller: CommandContext, result: ScriptCompletion["result"]): ScriptCompletion {
@@ -885,7 +1339,13 @@ export class CommandBuffer {
     return Object.freeze({ name, source, result });
   }
 
-  private insertScript(filename: string, file: string | undefined, caller: CommandContext, dialect = this.executionDialect, textMode = this.frame?.textMode ?? "source"): void {
+  private insertScript(
+    filename: string,
+    file: string | undefined,
+    caller: CommandContext,
+    dialect = this.executionDialect,
+    textMode = this.frame?.textMode ?? "source",
+  ): void {
     if (file === undefined) {
       this.print(`couldn't exec ${filename}\n`, caller);
       this.chunks.prepend([{ kind: "completion", event: this.scriptCompletion(filename, caller, { kind: "missing" }), dialect, textMode }]);
@@ -900,18 +1360,44 @@ export class CommandBuffer {
   }
 
   private executeScript(command: CommandInvocation): void {
-    if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
-    if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }
+    if (command.argv.length !== 2) {
+      this.print("exec <filename> : execute a script file\n");
+      return;
+    }
+    if (this.scriptRead !== undefined) {
+      this.insertFor(`${command.raw}\n`, command.source);
+      return;
+    }
     const requested = command.argv[1] ?? "";
     const filename = this.executionDialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
     const producer = this.producer(command.source);
     const file = producer === undefined ? this.options.readScript?.(filename, command.source) : producer.readScript(filename, command.source);
     if (file instanceof Promise) {
       let cancel = (): void => {};
-      const settled = new Promise<void>(resolve => { cancel = resolve; });
-      const read: ScriptRead = { name: filename, source: command.source, dialect: command.dialect, textMode: this.frame?.textMode ?? "source", result: { kind: "pending" }, settled, cancel };
-      void file.then(text => { read.result = { kind: "ready", text }; cancel(); }, (error: unknown) => { read.result = { kind: "failed", error }; cancel(); });
-      this.programRevision++; this.scriptRead = read;
+      const settled = new Promise<void>(resolve => {
+        cancel = resolve;
+      });
+      const read: ScriptRead = {
+        name: filename,
+        source: command.source,
+        dialect: command.dialect,
+        textMode: this.frame?.textMode ?? "source",
+        result: { kind: "pending" },
+        settled,
+        cancel,
+      };
+      void file.then(
+        text => {
+          read.result = { kind: "ready", text };
+          cancel();
+        },
+        (error: unknown) => {
+          read.result = { kind: "failed", error };
+          cancel();
+        },
+      );
+      this.programRevision++;
+      this.scriptRead = read;
     } else this.insertScript(filename, file, command.source);
   }
 
@@ -919,79 +1405,155 @@ export class CommandBuffer {
     this.builtinDialect = dialect;
     const handlers = new Map<string, CommandHandler>();
     const documents = new Map<string, CommandDocumentation>();
-    const register = (name: string, handler: CommandHandler, documentation?: CommandDocumentation): void => { handlers.set(name, handler); if (documentation !== undefined) documents.set(name, documentation); };
+    const register = (name: string, handler: CommandHandler, documentation?: CommandDocumentation): void => {
+      handlers.set(name, handler);
+      if (documentation !== undefined) documents.set(name, documentation);
+    };
     const install = (): void => {
-      const order = dialect === "q1-netquake" ? ["stuffcmds", "exec", "echo", "alias", "cmd", "wait"]
-        : dialect === "q1-quakeworld" ? ["stuffcmds", "exec", "echo", "alias", "wait", "cmd", "serverinfo", "localinfo"]
-        : isQ2(dialect) ? ["cmdlist", "exec", "echo", "alias", "wait", "set", "cvarlist", "cmd"]
-        : ["toggle", "set", "sets", "setu", "seta", "reset", "cvarlist", "cvar_restart", "cmdlist", "exec", "vstr", "echo", "wait", "cmd"];
-      for (const name of [...order, ...["set", "cmdlist", "cvarlist", "vstr", "inc", "dec", "resetall", "seta", "setu", "sets", "reset", "toggle"].filter(name => !order.includes(name))]) {
+      const order =
+        dialect === "q1-netquake"
+          ? ["stuffcmds", "exec", "echo", "alias", "cmd", "wait"]
+          : dialect === "q1-quakeworld"
+            ? ["stuffcmds", "exec", "echo", "alias", "wait", "cmd", "serverinfo", "localinfo"]
+            : isQ2(dialect)
+              ? ["cmdlist", "exec", "echo", "alias", "wait", "set", "cvarlist", "cmd"]
+              : ["toggle", "set", "sets", "setu", "seta", "reset", "cvarlist", "cvar_restart", "cmdlist", "exec", "vstr", "echo", "wait", "cmd"];
+      for (const name of [
+        ...order,
+        ...["set", "cmdlist", "cvarlist", "vstr", "inc", "dec", "resetall", "seta", "setu", "sets", "reset", "toggle"].filter(name => !order.includes(name)),
+      ]) {
         const handler = handlers.get(name);
         if (handler !== undefined && !this.exists(name) && this.register(name, handler, documents.get(name))) this.builtinHandlers.set(name, handler);
       }
     };
-    register("wait", command => { this.programRevision++; this.waitDialect = command.dialect; this.waitSource = command.source; this.waitFrames = this.executionDialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1; });
-    register("echo", command => { this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`); }, { summary: "Print text to the console.", usage: "echo <text>", examples: ["echo hello"] });
-    register("cmd", command => { this.forwardToServer(command); });
-    register("exec", command => { command.executeScript(); });
-    if (dialect !== "q3") register("alias", command => {
-      const name = command.argv[1];
-      if (name === undefined) { this.print("Current alias commands:\n"); for (const alias of this.visibleAliases()) this.print(`${alias.name} : ${alias.value}\n`); return; }
-      const args = command.argv.slice(2), text = `${args.join(" ")}${isQ1(this.executionDialect) && args.length > 0 ? " " : ""}\n`;
-      if (text.length >= 1024) throw new RangeError("Alias body overflows source cmd[1024]");
-      this.defineAlias(name, text);
+    register("wait", command => {
+      this.programRevision++;
+      this.waitDialect = command.dialect;
+      this.waitSource = command.source;
+      this.waitFrames = this.executionDialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1;
     });
-    if (isQ1(dialect)) register("stuffcmds", command => {
-      if (this.executionDialect === "q1-netquake" && command.argv.length !== 1) { this.print("stuffcmds : execute command line parameters\n"); return; }
-      if (this.startupCommandText !== undefined) { command.insert(this.startupCommandText); return; }
-      const text = (this.options.commandLine ?? []).slice(1).join(" ");
-      let script = "";
-      for (let offset = 0; offset < text.length; offset++) {
-        if (text.charAt(offset) !== "+") continue;
-        const start = ++offset;
-        while (offset < text.length && text.charAt(offset) !== "+" && text.charAt(offset) !== "-") offset++;
-        script += `${text.slice(start, offset)}\n`;
-        offset--;
-      }
-      if (script.length > 0) command.insert(script);
+    register(
+      "echo",
+      command => {
+        this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`);
+      },
+      { summary: "Print text to the console.", usage: "echo <text>", examples: ["echo hello"] },
+    );
+    register("cmd", command => {
+      this.forwardToServer(command);
     });
-    {
-      register("set", command => { this.setCommand(command, 0); }, { summary: "Set a console variable.", usage: "set <variable> <value>", examples: ['set name "Player"'] });
-      register("cmdlist", command => {
-        const pattern = this.executionDialect === "q3" ? command.argv[1] : undefined;
-        const names = this.registeredNames().filter(name => pattern === undefined || sourceFilter(pattern, name, false));
-        for (const name of names) this.print(`${name}\n`);
-        this.print(`${names.length} commands\n`);
-      }, { summary: "List registered console commands.", usage: dialect === "q3" ? "cmdlist [pattern]" : "cmdlist", examples: ["cmdlist"] });
-      register("cvarlist", command => {
-        const variables = this.cvarSnapshots(command.source), pattern = this.executionDialect === "q3" ? command.argv[1] : undefined;
-        for (const variable of variables) {
-          if (pattern !== undefined && !sourceFilter(pattern, variable.name, false)) continue;
-          const flag = (mask: number, marker: string): string => (variable.flags & mask) !== 0 ? marker : " ";
-          const markers = this.executionDialect === "q3"
-            ? flag(4, "S") + flag(2, "U") + flag(64, "R") + flag(16, "I") + flag(1, "A") + flag(32, "L") + flag(512, "C")
-            : flag(1, "*") + flag(2, "U") + flag(4, "S") + ((variable.flags & 8) !== 0 ? "-" : flag(16, "L"));
-          this.print(`${markers} ${variable.name} "${variable.value}"\n`);
+    register("exec", command => {
+      command.executeScript();
+    });
+    if (dialect !== "q3")
+      register("alias", command => {
+        const name = command.argv[1];
+        if (name === undefined) {
+          this.print("Current alias commands:\n");
+          for (const alias of this.visibleAliases()) this.print(`${alias.name} : ${alias.value}\n`);
+          return;
         }
-        const indexes = this.visibleCvars(command.source).reduce((total, registry) => total + registry.indexCount, 0);
-        this.print(this.executionDialect === "q3" ? `\n${variables.length} total cvars\n${indexes} cvar indexes\n` : `${variables.length} cvars\n`);
-      }, { summary: "List visible console variables and their current values.", usage: dialect === "q3" ? "cvarlist [pattern]" : "cvarlist", examples: ["cvarlist"] });
+        const args = command.argv.slice(2),
+          text = `${args.join(" ")}${isQ1(this.executionDialect) && args.length > 0 ? " " : ""}\n`;
+        if (text.length >= 1024) throw new RangeError("Alias body overflows source cmd[1024]");
+        this.defineAlias(name, text);
+      });
+    if (isQ1(dialect))
+      register("stuffcmds", command => {
+        if (this.executionDialect === "q1-netquake" && command.argv.length !== 1) {
+          this.print("stuffcmds : execute command line parameters\n");
+          return;
+        }
+        if (this.startupCommandText !== undefined) {
+          command.insert(this.startupCommandText);
+          return;
+        }
+        const text = (this.options.commandLine ?? []).slice(1).join(" ");
+        let script = "";
+        for (let offset = 0; offset < text.length; offset++) {
+          if (text.charAt(offset) !== "+") continue;
+          const start = ++offset;
+          while (offset < text.length && text.charAt(offset) !== "+" && text.charAt(offset) !== "-") offset++;
+          script += `${text.slice(start, offset)}\n`;
+          offset--;
+        }
+        if (script.length > 0) command.insert(script);
+      });
+    {
+      register(
+        "set",
+        command => {
+          this.setCommand(command, 0);
+        },
+        { summary: "Set a console variable.", usage: "set <variable> <value>", examples: ['set name "Player"'] },
+      );
+      register(
+        "cmdlist",
+        command => {
+          const pattern = this.executionDialect === "q3" ? command.argv[1] : undefined;
+          const names = this.registeredNames().filter(name => pattern === undefined || sourceFilter(pattern, name, false));
+          for (const name of names) this.print(`${name}\n`);
+          this.print(`${names.length} commands\n`);
+        },
+        { summary: "List registered console commands.", usage: dialect === "q3" ? "cmdlist [pattern]" : "cmdlist", examples: ["cmdlist"] },
+      );
+      register(
+        "cvarlist",
+        command => {
+          const variables = this.cvarSnapshots(command.source),
+            pattern = this.executionDialect === "q3" ? command.argv[1] : undefined;
+          for (const variable of variables) {
+            if (pattern !== undefined && !sourceFilter(pattern, variable.name, false)) continue;
+            const flag = (mask: number, marker: string): string => ((variable.flags & mask) !== 0 ? marker : " ");
+            const markers =
+              this.executionDialect === "q3"
+                ? flag(4, "S") + flag(2, "U") + flag(64, "R") + flag(16, "I") + flag(1, "A") + flag(32, "L") + flag(512, "C")
+                : flag(1, "*") + flag(2, "U") + flag(4, "S") + ((variable.flags & 8) !== 0 ? "-" : flag(16, "L"));
+            this.print(`${markers} ${variable.name} "${variable.value}"\n`);
+          }
+          const indexes = this.visibleCvars(command.source).reduce((total, registry) => total + registry.indexCount, 0);
+          this.print(this.executionDialect === "q3" ? `\n${variables.length} total cvars\n${indexes} cvar indexes\n` : `${variables.length} cvars\n`);
+        },
+        {
+          summary: "List visible console variables and their current values.",
+          usage: dialect === "q3" ? "cvarlist [pattern]" : "cvarlist",
+          examples: ["cvarlist"],
+        },
+      );
     }
-    for (const name of ["inc", "dec"]) register(name, command => {
-      const variableName = command.argv[1];
-      if (variableName === undefined) { this.print(`Usage: ${name} <variable> [value]\n`); return; }
-      const cvars = this.cvarOwner(variableName, command.source), variable = cvars?.find(variableName);
-      if (variable === undefined || cvars === undefined) { this.print(`${variableName} is not a variable\n`); return; }
-      if (!/^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]*)$/u.test(variable.value)) {
-        this.print(`"${variable.name}" is "${variable.value}", can't ${name}\n`); return;
-      }
-      const amount = Math.fround(command.argv[2] === undefined ? 1 : nativeAtof(command.argv[2]));
-      const value = Math.fround(variable.numericValue + (name === "dec" ? -amount : amount));
-      const text = value === variable.numericValue ? variable.value
-        : !Number.isFinite(value) ? Number.isNaN(value) ? "nan" : value < 0 ? "-inf" : "inf"
-        : Math.fround(value - Math.floor(value)) < Math.fround(1e-6) ? value.toFixed(0) : cvarValueText(value, false);
-      cvars.setConsole(variable.name, text.slice(0, 31));
-    });
+    for (const name of ["inc", "dec"])
+      register(name, command => {
+        const variableName = command.argv[1];
+        if (variableName === undefined) {
+          this.print(`Usage: ${name} <variable> [value]\n`);
+          return;
+        }
+        const cvars = this.cvarOwner(variableName, command.source),
+          variable = cvars?.find(variableName);
+        if (variable === undefined || cvars === undefined) {
+          this.print(`${variableName} is not a variable\n`);
+          return;
+        }
+        if (!/^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]*)$/u.test(variable.value)) {
+          this.print(`"${variable.name}" is "${variable.value}", can't ${name}\n`);
+          return;
+        }
+        const amount = Math.fround(command.argv[2] === undefined ? 1 : nativeAtof(command.argv[2]));
+        const value = Math.fround(variable.numericValue + (name === "dec" ? -amount : amount));
+        const text =
+          value === variable.numericValue
+            ? variable.value
+            : !Number.isFinite(value)
+              ? Number.isNaN(value)
+                ? "nan"
+                : value < 0
+                  ? "-inf"
+                  : "inf"
+              : Math.fround(value - Math.floor(value)) < Math.fround(1e-6)
+                ? value.toFixed(0)
+                : cvarValueText(value, false);
+        cvars.setConsole(variable.name, text.slice(0, 31));
+      });
     register("resetall", command => {
       for (const variable of this.cvarSnapshots(command.source)) {
         const cvars = this.cvarOwner(variable.name, command.source);
@@ -999,48 +1561,99 @@ export class CommandBuffer {
         cvars?.resetConsole(variable.name, true);
       }
     });
-    register("vstr", command => {
-      if (command.argv.length !== 2) { this.print("vstr <variablename> : execute a variable command\n"); return; }
-      command.insert(`${this.findCvar(command.argv[1] ?? "", command.source)?.value ?? ""}\n`);
-    }, { summary: "Execute the invoking owner's variable as commands in this command buffer.", usage: "vstr <variablename>", examples: ["vstr nextmap"] });
-    for (const [name, flag] of [["seta", CvarFlag.Archive], ["setu", CvarFlag.UserInfo], ["sets", CvarFlag.ServerInfo]] satisfies readonly (readonly [string, number])[]) {
+    register(
+      "vstr",
+      command => {
+        if (command.argv.length !== 2) {
+          this.print("vstr <variablename> : execute a variable command\n");
+          return;
+        }
+        command.insert(`${this.findCvar(command.argv[1] ?? "", command.source)?.value ?? ""}\n`);
+      },
+      { summary: "Execute the invoking owner's variable as commands in this command buffer.", usage: "vstr <variablename>", examples: ["vstr nextmap"] },
+    );
+    for (const [name, flag] of [
+      ["seta", CvarFlag.Archive],
+      ["setu", CvarFlag.UserInfo],
+      ["sets", CvarFlag.ServerInfo],
+    ] satisfies readonly (readonly [string, number])[]) {
       register(name, command => {
         const variable = command.argv[1];
-        if (variable === undefined || command.argv.length < 3 || this.executionDialect === "q3" && command.argv.length !== 3) {
-          this.print(`Usage: ${name} <variable> <value>\n`); return;
+        if (variable === undefined || command.argv.length < 3 || (this.executionDialect === "q3" && command.argv.length !== 3)) {
+          this.print(`Usage: ${name} <variable> <value>\n`);
+          return;
         }
         const cvars = this.cvarOwner(variable, command.source);
-        if (cvars?.dialect === "q3") { this.setCommand(command, flag); return; }
-        cvars?.setCommandFlags(variable, command.argv.slice(2).join(" "),
-          name === "seta" ? "archive" : name === "setu" ? "userinfo" : "serverinfo");
+        if (cvars?.dialect === "q3") {
+          this.setCommand(command, flag);
+          return;
+        }
+        cvars?.setCommandFlags(variable, command.argv.slice(2).join(" "), name === "seta" ? "archive" : name === "setu" ? "userinfo" : "serverinfo");
       });
     }
     for (const name of ["serverinfo", "localinfo"] as const) {
-      register(name, command => {
-        const args = command.argv, cvars = this.cvarOwner(args[1] ?? name, command.source);
-        if (cvars === undefined) return;
-        if (args.length === 1) {
-          const entries = name === "localinfo" ? [...cvars.localInfo] : cvars.infoString(CvarFlag.ServerInfo).split("\\").slice(1).reduce<[string, string][]>((pairs, part, index, parts) => index % 2 === 0 ? [...pairs, [part, parts[index + 1] ?? ""]] : pairs, []);
-          for (const [key, value] of entries) this.print(`${key.padEnd(20)}${value}\n`);
-          return;
-        }
-        const key = args[1] ?? "", value = args[2];
-        if (args.length !== 3 || value === undefined) { this.print(`usage: ${name} [ <key> <value> ]\n`); return; }
-        if (key.startsWith("*")) { this.print("Can't set * keys\n"); return; }
-        if (/[\\"\n\r;]/.test(key) || /[\\"\n\r]/.test(value) || key.length > 63 || value.length > 63) { this.print("Invalid info key or value\n"); return; }
-        if (name === "localinfo") { if (value === "") cvars.localInfo.delete(key); else cvars.localInfo.set(key, value); return; }
-        cvars.setCommandFlags(key, value, "serverinfo");
-      }, { summary: name === "serverinfo" ? "Show or set a QuakeWorld server info key." : "Show or set a QuakeWorld local info key.", usage: `${name} [<key> <value>]`, examples: [`${name} dq 1`] });
+      register(
+        name,
+        command => {
+          const args = command.argv,
+            cvars = this.cvarOwner(args[1] ?? name, command.source);
+          if (cvars === undefined) return;
+          if (args.length === 1) {
+            const entries =
+              name === "localinfo"
+                ? [...cvars.localInfo]
+                : cvars
+                    .infoString(CvarFlag.ServerInfo)
+                    .split("\\")
+                    .slice(1)
+                    .reduce<[string, string][]>((pairs, part, index, parts) => (index % 2 === 0 ? [...pairs, [part, parts[index + 1] ?? ""]] : pairs), []);
+            for (const [key, value] of entries) this.print(`${key.padEnd(20)}${value}\n`);
+            return;
+          }
+          const key = args[1] ?? "",
+            value = args[2];
+          if (args.length !== 3 || value === undefined) {
+            this.print(`usage: ${name} [ <key> <value> ]\n`);
+            return;
+          }
+          if (key.startsWith("*")) {
+            this.print("Can't set * keys\n");
+            return;
+          }
+          if (/[\\"\n\r;]/.test(key) || /[\\"\n\r]/.test(value) || key.length > 63 || value.length > 63) {
+            this.print("Invalid info key or value\n");
+            return;
+          }
+          if (name === "localinfo") {
+            if (value === "") cvars.localInfo.delete(key);
+            else cvars.localInfo.set(key, value);
+            return;
+          }
+          cvars.setCommandFlags(key, value, "serverinfo");
+        },
+        {
+          summary: name === "serverinfo" ? "Show or set a QuakeWorld server info key." : "Show or set a QuakeWorld local info key.",
+          usage: `${name} [<key> <value>]`,
+          examples: [`${name} dq 1`],
+        },
+      );
     }
     register("toggle", command => {
       const name = command.argv[1];
-      if (name === undefined) { this.print("Usage: toggle <variable> [values]\n"); return; }
+      if (name === undefined) {
+        this.print("Usage: toggle <variable> [values]\n");
+        return;
+      }
       const cvars = this.cvarOwner(name, command.source);
       if (this.executionDialect === "q3" && command.argv.length === 2) {
-        cvars?.set(name, Math.trunc(cvars.variableValue(name)) === 0 ? "1" : "0"); return;
+        cvars?.set(name, Math.trunc(cvars.variableValue(name)) === 0 ? "1" : "0");
+        return;
       }
       const variable = cvars?.find(name);
-      if (variable === undefined || cvars === undefined) { this.print(`${name} is not a variable\n`); return; }
+      if (variable === undefined || cvars === undefined) {
+        this.print(`${name} is not a variable\n`);
+        return;
+      }
       const values = command.argv.slice(2);
       if (values.length === 0) {
         if (variable.value === "0" || variable.value === "1") cvars.setConsole(name, variable.value === "0" ? "1" : "0");
@@ -1053,21 +1666,33 @@ export class CommandBuffer {
       }
     });
     register("reset", command => {
-      if (command.argv.length < 2 || this.executionDialect === "q3" && command.argv.length !== 2) { this.print("reset <variable> : reset a cvar\n"); return; }
+      if (command.argv.length < 2 || (this.executionDialect === "q3" && command.argv.length !== 2)) {
+        this.print("reset <variable> : reset a cvar\n");
+        return;
+      }
       const name = command.argv[1] ?? "";
       this.cvarOwner(name, command.source)?.resetConsole(name);
     });
-    register("cvar_restart", command => { for (const cvars of this.visibleCvars(command.source)) if (cvars.dialect === "q3") cvars.resetAll(); });
+    register("cvar_restart", command => {
+      for (const cvars of this.visibleCvars(command.source)) if (cvars.dialect === "q3") cvars.resetAll();
+    });
     install();
   }
   private setCommand(command: CommandInvocation, flags: number): void {
     const cvars = this.cvarOwner(command.argv[1] ?? "", command.source);
     if (cvars === undefined) return;
-    if (command.argv.length < 3 || isQ2(this.executionDialect) && command.argv.length > 4 || flags !== 0 && command.argv.length !== 3) { this.print("set <variable> <value>\n"); return; }
-    const name = command.argv[1] ?? "", value = command.argv[2] ?? "";
+    if (command.argv.length < 3 || (isQ2(this.executionDialect) && command.argv.length > 4) || (flags !== 0 && command.argv.length !== 3)) {
+      this.print("set <variable> <value>\n");
+      return;
+    }
+    const name = command.argv[1] ?? "",
+      value = command.argv[2] ?? "";
     if (isQ2(this.executionDialect) && command.argv.length === 4) {
       const requested = command.argv[3];
-      if (requested !== "u" && requested !== "s") { this.print("flags can only be 'u' or 's'\n"); return; }
+      if (requested !== "u" && requested !== "s") {
+        this.print("flags can only be 'u' or 's'\n");
+        return;
+      }
       cvars.fullSet(name, value, requested === "u" ? CvarFlag.UserInfo : CvarFlag.ServerInfo);
     } else {
       let combined = value;
@@ -1075,7 +1700,8 @@ export class CommandBuffer {
         combined = "";
         let length = 0;
         for (let index = 2; index < command.argv.length; index++) {
-          const argument = command.argv[index] ?? "", sourceLength = Math.max(0, argument.length - 1);
+          const argument = command.argv[index] ?? "",
+            sourceLength = Math.max(0, argument.length - 1);
           if (length + sourceLength >= 1022) break;
           combined += argument + (index !== command.argv.length - 1 ? " " : "");
           if (combined.length >= 1024) throw new RangeError("Cvar_Set overflows source combined buffer");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { BinaryError } from "../core/binary/index.ts";
 
@@ -15,7 +16,8 @@ function range(offset: number): void {
 export function mediaBytes(bytes: Uint8Array, source = "<media>"): MediaInput {
   let closed = false;
   return {
-    source, byteLength: bytes.byteLength,
+    source,
+    byteLength: bytes.byteLength,
     readAt(offset, destination) {
       if (closed) throw new Error("Media input is closed");
       range(offset);
@@ -23,7 +25,9 @@ export function mediaBytes(bytes: Uint8Array, source = "<media>"): MediaInput {
       destination.set(part);
       return part.length;
     },
-    close() { closed = true; },
+    close() {
+      closed = true;
+    },
   };
 }
 
@@ -31,17 +35,27 @@ export function mediaBytes(bytes: Uint8Array, source = "<media>"): MediaInput {
 export function openMediaFile(path: string): MediaInput {
   const descriptor = openSync(path, "r");
   let byteLength: number;
-  try { byteLength = fstatSync(descriptor).size; }
-  catch (error: unknown) { closeSync(descriptor); throw error; }
+  try {
+    byteLength = fstatSync(descriptor).size;
+  } catch (error: unknown) {
+    closeSync(descriptor);
+    throw error;
+  }
   let closed = false;
   return {
-    source: path, byteLength,
+    source: path,
+    byteLength,
     readAt(offset, destination) {
       if (closed) throw new Error("Media input is closed");
       range(offset);
       return readSync(descriptor, destination, 0, destination.length, offset);
     },
-    close() { if (!closed) { closed = true; closeSync(descriptor); } },
+    close() {
+      if (!closed) {
+        closed = true;
+        closeSync(descriptor);
+      }
+    },
   };
 }
 

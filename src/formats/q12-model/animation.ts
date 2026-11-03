@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Selection and interpolation adapted from Q1 r_alias.c/r_sprite.c and
  * Q2 gl_mesh.c. Copyright (C) 1996-2001 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec2, Vec3 } from "../../contracts/math.ts";
@@ -22,8 +23,12 @@ export function sampleTimedFrame<T>(frames: TimedFrames<T>, timeSeconds: number,
 /** Q1 and Q2 light the current pose's normal while interpolating vertex positions. */
 const aliasInterpolationCache = new PoseLru<readonly ModelVertex[]>(256);
 
-export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame, backLerp: number,
-  previousOriginDelta: Vec3 = { x: 0, y: 0, z: 0 }): readonly ModelVertex[] {
+export function interpolateAliasFrames(
+  current: ModelFrame,
+  previous: ModelFrame,
+  backLerp: number,
+  previousOriginDelta: Vec3 = { x: 0, y: 0, z: 0 },
+): readonly ModelVertex[] {
   if (!Number.isFinite(backLerp) || backLerp < 0 || backLerp > 1) throw new RangeError("backLerp must be in 0..1");
   if (current.vertices.length !== previous.vertices.length) throw new RangeError("Alias poses have different vertex counts");
   // Pure in its inputs; shared poses repeat across entities and frames.
@@ -34,18 +39,26 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
   const frontLerp = 1 - backLerp;
   const result = current.vertices.map((vertex, index) => {
     const old = at(previous.vertices, index, "previous vertex");
-    return { normal: vertex.normal, position: {
-      x: Math.fround(vertex.position.x * frontLerp + (old.position.x + previousOriginDelta.x) * backLerp),
-      y: Math.fround(vertex.position.y * frontLerp + (old.position.y + previousOriginDelta.y) * backLerp),
-      z: Math.fround(vertex.position.z * frontLerp + (old.position.z + previousOriginDelta.z) * backLerp),
-    } };
+    return {
+      normal: vertex.normal,
+      position: {
+        x: Math.fround(vertex.position.x * frontLerp + (old.position.x + previousOriginDelta.x) * backLerp),
+        y: Math.fround(vertex.position.y * frontLerp + (old.position.y + previousOriginDelta.y) * backLerp),
+        z: Math.fround(vertex.position.z * frontLerp + (old.position.z + previousOriginDelta.z) * backLerp),
+      },
+    };
   });
   aliasInterpolationCache.set(key, result);
   return result;
 }
 
-export interface AliasMeshVertex extends ModelVertex { readonly texCoord: Vec2; }
-export interface AliasGeometry { readonly vertices: readonly AliasMeshVertex[]; readonly indices: readonly number[]; }
+export interface AliasMeshVertex extends ModelVertex {
+  readonly texCoord: Vec2;
+}
+export interface AliasGeometry {
+  readonly vertices: readonly AliasMeshVertex[];
+  readonly indices: readonly number[];
+}
 
 interface AliasTopology {
   readonly corners: readonly { readonly vertex: number; readonly texCoord: Vec2 }[];
@@ -54,15 +67,23 @@ interface AliasTopology {
 const md2Topologies = new WeakMap<Q2AliasModel, AliasTopology>();
 const mdlTopologies = new WeakMap<Q1AliasModel, AliasTopology>();
 function poseGeometry(topology: AliasTopology, pose: readonly ModelVertex[]): AliasGeometry {
-  return { indices: topology.indices, vertices: topology.corners.map(corner => ({
-    ...at(pose, corner.vertex, "pose vertex"), texCoord: corner.texCoord,
-  })) };
+  return {
+    indices: topology.indices,
+    vertices: topology.corners.map(corner => ({
+      ...at(pose, corner.vertex, "pose vertex"),
+      texCoord: corner.texCoord,
+    })),
+  };
 }
 /** MDL callers contract fresh index/texCoord objects per call; topology itself is still cached. */
 function mdlPoseGeometry(topology: AliasTopology, pose: readonly ModelVertex[]): AliasGeometry {
-  return { indices: [...topology.indices], vertices: topology.corners.map(corner => ({
-    ...at(pose, corner.vertex, "pose vertex"), texCoord: { ...corner.texCoord },
-  })) };
+  return {
+    indices: [...topology.indices],
+    vertices: topology.corners.map(corner => ({
+      ...at(pose, corner.vertex, "pose vertex"),
+      texCoord: { ...corner.texCoord },
+    })),
+  };
 }
 
 /** Expand corners so back-facing seam vertices can use the other half of the skin. */
@@ -109,8 +130,11 @@ export function buildMd2Geometry(model: Q2AliasModel, pose: readonly ModelVertex
 }
 
 /** Map retained MD2 corners directly into a consumer's geometry without alias wrappers. */
-export function mapMd2Geometry<T>(model: Q2AliasModel, pose: readonly ModelVertex[],
-  map: (vertex: ModelVertex, texCoord: Vec2, corner: number) => T): { readonly vertices: readonly T[]; readonly indices: readonly number[] } {
+export function mapMd2Geometry<T>(
+  model: Q2AliasModel,
+  pose: readonly ModelVertex[],
+  map: (vertex: ModelVertex, texCoord: Vec2, corner: number) => T,
+): { readonly vertices: readonly T[]; readonly indices: readonly number[] } {
   const topology = md2Topologies.get(model);
   if (topology === undefined) {
     const geometry = buildMd2Geometry(model, pose);
@@ -122,15 +146,23 @@ export function mapMd2Geometry<T>(model: Q2AliasModel, pose: readonly ModelVerte
 export function mdlSkinImage(model: Q1AliasModel, skin: number, palette: Palette, timeSeconds = 0, syncBase = 0): RenderImage {
   const pixels = sampleTimedFrame(at(model.skins, skin, "skin"), timeSeconds, syncBase);
   return {
-    kind: "indexed8", levels: [{ width: model.skinWidth, height: model.skinHeight, pixels }],
-    palette, transparency: { kind: "opaque" }, fullbright: { first: 224, last: 255 }, translation: null,
+    kind: "indexed8",
+    levels: [{ width: model.skinWidth, height: model.skinHeight, pixels }],
+    palette,
+    transparency: { kind: "opaque" },
+    fullbright: { first: 224, last: 255 },
+    translation: null,
   };
 }
 
 export function sprFrameImage(model: Q1SpriteModel, frame: number, palette: Palette, timeSeconds = 0, syncBase = 0): RenderImage {
   const selected = sampleTimedFrame(at(model.frames, frame, "sprite frame"), timeSeconds, syncBase);
   return {
-    kind: "indexed8", levels: [{ width: selected.width, height: selected.height, pixels: selected.pixels }],
-    palette, transparency: { kind: "index", index: 255 }, fullbright: { first: 224, last: 254 }, translation: null,
+    kind: "indexed8",
+    levels: [{ width: selected.width, height: selected.height, pixels: selected.pixels }],
+    palette,
+    transparency: { kind: "index", index: 255 },
+    fullbright: { first: 224, last: 254 },
+    translation: null,
   };
 }

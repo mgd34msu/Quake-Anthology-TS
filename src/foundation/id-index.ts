@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * (string-id, discriminator) hash index over integer values, following the
  * shared C foundation (include/qa/id_index.h): storage is reserved before
@@ -29,8 +30,12 @@ export class IdIndex {
   private entryCount = 0;
   private reservedCount = 0;
 
-  get count(): number { return this.entryCount; }
-  get capacity(): number { return this.keys.length; }
+  get count(): number {
+    return this.entryCount;
+  }
+  get capacity(): number {
+    return this.keys.length;
+  }
 
   /** Grows entry storage and rehashes buckets. Cold path: call at load. */
   reserve(additional: number): void {
@@ -68,7 +73,8 @@ export class IdIndex {
 
   /** Inserts one entry. Requires a prior reserve covering the new count. */
   insert(key: number, discriminator: number, value: number): void {
-    if (this.entryCount >= this.reservedCount || this.entryCount >= this.keys.length) throw new RangeError("Id index insertion exceeds its reservation; reserve at load");
+    if (this.entryCount >= this.reservedCount || this.entryCount >= this.keys.length)
+      throw new RangeError("Id index insertion exceeds its reservation; reserve at load");
     if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("Id index values are nonnegative caller indices");
     const entry = this.entryCount++;
     this.keys[entry] = key >>> 0;
@@ -84,7 +90,7 @@ export class IdIndex {
     if (this.buckets.length === 0) return -1;
     let entry = this.buckets[hashOf(key, discriminator, this.buckets.length - 1)] ?? NO_ENTRY;
     while (entry !== NO_ENTRY) {
-      if (this.keys[entry] === (key >>> 0) && this.discriminators[entry] === (discriminator >>> 0)) {
+      if (this.keys[entry] === key >>> 0 && this.discriminators[entry] === discriminator >>> 0) {
         const value = this.values[entry];
         return value === undefined ? -1 : value;
       }
@@ -120,12 +126,14 @@ export class IdIndex {
 
   /** Removes matching entries, preserving remaining admission order. Invalidates cursors. */
   remove(key: number, discriminator: number): boolean {
-    return this.retain((entryKey, entryDiscriminator) => entryKey !== (key >>> 0) || entryDiscriminator !== (discriminator >>> 0)) > 0;
+    return this.retain((entryKey, entryDiscriminator) => entryKey !== key >>> 0 || entryDiscriminator !== discriminator >>> 0) > 0;
   }
 
   removeValue(key: number, discriminator: number, value: number): boolean {
-    return this.retain((entryKey, entryDiscriminator, entryValue) =>
-      entryKey !== (key >>> 0) || entryDiscriminator !== (discriminator >>> 0) || entryValue !== value) > 0;
+    return (
+      this.retain((entryKey, entryDiscriminator, entryValue) => entryKey !== key >>> 0 || entryDiscriminator !== discriminator >>> 0 || entryValue !== value) >
+      0
+    );
   }
 
   /** Keeps selected entries in admission order, rebuilding buckets once. Returns removals. */

@@ -1,4 +1,8 @@
-interface NameSlots { readonly slots: Set<number>; first: number; }
+// SPDX-License-Identifier: GPL-2.0-or-later
+interface NameSlots {
+  readonly slots: Set<number>;
+  first: number;
+}
 
 /** Mirrors source lookup order: a matching name must occur before the first free slot. */
 export class ResourceNameIndex {
@@ -9,10 +13,16 @@ export class ResourceNameIndex {
 
   constructor(capacity: number, reserved: readonly number[] = []) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Invalid resource capacity");
-    this.#values = new Array<string>(capacity).fill(""); this.#reserved = new Set(reserved);
+    this.#values = new Array<string>(capacity).fill("");
+    this.#reserved = new Set(reserved);
     this.#advance();
   }
-  clear(): void { this.#values.fill(""); this.#names.clear(); this.#free = 1; this.#advance(); }
+  clear(): void {
+    this.#values.fill("");
+    this.#names.clear();
+    this.#free = 1;
+    this.#advance();
+  }
   set(index: number, value: string): void {
     if (index <= 0 || index >= this.#values.length || this.#reserved.has(index)) return;
     const previous = this.#values[index];
@@ -33,7 +43,10 @@ export class ResourceNameIndex {
     else {
       const entry = this.#names.get(value);
       if (entry === undefined) this.#names.set(value, { slots: new Set([index]), first: index });
-      else { entry.slots.add(index); entry.first = Math.min(entry.first, index); }
+      else {
+        entry.slots.add(index);
+        entry.first = Math.min(entry.first, index);
+      }
       if (index === this.#free) this.#advance();
     }
   }

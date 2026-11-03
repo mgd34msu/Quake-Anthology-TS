@@ -14,15 +14,22 @@ export async function quakeLiveFixture(name: "qagamei386.so" | "qagamex64.so") {
     if (entry === undefined) throw new Error(`Missing fixture ${name}`);
     const bytes = await archive.readEntry(entry);
     const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-    const module: ModuleIdentity = { id: `compat:quakelive:${name}`, artifactPath: `${archivePath}!${name}`, revision: "supplied", digest: createContentDigest(digest) };
+    const module: ModuleIdentity = {
+      id: `compat:quakelive:${name}`,
+      artifactPath: `${archivePath}!${name}`,
+      revision: "supplied",
+      digest: createContentDigest(digest),
+    };
     return { bytes, module, elf: inspectElf(bytes) };
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 }
 if (import.meta.main) {
   for (const name of ["qagamei386.so", "qagamex64.so"] satisfies readonly ("qagamei386.so" | "qagamex64.so")[]) {
     const fixture = await quakeLiveFixture(name);
     console.log(name, fixture.module.digest);
-    for (const symbol of fixture.elf.symbols.filter(symbol => symbol.section === 0 && symbol.name !== "" || symbol.binding === 10)) {
+    for (const symbol of fixture.elf.symbols.filter(symbol => (symbol.section === 0 && symbol.name !== "") || symbol.binding === 10)) {
       console.log(symbol.name, symbol.version?.library ?? "", symbol.version?.name ?? "", `type=${symbol.type} binding=${symbol.binding} size=${symbol.size}`);
     }
   }

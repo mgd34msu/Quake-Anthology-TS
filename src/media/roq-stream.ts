@@ -1,17 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/client/cl_cin.c: CIN_PlayCinematic, RoQInterrupt and RoQReset.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { SaveReader } from "../persistence/value.ts";
 import type { MediaInput } from "./source.ts";
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 
-interface ChunkHeader { readonly id: number; readonly size: number; readonly flags: number }
-export interface RoqStreamChunk extends ChunkHeader { readonly reader: BinaryReader }
-type StreamFile = { readonly kind: "open"; readonly open: () => MediaInput | null; readonly input: MediaInput }
+interface ChunkHeader {
+  readonly id: number;
+  readonly size: number;
+  readonly flags: number;
+}
+export interface RoqStreamChunk extends ChunkHeader {
+  readonly reader: BinaryReader;
+}
+type StreamFile =
+  | { readonly kind: "open"; readonly open: () => MediaInput | null; readonly input: MediaInput }
   | { readonly kind: "missing"; readonly open: () => MediaInput | null }
   | { readonly kind: "bytes"; readonly data: Uint8Array }
   | { readonly kind: "closed" };
 
-interface PendingChunk { readonly header: ChunkHeader; readonly offset: number; readonly buffered: boolean }
+interface PendingChunk {
+  readonly header: ChunkHeader;
+  readonly offset: number;
+  readonly buffered: boolean;
+}
 
 /** One unique source file, with only the current payload and following header in cin.file. */
 export class RoqStream {
@@ -31,8 +43,13 @@ export class RoqStream {
   private bufferedLength = 0;
   private pending: PendingChunk | null = null;
 
-  private constructor(readonly source: string, length: number, file: StreamFile,
-    private readonly buffer: Uint8Array, private readonly endPolicy: "complete" | "cinematic-lookahead") {
+  private constructor(
+    readonly source: string,
+    length: number,
+    file: StreamFile,
+    private readonly buffer: Uint8Array,
+    private readonly endPolicy: "complete" | "cinematic-lookahead",
+  ) {
     this.file = file;
     this.length = length;
   }
@@ -40,44 +57,70 @@ export class RoqStream {
   static open(open: () => MediaInput | null, source: string, buffer: Uint8Array): RoqStream | undefined {
     const input = open();
     if (input === null) return undefined;
-    if (input.byteLength === 0) { input.close(); return undefined; }
+    if (input.byteLength === 0) {
+      input.close();
+      return undefined;
+    }
     return new RoqStream(source, input.byteLength, { kind: "open", open, input }, buffer, "cinematic-lookahead");
   }
 
   /** Diagnostic bytes use the same interrupt framing as the retained file owner. */
-  static fromBytes(data: Uint8Array, source: string, buffer: Uint8Array,
-    endPolicy: "complete" | "cinematic-lookahead" = "complete"): RoqStream {
+  static fromBytes(data: Uint8Array, source: string, buffer: Uint8Array, endPolicy: "complete" | "cinematic-lookahead" = "complete"): RoqStream {
     return new RoqStream(source, data.length, { kind: "bytes", data }, buffer, endPolicy);
   }
 
   captureCheckpoint() {
     if (this.pending !== null) throw new Error("Cannot checkpoint a pending RoQ chunk dispatch");
-    return { length: this.length, endPolicy: this.endPolicy, closed: this.file.kind === "closed", missing: this.file.kind === "missing",
-      position: this.position, played: this.played, header: this.header?.slice() ?? null,
-      nextHeader: this.nextHeader === null ? null : { ...this.nextHeader }, invalidLookahead: this.invalidLookahead,
-      retainedEof: this.retainedEof, resetHeader: this.resetHeader, inMemory: this.inMemory,
-      bufferedNext: this.bufferedNext, chunkOffset: this.chunkOffset, bufferOffset: this.bufferOffset,
-      bufferedLength: this.bufferedLength, buffer: this.buffer.slice() };
+    return {
+      length: this.length,
+      endPolicy: this.endPolicy,
+      closed: this.file.kind === "closed",
+      missing: this.file.kind === "missing",
+      position: this.position,
+      played: this.played,
+      header: this.header?.slice() ?? null,
+      nextHeader: this.nextHeader === null ? null : { ...this.nextHeader },
+      invalidLookahead: this.invalidLookahead,
+      retainedEof: this.retainedEof,
+      resetHeader: this.resetHeader,
+      inMemory: this.inMemory,
+      bufferedNext: this.bufferedNext,
+      chunkOffset: this.chunkOffset,
+      bufferOffset: this.bufferOffset,
+      bufferedLength: this.bufferedLength,
+      buffer: this.buffer.slice(),
+    };
   }
   restoreCheckpoint(value: unknown): void {
     if (this.pending !== null) throw new Error("Cannot restore a pending RoQ chunk dispatch");
     const r = new SaveReader(value, "roq-stream");
-    r.field("length").literal(this.length); r.field("endPolicy").literal(this.endPolicy);
+    r.field("length").literal(this.length);
+    r.field("endPolicy").literal(this.endPolicy);
     const buffer = r.field("buffer").bytes();
     if (buffer.length !== this.buffer.length) r.fail("scratch buffer size differs");
     const header = r.field("header").nullable(field => field.bytes().slice());
     if (header !== null && header.length !== 8) r.fail("invalid retained header");
-    const nextHeader = r.field("nextHeader").nullable(field => ({ id: field.field("id").integer(0),
-      size: field.field("size").integer(0), flags: field.field("flags").integer(0) }));
-    const position = r.field("position").integer(0), bufferedLength = r.field("bufferedLength").integer(0);
+    const nextHeader = r
+      .field("nextHeader")
+      .nullable(field => ({ id: field.field("id").integer(0), size: field.field("size").integer(0), flags: field.field("flags").integer(0) }));
+    const position = r.field("position").integer(0),
+      bufferedLength = r.field("bufferedLength").integer(0);
     if (position > this.length || bufferedLength > this.buffer.length) r.fail("stream cursor outside input");
-    const closed = r.field("closed").boolean(), missing = r.field("missing").boolean();
+    const closed = r.field("closed").boolean(),
+      missing = r.field("missing").boolean();
     if (missing && this.file.kind !== "missing") r.fail("missing source is no longer missing");
-    this.played = r.field("played").integer(0); this.inMemory = r.field("inMemory").integer(0);
-    this.chunkOffset = r.field("chunkOffset").integer(0); this.bufferOffset = r.field("bufferOffset").integer(0);
-    this.invalidLookahead = r.field("invalidLookahead").boolean(); this.retainedEof = r.field("retainedEof").boolean();
-    this.resetHeader = r.field("resetHeader").boolean(); this.bufferedNext = r.field("bufferedNext").boolean();
-    this.position = position; this.bufferedLength = bufferedLength; this.header = header; this.nextHeader = nextHeader;
+    this.played = r.field("played").integer(0);
+    this.inMemory = r.field("inMemory").integer(0);
+    this.chunkOffset = r.field("chunkOffset").integer(0);
+    this.bufferOffset = r.field("bufferOffset").integer(0);
+    this.invalidLookahead = r.field("invalidLookahead").boolean();
+    this.retainedEof = r.field("retainedEof").boolean();
+    this.resetHeader = r.field("resetHeader").boolean();
+    this.bufferedNext = r.field("bufferedNext").boolean();
+    this.position = position;
+    this.bufferedLength = bufferedLength;
+    this.header = header;
+    this.nextHeader = nextHeader;
     this.buffer.set(buffer);
     if (closed) this.close();
   }
@@ -108,11 +151,17 @@ export class RoqStream {
     this.initialize();
   }
 
-  get initializedByReset(): boolean { return this.resetHeader; }
+  get initializedByReset(): boolean {
+    return this.resetHeader;
+  }
 
-  get hasInvalidLookahead(): boolean { return this.invalidLookahead; }
+  get hasInvalidLookahead(): boolean {
+    return this.invalidLookahead;
+  }
 
-  get inPacket(): boolean { return this.bufferedNext; }
+  get inPacket(): boolean {
+    return this.bufferedNext;
+  }
 
   nextChunk(): RoqStreamChunk | null {
     if (this.pending !== null) throw new Error("RoQ chunk dispatch has not completed");
@@ -132,8 +181,7 @@ export class RoqStream {
         if (count < header.size + 8) {
           // Leading audio can leave a complete final payload and retained lookahead in cin.file.
           if (count === header.size && this.position === this.length) this.retainedEof = true;
-          else if (count !== 0 || !this.retainedEof)
-            throw new BinaryError(this.source, offset + count, "truncated RoQ payload or lookahead header");
+          else if (count !== 0 || !this.retainedEof) throw new BinaryError(this.source, offset + count, "truncated RoQ payload or lookahead header");
         }
         if (count === header.size + 8 && this.position === this.length) this.retainedEof = true;
         this.bufferedLength = header.size + 8;
@@ -149,8 +197,7 @@ export class RoqStream {
     }
     this.pending = { header, offset, buffered: this.bufferedNext };
     // decodeCodeBook follows its entry counts beyond the chunk into retained cin.file bytes.
-    const end = header.id === 0x1002 && this.endPolicy === "cinematic-lookahead"
-      ? Math.min(this.buffer.length, 65536) : offset + decodedSize;
+    const end = header.id === 0x1002 && this.endPolicy === "cinematic-lookahead" ? Math.min(this.buffer.length, 65536) : offset + decodedSize;
     return { ...header, reader: new BinaryReader(this.buffer.subarray(offset, end), `${this.source}@${this.bufferOffset + offset}`) };
   }
 
@@ -216,7 +263,9 @@ export class RoqStream {
   }
 
   /** Common owns final table closure; retirement cannot call into its ended lifetime. */
-  retire(): void { this.file = { kind: "closed" }; }
+  retire(): void {
+    this.file = { kind: "closed" };
+  }
 
   private read(length: number): number {
     const file = this.file;

@@ -14,90 +14,92 @@ import { SdlRenderContextLease } from "./sdl-render-context.ts";
 import type { SdlRenderContextTransfer } from "./sdl-render-context.ts";
 
 function loadSdl() {
-  const loaded = openNativeLibrary("sdl2", path => dlopen(path, {
-    SDL_SetMainReady: { args: [], returns: "void" },
-    SDL_InitSubSystem: { args: ["u32"], returns: "i32" },
-    SDL_SetHint: { args: ["buffer", "buffer"], returns: "i32" },
-    SDL_QuitSubSystem: { args: ["u32"], returns: "void" },
-    SDL_GetError: { args: [], returns: "cstring" },
-    SDL_OpenURL: { args: ["buffer"], returns: "i32" },
-    SDL_GetClipboardText: { args: [], returns: "ptr" },
-    SDL_SetClipboardText: { args: ["buffer"], returns: "i32" },
-    SDL_free: { args: ["ptr"], returns: "void" },
-    SDL_ShowWindow: { args: ["ptr"], returns: "void" },
-    SDL_GetWindowPosition: { args: ["ptr", "buffer", "buffer"], returns: "void" },
-    SDL_SetWindowPosition: { args: ["ptr", "i32", "i32"], returns: "void" },
-    SDL_RaiseWindow: { args: ["ptr"], returns: "void" },
-    SDL_MaximizeWindow: { args: ["ptr"], returns: "void" },
-    SDL_MinimizeWindow: { args: ["ptr"], returns: "void" },
-    SDL_RestoreWindow: { args: ["ptr"], returns: "void" },
-    SDL_GetWindowDisplayMode: { args: ["ptr", "buffer"], returns: "i32" },
-    SDL_HideWindow: { args: ["ptr"], returns: "void" },
-    SDL_CreateWindow: { args: ["buffer", "i32", "i32", "i32", "i32", "u32"], returns: "ptr" },
-    SDL_DestroyWindow: { args: ["ptr"], returns: "void" },
-    SDL_GetWindowID: { args: ["ptr"], returns: "u32" },
-    SDL_GetWindowFlags: { args: ["ptr"], returns: "u32" },
-    SDL_SetWindowSize: { args: ["ptr", "i32", "i32"], returns: "void" },
-    SDL_GetWindowSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
-    SDL_GetWindowSizeInPixels: { args: ["ptr", "buffer", "buffer"], returns: "void" },
-    SDL_SetWindowFullscreen: { args: ["ptr", "u32"], returns: "i32" },
-    SDL_GetWindowDisplayIndex: { args: ["ptr"], returns: "i32" },
-    SDL_GetNumVideoDisplays: { args: [], returns: "i32" },
-    SDL_GetDisplayBounds: { args: ["i32", "buffer"], returns: "i32" },
-    SDL_GetDisplayName: { args: ["i32"], returns: "cstring" },
-    SDL_GetNumDisplayModes: { args: ["i32"], returns: "i32" },
-    SDL_GetDisplayMode: { args: ["i32", "i32", "buffer"], returns: "i32" },
-    SDL_GetCurrentDisplayMode: { args: ["i32", "buffer"], returns: "i32" },
-    SDL_GetClosestDisplayMode: { args: ["i32", "buffer", "buffer"], returns: "ptr" },
-    SDL_SetWindowDisplayMode: { args: ["ptr", "buffer"], returns: "i32" },
-    SDL_GetWindowGammaRamp: { args: ["ptr", "buffer", "buffer", "buffer"], returns: "i32" },
-    SDL_SetWindowGammaRamp: { args: ["ptr", "buffer", "buffer", "buffer"], returns: "i32" },
-    SDL_CalculateGammaRamp: { args: ["f32", "buffer"], returns: "void" },
-    SDL_GetTicks: { args: [], returns: "u32" },
-    SDL_SetRelativeMouseMode: { args: ["i32"], returns: "i32" },
-    SDL_GetRelativeMouseMode: { args: [], returns: "i32" },
-    SDL_StartTextInput: { args: [], returns: "void" },
-    SDL_StopTextInput: { args: [], returns: "void" },
-    SDL_NumJoysticks: { args: [], returns: "i32" },
-    SDL_JoystickOpen: { args: ["i32"], returns: "ptr" },
-    SDL_JoystickClose: { args: ["ptr"], returns: "void" },
-    SDL_JoystickInstanceID: { args: ["ptr"], returns: "i32" },
-    SDL_JoystickName: { args: ["ptr"], returns: "cstring" },
-    SDL_JoystickNumAxes: { args: ["ptr"], returns: "i32" },
-    SDL_JoystickNumButtons: { args: ["ptr"], returns: "i32" },
-    SDL_JoystickNumHats: { args: ["ptr"], returns: "i32" },
-    SDL_JoystickNumBalls: { args: ["ptr"], returns: "i32" },
-    SDL_JoystickGetAxis: { args: ["ptr", "i32"], returns: "i16" },
-    SDL_JoystickGetHat: { args: ["ptr", "i32"], returns: "u8" },
-    SDL_JoystickGetButton: { args: ["ptr", "i32"], returns: "u8" },
-    SDL_JoystickUpdate: { args: [], returns: "void" },
-    SDL_CreateRenderer: { args: ["ptr", "i32", "u32"], returns: "ptr" },
-    SDL_DestroyRenderer: { args: ["ptr"], returns: "void" },
-    SDL_GetRendererOutputSize: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
-    SDL_CreateTexture: { args: ["ptr", "u32", "i32", "i32", "i32"], returns: "ptr" },
-    SDL_DestroyTexture: { args: ["ptr"], returns: "void" },
-    SDL_SetTextureBlendMode: { args: ["ptr", "i32"], returns: "i32" },
-    SDL_UpdateTexture: { args: ["ptr", "ptr", "buffer", "i32"], returns: "i32" },
-    SDL_RenderCopy: { args: ["ptr", "ptr", "ptr", "ptr"], returns: "i32" },
-    SDL_RenderPresent: { args: ["ptr"], returns: "void" },
-    SDL_RenderReadPixels: { args: ["ptr", "ptr", "u32", "buffer", "i32"], returns: "i32" },
-    SDL_PumpEvents: { args: [], returns: "void" },
-    SDL_PeepEvents: { args: ["buffer", "i32", "i32", "u32", "u32"], returns: "i32" },
-    SDL_PushEvent: { args: ["buffer"], returns: "i32" },
-    SDL_EventState: { args: ["u32", "i32"], returns: "u8" },
-    SDL_GL_SetAttribute: { args: ["i32", "i32"], returns: "i32" },
-    SDL_GL_LoadLibrary: { args: ["ptr"], returns: "i32" },
-    SDL_GL_UnloadLibrary: { args: [], returns: "void" },
-    SDL_GL_GetAttribute: { args: ["i32", "buffer"], returns: "i32" },
-    SDL_GL_CreateContext: { args: ["ptr"], returns: "ptr" },
-    SDL_GL_DeleteContext: { args: ["ptr"], returns: "void" },
-    SDL_GL_MakeCurrent: { args: ["ptr", "ptr"], returns: "i32" },
-    SDL_GL_GetDrawableSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
-    SDL_GL_GetProcAddress: { args: ["buffer"], returns: "ptr" },
-    SDL_GL_SwapWindow: { args: ["ptr"], returns: "void" },
-    SDL_GL_SetSwapInterval: { args: ["i32"], returns: "i32" },
-    SDL_GL_GetSwapInterval: { args: [], returns: "i32" },
-  }));
+  const loaded = openNativeLibrary("sdl2", path =>
+    dlopen(path, {
+      SDL_SetMainReady: { args: [], returns: "void" },
+      SDL_InitSubSystem: { args: ["u32"], returns: "i32" },
+      SDL_SetHint: { args: ["buffer", "buffer"], returns: "i32" },
+      SDL_QuitSubSystem: { args: ["u32"], returns: "void" },
+      SDL_GetError: { args: [], returns: "cstring" },
+      SDL_OpenURL: { args: ["buffer"], returns: "i32" },
+      SDL_GetClipboardText: { args: [], returns: "ptr" },
+      SDL_SetClipboardText: { args: ["buffer"], returns: "i32" },
+      SDL_free: { args: ["ptr"], returns: "void" },
+      SDL_ShowWindow: { args: ["ptr"], returns: "void" },
+      SDL_GetWindowPosition: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+      SDL_SetWindowPosition: { args: ["ptr", "i32", "i32"], returns: "void" },
+      SDL_RaiseWindow: { args: ["ptr"], returns: "void" },
+      SDL_MaximizeWindow: { args: ["ptr"], returns: "void" },
+      SDL_MinimizeWindow: { args: ["ptr"], returns: "void" },
+      SDL_RestoreWindow: { args: ["ptr"], returns: "void" },
+      SDL_GetWindowDisplayMode: { args: ["ptr", "buffer"], returns: "i32" },
+      SDL_HideWindow: { args: ["ptr"], returns: "void" },
+      SDL_CreateWindow: { args: ["buffer", "i32", "i32", "i32", "i32", "u32"], returns: "ptr" },
+      SDL_DestroyWindow: { args: ["ptr"], returns: "void" },
+      SDL_GetWindowID: { args: ["ptr"], returns: "u32" },
+      SDL_GetWindowFlags: { args: ["ptr"], returns: "u32" },
+      SDL_SetWindowSize: { args: ["ptr", "i32", "i32"], returns: "void" },
+      SDL_GetWindowSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+      SDL_GetWindowSizeInPixels: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+      SDL_SetWindowFullscreen: { args: ["ptr", "u32"], returns: "i32" },
+      SDL_GetWindowDisplayIndex: { args: ["ptr"], returns: "i32" },
+      SDL_GetNumVideoDisplays: { args: [], returns: "i32" },
+      SDL_GetDisplayBounds: { args: ["i32", "buffer"], returns: "i32" },
+      SDL_GetDisplayName: { args: ["i32"], returns: "cstring" },
+      SDL_GetNumDisplayModes: { args: ["i32"], returns: "i32" },
+      SDL_GetDisplayMode: { args: ["i32", "i32", "buffer"], returns: "i32" },
+      SDL_GetCurrentDisplayMode: { args: ["i32", "buffer"], returns: "i32" },
+      SDL_GetClosestDisplayMode: { args: ["i32", "buffer", "buffer"], returns: "ptr" },
+      SDL_SetWindowDisplayMode: { args: ["ptr", "buffer"], returns: "i32" },
+      SDL_GetWindowGammaRamp: { args: ["ptr", "buffer", "buffer", "buffer"], returns: "i32" },
+      SDL_SetWindowGammaRamp: { args: ["ptr", "buffer", "buffer", "buffer"], returns: "i32" },
+      SDL_CalculateGammaRamp: { args: ["f32", "buffer"], returns: "void" },
+      SDL_GetTicks: { args: [], returns: "u32" },
+      SDL_SetRelativeMouseMode: { args: ["i32"], returns: "i32" },
+      SDL_GetRelativeMouseMode: { args: [], returns: "i32" },
+      SDL_StartTextInput: { args: [], returns: "void" },
+      SDL_StopTextInput: { args: [], returns: "void" },
+      SDL_NumJoysticks: { args: [], returns: "i32" },
+      SDL_JoystickOpen: { args: ["i32"], returns: "ptr" },
+      SDL_JoystickClose: { args: ["ptr"], returns: "void" },
+      SDL_JoystickInstanceID: { args: ["ptr"], returns: "i32" },
+      SDL_JoystickName: { args: ["ptr"], returns: "cstring" },
+      SDL_JoystickNumAxes: { args: ["ptr"], returns: "i32" },
+      SDL_JoystickNumButtons: { args: ["ptr"], returns: "i32" },
+      SDL_JoystickNumHats: { args: ["ptr"], returns: "i32" },
+      SDL_JoystickNumBalls: { args: ["ptr"], returns: "i32" },
+      SDL_JoystickGetAxis: { args: ["ptr", "i32"], returns: "i16" },
+      SDL_JoystickGetHat: { args: ["ptr", "i32"], returns: "u8" },
+      SDL_JoystickGetButton: { args: ["ptr", "i32"], returns: "u8" },
+      SDL_JoystickUpdate: { args: [], returns: "void" },
+      SDL_CreateRenderer: { args: ["ptr", "i32", "u32"], returns: "ptr" },
+      SDL_DestroyRenderer: { args: ["ptr"], returns: "void" },
+      SDL_GetRendererOutputSize: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
+      SDL_CreateTexture: { args: ["ptr", "u32", "i32", "i32", "i32"], returns: "ptr" },
+      SDL_DestroyTexture: { args: ["ptr"], returns: "void" },
+      SDL_SetTextureBlendMode: { args: ["ptr", "i32"], returns: "i32" },
+      SDL_UpdateTexture: { args: ["ptr", "ptr", "buffer", "i32"], returns: "i32" },
+      SDL_RenderCopy: { args: ["ptr", "ptr", "ptr", "ptr"], returns: "i32" },
+      SDL_RenderPresent: { args: ["ptr"], returns: "void" },
+      SDL_RenderReadPixels: { args: ["ptr", "ptr", "u32", "buffer", "i32"], returns: "i32" },
+      SDL_PumpEvents: { args: [], returns: "void" },
+      SDL_PeepEvents: { args: ["buffer", "i32", "i32", "u32", "u32"], returns: "i32" },
+      SDL_PushEvent: { args: ["buffer"], returns: "i32" },
+      SDL_EventState: { args: ["u32", "i32"], returns: "u8" },
+      SDL_GL_SetAttribute: { args: ["i32", "i32"], returns: "i32" },
+      SDL_GL_LoadLibrary: { args: ["ptr"], returns: "i32" },
+      SDL_GL_UnloadLibrary: { args: [], returns: "void" },
+      SDL_GL_GetAttribute: { args: ["i32", "buffer"], returns: "i32" },
+      SDL_GL_CreateContext: { args: ["ptr"], returns: "ptr" },
+      SDL_GL_DeleteContext: { args: ["ptr"], returns: "void" },
+      SDL_GL_MakeCurrent: { args: ["ptr", "ptr"], returns: "i32" },
+      SDL_GL_GetDrawableSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+      SDL_GL_GetProcAddress: { args: ["buffer"], returns: "ptr" },
+      SDL_GL_SwapWindow: { args: ["ptr"], returns: "void" },
+      SDL_GL_SetSwapInterval: { args: ["i32"], returns: "i32" },
+      SDL_GL_GetSwapInterval: { args: [], returns: "i32" },
+    }),
+  );
   loaded.symbols.SDL_SetMainReady();
   return loaded;
 }
@@ -135,7 +137,8 @@ export function openSdlUrl(url: string): void {
 
 /** Win32 Sys_GetClipboardData's strtok(data, "\n\r\b") keeps leading delimiters. */
 export function sourceClipboardBytes(bytes: Uint8Array): Uint8Array {
-  let length = 0, token = false;
+  let length = 0,
+    token = false;
   for (const byte of bytes) {
     if (byte === 0) break;
     const delimiter = byte === 10 || byte === 13 || byte === 8;
@@ -154,12 +157,15 @@ export function writeSdlClipboard(text: string): void {
 }
 
 export function readSdlClipboard(): Uint8Array | null {
-  const api = sdl(), allocation = api.SDL_GetClipboardText();
+  const api = sdl(),
+    allocation = api.SDL_GetClipboardText();
   if (allocation === null) return null;
   try {
     // SDL owns the NUL-terminated allocation. Copy before releasing it, without decoding.
     return sourceClipboardBytes(new Uint8Array(toArrayBuffer(allocation)));
-  } finally { api.SDL_free(allocation); }
+  } finally {
+    api.SDL_free(allocation);
+  }
 }
 
 function initializeSubsystem(subsystem: number, operation: string): void {
@@ -195,32 +201,43 @@ interface SdlWindowDimensions {
   readonly position?: { readonly x: number; readonly y: number };
 }
 export type SdlWindowOptions = SdlWindowDimensions &
-  ({ readonly backend: "cpu" } | { readonly backend: "gl"; readonly stereo?: boolean;
-    readonly stencilBits?: number; readonly colorBits?: number; readonly depthBits?: number; readonly driver?: string;
-    readonly allowSoftwareGl?: boolean });
+  (
+    | { readonly backend: "cpu" }
+    | {
+        readonly backend: "gl";
+        readonly stereo?: boolean;
+        readonly stencilBits?: number;
+        readonly colorBits?: number;
+        readonly depthBits?: number;
+        readonly driver?: string;
+        readonly allowSoftwareGl?: boolean;
+      }
+  );
 
 /** GLW_SetMode's sixteen visual attempts, including the depth/stencil fallthrough. */
 function* visualAttempts(requestedColor: number, requestedDepth: number, requestedStencil: number) {
   let color = requestedColor;
   let depth = requestedDepth;
   let stencil = requestedStencil;
-  const reduce = (bits: number): number => bits === 24 ? 16 : bits === 16 ? 8 : bits;
+  const reduce = (bits: number): number => (bits === 24 ? 16 : bits === 16 ? 8 : bits);
   for (let index = 0; index < 16; index++) {
-    if (index === 4) { depth = reduce(depth); stencil = reduce(stencil); }
+    if (index === 4) {
+      depth = reduce(depth);
+      stencil = reduce(stencil);
+    }
     if (index === 8 && color === 24) color = 16;
     if (index === 12) stencil = reduce(stencil);
     const candidateColor = index % 4 === 3 && color === 24 ? 16 : color;
     yield {
       component: candidateColor === 24 ? 8 : 4,
       depth: index % 4 === 2 ? reduce(depth) : depth,
-      stencil: index % 4 === 1 ? stencil === 24 ? 16 : stencil === 16 ? 8 : 0 : stencil,
+      stencil: index % 4 === 1 ? (stencil === 24 ? 16 : stencil === 16 ? 8 : 0) : stencil,
     };
   }
 }
 
 function nativeInteger(value: number, name: string): void {
-  if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff)
-    throw new RangeError(`${name} must be a signed 32-bit integer`);
+  if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) throw new RangeError(`${name} must be a signed 32-bit integer`);
 }
 
 /** Linux tests the stored cvar float for zero before assigning it to an int. */
@@ -269,31 +286,38 @@ export function sdlMatchingDisplayMode(modes: readonly SdlDisplayMode[], request
 }
 
 function validateRefreshLimits(min: number, max: number): void {
-  nativeInteger(min, "Minimum display refresh"); nativeInteger(max, "Maximum display refresh");
-  if (min !== 0 && max !== 0 && min > max)
-    throw new Error("r_minDisplayRefresh must be less than or equal to r_maxDisplayRefresh");
+  nativeInteger(min, "Minimum display refresh");
+  nativeInteger(max, "Maximum display refresh");
+  if (min !== 0 && max !== 0 && min > max) throw new Error("r_minDisplayRefresh must be less than or equal to r_maxDisplayRefresh");
 }
 
 function displayMode(bytes: Uint8Array): SdlDisplayMode {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { colorBits: (view.getUint32(0, littleEndian) >>> 8) & 255,
-    width: view.getInt32(4, littleEndian), height: view.getInt32(8, littleEndian), refreshRate: view.getInt32(12, littleEndian) };
+  return {
+    colorBits: (view.getUint32(0, littleEndian) >>> 8) & 255,
+    width: view.getInt32(4, littleEndian),
+    height: view.getInt32(8, littleEndian),
+    refreshRate: view.getInt32(12, littleEndian),
+  };
 }
 
 function fullscreen(window: Pointer, options: SdlWindowOptions): string | null {
   if (options.fullscreen !== true) return null;
-  const api = sdl(), refresh = options.displayRefresh ?? 0;
+  const api = sdl(),
+    refresh = options.displayRefresh ?? 0;
   const index = api.SDL_GetWindowDisplayIndex(window);
   checked(index, "SDL_GetWindowDisplayIndex");
   // SDL2 SDL_DisplayMode: four 32-bit fields and an aligned driver pointer.
-  const requested = new Uint8Array(24), closest = new Uint8Array(24);
+  const requested = new Uint8Array(24),
+    closest = new Uint8Array(24);
   const view = new DataView(requested.buffer);
   view.setInt32(4, options.width, littleEndian);
   view.setInt32(8, options.height, littleEndian);
   view.setInt32(12, refresh, littleEndian);
   // GLW_SetMode continues windowed when no mode fits, leaving the cvars alone.
   // SDL replaces XF86 matching with size/format/refresh ordering; Linux ignores refresh.
-  const min = options.minDisplayRefresh ?? 0, max = options.maxDisplayRefresh ?? 0;
+  const min = options.minDisplayRefresh ?? 0,
+    max = options.maxDisplayRefresh ?? 0;
   let found: boolean;
   if (min !== 0 || max !== 0) {
     const count = api.SDL_GetNumDisplayModes(index);
@@ -302,14 +326,15 @@ function fullscreen(window: Pointer, options: SdlWindowOptions): string | null {
     checked(api.SDL_GetCurrentDisplayMode(index, desktop), "SDL_GetCurrentDisplayMode");
     const requestedColor = options.backend === "gl" ? Math.trunc(options.colorBits ?? 0) : 0;
     const colorBits = requestedColor < 16 ? displayMode(desktop).colorBits : requestedColor;
-    const nativeModes: Uint8Array[] = [], modes: SdlDisplayMode[] = [];
+    const nativeModes: Uint8Array[] = [],
+      modes: SdlDisplayMode[] = [];
     for (let modeIndex = 0; modeIndex < count; modeIndex++) {
       const bytes = new Uint8Array(24);
       checked(api.SDL_GetDisplayMode(index, modeIndex, bytes), "SDL_GetDisplayMode");
-      nativeModes.push(bytes); modes.push(displayMode(bytes));
+      nativeModes.push(bytes);
+      modes.push(displayMode(bytes));
     }
-    const selected = sdlMatchingDisplayMode(modes, { width: options.width, height: options.height, colorBits,
-      minDisplayRefresh: min, maxDisplayRefresh: max });
+    const selected = sdlMatchingDisplayMode(modes, { width: options.width, height: options.height, colorBits, minDisplayRefresh: min, maxDisplayRefresh: max });
     found = selected !== null;
     if (selected !== null) {
       const bytes = nativeModes[selected];
@@ -318,10 +343,9 @@ function fullscreen(window: Pointer, options: SdlWindowOptions): string | null {
     }
   } else found = api.SDL_GetClosestDisplayMode(index, requested, closest) !== null;
   if (!found) {
-    const failure = min !== 0 || max !== 0 ? "No suitable display mode available within the refresh limits."
-      : `SDL_GetClosestDisplayMode: ${api.SDL_GetError()}`;
-    if ((api.SDL_GetWindowFlags(window) & 1) !== 0)
-      throw new Error(`${failure}; SDL's newly created window is unexpectedly fullscreen`);
+    const failure =
+      min !== 0 || max !== 0 ? "No suitable display mode available within the refresh limits." : `SDL_GetClosestDisplayMode: ${api.SDL_GetError()}`;
+    if ((api.SDL_GetWindowFlags(window) & 1) !== 0) throw new Error(`${failure}; SDL's newly created window is unexpectedly fullscreen`);
     return failure;
   }
   let failure: string;
@@ -366,11 +390,43 @@ function gammaRamp(): { readonly red: Uint16Array; readonly green: Uint16Array; 
 
 export type SdlEvent =
   | { readonly kind: "quit"; readonly timestamp: number }
-  | { readonly kind: "key"; readonly timestamp: number; readonly down: boolean; readonly repeat: boolean; readonly scancode: number; readonly keycode: number; readonly modifiers: number }
+  | {
+      readonly kind: "key";
+      readonly timestamp: number;
+      readonly down: boolean;
+      readonly repeat: boolean;
+      readonly scancode: number;
+      readonly keycode: number;
+      readonly modifiers: number;
+    }
   | { readonly kind: "text"; readonly timestamp: number; readonly text: string }
-  | { readonly kind: "mouse-motion"; readonly timestamp: number; readonly buttons: number; readonly x: number; readonly y: number; readonly dx: number; readonly dy: number }
-  | { readonly kind: "mouse-button"; readonly timestamp: number; readonly down: boolean; readonly button: number; readonly clicks: number; readonly x: number; readonly y: number }
-  | { readonly kind: "mouse-wheel"; readonly timestamp: number; readonly x: number; readonly y: number; readonly preciseX: number; readonly preciseY: number; readonly flipped: boolean }
+  | {
+      readonly kind: "mouse-motion";
+      readonly timestamp: number;
+      readonly buttons: number;
+      readonly x: number;
+      readonly y: number;
+      readonly dx: number;
+      readonly dy: number;
+    }
+  | {
+      readonly kind: "mouse-button";
+      readonly timestamp: number;
+      readonly down: boolean;
+      readonly button: number;
+      readonly clicks: number;
+      readonly x: number;
+      readonly y: number;
+    }
+  | {
+      readonly kind: "mouse-wheel";
+      readonly timestamp: number;
+      readonly x: number;
+      readonly y: number;
+      readonly preciseX: number;
+      readonly preciseY: number;
+      readonly flipped: boolean;
+    }
   | { readonly kind: "window"; readonly timestamp: number; readonly event: number; readonly data1: number; readonly data2: number }
   | SdlJoystickEvent
   | { readonly kind: "unsupported"; readonly timestamp: number; readonly type: number };
@@ -396,27 +452,52 @@ export function decodeSdlEvent(bytes: Uint8Array): SdlEvent {
   const type = u32(0);
   const timestamp = u32(4);
   switch (type) {
-    case 0x100: return { kind: "quit", timestamp };
-    case 0x200: return { kind: "window", timestamp, event: view.getUint8(12), data1: i32(16), data2: i32(20) };
+    case 0x100:
+      return { kind: "quit", timestamp };
+    case 0x200:
+      return { kind: "window", timestamp, event: view.getUint8(12), data1: i32(16), data2: i32(20) };
     case 0x300:
     case 0x301:
-      return { kind: "key", timestamp, down: type === 0x300, repeat: view.getUint8(13) !== 0, scancode: i32(16), keycode: i32(20), modifiers: view.getUint16(24, littleEndian) };
+      return {
+        kind: "key",
+        timestamp,
+        down: type === 0x300,
+        repeat: view.getUint8(13) !== 0,
+        scancode: i32(16),
+        keycode: i32(20),
+        modifiers: view.getUint16(24, littleEndian),
+      };
     case 0x303: {
       const textBytes = bytes.subarray(12, 44);
       const end = textBytes.indexOf(0);
       return { kind: "text", timestamp, text: new TextDecoder("utf-8", { fatal: true }).decode(end < 0 ? textBytes : textBytes.subarray(0, end)) };
     }
-    case 0x400: return { kind: "mouse-motion", timestamp, buttons: u32(16), x: i32(20), y: i32(24), dx: i32(28), dy: i32(32) };
+    case 0x400:
+      return { kind: "mouse-motion", timestamp, buttons: u32(16), x: i32(20), y: i32(24), dx: i32(28), dy: i32(32) };
     case 0x401:
     case 0x402:
       return { kind: "mouse-button", timestamp, down: type === 0x401, button: view.getUint8(16), clicks: view.getUint8(18), x: i32(20), y: i32(24) };
-    case 0x403: return { kind: "mouse-wheel", timestamp, x: i32(16), y: i32(20), preciseX: view.getFloat32(28, littleEndian), preciseY: view.getFloat32(32, littleEndian), flipped: u32(24) === 1 };
-    case 0x600: return { kind: "joystick-axis", timestamp, instance: i32(8), axis: view.getUint8(12), value: view.getInt16(16, littleEndian) };
-    case 0x602: return { kind: "joystick-hat", timestamp, instance: i32(8), hat: view.getUint8(12), value: view.getUint8(13) };
+    case 0x403:
+      return {
+        kind: "mouse-wheel",
+        timestamp,
+        x: i32(16),
+        y: i32(20),
+        preciseX: view.getFloat32(28, littleEndian),
+        preciseY: view.getFloat32(32, littleEndian),
+        flipped: u32(24) === 1,
+      };
+    case 0x600:
+      return { kind: "joystick-axis", timestamp, instance: i32(8), axis: view.getUint8(12), value: view.getInt16(16, littleEndian) };
+    case 0x602:
+      return { kind: "joystick-hat", timestamp, instance: i32(8), hat: view.getUint8(12), value: view.getUint8(13) };
     case 0x603:
-    case 0x604: return { kind: "joystick-button", timestamp, instance: i32(8), button: view.getUint8(12), down: type === 0x603 };
-    case 0x606: return { kind: "joystick-removed", timestamp, instance: i32(8) };
-    default: return { kind: "unsupported", timestamp, type };
+    case 0x604:
+      return { kind: "joystick-button", timestamp, instance: i32(8), button: view.getUint8(12), down: type === 0x603 };
+    case 0x606:
+      return { kind: "joystick-removed", timestamp, instance: i32(8) };
+    default:
+      return { kind: "unsupported", timestamp, type };
   }
 }
 
@@ -430,8 +511,12 @@ export class SdlWindow {
   private gamma: SdlGammaLease | null = null;
   private procedureLeases = 0;
 
-  private constructor(resources: Resources, readonly id: number,
-    readonly fullscreenFailure: string | null, readonly positionOrigin: { readonly x: number; readonly y: number }) {
+  private constructor(
+    resources: Resources,
+    readonly id: number,
+    readonly fullscreenFailure: string | null,
+    readonly positionOrigin: { readonly x: number; readonly y: number },
+  ) {
     this.resources = resources;
   }
 
@@ -451,7 +536,8 @@ export class SdlWindow {
     nativeInteger(options.displayIndex ?? -1, "SDL display index");
     validateRefreshLimits(options.minDisplayRefresh ?? 0, options.maxDisplayRefresh ?? 0);
     if (options.position !== undefined) {
-      nativeInteger(options.position.x, "SDL window x"); nativeInteger(options.position.y, "SDL window y");
+      nativeInteger(options.position.x, "SDL window x");
+      nativeInteger(options.position.y, "SDL window y");
     }
     const colorBits = options.backend === "gl" ? sourceVisualPrecision(options.colorBits ?? 0, "SDL color precision") : 0;
     const depthBits = options.backend === "gl" ? sourceVisualPrecision(options.depthBits ?? 0, "SDL depth precision") : 0;
@@ -460,22 +546,20 @@ export class SdlWindow {
       if (!Number.isInteger(stencilBits) || stencilBits < 0 || stencilBits > 32) throw new RangeError("SDL stencil precision must be an integer in 0..32");
     }
     const title = cString(options.title);
-    const driver = options.backend === "gl" ? options.driver ?? null : null;
+    const driver = options.backend === "gl" ? (options.driver ?? null) : null;
     const driverName = driver === null ? null : cString(driver);
     let sharingDriver = false;
     if (driver === "") throw new Error("SDL GL driver name is empty");
     if (options.backend === "gl") {
       for (const existing of windows.values()) {
         const current = existing.resources;
-        if (current?.kind === "gl" && current.driver !== driver)
-          throw new Error("SDL cannot select different GL libraries for concurrent windows");
+        if (current?.kind === "gl" && current.driver !== driver) throw new Error("SDL cannot select different GL libraries for concurrent windows");
         if (current?.kind === "gl") sharingDriver = true;
       }
     }
     // SDL's EGL/offscreen loader can accept a path without loading that library.
     // This replacement supports the system GL library, not legacy vendor drivers.
-    if (driver !== null && driver.toLowerCase() !== defaultOpenGlDriver().toLowerCase())
-      throw new Error(`Unsupported SDL system OpenGL driver: ${driver}`);
+    if (driver !== null && driver.toLowerCase() !== defaultOpenGlDriver().toLowerCase()) throw new Error(`Unsupported SDL system OpenGL driver: ${driver}`);
     const api = sdl();
     initializeSubsystem(videoSubsystem, "SDL_InitSubSystem");
     let window: Pointer | null = null;
@@ -487,18 +571,19 @@ export class SdlWindow {
       const displayIndex = sdlDisplayIndex(options.displayIndex ?? -1, api.SDL_GetNumVideoDisplays());
       const bounds = new Int32Array(4);
       checked(api.SDL_GetDisplayBounds(displayIndex, bounds), "SDL_GetDisplayBounds");
-      const originX = bounds[0], originY = bounds[1];
+      const originX = bounds[0],
+        originY = bounds[1];
       if (originX === undefined || originY === undefined) throw new Error("SDL display bounds are missing an origin");
       const positionOrigin = { x: originX, y: originY };
       const x = options.fullscreen === true || options.position === undefined ? 0x1fff0000 | displayIndex : originX + options.position.x;
       const y = options.fullscreen === true || options.position === undefined ? 0x1fff0000 | displayIndex : originY + options.position.y;
-      nativeInteger(x, "SDL window x"); nativeInteger(y, "SDL window y");
+      nativeInteger(x, "SDL window x");
+      nativeInteger(y, "SDL window y");
       // These event types own native strings and are outside the game input contract.
       api.SDL_EventState(0x1000, 0);
       api.SDL_EventState(0x1001, 0);
       api.SDL_EventState(0x305, 0);
-      const flags = (options.hidden === true ? 0x8 : 0x4) | (options.backend === "gl" ? 0x2 : 0)
-        | (options.resizable === true ? 0x20 : 0);
+      const flags = (options.hidden === true ? 0x8 : 0x4) | (options.backend === "gl" ? 0x2 : 0) | (options.resizable === true ? 0x20 : 0);
       if (options.backend === "gl") {
         if (driverName !== null) {
           checked(api.SDL_GL_LoadLibrary(sharingDriver ? null : ptr(driverName)), "SDL_GL_LoadLibrary");
@@ -522,7 +607,12 @@ export class SdlWindow {
             context = handle(api.SDL_GL_CreateContext(window), "SDL_GL_CreateContext");
             checked(api.SDL_GL_MakeCurrent(window, context), "SDL_GL_MakeCurrent");
             const attributes: readonly (readonly [number, number])[] = [
-              [0, visual.component], [1, visual.component], [2, visual.component], [3, 0], [6, visual.depth], [7, visual.stencil],
+              [0, visual.component],
+              [1, visual.component],
+              [2, visual.component],
+              [3, 0],
+              [6, visual.depth],
+              [7, visual.stencil],
             ];
             for (const [attribute, minimum] of attributes) {
               const actual = new Int32Array(1);
@@ -535,28 +625,38 @@ export class SdlWindow {
             failures.push(error);
             if (context !== null) api.SDL_GL_DeleteContext(context);
             if (window !== null) api.SDL_DestroyWindow(window);
-            context = null; window = null;
+            context = null;
+            window = null;
           }
         }
         if (window === null || context === null) throw new AggregateError(failures, "SDL could not create any source GL visual candidate");
         if (options.allowSoftwareGl === false) {
-          const rendererQuery = linkSymbols({ glGetString: { args: ["u32"], returns: "cstring",
-            ptr: handle(api.SDL_GL_GetProcAddress(cString("glGetString")), "SDL_GL_GetProcAddress glGetString") } });
+          const rendererQuery = linkSymbols({
+            glGetString: {
+              args: ["u32"],
+              returns: "cstring",
+              ptr: handle(api.SDL_GL_GetProcAddress(cString("glGetString")), "SDL_GL_GetProcAddress glGetString"),
+            },
+          });
           try {
             const rendererName = String(rendererQuery.symbols.glGetString(0x1f01)).toLowerCase();
             // GLW_SetMode rejects only these two source tokens, not modern Mesa drivers.
             if (rendererName === "mesa x11" || rendererName === "mesa glx indirect")
               throw new Error("You are using software Mesa; add +set r_allowSoftwareGL 1 to allow this driver");
-          } finally { rendererQuery.close(); }
+          } finally {
+            rendererQuery.close();
+          }
         }
       } else window = handle(api.SDL_CreateWindow(title, x, y, options.width, options.height, flags), "SDL_CreateWindow");
       const fullscreenFailure = fullscreen(window, options);
-      const drawableWidth = new Int32Array(1), drawableHeight = new Int32Array(1);
+      const drawableWidth = new Int32Array(1),
+        drawableHeight = new Int32Array(1);
       let resources: Resources;
       if (options.backend === "cpu") {
         renderer = handle(api.SDL_CreateRenderer(window, -1, 1), "SDL_CreateRenderer SOFTWARE");
         checked(api.SDL_GetRendererOutputSize(renderer, drawableWidth, drawableHeight), "SDL_GetRendererOutputSize");
-        const width = drawableWidth[0], height = drawableHeight[0];
+        const width = drawableWidth[0],
+          height = drawableHeight[0];
         if (width === undefined || height === undefined || width <= 0 || height <= 0) throw new Error("SDL returned invalid drawable dimensions");
         texture = handle(api.SDL_CreateTexture(renderer, rgba32, 1, width, height), "SDL_CreateTexture");
         checked(api.SDL_SetTextureBlendMode(texture, 0), "SDL_SetTextureBlendMode NONE");
@@ -568,7 +668,8 @@ export class SdlWindow {
       }
       const id = api.SDL_GetWindowID(window);
       if (id === 0) throw new Error(`SDL_GetWindowID: ${api.SDL_GetError()}`);
-      const width = drawableWidth[0], height = drawableHeight[0];
+      const width = drawableWidth[0],
+        height = drawableHeight[0];
       if (width === undefined || height === undefined || width <= 0 || height <= 0) throw new Error("SDL returned invalid drawable dimensions");
       const result = new SdlWindow(resources, id, fullscreenFailure, positionOrigin);
       windows.set(id, result);
@@ -591,68 +692,115 @@ export class SdlWindow {
 
   setVisible(visible: boolean): void {
     const window = this.opened().window;
-    if (visible) sdl().SDL_ShowWindow(window); else sdl().SDL_HideWindow(window);
+    if (visible) sdl().SDL_ShowWindow(window);
+    else sdl().SDL_HideWindow(window);
   }
 
   capturePresentation(): SdlWindowPresentation {
-    const resources = this.opened(), api = sdl(), flags = this.flags, display = this.display;
-    const x = new Int32Array(1), y = new Int32Array(1), bytes = new Uint8Array(24);
+    const resources = this.opened(),
+      api = sdl(),
+      flags = this.flags,
+      display = this.display;
+    const x = new Int32Array(1),
+      y = new Int32Array(1),
+      bytes = new Uint8Array(24);
     api.SDL_GetWindowPosition(resources.window, x, y);
     checked(api.SDL_GetWindowDisplayMode(resources.window, bytes), "SDL_GetWindowDisplayMode");
-    const left = x[0], top = y[0], mode = new DataView(bytes.buffer);
+    const left = x[0],
+      top = y[0],
+      mode = new DataView(bytes.buffer);
     if (left === undefined || top === undefined) throw new Error("SDL returned invalid window position");
-    return { size: this.logicalSize, position: { x: left - display.bounds.x, y: top - display.bounds.y }, displayIndex: display.index,
-      displayMode: { format: mode.getUint32(0, littleEndian), width: mode.getInt32(4, littleEndian), height: mode.getInt32(8, littleEndian), refreshRate: mode.getInt32(12, littleEndian) },
+    return {
+      size: this.logicalSize,
+      position: { x: left - display.bounds.x, y: top - display.bounds.y },
+      displayIndex: display.index,
+      displayMode: {
+        format: mode.getUint32(0, littleEndian),
+        width: mode.getInt32(4, littleEndian),
+        height: mode.getInt32(8, littleEndian),
+        refreshRate: mode.getInt32(12, littleEndian),
+      },
       fullscreen: (flags & 0x1001) === 0x1001 ? "desktop" : (flags & 1) !== 0 ? "exclusive" : "windowed",
-      visible: (flags & 4) !== 0 && (flags & 8) === 0, maximized: (flags & 0x80) !== 0, minimized: (flags & 0x40) !== 0, focused: (flags & 0x200) !== 0 };
+      visible: (flags & 4) !== 0 && (flags & 8) === 0,
+      maximized: (flags & 0x80) !== 0,
+      minimized: (flags & 0x40) !== 0,
+      focused: (flags & 0x200) !== 0,
+    };
   }
 
   restorePresentation(state: SdlWindowPresentation): void {
-    const resources = this.opened(), api = sdl(), bounds = new Int32Array(4);
+    const resources = this.opened(),
+      api = sdl(),
+      bounds = new Int32Array(4);
     checked(api.SDL_GetDisplayBounds(state.displayIndex, bounds), "SDL_GetDisplayBounds");
-    const left = bounds[0], top = bounds[1];
+    const left = bounds[0],
+      top = bounds[1];
     if (left === undefined || top === undefined) throw new Error("SDL returned invalid display origin");
     api.SDL_RestoreWindow(resources.window);
     checked(api.SDL_SetWindowFullscreen(resources.window, 0), "SDL_SetWindowFullscreen windowed");
     api.SDL_SetWindowPosition(resources.window, left + state.position.x, top + state.position.y);
     this.setSize(state.size.width, state.size.height);
-    const bytes = new Uint8Array(24), mode = new DataView(bytes.buffer);
-    mode.setUint32(0, state.displayMode.format, littleEndian); mode.setInt32(4, state.displayMode.width, littleEndian);
-    mode.setInt32(8, state.displayMode.height, littleEndian); mode.setInt32(12, state.displayMode.refreshRate, littleEndian);
+    const bytes = new Uint8Array(24),
+      mode = new DataView(bytes.buffer);
+    mode.setUint32(0, state.displayMode.format, littleEndian);
+    mode.setInt32(4, state.displayMode.width, littleEndian);
+    mode.setInt32(8, state.displayMode.height, littleEndian);
+    mode.setInt32(12, state.displayMode.refreshRate, littleEndian);
     checked(api.SDL_SetWindowDisplayMode(resources.window, bytes), "SDL_SetWindowDisplayMode");
-    checked(api.SDL_SetWindowFullscreen(resources.window, state.fullscreen === "exclusive" ? 1 : state.fullscreen === "desktop" ? 0x1001 : 0), "SDL_SetWindowFullscreen restore");
+    checked(
+      api.SDL_SetWindowFullscreen(resources.window, state.fullscreen === "exclusive" ? 1 : state.fullscreen === "desktop" ? 0x1001 : 0),
+      "SDL_SetWindowFullscreen restore",
+    );
     if (state.maximized) api.SDL_MaximizeWindow(resources.window);
     if (state.minimized) api.SDL_MinimizeWindow(resources.window);
     this.setVisible(state.visible);
     if (state.visible && state.focused && !state.minimized) api.SDL_RaiseWindow(resources.window);
   }
 
-  get flags(): number { return sdl().SDL_GetWindowFlags(this.opened().window); }
-  get ticks(): number { this.opened(); return sdl().SDL_GetTicks(); }
-  get closed(): boolean { return this.resources === null; }
-  get relativeMouse(): boolean { return this.input !== null && inputLease === this.input && sdl().SDL_GetRelativeMouseMode() !== 0; }
-  get backend(): "cpu" | "gl" { return this.opened().kind; }
-  get width(): number { return this.drawableSize.width; }
-  get height(): number { return this.drawableSize.height; }
+  get flags(): number {
+    return sdl().SDL_GetWindowFlags(this.opened().window);
+  }
+  get ticks(): number {
+    this.opened();
+    return sdl().SDL_GetTicks();
+  }
+  get closed(): boolean {
+    return this.resources === null;
+  }
+  get relativeMouse(): boolean {
+    return this.input !== null && inputLease === this.input && sdl().SDL_GetRelativeMouseMode() !== 0;
+  }
+  get backend(): "cpu" | "gl" {
+    return this.opened().kind;
+  }
+  get width(): number {
+    return this.drawableSize.width;
+  }
+  get height(): number {
+    return this.drawableSize.height;
+  }
 
   get logicalSize(): { readonly width: number; readonly height: number } {
-    const width = new Int32Array(1), height = new Int32Array(1);
+    const width = new Int32Array(1),
+      height = new Int32Array(1);
     sdl().SDL_GetWindowSize(this.opened().window, width, height);
-    const w = width[0], h = height[0];
+    const w = width[0],
+      h = height[0];
     if (w === undefined || h === undefined || w <= 0 || h <= 0) throw new Error("SDL returned invalid window dimensions");
     return { width: w, height: h };
   }
 
   setSize(width: number, height: number): void {
     for (const dimension of [width, height]) {
-      if (!Number.isInteger(dimension) || dimension <= 0 || dimension > 16384)
-        throw new RangeError("SDL window dimensions must be integers in 1..16384");
+      if (!Number.isInteger(dimension) || dimension <= 0 || dimension > 16384) throw new RangeError("SDL window dimensions must be integers in 1..16384");
     }
     if (this.renderContextLease !== null && !this.renderContextLease.parked) throw new Error("SDL render context is reserved for the worker");
     sdl().SDL_SetWindowSize(this.opened().window, width, height);
   }
 
-  get fullscreen(): boolean { return (this.flags & 1) !== 0; }
+  get fullscreen(): boolean {
+    return (this.flags & 1) !== 0;
+  }
   setFullscreen(enabled: boolean): void {
     if (this.renderContextLease !== null && !this.renderContextLease.parked) throw new Error("SDL render context is reserved for the worker");
     checked(sdl().SDL_SetWindowFullscreen(this.opened().window, enabled ? 0x1001 : 0), "SDL_SetWindowFullscreen");
@@ -670,20 +818,33 @@ export class SdlWindow {
   }
 
   get display(): SdlDisplay {
-    const api = sdl(), index = api.SDL_GetWindowDisplayIndex(this.opened().window), count = api.SDL_GetNumVideoDisplays();
-    checked(index, "SDL_GetWindowDisplayIndex"); checked(count, "SDL_GetNumVideoDisplays");
+    const api = sdl(),
+      index = api.SDL_GetWindowDisplayIndex(this.opened().window),
+      count = api.SDL_GetNumVideoDisplays();
+    checked(index, "SDL_GetWindowDisplayIndex");
+    checked(count, "SDL_GetNumVideoDisplays");
     // SDL_DisplayMode has four 32-bit fields followed by a pointer; only refresh_rate is read.
     const mode = new Uint8Array(24);
     checked(api.SDL_GetCurrentDisplayMode(index, mode), "SDL_GetCurrentDisplayMode");
     const bounds = new Int32Array(4);
     checked(api.SDL_GetDisplayBounds(index, bounds), "SDL_GetDisplayBounds");
     const [x, y, width, height] = bounds;
-    if (x === undefined || y === undefined || width === undefined || height === undefined || width <= 0 || height <= 0) throw new Error("SDL returned invalid display bounds");
-    return { index, count, name: String(api.SDL_GetDisplayName(index)), refreshRate: new DataView(mode.buffer).getInt32(12, littleEndian), bounds: { x, y, width, height } };
+    if (x === undefined || y === undefined || width === undefined || height === undefined || width <= 0 || height <= 0)
+      throw new Error("SDL returned invalid display bounds");
+    return {
+      index,
+      count,
+      name: String(api.SDL_GetDisplayName(index)),
+      refreshRate: new DataView(mode.buffer).getInt32(12, littleEndian),
+      bounds: { x, y, width, height },
+    };
   }
 
   get displayModes(): readonly SdlDisplayMode[] {
-    const api = sdl(), index = this.display.index, count = api.SDL_GetNumDisplayModes(index), modes: SdlDisplayMode[] = [];
+    const api = sdl(),
+      index = this.display.index,
+      count = api.SDL_GetNumDisplayModes(index),
+      modes: SdlDisplayMode[] = [];
     checked(count, "SDL_GetNumDisplayModes");
     for (let ordinal = 0; ordinal < count; ordinal++) {
       const bytes = new Uint8Array(24);
@@ -703,7 +864,8 @@ export class SdlWindow {
   beginGamma(): SdlGammaLease {
     const resources = this.opened();
     if (gammaLease !== null) throw new Error("SDL display gamma already has an owner");
-    const display = this.display, api = sdl();
+    const display = this.display,
+      api = sdl();
     let capability: SdlGammaCapability;
     let original: ReturnType<typeof gammaRamp> | null = null;
     if (display.count !== 1) capability = { kind: "unavailable", reason: "Gamma requires the single-display ownership profile" };
@@ -728,8 +890,13 @@ export class SdlWindow {
       original = null;
     };
     const lease: SdlGammaLease = {
-      get closed(): boolean { return gammaLease !== lease; },
-      get capability(): SdlGammaCapability { lease.synchronize(); return { ...capability }; },
+      get closed(): boolean {
+        return gammaLease !== lease;
+      },
+      get capability(): SdlGammaCapability {
+        lease.synchronize();
+        return { ...capability };
+      },
       synchronize: (): void => {
         if (gammaLease !== lease) return;
         if (capability.kind !== "api-accepted") return;
@@ -750,8 +917,11 @@ export class SdlWindow {
       },
       close: (): void => {
         if (gammaLease !== lease) return;
-        try { restore(); }
-        finally { gammaLease = null; }
+        try {
+          restore();
+        } finally {
+          gammaLease = null;
+        }
       },
     };
     gammaLease = lease;
@@ -765,7 +935,9 @@ export class SdlWindow {
     if (inputLease !== null) throw new Error("SDL gameplay input already has an owner");
     let relative = false;
     const lease: SdlInputLease = {
-      get closed(): boolean { return inputLease !== lease; },
+      get closed(): boolean {
+        return inputLease !== lease;
+      },
       setRelativeMouse: (enabled: boolean): void => {
         this.opened();
         if (inputLease !== lease) throw new Error("SDL input lease is closed");
@@ -776,9 +948,16 @@ export class SdlWindow {
       close: (): void => {
         if (inputLease !== lease) return;
         const errors: unknown[] = [];
-        try { if (relative) checked(sdl().SDL_SetRelativeMouseMode(0), "SDL_SetRelativeMouseMode release"); }
-        catch (error) { errors.push(error); }
-        try { sdl().SDL_StopTextInput(); } catch (error) { errors.push(error); }
+        try {
+          if (relative) checked(sdl().SDL_SetRelativeMouseMode(0), "SDL_SetRelativeMouseMode release");
+        } catch (error) {
+          errors.push(error);
+        }
+        try {
+          sdl().SDL_StopTextInput();
+        } catch (error) {
+          errors.push(error);
+        }
         inputLease = null;
         if (errors.length !== 0) throw new AggregateError(errors, "SDL input release failed");
       },
@@ -796,8 +975,7 @@ export class SdlWindow {
     if (resources.kind === "cpu") {
       // SDL2-compat's software renderer caches its surface until presentation after a resize.
       sdl().SDL_GetWindowSizeInPixels(resources.window, width, height);
-    }
-    else sdl().SDL_GL_GetDrawableSize(resources.window, width, height);
+    } else sdl().SDL_GL_GetDrawableSize(resources.window, width, height);
     const w = width[0];
     const h = height[0];
     if (w === undefined || h === undefined || w <= 0 || h <= 0) throw new Error("SDL returned invalid drawable dimensions");
@@ -811,18 +989,22 @@ export class SdlWindow {
     const view = new DataView(bytes.buffer);
     sdl().SDL_PumpEvents();
     // Controller events have a separate device owner. Window polling must not consume them.
-    const ranges: readonly (readonly [number, number])[] = [[0, 0x64f], [0x670, 0xffff]];
-    for (const [minimum, maximum] of ranges) for (;;) {
-      const count = sdl().SDL_PeepEvents(bytes, 1, 2, minimum, maximum);
-      checked(count, "SDL_PeepEvents window");
-      if (count === 0) break;
-      const event = decodeSdlEvent(bytes);
-      if (SdlJoystick.queueEvent(event)) continue;
-      const type = view.getUint32(0, littleEndian);
-      const targeted = type === 0x200 || (type >= 0x300 && type <= 0x305) || (type >= 0x400 && type <= 0x403);
-      if (targeted) windows.get(view.getUint32(8, littleEndian))?.pending.push(event);
-      else for (const window of windows.values()) window.pending.push(event);
-    }
+    const ranges: readonly (readonly [number, number])[] = [
+      [0, 0x64f],
+      [0x670, 0xffff],
+    ];
+    for (const [minimum, maximum] of ranges)
+      for (;;) {
+        const count = sdl().SDL_PeepEvents(bytes, 1, 2, minimum, maximum);
+        checked(count, "SDL_PeepEvents window");
+        if (count === 0) break;
+        const event = decodeSdlEvent(bytes);
+        if (SdlJoystick.queueEvent(event)) continue;
+        const type = view.getUint32(0, littleEndian);
+        const targeted = type === 0x200 || (type >= 0x300 && type <= 0x305) || (type >= 0x400 && type <= 0x403);
+        if (targeted) windows.get(view.getUint32(8, littleEndian))?.pending.push(event);
+        else for (const window of windows.values()) window.pending.push(event);
+      }
     const events = this.pending;
     this.pending = [];
     gammaLease?.synchronize();
@@ -836,8 +1018,12 @@ export class SdlWindow {
     if (rgba.byteLength !== width * height * 4) throw new Error("RGBA framebuffer size does not match the window");
     if (resources.width !== width || resources.height !== height) {
       const texture = handle(sdl().SDL_CreateTexture(resources.renderer, rgba32, 1, width, height), "SDL_CreateTexture resize");
-      try { checked(sdl().SDL_SetTextureBlendMode(texture, 0), "SDL_SetTextureBlendMode resize"); }
-      catch (error) { sdl().SDL_DestroyTexture(texture); throw error; }
+      try {
+        checked(sdl().SDL_SetTextureBlendMode(texture, 0), "SDL_SetTextureBlendMode resize");
+      } catch (error) {
+        sdl().SDL_DestroyTexture(texture);
+        throw error;
+      }
       sdl().SDL_DestroyTexture(resources.texture);
       resources = { ...resources, texture, width, height };
       this.resources = resources;
@@ -868,7 +1054,9 @@ export class SdlWindow {
     checked(sdl().SDL_GL_MakeCurrent(resources.window, this.renderEnabled ? resources.context : null), "SDL_GL_MakeCurrent");
   }
 
-  get renderingEnabled(): boolean { return this.renderEnabled; }
+  get renderingEnabled(): boolean {
+    return this.renderEnabled;
+  }
 
   setRenderingEnabled(enabled: boolean): void {
     const resources = this.opened();
@@ -913,7 +1101,10 @@ export class SdlWindow {
     if (!this.renderEnabled) checked(sdl().SDL_GL_MakeCurrent(resources.window, null), "SDL_GL_MakeCurrent restore diagnostic");
   }
 
-  get swapInterval(): number { this.makeCurrent(); return sdl().SDL_GL_GetSwapInterval(); }
+  get swapInterval(): number {
+    this.makeCurrent();
+    return sdl().SDL_GL_GetSwapInterval();
+  }
 
   setSwapInterval(interval: -1 | 0 | 1): void {
     if (interval !== -1 && interval !== 0 && interval !== 1) throw new RangeError("SDL swap interval must be -1, 0, or 1");
@@ -940,25 +1131,39 @@ export class SdlWindow {
     u32(4, event.timestamp);
     u32(8, this.id);
     switch (event.kind) {
-      case "quit": u32(0, 0x100); break;
+      case "quit":
+        u32(0, 0x100);
+        break;
       case "key":
         u32(0, event.down ? 0x300 : 0x301);
-        byte(12, Number(event.down)); byte(13, Number(event.repeat));
-        i32(16, event.scancode); i32(20, event.keycode);
+        byte(12, Number(event.down));
+        byte(13, Number(event.repeat));
+        i32(16, event.scancode);
+        i32(20, event.keycode);
         if (!Number.isInteger(event.modifiers) || event.modifiers < 0 || event.modifiers > 65535) throw new Error("SDL key modifiers exceed uint16");
         view.setUint16(24, event.modifiers, littleEndian);
         break;
       case "mouse-motion":
-        u32(0, 0x400); u32(16, event.buttons);
-        i32(20, event.x); i32(24, event.y); i32(28, event.dx); i32(32, event.dy);
+        u32(0, 0x400);
+        u32(16, event.buttons);
+        i32(20, event.x);
+        i32(24, event.y);
+        i32(28, event.dx);
+        i32(32, event.dy);
         break;
       case "mouse-button":
         u32(0, event.down ? 0x401 : 0x402);
-        byte(16, event.button); byte(17, Number(event.down)); byte(18, event.clicks);
-        i32(20, event.x); i32(24, event.y);
+        byte(16, event.button);
+        byte(17, Number(event.down));
+        byte(18, event.clicks);
+        i32(20, event.x);
+        i32(24, event.y);
         break;
       case "window":
-        u32(0, 0x200); byte(12, event.event); i32(16, event.data1); i32(20, event.data2);
+        u32(0, 0x200);
+        byte(12, event.event);
+        i32(16, event.data1);
+        i32(20, event.data2);
         break;
       default: {
         const exhaustive: never = event;
@@ -977,8 +1182,16 @@ export class SdlWindow {
     this.restoreRenderContext();
     SdlWindow.requireWindowListOwnership();
     const errors: unknown[] = [];
-    try { this.gamma?.close(); } catch (error) { errors.push(error); }
-    try { this.input?.close(); } catch (error) { errors.push(error); }
+    try {
+      this.gamma?.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.input?.close();
+    } catch (error) {
+      errors.push(error);
+    }
     this.resources = null;
     windows.delete(this.id);
     this.pending = [];
@@ -992,15 +1205,23 @@ export class SdlWindow {
     if (errors.length !== 0) throw new AggregateError(errors, "SDL window cleanup failed");
   }
 
-  [Symbol.dispose](): void { this.close(); }
+  [Symbol.dispose](): void {
+    this.close();
+  }
 }
 
 /** SDL replaces /dev/js0..3 selection. Events retain every button edge for IN_JoyMove. */
 export class SdlJoystick {
   private static readonly opened = new Set<SdlJoystick>();
   private pending: SdlJoystickEvent[] = [];
-  private constructor(private pointer: Pointer | null, readonly instance: number,
-    readonly name: string, readonly axes: number, readonly buttons: number, private readonly hats: number) {
+  private constructor(
+    private pointer: Pointer | null,
+    readonly instance: number,
+    readonly name: string,
+    readonly axes: number,
+    readonly buttons: number,
+    private readonly hats: number,
+  ) {
     SdlJoystick.opened.add(this);
   }
 
@@ -1012,7 +1233,8 @@ export class SdlJoystick {
   }
 
   static openFirst(print: (text: string) => undefined, profile: "linux" | "windows" = "linux"): SdlJoystick | null {
-    const api = sdl(), subsystem = 0x200;
+    const api = sdl(),
+      subsystem = 0x200;
     initializeSubsystem(subsystem, "SDL_InitSubSystem joystick");
     let pointer: Pointer | null = null;
     try {
@@ -1023,11 +1245,18 @@ export class SdlJoystick {
         if (pointer !== null) break;
         print(`SDL_JoystickOpen ${index}: ${api.SDL_GetError()}\n`);
       }
-      if (pointer === null) { api.SDL_QuitSubSystem(subsystem); return null; }
-      const instance = api.SDL_JoystickInstanceID(pointer), axes = api.SDL_JoystickNumAxes(pointer);
-      const buttons = api.SDL_JoystickNumButtons(pointer), hats = api.SDL_JoystickNumHats(pointer), balls = api.SDL_JoystickNumBalls(pointer);
+      if (pointer === null) {
+        api.SDL_QuitSubSystem(subsystem);
+        return null;
+      }
+      const instance = api.SDL_JoystickInstanceID(pointer),
+        axes = api.SDL_JoystickNumAxes(pointer);
+      const buttons = api.SDL_JoystickNumButtons(pointer),
+        hats = api.SDL_JoystickNumHats(pointer),
+        balls = api.SDL_JoystickNumBalls(pointer);
       for (const value of [instance, axes, buttons, hats, balls]) checked(value, "SDL joystick description");
-      if (profile === "linux" && (hats !== 0 || balls !== 0)) print(`SDL joystick has ${hats} hats and ${balls} balls; this Unix axis/button profile does not map them.\n`);
+      if (profile === "linux" && (hats !== 0 || balls !== 0))
+        print(`SDL joystick has ${hats} hats and ${balls} balls; this Unix axis/button profile does not map them.\n`);
       if (profile === "windows" && balls !== 0) print(`SDL joystick has ${balls} relative balls; Windows source mouse motion uses absolute U/V axes.\n`);
       return new SdlJoystick(pointer, instance, String(api.SDL_JoystickName(pointer)), axes, buttons, hats);
     } catch (error) {
@@ -1040,7 +1269,8 @@ export class SdlJoystick {
   /** Pumps only joystick devices and removes only their event range, including before video init. */
   pollEvents(profile: "linux" | "windows" = "linux"): readonly SdlJoystickEvent[] {
     if (this.pointer === null) throw new Error("SDL joystick is closed");
-    const api = sdl(), bytes = new Uint8Array(56);
+    const api = sdl(),
+      bytes = new Uint8Array(56);
     api.SDL_JoystickUpdate();
     for (;;) {
       const count = api.SDL_PeepEvents(bytes, 1, 2, 0x600, 0x606);
@@ -1055,7 +1285,9 @@ export class SdlJoystick {
       if (removed !== undefined) return [removed];
       // joyGetPosEx polls the current absolute values, including unchanged U/V.
       // SDL event-only state can omit the initial centered or held values.
-      const state: SdlJoystickEvent[] = [], timestamp = api.SDL_GetTicks(), instance = this.instance;
+      const state: SdlJoystickEvent[] = [],
+        timestamp = api.SDL_GetTicks(),
+        instance = this.instance;
       for (let button = 0; button < Math.min(this.buttons, 32); button++)
         state.push({ kind: "joystick-button", timestamp, instance, button, down: api.SDL_JoystickGetButton(this.pointer, button) !== 0 });
       for (let axis = 0; axis < Math.min(this.axes, 6); axis++)
@@ -1076,5 +1308,7 @@ export class SdlJoystick {
     sdl().SDL_QuitSubSystem(0x200);
   }
 
-  [Symbol.dispose](): void { this.close(); }
+  [Symbol.dispose](): void {
+    this.close();
+  }
 }

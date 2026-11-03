@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's client/cl_parse.c CL_ParseSnapshot history publication.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ServerOperation, Snapshot, SnapshotHistoryEntry } from "./server-message.ts";
@@ -22,9 +23,17 @@ interface RetainedSnapshotEntry {
 }
 
 function zeroSnapshot(product: Product): RetainedSnapshot {
-  return { messageNumber: 0, serverTime: 0, deltaNumber: 0, flags: 0, serverCommandNumber: 0,
-    parseEntitiesNumber: 0, areaMask: new Uint8Array(32),
-    playerState: new PlayerStateRecord<number, number, number>(product, 0, 0, 0), entities: [] };
+  return {
+    messageNumber: 0,
+    serverTime: 0,
+    deltaNumber: 0,
+    flags: 0,
+    serverCommandNumber: 0,
+    parseEntitiesNumber: 0,
+    areaMask: new Uint8Array(32),
+    playerState: new PlayerStateRecord<number, number, number>(product, 0, 0, 0),
+    entities: [],
+  };
 }
 
 function copyEntity(source: Readonly<EntityStateFields>): SourceEntityState {
@@ -70,9 +79,13 @@ export class SnapshotHistory {
 
   constructor(readonly parseEntities: SourceParseEntities | null = null) {}
 
-  get latest(): OwnedSnapshot | null { return this.current === null ? null : copySnapshot(this.current); }
+  get latest(): OwnedSnapshot | null {
+    return this.current === null ? null : copySnapshot(this.current);
+  }
 
-  readCurrentPlayerState(): SourcePlayerState | null { return this.current === null ? null : this.current.playerState.copy(); }
+  readCurrentPlayerState(): SourcePlayerState | null {
+    return this.current === null ? null : this.current.playerState.copy();
+  }
 
   /** Detached history inspection. Source parsing borrows its actual slot instead. */
   readSlot(messageNumber: number): { readonly status: SnapshotHistoryEntry["status"]; readonly snapshot: OwnedSnapshot } | null {

@@ -19,7 +19,8 @@ test("guest cvar records hide private values, follow changes in place and relink
     registry.register("skill", "1");
     const memory = new SparseGuestMemory({ module: identity, pointerBytes: 4 });
     const cvars = new ClassicQ2Cvars(memory, registry);
-    const rcon = cvars.pointer("rcon_password"), skill = cvars.pointer("skill");
+    const rcon = cvars.pointer("rcon_password"),
+      skill = cvars.pointer("skill");
     if (rcon === null || skill === null) throw new Error("Missing guest cvar records");
     const text = (record: typeof rcon) => readClassicString(memory, memory.readPointer(memory.offset(record, 4n)));
     expect(text(rcon)).toBe("");
@@ -39,5 +40,7 @@ test("guest cvar records hide private values, follow changes in place and relink
       node = memory.readPointer(memory.offset(node, 24n));
     }
     expect(names).toEqual(["deathmatch", "skill", "rcon_password"]);
-  } finally { actors.close(); }
+  } finally {
+    actors.close();
+  }
 });

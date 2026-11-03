@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { writeCapture } from "../support/capture.ts";
 import { expect, spyOn } from "bun:test";
 import { glTest as test } from "../support/gl.ts";
@@ -12,33 +13,65 @@ import { encodePng } from "../../src/formats/images/png.ts";
 
 test("startup Display keeps renderer and Apply visible on one normal-sized page", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-display-layout-"));
-  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--renderer", "gl", "--hidden", "--width", "640", "--height", "480", "--gamma", "1.3", "--user-content-root", root]);
+  const parsed = parseApplicationCommand([
+    "--game",
+    "q2-classic-baseq2",
+    "--renderer",
+    "gl",
+    "--hidden",
+    "--width",
+    "640",
+    "--height",
+    "480",
+    "--gamma",
+    "1.3",
+    "--user-content-root",
+    root,
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing startup options");
-  const observed: { controller: NativeUiController | null } = { controller: null }, draw = NativeUiController.prototype.draw;
-  const captureController = spyOn(NativeUiController.prototype, "draw").mockImplementation(function(this: NativeUiController, ...args) {
-    observed.controller = this; return draw.call(this, ...args);
+  const observed: { controller: NativeUiController | null } = { controller: null },
+    draw = NativeUiController.prototype.draw;
+  const captureController = spyOn(NativeUiController.prototype, "draw").mockImplementation(function (this: NativeUiController, ...args) {
+    observed.controller = this;
+    return draw.call(this, ...args);
   });
   let app: StartupApplication | null = null;
   try {
     app = await StartupApplication.open(parsed.options, { print: () => undefined }, join(root, "saves"));
-    const startup = app, seat = startup.inputSeat; if (seat === null) throw new Error("Missing startup seat");
-    const key = (code: number): void => { for (const down of [true, false]) startup.input({ seat, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
+    const startup = app,
+      seat = startup.inputSeat;
+    if (seat === null) throw new Error("Missing startup seat");
+    const key = (code: number): void => {
+      for (const down of [true, false]) startup.input({ seat, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() });
+    };
     // Main menu order: Play a game, Load Game, Options, Library, Quit.
     for (let index = 0; index < 2; index++) key(KeyCode.Down);
-    key(KeyCode.Enter); key(KeyCode.Enter); await startup.step();
-    const controller = observed.controller; if (controller === null) throw new Error("Missing rendered menu controller");
+    key(KeyCode.Enter);
+    key(KeyCode.Enter);
+    await startup.step();
+    const controller = observed.controller;
+    if (controller === null) throw new Error("Missing rendered menu controller");
     for (let index = 0; index < 16; index++) {
-      const focus = controller.state().focus; if (focus.kind === "menu" && focus.control === "ui:video:renderer") break;
+      const focus = controller.state().focus;
+      if (focus.kind === "menu" && focus.control === "ui:video:renderer") break;
       key(KeyCode.Tab);
     }
     expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:video:renderer" });
     // Changing the draft enables Apply renderer; it must stay on this same page.
-    key(KeyCode.Enter); await startup.step();
+    key(KeyCode.Enter);
+    await startup.step();
     key(KeyCode.Tab);
     expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:video:renderer-apply" });
-    const pixels = startup.captureNextFrame(); await startup.step();
+    const pixels = startup.captureNextFrame();
+    await startup.step();
     await writeCapture("video-settings-gl-startup-complete-page.png", encodePng(640, 480, await pixels));
-    key(KeyCode.Tab); expect(controller.state().focus).toMatchObject({ control: "ui:settings:back" });
-    key(KeyCode.Tab); expect(controller.state().focus).toMatchObject({ control: "ui:video:brightness" });
-  } finally { await app?.close(); captureController.mockRestore(); await rm(root, { recursive: true, force: true }); }
+    key(KeyCode.Tab);
+    expect(controller.state().focus).toMatchObject({ control: "ui:settings:back" });
+    key(KeyCode.Tab);
+    expect(controller.state().focus).toMatchObject({ control: "ui:video:brightness" });
+  } finally {
+    await app?.close();
+    captureController.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
 }, 60000);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Vector traps from Quake III Arena sv_game.c and game/q_math.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -26,11 +27,7 @@ function optionalVector(memory: Q3GameMemory, word: number): DataView | null {
  * These are engine calls, not the q3lcc arithmetic in core/math.ts.
  * Required spans preflight before writes; null means another service owns the trap.
  */
-export function qvmVectorSyscall(
-  role: "game" | "cgame" | "ui",
-  words: DataView,
-  memory: Q3GameMemory,
-): number | null {
+export function qvmVectorSyscall(role: "game" | "cgame" | "ui", words: DataView, memory: Q3GameMemory): number | null {
   if (role !== "game") return null;
   switch (words.getInt32(0, true)) {
     case 107: {
@@ -40,16 +37,8 @@ export function qvmVectorSyscall(
       // C has no restrict here. Each assignment can change later input reads.
       for (let row = 0; row < 3; row++) {
         for (let column = 0; column < 3; column++) {
-          const a = vec3(
-            left.getFloat32(row * 12, true),
-            left.getFloat32(row * 12 + 4, true),
-            left.getFloat32(row * 12 + 8, true),
-          );
-          const b = vec3(
-            right.getFloat32(column * 4, true),
-            right.getFloat32(column * 4 + 12, true),
-            right.getFloat32(column * 4 + 24, true),
-          );
+          const a = vec3(left.getFloat32(row * 12, true), left.getFloat32(row * 12 + 4, true), left.getFloat32(row * 12 + 8, true));
+          const b = vec3(right.getFloat32(column * 4, true), right.getFloat32(column * 4 + 12, true), right.getFloat32(column * 4 + 24, true));
           output.setFloat32(row * 12 + column * 4, dot3(a, b), true);
         }
       }
@@ -78,6 +67,7 @@ export function qvmVectorSyscall(
       writeVector(destination, perpendicularVector(source));
       return 0;
     }
-    default: return null;
+    default:
+      return null;
   }
 }

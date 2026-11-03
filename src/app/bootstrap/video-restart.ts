@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CommandContext } from "../../contracts/common.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 import type { SdlWindow } from "../../platform/sdl.ts";
@@ -30,10 +31,17 @@ export class ApplicationVideoRestart {
   private unregister: (() => void) | null = null;
   private completed = 0;
 
-  constructor(private readonly renderer: NativeRenderer, private readonly host: VideoRestartHost) {}
+  constructor(
+    private readonly renderer: NativeRenderer,
+    private readonly host: VideoRestartHost,
+  ) {}
 
-  get pending(): boolean { return this.requested !== null || this.running; }
-  get generation(): number { return this.completed; }
+  get pending(): boolean {
+    return this.requested !== null || this.running;
+  }
+  get generation(): number {
+    return this.completed;
+  }
 
   request(kind = this.renderer.window.backend, source?: CommandContext): void {
     if (this.closed) throw new Error("Video restart owner has retired");
@@ -45,17 +53,29 @@ export class ApplicationVideoRestart {
     const handler: Parameters<CommandBuffer["register"]>[1] = command => {
       let origin = command.source.origin;
       while (origin.kind === "script") origin = origin.caller;
-      if (origin.kind === "remote-client") { this.host.print("vid_restart is a local client command.\n", command.source); return undefined; }
-      const kind = command.args[0];
-      if (command.args.length > 1 || kind !== undefined && kind !== "cpu" && kind !== "gl") {
-        this.host.print("vid_restart [cpu|gl]\n", command.source); return undefined;
+      if (origin.kind === "remote-client") {
+        this.host.print("vid_restart is a local client command.\n", command.source);
+        return undefined;
       }
-      this.request(kind, command.source); return undefined;
+      const kind = command.args[0];
+      if (command.args.length > 1 || (kind !== undefined && kind !== "cpu" && kind !== "gl")) {
+        this.host.print("vid_restart [cpu|gl]\n", command.source);
+        return undefined;
+      }
+      this.request(kind, command.source);
+      return undefined;
     };
-    if (!commands.registerEngine("vid_restart", handler, { summary: "Restart the client renderer while retaining the current game.",
-      usage: "vid_restart [cpu|gl]", examples: ["vid_restart", "vid_restart cpu", "vid_restart gl"] }))
+    if (
+      !commands.registerEngine("vid_restart", handler, {
+        summary: "Restart the client renderer while retaining the current game.",
+        usage: "vid_restart [cpu|gl]",
+        examples: ["vid_restart", "vid_restart cpu", "vid_restart gl"],
+      })
+    )
       throw new Error("Video restart command belongs to another owner");
-    this.unregister = () => { commands.unregister("vid_restart", handler); };
+    this.unregister = () => {
+      commands.unregister("vid_restart", handler);
+    };
   }
 
   async drain(): Promise<boolean> {
@@ -63,7 +83,8 @@ export class ApplicationVideoRestart {
     const request = this.requested;
     if (this.closed || request === null || this.host.capture()?.pendingReadback) return false;
     const { kind, source } = request;
-    this.requested = null; this.running = true;
+    this.requested = null;
+    this.running = true;
     let surface: Awaited<ReturnType<NativeRenderer["prepareRestart"]>> | null = null;
     let presentation: PreparedVideoPresentation | null = null;
     let retire: (() => void) | null = null;
@@ -75,34 +96,56 @@ export class ApplicationVideoRestart {
       presentation = await this.host.prepare();
       if (this.closed) throw new Error("Video restart was cancelled during preparation");
       presentation?.validatePublication();
-      this.host.publishWindow(surface.window); inputPublished = true;
+      this.host.publishWindow(surface.window);
+      inputPublished = true;
       retire = surface.publish();
       await presentation?.restart();
       if (this.closed) throw new Error("Video restart was cancelled after publication");
       await this.host.published(kind);
-      retire(); retire = null;
+      retire();
+      retire = null;
       this.host.print(`Renderer restarted (${kind}).\n`, source);
       return true;
     } catch (error) {
       const failures: unknown[] = [error];
       const published = surface?.published === true;
       if (!published) {
-        if (inputPublished) { try { this.host.publishWindow(previousWindow); } catch (cleanup) { failures.push(cleanup); } }
-        try { surface?.discard(); } catch (cleanup) { failures.push(cleanup); }
+        if (inputPublished) {
+          try {
+            this.host.publishWindow(previousWindow);
+          } catch (cleanup) {
+            failures.push(cleanup);
+          }
+        }
+        try {
+          surface?.discard();
+        } catch (cleanup) {
+          failures.push(cleanup);
+        }
       } else {
-        try { retire?.(); } catch (cleanup) { failures.push(cleanup); }
+        try {
+          retire?.();
+        } catch (cleanup) {
+          failures.push(cleanup);
+        }
       }
       if (published || failures.length > 1 || error instanceof AggregateError)
         return this.host.failed(new AggregateError(failures, "Video restart publication failed"));
       this.host.print(`Video restart rejected: ${error instanceof Error ? error.message : String(error)}\n`, source);
       return false;
-    } finally { this.completed++; this.running = false; this.host.settled(); }
+    } finally {
+      this.completed++;
+      this.running = false;
+      this.host.settled();
+    }
   }
 
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.requested = null;
-    this.unregister?.(); this.unregister = null;
+    this.closed = true;
+    this.requested = null;
+    this.unregister?.();
+    this.unregister = null;
   }
 }
 
@@ -112,8 +155,12 @@ export interface VideoGuestSeat {
   publish(client: ApplicationQ3Client): void;
 }
 
-export function prepareVideoGuests(input: ApplicationInput, renderer: NativeRenderer,
-  seats: readonly VideoGuestSeat[], assertCurrent: () => void): PreparedVideoPresentation | null {
+export function prepareVideoGuests(
+  input: ApplicationInput,
+  renderer: NativeRenderer,
+  seats: readonly VideoGuestSeat[],
+  assertCurrent: () => void,
+): PreparedVideoPresentation | null {
   if (seats.length === 0) return null;
   const guests = seats.map(seat => ({ seat, reopen: seat.client.captureVideoReopen() }));
   return {
@@ -121,8 +168,17 @@ export function prepareVideoGuests(input: ApplicationInput, renderer: NativeRend
     restart: async () => {
       const errors: unknown[] = [];
       for (const { seat } of guests) {
-        try { await seat.client.shutdown(); } catch (error) { errors.push(error); }
-        finally { try { seat.client.close(); } catch (error) { errors.push(error); } }
+        try {
+          await seat.client.shutdown();
+        } catch (error) {
+          errors.push(error);
+        } finally {
+          try {
+            seat.client.close();
+          } catch (error) {
+            errors.push(error);
+          }
+        }
       }
       if (errors.length !== 0) throw new AggregateError(errors, "Previous guest video shutdown failed");
       for (const { seat, reopen } of guests) {
@@ -133,8 +189,16 @@ export function prepareVideoGuests(input: ApplicationInput, renderer: NativeRend
           seat.publish(replacement);
         } catch (error) {
           const failures: unknown[] = [error];
-          try { replacement?.close(); } catch (cleanup) { failures.push(cleanup); }
-          try { registration.close(); } catch (cleanup) { failures.push(cleanup); }
+          try {
+            replacement?.close();
+          } catch (cleanup) {
+            failures.push(cleanup);
+          }
+          try {
+            registration.close();
+          } catch (cleanup) {
+            failures.push(cleanup);
+          }
           if (failures.length > 1) throw new AggregateError(failures, "Guest video reopen and cleanup failed");
           throw error;
         }

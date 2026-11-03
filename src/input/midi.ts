@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // win32/win_input.c IN_StartupMIDI, IN_ShutdownMIDI and MidiInfo_f.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 // Linux ALSA raw MIDI supplies the system byte stream in place of WinMM.
@@ -36,18 +37,22 @@ const systemMidiFiles: MidiFileIo = {
   open: (path, flags) => openSync(path, flags),
   isCharacterDevice: fd => fstatSync(fd).isCharacterDevice(),
   read: (fd, bytes) => readSync(fd, bytes, 0, bytes.length, null),
-  close: fd => { closeSync(fd); },
+  close: fd => {
+    closeSync(fd);
+  },
 };
 
 function errorCode(error: unknown): string | null {
-  return error !== null && typeof error === "object" && "code" in error && typeof error.code === "string"
-    ? error.code : null;
+  return error !== null && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : null;
 }
 
 class RawMidiHandle implements MidiInputHandle {
   private closed = false;
   private pending: number | null = null;
-  constructor(private readonly fd: number, private readonly io: MidiFileIo) {}
+  constructor(
+    private readonly fd: number,
+    private readonly io: MidiFileIo,
+  ) {}
 
   start(): void {
     const first = new Uint8Array(1);
@@ -60,10 +65,15 @@ class RawMidiHandle implements MidiInputHandle {
   read(bytes: Uint8Array): number {
     if (this.closed) throw new Error("MIDI input handle is closed");
     if (bytes.length === 0) throw new RangeError("MIDI read requires a nonempty buffer");
-    if (this.pending !== null) { bytes[0] = this.pending; this.pending = null; return 1; }
+    if (this.pending !== null) {
+      bytes[0] = this.pending;
+      this.pending = null;
+      return 1;
+    }
     let count: number;
-    try { count = this.io.read(this.fd, bytes); }
-    catch (error) {
+    try {
+      count = this.io.read(this.fd, bytes);
+    } catch (error) {
       const code = errorCode(error);
       if (code === "EAGAIN" || code === "EWOULDBLOCK" || code === "EINTR") return 0;
       throw error;
@@ -87,15 +97,21 @@ export class LinuxMidiInputBoundary implements MidiInputBoundary {
   list(): readonly MidiDevice[] {
     if (process.platform !== "linux") throw new Error("MIDI input currently requires Linux ALSA raw MIDI");
     let names: readonly string[];
-    try { names = this.io.readDirectory(); }
-    catch (error) { if (errorCode(error) === "ENOENT") return []; throw error; }
+    try {
+      names = this.io.readDirectory();
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return [];
+      throw error;
+    }
     const devices: { readonly card: number; readonly device: number; readonly name: string }[] = [];
     for (const name of names) {
       const match = /^midiC([0-9]+)D([0-9]+)$/.exec(name);
       if (match === null) continue;
-      const cardText = match[1], deviceText = match[2];
+      const cardText = match[1],
+        deviceText = match[2];
       if (cardText === undefined || deviceText === undefined) throw new Error("Missing MIDI device coordinates");
-      const card = Number(cardText), device = Number(deviceText);
+      const card = Number(cardText),
+        device = Number(deviceText);
       if (!Number.isSafeInteger(card) || !Number.isSafeInteger(device)) continue;
       devices.push({ card, device, name });
     }
@@ -114,7 +130,10 @@ export class LinuxMidiInputBoundary implements MidiInputBoundary {
       const handle = new RawMidiHandle(fd, this.io);
       handle.start();
       return handle;
-    } catch (error) { this.io.close(fd); throw error; }
+    } catch (error) {
+      this.io.close(fd);
+      throw error;
+    }
   }
 }
 
@@ -132,12 +151,18 @@ export class SourceMidiInput {
   private readonly held = new Set<number>();
   private readonly released = new Set<number>();
   private channel: number | null = null;
-  get connected(): boolean { return this.handle !== null; }
-  availableDevices(): readonly MidiDevice[] { return this.boundary.list(); }
+  get connected(): boolean {
+    return this.handle !== null;
+  }
+  availableDevices(): readonly MidiDevice[] {
+    return this.boundary.list();
+  }
 
   /** Construction performs no device access, including enumeration. */
-  constructor(private readonly options: SourceMidiOptions,
-    private readonly boundary: MidiInputBoundary = new LinuxMidiInputBoundary()) {}
+  constructor(
+    private readonly options: SourceMidiOptions,
+    private readonly boundary: MidiInputBoundary = new LinuxMidiInputBoundary(),
+  ) {}
 
   initialize(): void {
     this.requireOpen();
@@ -156,12 +181,17 @@ export class SourceMidiInput {
     }
   }
 
-  restart(): void { this.initialize(); }
+  restart(): void {
+    this.initialize();
+  }
 
   frame(queueKey: (key: number, down: boolean, time: number) => undefined, time = 0): void {
     this.requireOpen();
     const channel = this.cvar("in_midichannel").integerValue;
-    if (channel !== this.channel) { this.release(time, queueKey); this.channel = channel; }
+    if (channel !== this.channel) {
+      this.release(time, queueKey);
+      this.channel = channel;
+    }
     for (const key of this.released) queueKey(key, false, time);
     this.released.clear();
     // Bound one frame's reads even when a virtual MIDI producer never becomes idle.
@@ -169,16 +199,19 @@ export class SourceMidiInput {
       const handle = this.handle;
       if (handle === null) return;
       let count: number;
-      try { count = handle.read(this.buffer); }
-      catch (error) {
-        this.stop(); this.release(time, queueKey);
+      try {
+        count = handle.read(this.buffer);
+      } catch (error) {
+        this.stop();
+        this.release(time, queueKey);
         this.options.print(`WARNING: MIDI input stopped: ${error instanceof Error ? error.message : String(error)}\n`);
         return;
       }
       if (!Number.isInteger(count) || count < 0 || count > this.buffer.length) throw new Error("Invalid MIDI input boundary read length");
       if (count === 0) return;
       this.decoder.feed(this.buffer.subarray(0, count), channel, time, (key, down, timestamp) => {
-        if (down) this.held.add(key); else this.held.delete(key);
+        if (down) this.held.add(key);
+        else this.held.delete(key);
         return queueKey(key, down, timestamp);
       });
     }
@@ -204,11 +237,15 @@ export class SourceMidiInput {
     return value;
   }
 
-  private requireOpen(): void { if (this.closed) throw new Error("Source MIDI input is closed"); }
+  private requireOpen(): void {
+    if (this.closed) throw new Error("Source MIDI input is closed");
+  }
 
   release(time: number, queueKey: (key: number, down: boolean, time: number) => undefined): void {
     for (const key of new Set([...this.held, ...this.released])) queueKey(key, false, time);
-    this.held.clear(); this.released.clear(); this.decoder.reset();
+    this.held.clear();
+    this.released.clear();
+    this.decoder.reset();
   }
 
   private stop(): void {

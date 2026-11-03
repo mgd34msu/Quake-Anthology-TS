@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { writeCapture } from "../support/capture.ts";
 import { RawAudioStream } from "../../src/audio/streams.ts";
 import { testCorpusRoot, corpusFile } from "../support/corpus.ts";
@@ -25,16 +26,22 @@ function shortCin(sampleRate = 22051): Uint8Array {
   const writer = new BinaryWriter(100000);
   for (const value of [2, 1, sampleRate, 1, 1]) writer.i32(value);
   const counts = new Uint8Array(65536);
-  for (let context = 0; context < 256; context++) { counts[context * 256] = 1; counts[context * 256 + 1] = 1; }
+  for (let context = 0; context < 256; context++) {
+    counts[context * 256] = 1;
+    counts[context * 256 + 1] = 1;
+  }
   writer.bytes(counts);
   for (let frame = 0; frame < 4; frame++) {
     writer.i32(frame === 0 ? 1 : 0);
     if (frame === 0) {
       const palette = new Uint8Array(768);
-      palette[0] = 255; palette[4] = 255;
+      palette[0] = 255;
+      palette[4] = 255;
       writer.bytes(palette);
     }
-    writer.i32(5); writer.i32(2); writer.u8(frame % 2 === 0 ? 2 : 1);
+    writer.i32(5);
+    writer.i32(2);
+    writer.u8(frame % 2 === 0 ? 2 : 1);
     const { start, end } = cinSampleRange(frame, sampleRate);
     writer.bytes(new Uint8Array(end - start).fill(128 + frame));
   }
@@ -44,9 +51,14 @@ function shortCin(sampleRate = 22051): Uint8Array {
 
 test("RoQ decodes stereo deltas and holds the final frame on its source clock", () => {
   const writer = new BinaryWriter(256);
-  writer.u16(0x1084); writer.u32(0xffffffff); writer.u16(30);
+  writer.u16(0x1084);
+  writer.u32(0xffffffff);
+  writer.u16(30);
   const chunk = (id: number, data: readonly number[], flags = 0): void => {
-    writer.u16(id); writer.u32(data.length); writer.u16(flags); writer.bytes(Uint8Array.from(data));
+    writer.u16(id);
+    writer.u32(data.length);
+    writer.u16(flags);
+    writer.bytes(Uint8Array.from(data));
   };
   chunk(0x1021, [1, 2, 3, 4], 0x0102);
   chunk(0x1001, [8, 0, 8, 0, 8, 0, 4, 0]);
@@ -58,11 +70,18 @@ test("RoQ decodes stereo deltas and holds the final frame on its source clock", 
   if (event.kind !== "audio") throw new Error("Missing RoQ stereo block");
   expect(Array.from(event.samples)).toEqual([257, 516, 266, 532]);
   expect(event.channels).toBe(2);
-  const clock = { time: 0, sample(): number { return this.time; } };
+  const clock = {
+    time: 0,
+    sample(): number {
+      return this.time;
+    },
+  };
   const playback = new RoqPlayback(bytes, { clock, hold: true, onAudio: () => undefined, developerPrint: () => undefined });
   playback.run(clock);
-  clock.time = 34; expect(playback.run(clock).update.kind).toBe("frame");
-  clock.time = 67; expect(playback.run(clock).status).toBe("held");
+  clock.time = 34;
+  expect(playback.run(clock).update.kind).toBe("frame");
+  clock.time = 67;
+  expect(playback.run(clock).status).toBe("held");
   expect(playback.currentFrame?.rgba.length).toBe(8 * 8 * 4);
 });
 
@@ -75,10 +94,21 @@ test("CIN keeps integer frame and sample boundaries, palette colors, and source 
   expect(first.audio?.sourceSample).toBe(0);
   expect(first.audio?.samples.length).toBe(1575);
   decoder.close();
-  const clock = { time: 0, sample(): number { return this.time; } };
+  const clock = {
+    time: 0,
+    sample(): number {
+      return this.time;
+    },
+  };
   const audio: CinematicAudio[] = [];
-  const playback = new CinPlayback(shortCin(), { clock, onAudio: block => { audio.push(block); } });
-  clock.time = 142; expect(playback.run(clock).update.kind).toBe("unchanged");
+  const playback = new CinPlayback(shortCin(), {
+    clock,
+    onAudio: block => {
+      audio.push(block);
+    },
+  });
+  clock.time = 142;
+  expect(playback.run(clock).update.kind).toBe("unchanged");
   clock.time = 143;
   const blank = playback.run(clock);
   expect(blank.update.kind === "frame" && blank.update.frame === null).toBe(true);
@@ -92,28 +122,52 @@ test("CIN keeps integer frame and sample boundaries, palette colors, and source 
 test("fullscreen CIN pauses its clock and audio, targets a second seat, and completes once", () => {
   const identity = createIdentityOwner("media-smoke");
   const seat = identity.seat(1);
-  const clock = { time: 0, sample(): number { return this.time; } };
-  const completed: CinematicEndReason[] = [], paused: boolean[] = [];
-  const options: CinematicOptions = { clock, target: { kind: "seat", seat },
-    onAudio: () => {}, onAudioReset: () => {}, onAudioPause: value => { paused.push(value); },
-    onComplete(reason) { completed.push(reason); } };
+  const clock = {
+    time: 0,
+    sample(): number {
+      return this.time;
+    },
+  };
+  const completed: CinematicEndReason[] = [],
+    paused: boolean[] = [];
+  const options: CinematicOptions = {
+    clock,
+    target: { kind: "seat", seat },
+    onAudio: () => {},
+    onAudioReset: () => {},
+    onAudioPause: value => {
+      paused.push(value);
+    },
+    onComplete(reason) {
+      completed.push(reason);
+    },
+  };
   const source = cinematicBytes("cin", shortCin());
   expect(cinematicDimensions(source)).toEqual({ width: 2, height: 1 });
   const playback = new CinematicPlayback(source, options);
-  const image: RendererImage = { owner: { identity: Symbol("render"), session: identity.session, generation: 0 },
-    ordinal: 1, source: { kind: "generated", name: "cinematic:test" }, width: 2, height: 1 };
+  const image: RendererImage = {
+    owner: { identity: Symbol("render"), session: identity.session, generation: 0 },
+    ordinal: 1,
+    source: { kind: "generated", name: "cinematic:test" },
+    width: 2,
+    height: 1,
+  };
   const fullscreen = new FullscreenCinematic(playback, image, (width, height, source) => ({ ...image, ordinal: image.ordinal + 1, width, height, source }));
   const viewport = { x: 400, y: 0, width: 400, height: 300 };
   const draw = fullscreen.prepare(viewport);
   expect(draw.seat.equals(seat)).toBe(true);
   expect(draw.commands.map(command => command.kind)).toEqual(["image-resource", "set-color", "stretch-pic"]);
   draw.complete();
-  clock.time = 100; playback.pause(true);
-  clock.time = 1000; expect(playback.playbackTimeMilliseconds).toBe(100);
+  clock.time = 100;
+  playback.pause(true);
+  clock.time = 1000;
+  expect(playback.playbackTimeMilliseconds).toBe(100);
   expect(playback.tick().status).toBe("paused");
   playback.pause(false);
-  clock.time = 1050; expect(playback.playbackTimeMilliseconds).toBe(150);
-  playback.skip(); playback.skip();
+  clock.time = 1050;
+  expect(playback.playbackTimeMilliseconds).toBe(150);
+  playback.skip();
+  playback.skip();
   expect(paused).toEqual([true, false]);
   expect(completed).toEqual(["skipped"]);
   expect(fullscreen.close()?.kind).toBe("release-image");
@@ -121,18 +175,33 @@ test("fullscreen CIN pauses its clock and audio, targets a second seat, and comp
 
 test("material uploads acknowledge execution and malformed OGV fails before native admission", () => {
   const identity = createIdentityOwner("material-media");
-  const options: CinematicOptions = { clock: { sample: () => 0 }, target: { kind: "material", id: "wall" },
-    onAudio: () => {}, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: () => {} };
+  const options: CinematicOptions = {
+    clock: { sample: () => 0 },
+    target: { kind: "material", id: "wall" },
+    onAudio: () => {},
+    onAudioReset: () => {},
+    onAudioPause: () => {},
+    onComplete: () => {},
+  };
   const playback = new CinematicPlayback(cinematicBytes("cin", shortCin()), options);
-  const image: RendererImage = { owner: { identity: Symbol("render"), session: identity.session, generation: 0 }, ordinal: 0,
-    source: { kind: "generated", name: "wall" }, width: 2, height: 1 };
+  const image: RendererImage = {
+    owner: { identity: Symbol("render"), session: identity.session, generation: 0 },
+    ordinal: 0,
+    source: { kind: "generated", name: "wall" },
+    width: 2,
+    height: 1,
+  };
   const registry = new SceneImageRegistry(image.owner);
   const first = registry.allocate(image.width, image.height, image.source);
   const material = new MaterialCinematic(playback, first, (width, height, source) => registry.allocate(width, height, source));
   const operations: string[] = [];
-  material.resolve(operation => { operations.push(operation.kind); });
+  material.resolve(operation => {
+    operations.push(operation.kind);
+  });
   expect(operations).toEqual(["create-image"]);
-  material.resolve(operation => { operations.push(operation.kind); });
+  material.resolve(operation => {
+    operations.push(operation.kind);
+  });
   expect(operations).toEqual(["create-image"]);
   expect(material.close()?.kind).toBe("release-image");
   expect(() => new CinematicPlayback(cinematicBytes("ogv", new Uint8Array([0]), "intro.ogv"), options)).toThrow("Invalid or truncated Ogg page");
@@ -161,7 +230,9 @@ test.skipIf(!existsSync(cinPath))("retail Q2 CIN and expansion movies decode rea
       decoder.rewind();
       const rewound = decoder.next();
       expect(rewound.kind === "frame" ? rewound.index : -1).toBe(0);
-    } finally { decoder.close(); }
+    } finally {
+      decoder.close();
+    }
   }
 });
 
@@ -186,43 +257,95 @@ test.skipIf(!existsSync(roqArchive))("Team Arena RoQ reads from PK3 and decodes 
       "d3ab279ad9bfe65174d02b92db849635027152ce1150d6e045fffc08e5aa6346",
       "e0c09a33d4b22c4df19b4f33d3023392b94774f8cfd16a24fa055e1c7bd4e21f",
     ]);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
-
-
 function movieQuad(texture: TextureBinding): DrawBatch {
-  return { primitive: "triangles", texturing: "single", lighting: { kind: "vertex" }, texture,
-    vertices: [{ position: { x: -1, y: -1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 0 } },
+  return {
+    primitive: "triangles",
+    texturing: "single",
+    lighting: { kind: "vertex" },
+    texture,
+    vertices: [
+      { position: { x: -1, y: -1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 0 } },
       { position: { x: 1, y: -1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 1, y: 0 } },
       { position: { x: 1, y: 1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 1, y: 1 } },
-      { position: { x: -1, y: 1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 1 } }], indices: [0, 1, 2, 0, 2, 3],
-    state: { blend: { source: "one", destination: "zero" }, depthTest: "always", depthWrite: false, alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null } };
+      { position: { x: -1, y: 1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 1 } },
+    ],
+    indices: [0, 1, 2, 0, 2, 3],
+    state: {
+      blend: { source: "one", destination: "zero" },
+      depthTest: "always",
+      depthWrite: false,
+      alphaTest: "none",
+      cull: "none",
+      depthRange: [0, 1],
+      polygonOffset: null,
+    },
+  };
 }
 
 test("dynamic movie textures resolve in draw order, resize once and retry a failed creation", () => {
-  const identity = createIdentityOwner("cinematic-resize"), owner = { identity: Symbol("cinematic-resize"), session: identity.session, generation: 0 };
-  const images = new SceneImageRegistry(owner), initial = images.allocate(1, 1, { kind: "generated", name: "resize" });
+  const identity = createIdentityOwner("cinematic-resize"),
+    owner = { identity: Symbol("cinematic-resize"), session: identity.session, generation: 0 };
+  const images = new SceneImageRegistry(owner),
+    initial = images.allocate(1, 1, { kind: "generated", name: "resize" });
   const texture = new CinematicImage(initial, (width, height, source) => images.allocate(width, height, source));
-  const backend = new SoftwareRenderer(8, 8, owner), target = new CpuRenderTarget(backend);
+  const backend = new SoftwareRenderer(8, 8, owner),
+    target = new CpuRenderTarget(backend);
   const operations: ImageResourceOperation[] = [];
-  const apply = (operation: ImageResourceOperation): void => { backend.applyImageResource(operation); images.commit(operation); operations.push(operation); };
-  const frame = (width: number, red: boolean): CinematicFrame => ({ width, height: 1, index: width, loop: 0, sourceTime: 0, time: 0,
-    rgba: Uint8Array.from(Array.from({ length: width }, () => red ? [255, 0, 0, 255] : [0, 255, 0, 255]).flat()) });
-  let sourceFrame = frame(1, true), revision = 0;
+  const apply = (operation: ImageResourceOperation): void => {
+    backend.applyImageResource(operation);
+    images.commit(operation);
+    operations.push(operation);
+  };
+  const frame = (width: number, red: boolean): CinematicFrame => ({
+    width,
+    height: 1,
+    index: width,
+    loop: 0,
+    sourceTime: 0,
+    time: 0,
+    rgba: Uint8Array.from(Array.from({ length: width }, () => (red ? [255, 0, 0, 255] : [0, 255, 0, 255])).flat()),
+  });
+  let sourceFrame = frame(1, true),
+    revision = 0;
   let nextDraw = 0;
-  const source = { resolve: (upload: (operation: ImageResourceOperation) => void) => {
-    sourceFrame = frame(nextDraw + 1, nextDraw === 0); revision = nextDraw++;
-    return texture.resolve(sourceFrame, revision, operation => { upload(operation); images.commit(operation); operations.push(operation); });
-  } };
+  const source = {
+    resolve: (upload: (operation: ImageResourceOperation) => void) => {
+      sourceFrame = frame(nextDraw + 1, nextDraw === 0);
+      revision = nextDraw++;
+      return texture.resolve(sourceFrame, revision, operation => {
+        upload(operation);
+        images.commit(operation);
+        operations.push(operation);
+      });
+    },
+  };
   const batch = movieQuad({ kind: "dynamic-image", source });
   try {
     const queued = [batch, batch];
     expect(operations).toHaveLength(0);
-    target.execute({ owner, sequence: 0, commands: queued.map((draw, index): RenderCommand => ({ kind: "view", view: {
-      target: { kind: "preview", id: `resize-${index}` }, time: { kind: "milliseconds", value: 0 },
-      viewport: { x: index * 4, y: 0, width: 4, height: 8 }, clear: { color: null, depth: 1, stencil: false }, clipPlane: null,
-      beforeView: [], operations: [{ kind: "draw", batches: [draw] }] } })) });
+    target.execute({
+      owner,
+      sequence: 0,
+      commands: queued.map(
+        (draw, index): RenderCommand => ({
+          kind: "view",
+          view: {
+            target: { kind: "preview", id: `resize-${index}` },
+            time: { kind: "milliseconds", value: 0 },
+            viewport: { x: index * 4, y: 0, width: 4, height: 8 },
+            clear: { color: null, depth: 1, stencil: false },
+            clipPlane: null,
+            beforeView: [],
+            operations: [{ kind: "draw", batches: [draw] }],
+          },
+        }),
+      ),
+    });
     for (const index of [0, 1]) {
       const pixel = (4 * 8 + index * 4 + 2) * 4;
       expect(backend.pixels[pixel + index]).toBeGreaterThan(0);
@@ -231,10 +354,14 @@ test("dynamic movie textures resolve in draw order, resize once and retry a fail
     }
     expect(operations.map(operation => operation.kind)).toEqual(["create-image", "release-image", "create-image"]);
     expect(texture.image.ordinal).not.toBe(initial.ordinal);
-    sourceFrame = frame(3, true); revision = 2;
+    sourceFrame = frame(3, true);
+    revision = 2;
     let fail = true;
     const flaky = (operation: ImageResourceOperation): void => {
-      if (operation.kind === "create-image" && fail) { fail = false; throw new Error("injected upload failure"); }
+      if (operation.kind === "create-image" && fail) {
+        fail = false;
+        throw new Error("injected upload failure");
+      }
       apply(operation);
     };
     expect(() => texture.resolve(sourceFrame, revision, flaky)).toThrow("injected upload failure");
@@ -242,281 +369,554 @@ test("dynamic movie textures resolve in draw order, resize once and retry a fail
     texture.resolve(sourceFrame, revision, flaky);
     expect(operations.filter(operation => operation.kind === "release-image")).toHaveLength(releases);
     expect(texture.image.width).toBe(3);
-    sourceFrame = frame(3, false); revision = 3;
-    expect(() => texture.resolve(sourceFrame, revision, operation => {
-      expect(() => texture.resolve(sourceFrame, revision, apply)).toThrow("cannot reenter");
-      expect(() => texture.release()).toThrow("during upload");
-      apply(operation);
-    })).not.toThrow();
+    sourceFrame = frame(3, false);
+    revision = 3;
+    expect(() =>
+      texture.resolve(sourceFrame, revision, operation => {
+        expect(() => texture.resolve(sourceFrame, revision, apply)).toThrow("cannot reenter");
+        expect(() => texture.release()).toThrow("during upload");
+        apply(operation);
+      }),
+    ).not.toThrow();
     expect(() => images.require(initial)).toThrow();
-    const release = texture.release(); if (release !== null) apply(release);
+    const release = texture.release();
+    if (release !== null) apply(release);
     expect(texture.release()).toBeNull();
-    images.close(); expect(images.drainOperations()).toHaveLength(0);
-  } finally { target.close(); }
+    images.close();
+    expect(images.drainOperations()).toHaveLength(0);
+  } finally {
+    target.close();
+  }
 });
 
-for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))(`shipped Team Arena videoMap executes through shared ${rendererKind} world materials`, async () => {
-  const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
-  const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
-  const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
-  const { NativeRenderer } = await import("../../src/app/bootstrap/renderer.ts");
-  const { SceneFrameBuilder } = await import("../../src/render/commands/frame.ts");
-  const { anglesToAxis, vectorToAngles } = await import("../../src/core/math.ts");
-  const { perspectiveProjection } = await import("../../src/render/scene/view.ts");
-  const { encodePng } = await import("../../src/formats/images/png.ts");
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
-  if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
-  const content = await loadApplicationContent(parsed.options);
-  const identity = createIdentityOwner(`world-video-${rendererKind}`), owner = { identity: Symbol("world-video"), session: identity.session, generation: 0 };
-  let now = 0;
-  const assets = new ApplicationAssets(content, owner, { sample: () => now });
-  const renderer = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
-  const frames = new SceneFrameBuilder(assets.images);
-  try {
-    const world = content.world;
-    if (world.kind !== "q3-bsp") throw new Error("Expected Q3 world");
-    const surface = world.surfaces.find(surface => world.shaders[surface.shader]?.name === "textures/proto2/mpteam1");
-    if (surface === undefined) throw new Error("Shipped movie surface missing");
-    const vertices = world.vertices.slice(surface.vertices.first, surface.vertices.first + surface.vertices.count), first = vertices[0];
-    if (first === undefined) throw new Error("Movie surface has no vertices");
-    const center = vertices.reduce((sum, vertex) => ({ x: sum.x + vertex.position.x / vertices.length, y: sum.y + vertex.position.y / vertices.length,
-      z: sum.z + vertex.position.z / vertices.length }), { x: 0, y: 0, z: 0 });
-    const normal = first.normal;
-    const camera = { origin: { x: center.x + normal.x * 180, y: center.y + normal.y * 180, z: center.z + normal.z * 180 },
-      axis: anglesToAxis(vectorToAngles({ x: -normal.x, y: -normal.y, z: -normal.z })), viewport: { x: 0, y: 0, width: 640, height: 400 },
-      projection: perspectiveProjection(80, 55.41, 4096), clip: { kind: "none" } } satisfies import("../../src/contracts/render.ts").SceneCamera;
-    const scene = await assets.loadWorld();
-    const hashes: string[] = [];
-    const decodedFrames: number[] = [];
-    let sharedMovie: MaterialCinematic | null = null;
-    for (const time of [0, 34, 68, 102, 136]) {
-      now = time;
-      frames.begin();
-      const prepared = scene.prepareView({ camera, target: { kind: "preview", id: "authored-videoMap" }, time: { kind: "milliseconds", value: time },
-        clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } });
-      const movies = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : [])
-        .filter(batch => batch.texture.kind === "dynamic-image" || batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image");
-      expect(movies.length).toBeGreaterThan(0);
-      const source = movies.flatMap(batch => [batch.texture, ...(batch.texturing === "pair" ? [batch.secondTexture.binding] : [])])
-        .find(binding => binding.kind === "dynamic-image");
-      if (source?.kind !== "dynamic-image" || !(source.source instanceof MaterialCinematic)) throw new Error("Missing actual shared material movie");
-      if (sharedMovie === null) sharedMovie = source.source; else expect(source.source).toBe(sharedMovie);
-      frames.world(prepared);
-      const capture = renderer.captureNextFrame().then(frame => frame.pixels);
-      try { renderer.execute(frames.finish(true)); } catch (error: unknown) { renderer.close(); await capture.catch(() => undefined); throw error; }
-      const pixels = await capture;
-      if (time === 68 || time === 136) {
-        hashes.push(new Bun.CryptoHasher("sha256").update(pixels).digest("hex"));
-        const decoded = sharedMovie.playback.currentFrame;
-        if (decoded === null) throw new Error("Actual movie frame was not decoded");
-        decodedFrames.push(decoded.index);
-        const provenance = sharedMovie.image.source;
-        if (provenance.kind !== "resource") throw new Error("Material movie lost resource provenance");
-        expect(provenance.resource.requestedPath).toBe("video/mpteam1.roq");
-        expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
+for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[])
+  test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))(
+    `shipped Team Arena videoMap executes through shared ${rendererKind} world materials`,
+    async () => {
+      const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
+      const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
+      const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
+      const { NativeRenderer } = await import("../../src/app/bootstrap/renderer.ts");
+      const { SceneFrameBuilder } = await import("../../src/render/commands/frame.ts");
+      const { anglesToAxis, vectorToAngles } = await import("../../src/core/math.ts");
+      const { perspectiveProjection } = await import("../../src/render/scene/view.ts");
+      const { encodePng } = await import("../../src/formats/images/png.ts");
+      const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+      if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
+      const content = await loadApplicationContent(parsed.options);
+      const identity = createIdentityOwner(`world-video-${rendererKind}`),
+        owner = { identity: Symbol("world-video"), session: identity.session, generation: 0 };
+      let now = 0;
+      const assets = new ApplicationAssets(content, owner, { sample: () => now });
+      const renderer = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+      const frames = new SceneFrameBuilder(assets.images);
+      try {
+        const world = content.world;
+        if (world.kind !== "q3-bsp") throw new Error("Expected Q3 world");
+        const surface = world.surfaces.find(surface => world.shaders[surface.shader]?.name === "textures/proto2/mpteam1");
+        if (surface === undefined) throw new Error("Shipped movie surface missing");
+        const vertices = world.vertices.slice(surface.vertices.first, surface.vertices.first + surface.vertices.count),
+          first = vertices[0];
+        if (first === undefined) throw new Error("Movie surface has no vertices");
+        const center = vertices.reduce(
+          (sum, vertex) => ({
+            x: sum.x + vertex.position.x / vertices.length,
+            y: sum.y + vertex.position.y / vertices.length,
+            z: sum.z + vertex.position.z / vertices.length,
+          }),
+          { x: 0, y: 0, z: 0 },
+        );
+        const normal = first.normal;
+        const camera = {
+          origin: { x: center.x + normal.x * 180, y: center.y + normal.y * 180, z: center.z + normal.z * 180 },
+          axis: anglesToAxis(vectorToAngles({ x: -normal.x, y: -normal.y, z: -normal.z })),
+          viewport: { x: 0, y: 0, width: 640, height: 400 },
+          projection: perspectiveProjection(80, 55.41, 4096),
+          clip: { kind: "none" },
+        } satisfies import("../../src/contracts/render.ts").SceneCamera;
+        const scene = await assets.loadWorld();
+        const hashes: string[] = [];
+        const decodedFrames: number[] = [];
+        let sharedMovie: MaterialCinematic | null = null;
+        for (const time of [0, 34, 68, 102, 136]) {
+          now = time;
+          frames.begin();
+          const prepared = scene.prepareView({
+            camera,
+            target: { kind: "preview", id: "authored-videoMap" },
+            time: { kind: "milliseconds", value: time },
+            clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false },
+          });
+          const movies = prepared.view.operations
+            .flatMap(operation => (operation.kind === "draw" ? operation.batches : []))
+            .filter(batch => batch.texture.kind === "dynamic-image" || (batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image"));
+          expect(movies.length).toBeGreaterThan(0);
+          const source = movies
+            .flatMap(batch => [batch.texture, ...(batch.texturing === "pair" ? [batch.secondTexture.binding] : [])])
+            .find(binding => binding.kind === "dynamic-image");
+          if (source?.kind !== "dynamic-image" || !(source.source instanceof MaterialCinematic)) throw new Error("Missing actual shared material movie");
+          if (sharedMovie === null) sharedMovie = source.source;
+          else expect(source.source).toBe(sharedMovie);
+          frames.world(prepared);
+          const capture = renderer.captureNextFrame().then(frame => frame.pixels);
+          try {
+            renderer.execute(frames.finish(true));
+          } catch (error: unknown) {
+            renderer.close();
+            await capture.catch(() => undefined);
+            throw error;
+          }
+          const pixels = await capture;
+          if (time === 68 || time === 136) {
+            hashes.push(new Bun.CryptoHasher("sha256").update(pixels).digest("hex"));
+            const decoded = sharedMovie.playback.currentFrame;
+            if (decoded === null) throw new Error("Actual movie frame was not decoded");
+            decodedFrames.push(decoded.index);
+            const provenance = sharedMovie.image.source;
+            if (provenance.kind !== "resource") throw new Error("Material movie lost resource provenance");
+            expect(provenance.resource.requestedPath).toBe("video/mpteam1.roq");
+            expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
+          }
+          if (process.env["QUAKE_SCENE_CAPTURE"] === "1" && (time === 68 || time === 136)) {
+            await writeCapture(`world-video/${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
+            await writeCapture(
+              `world-video/${rendererKind}.json`,
+              JSON.stringify(
+                {
+                  source: content.recipe.presentation.assets,
+                  shader: "textures/proto2/mpteam1",
+                  movie: "video/mpteam1.roq",
+                  camera,
+                  center,
+                  normal,
+                  times: [68, 136],
+                  decodedFrames,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+        }
+        expect(hashes[0]).not.toBe(hashes[1]);
+        expect(decodedFrames[0]).not.toBe(decodedFrames[1]);
+        // The standalone prepared-draw API must preserve its primary binding while uploading unit 1.
+        const primary = assets.images.register(
+          "paired-primary",
+          { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) }], borderColor: { x: 1, y: 0, z: 0, w: 1 } },
+          { wrap: "clamp", filter: "nearest" },
+        );
+        renderer.execute({ owner, sequence: 6, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
+        const initial = assets.images.allocate(1, 1, { kind: "generated", name: "paired-secondary" });
+        const image = new CinematicImage(initial, (width, height, source) => assets.images.allocate(width, height, source));
+        const source = {
+          resolve: (apply: (operation: ImageResourceOperation) => void) =>
+            image.resolve({ width: 1, height: 1, rgba: new Uint8Array([0, 255, 0, 255]), index: 0, loop: 0, sourceTime: 0, time: 0 }, 0, operation => {
+              apply(operation);
+              assets.images.commit(operation);
+            }),
+        };
+        const quad = movieQuad({ kind: "bind-image", image: primary });
+        if (quad.primitive !== "triangles" || quad.texturing !== "single") throw new Error("Expected quad geometry");
+        const paired: DrawBatch = {
+          ...quad,
+          texturing: "pair",
+          vertices: quad.vertices.map(vertex => ({ ...vertex, texCoord2: vertex.texCoord })),
+          secondTexture: { binding: { kind: "dynamic-image", source }, environment: "add" },
+        };
+        renderer.backend.beginView({ viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null });
+        const draw = renderer.backend.prepareGeometry(paired);
+        try {
+          draw.begin();
+          draw.applyTexture(0, paired.texture);
+          draw.applyTexture(1, paired.secondTexture.binding);
+          draw.draw();
+        } finally {
+          draw.cleanup();
+        }
+        const pairCapture = renderer.captureNextFrame().then(frame => frame.pixels);
+        renderer.execute({ owner, sequence: 7, commands: [{ kind: "swap-buffers" }] });
+        const pairPixels = await pairCapture,
+          centerPixel = (200 * 640 + 320) * 4;
+        expect(pairPixels[centerPixel]).toBeGreaterThan(200);
+        expect(pairPixels[centerPixel + 1]).toBeGreaterThan(200);
+        expect(pairPixels[centerPixel + 2]).toBe(0);
+        image.release();
+        assets.close();
+        renderer.execute({ owner, sequence: 3, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
+        expect(assets.images.drainOperations()).toHaveLength(0);
+      } finally {
+        assets.close();
+        renderer.close();
+        await content.close();
       }
-      if (process.env["QUAKE_SCENE_CAPTURE"] === "1" && (time === 68 || time === 136)) {
-        await writeCapture(`world-video/${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
-        await writeCapture(`world-video/${rendererKind}.json`, JSON.stringify({ source: content.recipe.presentation.assets, shader: "textures/proto2/mpteam1",
-          movie: "video/mpteam1.roq", camera, center, normal, times: [68, 136], decodedFrames }, null, 2));
-      }
-    }
-    expect(hashes[0]).not.toBe(hashes[1]);
-    expect(decodedFrames[0]).not.toBe(decodedFrames[1]);
-    // The standalone prepared-draw API must preserve its primary binding while uploading unit 1.
-    const primary = assets.images.register("paired-primary", { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) }],
-      borderColor: { x: 1, y: 0, z: 0, w: 1 } }, { wrap: "clamp", filter: "nearest" });
-    renderer.execute({ owner, sequence: 6, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
-    const initial = assets.images.allocate(1, 1, { kind: "generated", name: "paired-secondary" });
-    const image = new CinematicImage(initial, (width, height, source) => assets.images.allocate(width, height, source));
-    const source = { resolve: (apply: (operation: ImageResourceOperation) => void) => image.resolve({ width: 1, height: 1,
-      rgba: new Uint8Array([0, 255, 0, 255]), index: 0, loop: 0, sourceTime: 0, time: 0 }, 0, operation => { apply(operation); assets.images.commit(operation); }) };
-    const quad = movieQuad({ kind: "bind-image", image: primary });
-    if (quad.primitive !== "triangles" || quad.texturing !== "single") throw new Error("Expected quad geometry");
-    const paired: DrawBatch = { ...quad, texturing: "pair", vertices: quad.vertices.map(vertex => ({ ...vertex, texCoord2: vertex.texCoord })),
-      secondTexture: { binding: { kind: "dynamic-image", source }, environment: "add" } };
-    renderer.backend.beginView({ viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null });
-    const draw = renderer.backend.prepareGeometry(paired);
-    try { draw.begin(); draw.applyTexture(0, paired.texture); draw.applyTexture(1, paired.secondTexture.binding); draw.draw(); }
-    finally { draw.cleanup(); }
-    const pairCapture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute({ owner, sequence: 7, commands: [{ kind: "swap-buffers" }] });
-    const pairPixels = await pairCapture, centerPixel = (200 * 640 + 320) * 4;
-    expect(pairPixels[centerPixel]).toBeGreaterThan(200);
-    expect(pairPixels[centerPixel + 1]).toBeGreaterThan(200);
-    expect(pairPixels[centerPixel + 2]).toBe(0);
-    image.release();
-    assets.close();
-    renderer.execute({ owner, sequence: 3, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
-    expect(assets.images.drainOperations()).toHaveLength(0);
-  } finally { assets.close(); renderer.close(); await content.close(); }
-}, 60000);
+    },
+    60000,
+  );
 
-test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))("Q3 UI movies use shared execution-owned images and release reused handles", async () => {
-  const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
-  const { ApplicationQ3Assets } = await import("../../src/app/bootstrap/q3-client/assets.ts");
-  const { ApplicationQ3Cinematics } = await import("../../src/app/bootstrap/q3-client/cinematics.ts");
-  const { ApplicationAudio } = await import("../../src/app/bootstrap/audio.ts");
-  const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
-  const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
-  const { Draw2D, TextCommandSink } = await import("../../src/text/draw2d.ts");
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
-  if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
-  const content = await loadApplicationContent(parsed.options);
-  const identity = createIdentityOwner("ui-video"), owner = { identity: Symbol("ui-video"), session: identity.session, generation: 0 };
-  let now = 0;
-  const assets = new ApplicationAssets(content, owner, { sample: () => now });
-  const audio = new ApplicationAudio(content, () => now, 1, "sarge", () => undefined);
-  const media = await ApplicationQ3Assets.create(assets, content.recipe.engineBehavior.content, () => undefined, () => false);
-  const movies = new ApplicationQ3Cinematics(media, audio, identity.seat(0), () => now);
-  const backend = new SoftwareRenderer(8, 8, owner);
-  const sources: import("../../src/materials/cinematic.ts").ShaderCinematicSource[] = [];
-  const draw = new Draw2D(new TextCommandSink(identity.seat(0), { x: 0, y: 0, width: 8, height: 8 }, () => undefined, call => {
-    const stage = call.picture.material.compiled.finished.sourceStages[0];
-    if (stage === undefined || !stage.active || stage.binding.kind !== "video") throw new Error("UI movie lost its shared dynamic binding");
-    sources.push(stage.binding.source);
-  }), "pixels");
-  try {
-    const asset = await movies.owner.prepare("mpteam1.roq");
-    assets.images.drainOperations();
-    const first = movies.play(asset); if (first === undefined) throw new Error("Missing UI movie slot");
-    for (const time of [0, 34, 68]) { now = time; movies.run(first.handle.index); }
-    movies.draw(first.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
-    const source = sources[0]; if (source === undefined) throw new Error("Missing UI movie draw");
-    expect(assets.images.drainOperations()).toHaveLength(0);
-    const uploads: ImageResourceOperation[] = [];
-    const apply = (operation: ImageResourceOperation): void => { backend.applyImageResource(operation); uploads.push(operation); };
-    const image = source.resolve(apply);
-    expect(uploads.map(operation => operation.kind)).toEqual(["create-image"]);
-    expect(image.source.kind).toBe("resource");
-    now = 102; movies.run(first.handle.index); source.resolve(apply);
-    expect(uploads.at(-1)?.kind).toBe("update-image");
-    movies.stop(first.handle.index);
-    const releases = assets.images.drainOperations(); expect(releases).toHaveLength(1);
-    for (const operation of releases) backend.applyImageResource(operation);
-    const second = movies.play(asset); if (second === undefined) throw new Error("Missing reused UI slot");
-    expect(second.handle.index).toBe(first.handle.index);
-    for (const time of [102, 136, 170]) { now = time; movies.run(second.handle.index); }
-    movies.draw(second.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
-    const replacement = sources[1]; if (replacement === undefined) throw new Error("Missing replacement movie draw");
-    expect(replacement.resolve(apply).ordinal).not.toBe(image.ordinal);
-    expect(() => source.resolve(apply)).toThrow();
-    movies.close(); expect(assets.images.drainOperations()).toHaveLength(1);
-    movies.close(); expect(assets.images.drainOperations()).toHaveLength(0);
-  } finally { movies.close(); audio.close(); assets.close(); await content.close(); }
-}, 30000);
+test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))(
+  "Q3 UI movies use shared execution-owned images and release reused handles",
+  async () => {
+    const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
+    const { ApplicationQ3Assets } = await import("../../src/app/bootstrap/q3-client/assets.ts");
+    const { ApplicationQ3Cinematics } = await import("../../src/app/bootstrap/q3-client/cinematics.ts");
+    const { ApplicationAudio } = await import("../../src/app/bootstrap/audio.ts");
+    const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
+    const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
+    const { Draw2D, TextCommandSink } = await import("../../src/text/draw2d.ts");
+    const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+    if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
+    const content = await loadApplicationContent(parsed.options);
+    const identity = createIdentityOwner("ui-video"),
+      owner = { identity: Symbol("ui-video"), session: identity.session, generation: 0 };
+    let now = 0;
+    const assets = new ApplicationAssets(content, owner, { sample: () => now });
+    const audio = new ApplicationAudio(
+      content,
+      () => now,
+      1,
+      "sarge",
+      () => undefined,
+    );
+    const media = await ApplicationQ3Assets.create(
+      assets,
+      content.recipe.engineBehavior.content,
+      () => undefined,
+      () => false,
+    );
+    const movies = new ApplicationQ3Cinematics(media, audio, identity.seat(0), () => now);
+    const backend = new SoftwareRenderer(8, 8, owner);
+    const sources: import("../../src/materials/cinematic.ts").ShaderCinematicSource[] = [];
+    const draw = new Draw2D(
+      new TextCommandSink(
+        identity.seat(0),
+        { x: 0, y: 0, width: 8, height: 8 },
+        () => undefined,
+        call => {
+          const stage = call.picture.material.compiled.finished.sourceStages[0];
+          if (stage === undefined || !stage.active || stage.binding.kind !== "video") throw new Error("UI movie lost its shared dynamic binding");
+          sources.push(stage.binding.source);
+        },
+      ),
+      "pixels",
+    );
+    try {
+      const asset = await movies.owner.prepare("mpteam1.roq");
+      assets.images.drainOperations();
+      const first = movies.play(asset);
+      if (first === undefined) throw new Error("Missing UI movie slot");
+      for (const time of [0, 34, 68]) {
+        now = time;
+        movies.run(first.handle.index);
+      }
+      movies.draw(first.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
+      const source = sources[0];
+      if (source === undefined) throw new Error("Missing UI movie draw");
+      expect(assets.images.drainOperations()).toHaveLength(0);
+      const uploads: ImageResourceOperation[] = [];
+      const apply = (operation: ImageResourceOperation): void => {
+        backend.applyImageResource(operation);
+        uploads.push(operation);
+      };
+      const image = source.resolve(apply);
+      expect(uploads.map(operation => operation.kind)).toEqual(["create-image"]);
+      expect(image.source.kind).toBe("resource");
+      now = 102;
+      movies.run(first.handle.index);
+      source.resolve(apply);
+      expect(uploads.at(-1)?.kind).toBe("update-image");
+      movies.stop(first.handle.index);
+      const releases = assets.images.drainOperations();
+      expect(releases).toHaveLength(1);
+      for (const operation of releases) backend.applyImageResource(operation);
+      const second = movies.play(asset);
+      if (second === undefined) throw new Error("Missing reused UI slot");
+      expect(second.handle.index).toBe(first.handle.index);
+      for (const time of [102, 136, 170]) {
+        now = time;
+        movies.run(second.handle.index);
+      }
+      movies.draw(second.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
+      const replacement = sources[1];
+      if (replacement === undefined) throw new Error("Missing replacement movie draw");
+      expect(replacement.resolve(apply).ordinal).not.toBe(image.ordinal);
+      expect(() => source.resolve(apply)).toThrow();
+      movies.close();
+      expect(assets.images.drainOperations()).toHaveLength(1);
+      movies.close();
+      expect(assets.images.drainOperations()).toHaveLength(0);
+    } finally {
+      movies.close();
+      audio.close();
+      assets.close();
+      await content.close();
+    }
+  },
+  30000,
+);
 
 test("cinematic timeline freezes across pause, hold and completion", () => {
-  const clock = { time: 0, sample(): number { return this.time; } }, completed: CinematicEndReason[] = [];
+  const clock = {
+      time: 0,
+      sample(): number {
+        return this.time;
+      },
+    },
+    completed: CinematicEndReason[] = [];
   const playback = new CinematicPlayback(cinematicBytes("cin", shortCin(), "video/unit.cin"), {
-    clock, target: { kind: "material", id: "timeline" }, hold: true,
-    onAudio: () => {}, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: reason => { completed.push(reason); },
+    clock,
+    target: { kind: "material", id: "timeline" },
+    hold: true,
+    onAudio: () => {},
+    onAudioReset: () => {},
+    onAudioPause: () => {},
+    onComplete: reason => {
+      completed.push(reason);
+    },
   });
-  clock.time = 100; playback.tick(); playback.pause(true);
-  const paused = playback.timeline; clock.time = 9000;
+  clock.time = 100;
+  playback.tick();
+  playback.pause(true);
+  const paused = playback.timeline;
+  clock.time = 9000;
   expect(playback.timeline).toEqual(paused);
-  playback.pause(false); clock.time = 9100; playback.tick();
+  playback.pause(false);
+  clock.time = 9100;
+  playback.tick();
   expect(playback.timeline.elapsedMilliseconds).toBe(200);
-  for (let tick = 0; tick < 20 && playback.status !== "held"; tick++) { clock.time += 72; playback.tick(); }
+  for (let tick = 0; tick < 20 && playback.status !== "held"; tick++) {
+    clock.time += 72;
+    playback.tick();
+  }
   expect(playback.status).toBe("held");
-  const held = playback.timeline; clock.time += 10000; playback.tick();
+  const held = playback.timeline;
+  clock.time += 10000;
+  playback.tick();
   expect(playback.timeline).toEqual(held);
   expect(playback.timeline.source).toBe("video/unit.cin");
-  playback.skip(); playback.skip(); playback.close();
+  playback.skip();
+  playback.skip();
+  playback.close();
   expect(completed).toEqual(["skipped"]);
 });
 
 test("Ogg demux joins continued packets and separates the original Vorbis pages", async () => {
   const { decodeOggMovie } = await import("../../src/media/ogg.ts");
   const page = (serial: number, sequence: number, flags: number, lacing: readonly number[], payload: Uint8Array): Uint8Array => {
-    const bytes = new Uint8Array(27 + lacing.length + payload.length), view = new DataView(bytes.buffer);
-    bytes.set([79, 103, 103, 83, 0, flags]); view.setBigInt64(6, -1n, true); view.setUint32(14, serial, true); view.setUint32(18, sequence, true);
-    bytes[26] = lacing.length; bytes.set(lacing, 27); bytes.set(payload, 27 + lacing.length);
+    const bytes = new Uint8Array(27 + lacing.length + payload.length),
+      view = new DataView(bytes.buffer);
+    bytes.set([79, 103, 103, 83, 0, flags]);
+    view.setBigInt64(6, -1n, true);
+    view.setUint32(14, serial, true);
+    view.setUint32(18, sequence, true);
+    bytes[26] = lacing.length;
+    bytes.set(lacing, 27);
+    bytes.set(payload, 27 + lacing.length);
     let crc = 0;
-    for (const byte of bytes) { crc ^= byte << 24; for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1; }
-    view.setUint32(22, crc >>> 0, true); return bytes;
+    for (const byte of bytes) {
+      crc ^= byte << 24;
+      for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
+    }
+    view.setUint32(22, crc >>> 0, true);
+    return bytes;
   };
-  const header = new Uint8Array(267); header.set([128, 116, 104, 101, 111, 114, 97]);
+  const header = new Uint8Array(267);
+  header.set([128, 116, 104, 101, 111, 114, 97]);
   const first = page(1, 0, 2, [255], header.subarray(0, 255));
-  const tail = new Uint8Array(12 + 7 + 7 + 1); tail.set(header.subarray(255));
-  tail.set([129, 116, 104, 101, 111, 114, 97], 12); tail.set([130, 116, 104, 101, 111, 114, 97], 19);
-  const last = page(1, 1, 5, [12, 7, 7, 1], tail), audio = page(2, 0, 6, [7], new Uint8Array([1, 118, 111, 114, 98, 105, 115]));
-  const bytes = new Uint8Array(first.length + audio.length + last.length); bytes.set(first); bytes.set(audio, first.length); bytes.set(last, first.length + audio.length);
+  const tail = new Uint8Array(12 + 7 + 7 + 1);
+  tail.set(header.subarray(255));
+  tail.set([129, 116, 104, 101, 111, 114, 97], 12);
+  tail.set([130, 116, 104, 101, 111, 114, 97], 19);
+  const last = page(1, 1, 5, [12, 7, 7, 1], tail),
+    audio = page(2, 0, 6, [7], new Uint8Array([1, 118, 111, 114, 98, 105, 115]));
+  const bytes = new Uint8Array(first.length + audio.length + last.length);
+  bytes.set(first);
+  bytes.set(audio, first.length);
+  bytes.set(last, first.length + audio.length);
   const movie = decodeOggMovie(bytes);
-  expect(movie.video.length).toBe(4); expect(movie.video[0]?.data).toEqual(header); expect(movie.video[3]?.last).toBe(true);
+  expect(movie.video.length).toBe(4);
+  expect(movie.video[0]?.data).toEqual(header);
+  expect(movie.video[3]?.last).toBe(true);
   expect(movie.audio).toEqual(audio);
-  const corrupt = bytes.slice(); corrupt[corrupt.length - 1] = 1;
+  const corrupt = bytes.slice();
+  corrupt[corrupt.length - 1] = 1;
   expect(() => decodeOggMovie(corrupt)).toThrow("checksum");
   expect(() => decodeOggMovie(bytes.subarray(0, bytes.length - 1))).toThrow("Truncated Ogg page payload");
 });
 
-test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")("installed rerelease OGV decodes Theora frames and synchronized Vorbis through the shared media owner", async () => {
-  const path = `${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`, bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
-  const clock = { time: 0, sample(): number { return this.time; } }, audio: CinematicAudio[] = [];
-  const playback = new CinematicPlayback(cinematicBytes("ogv", bytes, path), { clock, target: { kind: "material", id: "rerelease" },
-    onAudio: block => { audio.push(block); }, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: () => {} });
-  try {
-    const first = playback.currentFrame;
-    expect(first).not.toBeNull(); expect(first?.rgba.length).toBe((first?.width ?? 0) * (first?.height ?? 0) * 4);
-    clock.time = 250; const next = playback.tick().frame;
-    expect(next?.index).toBeGreaterThan(first?.index ?? -1);
-    expect(audio.length).toBeGreaterThan(0); expect(audio[0]?.sourceSample).toBe(0); expect(audio[0]?.resetStream).toBe(true);
-    let samples = 0;
-    for (const block of audio) { expect(block.sourceSample).toBe(samples); expect(block.sourceTime).toBe(block.sourceSample * 1000 / block.sampleRate); samples += block.samples.length / block.channels; }
-    playback.pause(true); const paused = playback.timeline; clock.time = 10000; playback.tick(); expect(playback.timeline).toEqual(paused);
-    playback.pause(false); clock.time += 100; playback.tick(); expect(playback.timeline.elapsedMilliseconds).toBe(350);
-    playback.skip(); expect(playback.status).toBe("ended");
-  } finally { playback.close(); }
-});
-
+test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")(
+  "installed rerelease OGV decodes Theora frames and synchronized Vorbis through the shared media owner",
+  async () => {
+    const path = `${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`,
+      bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+    const clock = {
+        time: 0,
+        sample(): number {
+          return this.time;
+        },
+      },
+      audio: CinematicAudio[] = [];
+    const playback = new CinematicPlayback(cinematicBytes("ogv", bytes, path), {
+      clock,
+      target: { kind: "material", id: "rerelease" },
+      onAudio: block => {
+        audio.push(block);
+      },
+      onAudioReset: () => {},
+      onAudioPause: () => {},
+      onComplete: () => {},
+    });
+    try {
+      const first = playback.currentFrame;
+      expect(first).not.toBeNull();
+      expect(first?.rgba.length).toBe((first?.width ?? 0) * (first?.height ?? 0) * 4);
+      clock.time = 250;
+      const next = playback.tick().frame;
+      expect(next?.index).toBeGreaterThan(first?.index ?? -1);
+      expect(audio.length).toBeGreaterThan(0);
+      expect(audio[0]?.sourceSample).toBe(0);
+      expect(audio[0]?.resetStream).toBe(true);
+      let samples = 0;
+      for (const block of audio) {
+        expect(block.sourceSample).toBe(samples);
+        expect(block.sourceTime).toBe((block.sourceSample * 1000) / block.sampleRate);
+        samples += block.samples.length / block.channels;
+      }
+      playback.pause(true);
+      const paused = playback.timeline;
+      clock.time = 10000;
+      playback.tick();
+      expect(playback.timeline).toEqual(paused);
+      playback.pause(false);
+      clock.time += 100;
+      playback.tick();
+      expect(playback.timeline.elapsedMilliseconds).toBe(350);
+      playback.skip();
+      expect(playback.status).toBe("ended");
+    } finally {
+      playback.close();
+    }
+  },
+);
 
 function compareContinuation(format: "cin" | "roq" | "ogv", bytes: Uint8Array, before: readonly number[], after: readonly number[]): void {
   const source = cinematicBytes(format, bytes, `continuation.${format}`);
   const make = (clock: { time: number; sample(): number }, checkpoint?: unknown) => {
-    let stream = new RawAudioStream(48000), submitted = 0;
+    let stream = new RawAudioStream(48000),
+      submitted = 0;
     const completed: CinematicEndReason[] = [];
-    const playback = new CinematicPlayback(source, { clock, target: { kind: "seat", seat: createIdentityOwner("saved-movie").seat(0) },
-      hold: true, onAudio: block => { submitted++; stream.queue(block); }, onAudioReset: () => { stream = new RawAudioStream(48000); },
-      onAudioPause: paused => { stream.paused = paused; }, onComplete: reason => { completed.push(reason); } }, checkpoint);
-    return { playback, completed, submitted: () => submitted, mix: (frames: number) => stream.mix(frames),
-      stream: () => stream.captureCheckpoint(), restoreStream: (saved: unknown) => { stream = RawAudioStream.restoreCheckpoint(saved, 48000); } };
+    const playback = new CinematicPlayback(
+      source,
+      {
+        clock,
+        target: { kind: "seat", seat: createIdentityOwner("saved-movie").seat(0) },
+        hold: true,
+        onAudio: block => {
+          submitted++;
+          stream.queue(block);
+        },
+        onAudioReset: () => {
+          stream = new RawAudioStream(48000);
+        },
+        onAudioPause: paused => {
+          stream.paused = paused;
+        },
+        onComplete: reason => {
+          completed.push(reason);
+        },
+      },
+      checkpoint,
+    );
+    return {
+      playback,
+      completed,
+      submitted: () => submitted,
+      mix: (frames: number) => stream.mix(frames),
+      stream: () => stream.captureCheckpoint(),
+      restoreStream: (saved: unknown) => {
+        stream = RawAudioStream.restoreCheckpoint(saved, 48000);
+      },
+    };
   };
-  const wall = { time: 0, sample(): number { return this.time; } }, uninterrupted = make(wall);
-  for (const time of before) { wall.time = time; uninterrupted.playback.tick(); uninterrupted.mix(137); }
+  const wall = {
+      time: 0,
+      sample(): number {
+        return this.time;
+      },
+    },
+    uninterrupted = make(wall);
+  for (const time of before) {
+    wall.time = time;
+    uninterrupted.playback.tick();
+    uninterrupted.mix(137);
+  }
   uninterrupted.playback.pause(true);
   const elapsed = uninterrupted.playback.playbackTimeMilliseconds;
   const saved = decodeCheckpointValue(encodeCheckpointValue(uninterrupted.playback.captureCheckpoint()));
   const pcm = decodeCheckpointValue(encodeCheckpointValue(uninterrupted.stream()));
-  const restoredWall = { time: 25000, sample(): number { return this.time; } }, resumed = make(restoredWall, saved);
+  const restoredWall = {
+      time: 25000,
+      sample(): number {
+        return this.time;
+      },
+    },
+    resumed = make(restoredWall, saved);
   try {
     resumed.restoreStream(pcm);
     expect(resumed.submitted()).toBe(0);
     expect(resumed.playback.currentFrame).toEqual(uninterrupted.playback.currentFrame);
     expect(resumed.playback.captureCheckpoint()).toEqual(uninterrupted.playback.captureCheckpoint());
     expect(resumed.mix(17)).toEqual(uninterrupted.mix(17));
-    uninterrupted.playback.pause(false); resumed.playback.pause(false);
+    uninterrupted.playback.pause(false);
+    resumed.playback.pause(false);
     for (const delta of after) {
-      wall.time = elapsed + delta; restoredWall.time = 25000 + delta;
+      wall.time = elapsed + delta;
+      restoredWall.time = 25000 + delta;
       expect(resumed.playback.tick()).toEqual(uninterrupted.playback.tick());
       expect(resumed.mix(131)).toEqual(uninterrupted.mix(131));
     }
-    uninterrupted.playback.skip(); resumed.playback.skip();
+    uninterrupted.playback.skip();
+    resumed.playback.skip();
     expect(resumed.completed).toEqual(uninterrupted.completed);
-    const terminal = make({ time: 90000, sample() { return this.time; } }, decodeCheckpointValue(encodeCheckpointValue(resumed.playback.captureCheckpoint())));
-    try { terminal.playback.tick(); terminal.playback.skip(); expect(terminal.completed).toEqual([]); expect(terminal.submitted()).toBe(0); }
-    finally { terminal.playback.close(); }
-  } finally { uninterrupted.playback.close(); resumed.playback.close(); }
+    const terminal = make(
+      {
+        time: 90000,
+        sample() {
+          return this.time;
+        },
+      },
+      decodeCheckpointValue(encodeCheckpointValue(resumed.playback.captureCheckpoint())),
+    );
+    try {
+      terminal.playback.tick();
+      terminal.playback.skip();
+      expect(terminal.completed).toEqual([]);
+      expect(terminal.submitted()).toBe(0);
+    } finally {
+      terminal.playback.close();
+    }
+  } finally {
+    uninterrupted.playback.close();
+    resumed.playback.close();
+  }
 }
 
 test("CIN checkpoint preserves prefetched frames, queued fractional PCM, paused clocks and completion latches", () => {
   compareContinuation("cin", shortCin(), [0, 143, 215], [0, 30, 72, 144, 216, 1000]);
 });
 
-test.skipIf(!existsSync(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`))("original RoQ checkpoint preserves both frame buffers and retained codebooks across future frames", async () => {
-  const bytes = new Uint8Array(await Bun.file(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`).arrayBuffer());
-  compareContinuation("roq", bytes, [0, 34, 67, 100, 134], [0, 33, 67, 100, 134, 200, 400]);
-});
+test.skipIf(!existsSync(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`))(
+  "original RoQ checkpoint preserves both frame buffers and retained codebooks across future frames",
+  async () => {
+    const bytes = new Uint8Array(await Bun.file(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`).arrayBuffer());
+    compareContinuation("roq", bytes, [0, 34, 67, 100, 134], [0, 33, 67, 100, 134, 200, 400]);
+  },
+);
 
-test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")("original rerelease OGV checkpoint reconstructs its exact packet prefix with identical future pixels and PCM", async () => {
-  const bytes = new Uint8Array(await Bun.file(`${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`).arrayBuffer());
-  compareContinuation("ogv", bytes, [0, 71, 149, 237], [0, 20, 60, 121, 201, 370]);
-});
+test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")(
+  "original rerelease OGV checkpoint reconstructs its exact packet prefix with identical future pixels and PCM",
+  async () => {
+    const bytes = new Uint8Array(await Bun.file(`${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`).arrayBuffer());
+    compareContinuation("ogv", bytes, [0, 71, 149, 237], [0, 20, 60, 121, 201, 370]);
+  },
+);

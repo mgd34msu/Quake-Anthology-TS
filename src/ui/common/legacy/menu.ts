@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Team Arena menu definition parsing translated from id Software's
  * code/ui/ui_shared.c, ui_shared.h, ui_main.c, and code/cgame/cg_main.c.
@@ -8,12 +9,7 @@
 import type { Vec3, Vec4 } from "../../../contracts/math.ts";
 import { CommonParseCursor, CommonParseState, compressCommonText } from "../../../core/common-parse.ts";
 import { TeamArenaUiMemory, UiStringReference, type UiMemoryAllocation } from "./team-arena/memory.ts";
-import {
-  ScriptLanguageError,
-  type ScriptDiagnostic,
-  type ScriptToken,
-  type SourceLocation,
-} from "../../../content/legacy-script/lexer.ts";
+import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
 import {
   ScriptSourceReader,
   type IncludeResolver,
@@ -317,9 +313,10 @@ export interface UiMenuRegistrationSink {
 
 export type UiMenuRegistrationResult = void | { readonly handle: number };
 
-export type UiMenuAssetPublication = {
-  [Field in Exclude<keyof UiGlobalAssets, "shadowColor">]: { readonly field: Field; readonly value: Exclude<UiGlobalAssets[Field], undefined> }
-}[Exclude<keyof UiGlobalAssets, "shadowColor">]
+export type UiMenuAssetPublication =
+  | {
+      [Field in Exclude<keyof UiGlobalAssets, "shadowColor">]: { readonly field: Field; readonly value: Exclude<UiGlobalAssets[Field], undefined> };
+    }[Exclude<keyof UiGlobalAssets, "shadowColor">]
   | { readonly field: "shadowColorComponent"; readonly component: keyof Vec4; readonly value: number }
   | { readonly field: "fontRegistered"; readonly value: boolean }
   | { readonly field: "cursorStr"; readonly value: UiStringReference | null };
@@ -356,11 +353,13 @@ export interface UiMenuResolvedParseHost {
   readonly random: UiMenuRandom;
 }
 
-export type UiMenuParseHost = UiMenuResolvedParseHost | {
-  readonly random: UiMenuRandom;
-  scriptSources(): UiMenuScriptSources;
-  assertCurrentOperation(): void;
-};
+export type UiMenuParseHost =
+  | UiMenuResolvedParseHost
+  | {
+      readonly random: UiMenuRandom;
+      scriptSources(): UiMenuScriptSources;
+      assertCurrentOperation(): void;
+    };
 
 export interface UiMenuMemory {
   allocate(size: number): number | null;
@@ -370,9 +369,7 @@ export interface UiMenuMemory {
   stringAllocReference(text: string | null): UiStringReference | null;
 }
 
-export type UiMenuMemoryOwnership =
-  | { readonly kind: "unaccounted" }
-  | { readonly kind: "qvm32"; readonly memory: UiMenuMemory };
+export type UiMenuMemoryOwnership = { readonly kind: "unaccounted" } | { readonly kind: "qvm32"; readonly memory: UiMenuMemory };
 
 export interface UiMenuParseOptions {
   readonly memory?: UiMenuMemoryOwnership;
@@ -391,36 +388,74 @@ export function defaultHudMenuPlan(): UiMenuLoadPlan {
 
 function retainedRect(allocation: UiMemoryAllocation, offset: number): UiMutableRect {
   return Object.freeze({
-    get x(): number { return allocation.getFloat32(offset); },
-    set x(value: number) { allocation.setFloat32(offset, value); },
-    get y(): number { return allocation.getFloat32(offset + 4); },
-    set y(value: number) { allocation.setFloat32(offset + 4, value); },
-    get width(): number { return allocation.getFloat32(offset + 8); },
-    set width(value: number) { allocation.setFloat32(offset + 8, value); },
-    get height(): number { return allocation.getFloat32(offset + 12); },
-    set height(value: number) { allocation.setFloat32(offset + 12, value); },
+    get x(): number {
+      return allocation.getFloat32(offset);
+    },
+    set x(value: number) {
+      allocation.setFloat32(offset, value);
+    },
+    get y(): number {
+      return allocation.getFloat32(offset + 4);
+    },
+    set y(value: number) {
+      allocation.setFloat32(offset + 4, value);
+    },
+    get width(): number {
+      return allocation.getFloat32(offset + 8);
+    },
+    set width(value: number) {
+      allocation.setFloat32(offset + 8, value);
+    },
+    get height(): number {
+      return allocation.getFloat32(offset + 12);
+    },
+    set height(value: number) {
+      allocation.setFloat32(offset + 12, value);
+    },
   });
 }
 
 function retainedColor(allocation: UiMemoryAllocation, offset: number): UiMutableColor {
   return Object.freeze({
-    get x(): number { return allocation.getFloat32(offset); },
-    set x(value: number) { allocation.setFloat32(offset, value); },
-    get y(): number { return allocation.getFloat32(offset + 4); },
-    set y(value: number) { allocation.setFloat32(offset + 4, value); },
-    get z(): number { return allocation.getFloat32(offset + 8); },
-    set z(value: number) { allocation.setFloat32(offset + 8, value); },
-    get w(): number { return allocation.getFloat32(offset + 12); },
-    set w(value: number) { allocation.setFloat32(offset + 12, value); },
+    get x(): number {
+      return allocation.getFloat32(offset);
+    },
+    set x(value: number) {
+      allocation.setFloat32(offset, value);
+    },
+    get y(): number {
+      return allocation.getFloat32(offset + 4);
+    },
+    set y(value: number) {
+      allocation.setFloat32(offset + 4, value);
+    },
+    get z(): number {
+      return allocation.getFloat32(offset + 8);
+    },
+    set z(value: number) {
+      allocation.setFloat32(offset + 8, value);
+    },
+    get w(): number {
+      return allocation.getFloat32(offset + 12);
+    },
+    set w(value: number) {
+      allocation.setFloat32(offset + 12, value);
+    },
   });
 }
 
 function writeRect(destination: UiMutableRect, value: UiRect): void {
-  destination.x = value.x; destination.y = value.y; destination.width = value.width; destination.height = value.height;
+  destination.x = value.x;
+  destination.y = value.y;
+  destination.width = value.width;
+  destination.height = value.height;
 }
 
 function writeColor(destination: UiMutableColor, value: Vec4): void {
-  destination.x = value.x; destination.y = value.y; destination.z = value.z; destination.w = value.w;
+  destination.x = value.x;
+  destination.y = value.y;
+  destination.z = value.z;
+  destination.w = value.w;
 }
 
 class MutableWindow implements UiWindowDefinition {
@@ -434,10 +469,14 @@ class MutableWindow implements UiWindowDefinition {
   private readonly outlineView: UiMutableColor;
 
   constructor(private readonly allocation: UiMemoryAllocation) {
-    this.rectView = retainedRect(allocation, 0); this.clientView = retainedRect(allocation, 16);
-    this.effectsView = retainedRect(allocation, 72); this.effects2View = retainedRect(allocation, 88);
-    this.foreView = retainedColor(allocation, 112); this.backView = retainedColor(allocation, 128);
-    this.borderView = retainedColor(allocation, 144); this.outlineView = retainedColor(allocation, 160);
+    this.rectView = retainedRect(allocation, 0);
+    this.clientView = retainedRect(allocation, 16);
+    this.effectsView = retainedRect(allocation, 72);
+    this.effects2View = retainedRect(allocation, 88);
+    this.foreView = retainedColor(allocation, 112);
+    this.backView = retainedColor(allocation, 128);
+    this.borderView = retainedColor(allocation, 144);
+    this.outlineView = retainedColor(allocation, 160);
   }
 
   initialize(): void {
@@ -447,72 +486,184 @@ class MutableWindow implements UiWindowDefinition {
     this.allocation.setInt32(44, -1);
   }
 
-  get rect(): UiMutableRect { return this.rectView; }
-  set rect(value: UiRect) { writeRect(this.rectView, value); }
-  get clientRect(): UiMutableRect { return this.clientView; }
-  set clientRect(value: UiRect) { writeRect(this.clientView, value); }
-  get rectEffects(): UiMutableRect { return this.effectsView; }
-  set rectEffects(value: UiRect) { writeRect(this.effectsView, value); }
-  get rectEffects2(): UiMutableRect { return this.effects2View; }
-  set rectEffects2(value: UiRect) { writeRect(this.effects2View, value); }
-  get foreColor(): UiMutableColor { return this.foreView; }
-  set foreColor(value: Vec4) { writeColor(this.foreView, value); }
-  get backColor(): UiMutableColor { return this.backView; }
-  set backColor(value: Vec4) { writeColor(this.backView, value); }
-  get borderColor(): UiMutableColor { return this.borderView; }
-  set borderColor(value: Vec4) { writeColor(this.borderView, value); }
-  get outlineColor(): UiMutableColor { return this.outlineView; }
-  set outlineColor(value: Vec4) { writeColor(this.outlineView, value); }
-  get name(): string | undefined { return this.allocation.getString(32); }
-  set name(value: string | undefined) { this.allocation.setString(32, value); }
-  get group(): string | undefined { return this.allocation.getString(36); }
-  set group(value: string | undefined) { this.allocation.setString(36, value); }
-  get cinematic(): string | undefined { return this.allocation.getString(40); }
-  set cinematic(value: string | undefined) { this.allocation.setString(40, value); }
-  get style(): number { return this.allocation.getInt32(48); }
-  set style(value: number) { this.allocation.setInt32(48, value); }
-  get border(): number { return this.allocation.getInt32(52); }
-  set border(value: number) { this.allocation.setInt32(52, value); }
-  get ownerDraw(): number { return this.allocation.getInt32(56); }
-  set ownerDraw(value: number) { this.allocation.setInt32(56, value); }
-  get ownerDrawFlags(): number { return this.allocation.getInt32(60); }
-  set ownerDrawFlags(value: number) { this.allocation.setInt32(60, value); }
-  get borderSize(): number { return this.allocation.getFloat32(64); }
-  set borderSize(value: number) { this.allocation.setFloat32(64, value); }
-  get flags(): number { return this.allocation.getInt32(68); }
-  set flags(value: number) { this.allocation.setInt32(68, value); }
-  get offsetTime(): number { return this.allocation.getInt32(104); }
-  set offsetTime(value: number) { this.allocation.setInt32(104, value); }
-  get nextTime(): number { return this.allocation.getInt32(108); }
-  set nextTime(value: number) { this.allocation.setInt32(108, value); }
-  get cinematicHandle(): number { return this.allocation.getInt32(44); }
-  set cinematicHandle(value: number) { this.allocation.setInt32(44, value); }
+  get rect(): UiMutableRect {
+    return this.rectView;
+  }
+  set rect(value: UiRect) {
+    writeRect(this.rectView, value);
+  }
+  get clientRect(): UiMutableRect {
+    return this.clientView;
+  }
+  set clientRect(value: UiRect) {
+    writeRect(this.clientView, value);
+  }
+  get rectEffects(): UiMutableRect {
+    return this.effectsView;
+  }
+  set rectEffects(value: UiRect) {
+    writeRect(this.effectsView, value);
+  }
+  get rectEffects2(): UiMutableRect {
+    return this.effects2View;
+  }
+  set rectEffects2(value: UiRect) {
+    writeRect(this.effects2View, value);
+  }
+  get foreColor(): UiMutableColor {
+    return this.foreView;
+  }
+  set foreColor(value: Vec4) {
+    writeColor(this.foreView, value);
+  }
+  get backColor(): UiMutableColor {
+    return this.backView;
+  }
+  set backColor(value: Vec4) {
+    writeColor(this.backView, value);
+  }
+  get borderColor(): UiMutableColor {
+    return this.borderView;
+  }
+  set borderColor(value: Vec4) {
+    writeColor(this.borderView, value);
+  }
+  get outlineColor(): UiMutableColor {
+    return this.outlineView;
+  }
+  set outlineColor(value: Vec4) {
+    writeColor(this.outlineView, value);
+  }
+  get name(): string | undefined {
+    return this.allocation.getString(32);
+  }
+  set name(value: string | undefined) {
+    this.allocation.setString(32, value);
+  }
+  get group(): string | undefined {
+    return this.allocation.getString(36);
+  }
+  set group(value: string | undefined) {
+    this.allocation.setString(36, value);
+  }
+  get cinematic(): string | undefined {
+    return this.allocation.getString(40);
+  }
+  set cinematic(value: string | undefined) {
+    this.allocation.setString(40, value);
+  }
+  get style(): number {
+    return this.allocation.getInt32(48);
+  }
+  set style(value: number) {
+    this.allocation.setInt32(48, value);
+  }
+  get border(): number {
+    return this.allocation.getInt32(52);
+  }
+  set border(value: number) {
+    this.allocation.setInt32(52, value);
+  }
+  get ownerDraw(): number {
+    return this.allocation.getInt32(56);
+  }
+  set ownerDraw(value: number) {
+    this.allocation.setInt32(56, value);
+  }
+  get ownerDrawFlags(): number {
+    return this.allocation.getInt32(60);
+  }
+  set ownerDrawFlags(value: number) {
+    this.allocation.setInt32(60, value);
+  }
+  get borderSize(): number {
+    return this.allocation.getFloat32(64);
+  }
+  set borderSize(value: number) {
+    this.allocation.setFloat32(64, value);
+  }
+  get flags(): number {
+    return this.allocation.getInt32(68);
+  }
+  set flags(value: number) {
+    this.allocation.setInt32(68, value);
+  }
+  get offsetTime(): number {
+    return this.allocation.getInt32(104);
+  }
+  set offsetTime(value: number) {
+    this.allocation.setInt32(104, value);
+  }
+  get nextTime(): number {
+    return this.allocation.getInt32(108);
+  }
+  set nextTime(value: number) {
+    this.allocation.setInt32(108, value);
+  }
+  get cinematicHandle(): number {
+    return this.allocation.getInt32(44);
+  }
+  set cinematicHandle(value: number) {
+    this.allocation.setInt32(44, value);
+  }
   get background(): UiShaderReference | undefined {
     const value = this.allocation.getResource(176);
     if (value === undefined || value.kind === "shader") return value;
     throw new Error("UI window background aliases a different resource kind");
   }
-  get backgroundHandle(): number | undefined { return this.allocation.getResourceHandle(176); }
-  setBackground(value: UiShaderReference, handle: number | undefined): void { this.allocation.setResource(176, value, handle); }
+  get backgroundHandle(): number | undefined {
+    return this.allocation.getResourceHandle(176);
+  }
+  setBackground(value: UiShaderReference, handle: number | undefined): void {
+    this.allocation.setResource(176, value, handle);
+  }
 }
 
 class MutableEditField implements UiEditFieldDefinition {
   constructor(private readonly allocation: UiMemoryAllocation) {}
 
-  get minimum(): number { return this.allocation.getFloat32(0); }
-  set minimum(value: number) { this.allocation.setFloat32(0, value); }
-  get maximum(): number { return this.allocation.getFloat32(4); }
-  set maximum(value: number) { this.allocation.setFloat32(4, value); }
-  get defaultValue(): number { return this.allocation.getFloat32(8); }
-  set defaultValue(value: number) { this.allocation.setFloat32(8, value); }
-  get range(): number { return this.allocation.getFloat32(12); }
-  set range(value: number) { this.allocation.setFloat32(12, value); }
-  get maxChars(): number { return this.allocation.getInt32(16); }
-  set maxChars(value: number) { this.allocation.setInt32(16, value); }
-  get maxPaintChars(): number { return this.allocation.getInt32(20); }
-  set maxPaintChars(value: number) { this.allocation.setInt32(20, value); }
-  get paintOffset(): number { return this.allocation.getInt32(24); }
-  set paintOffset(value: number) { this.allocation.setInt32(24, value); }
+  get minimum(): number {
+    return this.allocation.getFloat32(0);
+  }
+  set minimum(value: number) {
+    this.allocation.setFloat32(0, value);
+  }
+  get maximum(): number {
+    return this.allocation.getFloat32(4);
+  }
+  set maximum(value: number) {
+    this.allocation.setFloat32(4, value);
+  }
+  get defaultValue(): number {
+    return this.allocation.getFloat32(8);
+  }
+  set defaultValue(value: number) {
+    this.allocation.setFloat32(8, value);
+  }
+  get range(): number {
+    return this.allocation.getFloat32(12);
+  }
+  set range(value: number) {
+    this.allocation.setFloat32(12, value);
+  }
+  get maxChars(): number {
+    return this.allocation.getInt32(16);
+  }
+  set maxChars(value: number) {
+    this.allocation.setInt32(16, value);
+  }
+  get maxPaintChars(): number {
+    return this.allocation.getInt32(20);
+  }
+  set maxPaintChars(value: number) {
+    this.allocation.setInt32(20, value);
+  }
+  get paintOffset(): number {
+    return this.allocation.getInt32(24);
+  }
+  set paintOffset(value: number) {
+    this.allocation.setInt32(24, value);
+  }
 }
 
 class MutableListBox implements UiListBoxDefinition {
@@ -522,33 +673,79 @@ class MutableListBox implements UiListBoxDefinition {
     this.columnViews = Array.from({ length: MAX_UI_LIST_COLUMNS }, (_, index) => {
       const offset = 32 + index * 12;
       return Object.freeze({
-        get position(): number { return allocation.getInt32(offset); },
-        get width(): number { return allocation.getInt32(offset + 4); },
-        get maxChars(): number { return allocation.getInt32(offset + 8); },
+        get position(): number {
+          return allocation.getInt32(offset);
+        },
+        get width(): number {
+          return allocation.getInt32(offset + 4);
+        },
+        get maxChars(): number {
+          return allocation.getInt32(offset + 8);
+        },
       });
     });
   }
 
-  get startPosition(): number { return this.allocation.getInt32(0); }
-  set startPosition(value: number) { this.allocation.setInt32(0, value); }
-  get endPosition(): number { return this.allocation.getInt32(4); }
-  set endPosition(value: number) { this.allocation.setInt32(4, value); }
-  get drawPadding(): number { return this.allocation.getInt32(8); }
-  set drawPadding(value: number) { this.allocation.setInt32(8, value); }
-  get cursorPosition(): number { return this.allocation.getInt32(12); }
-  set cursorPosition(value: number) { this.allocation.setInt32(12, value); }
-  get elementWidth(): number { return this.allocation.getFloat32(16); }
-  set elementWidth(value: number) { this.allocation.setFloat32(16, value); }
-  get elementHeight(): number { return this.allocation.getFloat32(20); }
-  set elementHeight(value: number) { this.allocation.setFloat32(20, value); }
-  get elementStyle(): number { return this.allocation.getInt32(24); }
-  set elementStyle(value: number) { this.allocation.setInt32(24, value); }
-  get columnCount(): number { return this.allocation.getInt32(28); }
-  set columnCount(value: number) { this.allocation.setInt32(28, value); }
-  get notSelectable(): boolean { return this.allocation.getInt32(228) !== 0; }
-  set notSelectable(value: boolean) { this.allocation.setInt32(228, value ? 1 : 0); }
-  get doubleClick(): UiScript | undefined { return this.allocation.getScript(224); }
-  set doubleClick(value: UiScript | undefined) { this.allocation.setScript(224, value); }
+  get startPosition(): number {
+    return this.allocation.getInt32(0);
+  }
+  set startPosition(value: number) {
+    this.allocation.setInt32(0, value);
+  }
+  get endPosition(): number {
+    return this.allocation.getInt32(4);
+  }
+  set endPosition(value: number) {
+    this.allocation.setInt32(4, value);
+  }
+  get drawPadding(): number {
+    return this.allocation.getInt32(8);
+  }
+  set drawPadding(value: number) {
+    this.allocation.setInt32(8, value);
+  }
+  get cursorPosition(): number {
+    return this.allocation.getInt32(12);
+  }
+  set cursorPosition(value: number) {
+    this.allocation.setInt32(12, value);
+  }
+  get elementWidth(): number {
+    return this.allocation.getFloat32(16);
+  }
+  set elementWidth(value: number) {
+    this.allocation.setFloat32(16, value);
+  }
+  get elementHeight(): number {
+    return this.allocation.getFloat32(20);
+  }
+  set elementHeight(value: number) {
+    this.allocation.setFloat32(20, value);
+  }
+  get elementStyle(): number {
+    return this.allocation.getInt32(24);
+  }
+  set elementStyle(value: number) {
+    this.allocation.setInt32(24, value);
+  }
+  get columnCount(): number {
+    return this.allocation.getInt32(28);
+  }
+  set columnCount(value: number) {
+    this.allocation.setInt32(28, value);
+  }
+  get notSelectable(): boolean {
+    return this.allocation.getInt32(228) !== 0;
+  }
+  set notSelectable(value: boolean) {
+    this.allocation.setInt32(228, value ? 1 : 0);
+  }
+  get doubleClick(): UiScript | undefined {
+    return this.allocation.getScript(224);
+  }
+  set doubleClick(value: UiScript | undefined) {
+    this.allocation.setScript(224, value);
+  }
 
   get columns(): readonly UiListColumn[] {
     const count = this.columnCount;
@@ -570,16 +767,36 @@ class MutableListBox implements UiListBoxDefinition {
 class MutableMulti implements UiMultiDefinition {
   constructor(private readonly allocation: UiMemoryAllocation) {}
 
-  get count(): number { return this.allocation.getInt32(384); }
-  set count(value: number) { this.allocation.setInt32(384, value); }
-  get stringDefinition(): boolean { return this.allocation.getInt32(388) !== 0; }
-  set stringDefinition(value: boolean) { this.allocation.setInt32(388, value ? 1 : 0); }
-  label(index: number): string | undefined { return this.allocation.getString(this.slot(index)); }
-  stringValue(index: number): string | undefined { return this.allocation.getString(128 + this.slot(index)); }
-  numberValue(index: number): number { return this.allocation.getFloat32(256 + this.slot(index)); }
-  setLabel(index: number, value: string | UiStringReference | undefined): void { this.allocation.setString(this.slot(index), value); }
-  setStringValue(index: number, value: string | UiStringReference | undefined): void { this.allocation.setString(128 + this.slot(index), value); }
-  setNumberValue(index: number, value: number): void { this.allocation.setFloat32(256 + this.slot(index), value); }
+  get count(): number {
+    return this.allocation.getInt32(384);
+  }
+  set count(value: number) {
+    this.allocation.setInt32(384, value);
+  }
+  get stringDefinition(): boolean {
+    return this.allocation.getInt32(388) !== 0;
+  }
+  set stringDefinition(value: boolean) {
+    this.allocation.setInt32(388, value ? 1 : 0);
+  }
+  label(index: number): string | undefined {
+    return this.allocation.getString(this.slot(index));
+  }
+  stringValue(index: number): string | undefined {
+    return this.allocation.getString(128 + this.slot(index));
+  }
+  numberValue(index: number): number {
+    return this.allocation.getFloat32(256 + this.slot(index));
+  }
+  setLabel(index: number, value: string | UiStringReference | undefined): void {
+    this.allocation.setString(this.slot(index), value);
+  }
+  setStringValue(index: number, value: string | UiStringReference | undefined): void {
+    this.allocation.setString(128 + this.slot(index), value);
+  }
+  setNumberValue(index: number, value: number): void {
+    this.allocation.setFloat32(256 + this.slot(index), value);
+  }
 
   private slot(index: number): number {
     if (!Number.isInteger(index) || index < 0 || index >= 32) throw new RangeError("multiDef_t index exceeds the source 32-slot arrays");
@@ -592,23 +809,51 @@ class MutableModel implements UiModelDefinition {
 
   constructor(private readonly allocation: UiMemoryAllocation) {
     this.origin = Object.freeze({
-      get x(): number { return allocation.getFloat32(4); },
-      set x(value: number) { allocation.setFloat32(4, value); },
-      get y(): number { return allocation.getFloat32(8); },
-      set y(value: number) { allocation.setFloat32(8, value); },
-      get z(): number { return allocation.getFloat32(12); },
-      set z(value: number) { allocation.setFloat32(12, value); },
+      get x(): number {
+        return allocation.getFloat32(4);
+      },
+      set x(value: number) {
+        allocation.setFloat32(4, value);
+      },
+      get y(): number {
+        return allocation.getFloat32(8);
+      },
+      set y(value: number) {
+        allocation.setFloat32(8, value);
+      },
+      get z(): number {
+        return allocation.getFloat32(12);
+      },
+      set z(value: number) {
+        allocation.setFloat32(12, value);
+      },
     });
   }
 
-  get angle(): number { return this.allocation.getInt32(0); }
-  set angle(value: number) { this.allocation.setInt32(0, value); }
-  get fieldOfViewX(): number { return this.allocation.getFloat32(16); }
-  set fieldOfViewX(value: number) { this.allocation.setFloat32(16, value); }
-  get fieldOfViewY(): number { return this.allocation.getFloat32(20); }
-  set fieldOfViewY(value: number) { this.allocation.setFloat32(20, value); }
-  get rotationSpeed(): number { return this.allocation.getInt32(24); }
-  set rotationSpeed(value: number) { this.allocation.setInt32(24, value); }
+  get angle(): number {
+    return this.allocation.getInt32(0);
+  }
+  set angle(value: number) {
+    this.allocation.setInt32(0, value);
+  }
+  get fieldOfViewX(): number {
+    return this.allocation.getFloat32(16);
+  }
+  set fieldOfViewX(value: number) {
+    this.allocation.setFloat32(16, value);
+  }
+  get fieldOfViewY(): number {
+    return this.allocation.getFloat32(20);
+  }
+  set fieldOfViewY(value: number) {
+    this.allocation.setFloat32(20, value);
+  }
+  get rotationSpeed(): number {
+    return this.allocation.getInt32(24);
+  }
+  set rotationSpeed(value: number) {
+    this.allocation.setInt32(24, value);
+  }
 }
 
 type MutableItemBehavior =
@@ -638,70 +883,165 @@ class MutableItem {
   private readonly modelViews = new WeakMap<UiMemoryAllocation, MutableModel>();
   private readonly multiViews = new WeakMap<UiMemoryAllocation, MutableMulti>();
 
-  constructor(readonly allocation: UiMemoryAllocation, readonly location: SourceLocation, readonly allocationOffset: number | undefined) {
+  constructor(
+    readonly allocation: UiMemoryAllocation,
+    readonly location: SourceLocation,
+    readonly allocationOffset: number | undefined,
+  ) {
     this.window = new MutableWindow(allocation.subrecord(0, 180));
     this.textView = retainedRect(allocation, 180);
     this.colors = Array.from({ length: MAX_UI_COLOR_RANGES }, (_, index) => {
-      const offset = 288 + index * 24, colorView = retainedColor(allocation, offset);
+      const offset = 288 + index * 24,
+        colorView = retainedColor(allocation, offset);
       return Object.freeze({
         color: colorView,
-        get low(): number { return allocation.getFloat32(offset + 16); },
-        get high(): number { return allocation.getFloat32(offset + 20); },
+        get low(): number {
+          return allocation.getFloat32(offset + 16);
+        },
+        get high(): number {
+          return allocation.getFloat32(offset + 20);
+        },
       });
     });
     this.definition = freezeItem(this);
   }
 
   initialize(): void {
-    this.allocation.clear(); this.textScale = .55; this.window.initialize();
+    this.allocation.clear();
+    this.textScale = 0.55;
+    this.window.initialize();
   }
-  get textRect(): UiMutableRect { return this.textView; }
-  set textRect(value: UiRect) { writeRect(this.textView, value); }
-  get type(): number { return this.allocation.getInt32(196); }
-  set type(value: number) { this.allocation.setInt32(196, value); }
-  get alignment(): number { return this.allocation.getInt32(200); }
-  set alignment(value: number) { this.allocation.setInt32(200, value); }
-  get textAlignment(): number { return this.allocation.getInt32(204); }
-  set textAlignment(value: number) { this.allocation.setInt32(204, value); }
-  get textAlignX(): number { return this.allocation.getFloat32(208); }
-  set textAlignX(value: number) { this.allocation.setFloat32(208, value); }
-  get textAlignY(): number { return this.allocation.getFloat32(212); }
-  set textAlignY(value: number) { this.allocation.setFloat32(212, value); }
-  get textScale(): number { return this.allocation.getFloat32(216); }
-  set textScale(value: number) { this.allocation.setFloat32(216, value); }
-  get textStyle(): number { return this.allocation.getInt32(220); }
-  set textStyle(value: number) { this.allocation.setInt32(220, value); }
-  get text(): string | undefined { return this.allocation.getString(224); }
-  set text(value: string | undefined) { this.allocation.setString(224, value); }
-  get parent(): UiMenuDefinition | undefined { return this.allocation.getMenu(228); }
-  set parent(value: UiMenuDefinition | undefined) { this.allocation.setMenu(228, value); }
+  get textRect(): UiMutableRect {
+    return this.textView;
+  }
+  set textRect(value: UiRect) {
+    writeRect(this.textView, value);
+  }
+  get type(): number {
+    return this.allocation.getInt32(196);
+  }
+  set type(value: number) {
+    this.allocation.setInt32(196, value);
+  }
+  get alignment(): number {
+    return this.allocation.getInt32(200);
+  }
+  set alignment(value: number) {
+    this.allocation.setInt32(200, value);
+  }
+  get textAlignment(): number {
+    return this.allocation.getInt32(204);
+  }
+  set textAlignment(value: number) {
+    this.allocation.setInt32(204, value);
+  }
+  get textAlignX(): number {
+    return this.allocation.getFloat32(208);
+  }
+  set textAlignX(value: number) {
+    this.allocation.setFloat32(208, value);
+  }
+  get textAlignY(): number {
+    return this.allocation.getFloat32(212);
+  }
+  set textAlignY(value: number) {
+    this.allocation.setFloat32(212, value);
+  }
+  get textScale(): number {
+    return this.allocation.getFloat32(216);
+  }
+  set textScale(value: number) {
+    this.allocation.setFloat32(216, value);
+  }
+  get textStyle(): number {
+    return this.allocation.getInt32(220);
+  }
+  set textStyle(value: number) {
+    this.allocation.setInt32(220, value);
+  }
+  get text(): string | undefined {
+    return this.allocation.getString(224);
+  }
+  set text(value: string | undefined) {
+    this.allocation.setString(224, value);
+  }
+  get parent(): UiMenuDefinition | undefined {
+    return this.allocation.getMenu(228);
+  }
+  set parent(value: UiMenuDefinition | undefined) {
+    this.allocation.setMenu(228, value);
+  }
   get asset(): UiShaderReference | UiModelReference | undefined {
     const value = this.allocation.getResource(232);
     if (value === undefined || value.kind === "shader" || value.kind === "model") return value;
     throw new Error("UI item asset aliases a sound handle");
   }
-  get assetHandle(): number | undefined { return this.allocation.getResourceHandle(232); }
-  setAsset(value: UiShaderReference | UiModelReference, handle: number | undefined): void { this.allocation.setResource(232, value, handle); }
-  get mouseEnterText(): UiScript | undefined { return this.allocation.getScript(236); }
-  set mouseEnterText(value: UiScript | undefined) { this.allocation.setScript(236, value); }
-  get mouseExitText(): UiScript | undefined { return this.allocation.getScript(240); }
-  set mouseExitText(value: UiScript | undefined) { this.allocation.setScript(240, value); }
-  get mouseEnter(): UiScript | undefined { return this.allocation.getScript(244); }
-  set mouseEnter(value: UiScript | undefined) { this.allocation.setScript(244, value); }
-  get mouseExit(): UiScript | undefined { return this.allocation.getScript(248); }
-  set mouseExit(value: UiScript | undefined) { this.allocation.setScript(248, value); }
-  get action(): UiScript | undefined { return this.allocation.getScript(252); }
-  set action(value: UiScript | undefined) { this.allocation.setScript(252, value); }
-  get onFocus(): UiScript | undefined { return this.allocation.getScript(256); }
-  set onFocus(value: UiScript | undefined) { this.allocation.setScript(256, value); }
-  get leaveFocus(): UiScript | undefined { return this.allocation.getScript(260); }
-  set leaveFocus(value: UiScript | undefined) { this.allocation.setScript(260, value); }
-  get cvar(): string | undefined { return this.allocation.getString(264); }
-  set cvar(value: string | undefined) { this.allocation.setString(264, value); }
-  get cvarTest(): string | undefined { return this.allocation.getString(268); }
-  set cvarTest(value: string | undefined) { this.allocation.setString(268, value); }
-  get cvarScript(): UiScript | undefined { return this.allocation.getScript(272); }
-  get cvarFlags(): number { return this.allocation.getInt32(276); }
+  get assetHandle(): number | undefined {
+    return this.allocation.getResourceHandle(232);
+  }
+  setAsset(value: UiShaderReference | UiModelReference, handle: number | undefined): void {
+    this.allocation.setResource(232, value, handle);
+  }
+  get mouseEnterText(): UiScript | undefined {
+    return this.allocation.getScript(236);
+  }
+  set mouseEnterText(value: UiScript | undefined) {
+    this.allocation.setScript(236, value);
+  }
+  get mouseExitText(): UiScript | undefined {
+    return this.allocation.getScript(240);
+  }
+  set mouseExitText(value: UiScript | undefined) {
+    this.allocation.setScript(240, value);
+  }
+  get mouseEnter(): UiScript | undefined {
+    return this.allocation.getScript(244);
+  }
+  set mouseEnter(value: UiScript | undefined) {
+    this.allocation.setScript(244, value);
+  }
+  get mouseExit(): UiScript | undefined {
+    return this.allocation.getScript(248);
+  }
+  set mouseExit(value: UiScript | undefined) {
+    this.allocation.setScript(248, value);
+  }
+  get action(): UiScript | undefined {
+    return this.allocation.getScript(252);
+  }
+  set action(value: UiScript | undefined) {
+    this.allocation.setScript(252, value);
+  }
+  get onFocus(): UiScript | undefined {
+    return this.allocation.getScript(256);
+  }
+  set onFocus(value: UiScript | undefined) {
+    this.allocation.setScript(256, value);
+  }
+  get leaveFocus(): UiScript | undefined {
+    return this.allocation.getScript(260);
+  }
+  set leaveFocus(value: UiScript | undefined) {
+    this.allocation.setScript(260, value);
+  }
+  get cvar(): string | undefined {
+    return this.allocation.getString(264);
+  }
+  set cvar(value: string | undefined) {
+    this.allocation.setString(264, value);
+  }
+  get cvarTest(): string | undefined {
+    return this.allocation.getString(268);
+  }
+  set cvarTest(value: string | undefined) {
+    this.allocation.setString(268, value);
+  }
+  get cvarScript(): UiScript | undefined {
+    return this.allocation.getScript(272);
+  }
+  get cvarFlags(): number {
+    return this.allocation.getInt32(276);
+  }
   get cvarRule(): UiCvarRule | undefined {
     const flags = this.cvarFlags;
     if ((flags & 15) === 0) return undefined;
@@ -721,10 +1061,18 @@ class MutableItem {
     if (value === undefined || value.kind === "sound") return value;
     throw new Error("UI focus sound aliases a different resource kind");
   }
-  get focusSoundHandle(): number | undefined { return this.allocation.getResourceHandle(280); }
-  setFocusSound(value: UiSoundReference, handle: number | undefined): void { this.allocation.setResource(280, value, handle); }
-  get colorCount(): number { return this.allocation.getInt32(284); }
-  set colorCount(value: number) { this.allocation.setInt32(284, value); }
+  get focusSoundHandle(): number | undefined {
+    return this.allocation.getResourceHandle(280);
+  }
+  setFocusSound(value: UiSoundReference, handle: number | undefined): void {
+    this.allocation.setResource(280, value, handle);
+  }
+  get colorCount(): number {
+    return this.allocation.getInt32(284);
+  }
+  set colorCount(value: number) {
+    this.allocation.setInt32(284, value);
+  }
   get colorRanges(): readonly UiColorRange[] {
     const count = this.colorCount;
     if (count > MAX_UI_COLOR_RANGES) throw new RangeError("UI color ranges exceed the source array");
@@ -736,66 +1084,162 @@ class MutableItem {
     if (index < 0) throw new RangeError("UI color range index is negative");
     const offset = 288 + index * 24;
     writeColor(retainedColor(this.allocation, offset), value.color);
-    this.allocation.setFloat32(offset + 16, value.low); this.allocation.setFloat32(offset + 20, value.high);
+    this.allocation.setFloat32(offset + 16, value.low);
+    this.allocation.setFloat32(offset + 20, value.high);
     this.colorCount = index + 1;
   }
-  get special(): number { return this.allocation.getFloat32(528); }
-  set special(value: number) { this.allocation.setFloat32(528, value); }
-  get cursorPosition(): number { return this.allocation.getInt32(532); }
-  set cursorPosition(value: number) { this.allocation.setInt32(532, value); }
-  get typeData(): UiMemoryAllocation | undefined { return this.allocation.getAllocationPointer(536); }
-  set typeData(value: UiMemoryAllocation | undefined) { this.allocation.setAllocationPointer(536, value); }
-  get hasTypeData(): boolean { return !this.allocation.isNullPointer(536); }
+  get special(): number {
+    return this.allocation.getFloat32(528);
+  }
+  set special(value: number) {
+    this.allocation.setFloat32(528, value);
+  }
+  get cursorPosition(): number {
+    return this.allocation.getInt32(532);
+  }
+  set cursorPosition(value: number) {
+    this.allocation.setInt32(532, value);
+  }
+  get typeData(): UiMemoryAllocation | undefined {
+    return this.allocation.getAllocationPointer(536);
+  }
+  set typeData(value: UiMemoryAllocation | undefined) {
+    this.allocation.setAllocationPointer(536, value);
+  }
+  get hasTypeData(): boolean {
+    return !this.allocation.isNullPointer(536);
+  }
 
   editData(): MutableEditField | undefined {
     const data = this.typeData;
     if (data === undefined) return undefined;
     let view = this.editViews.get(data);
-    if (view === undefined) { view = new MutableEditField(data.dereference(28)); this.editViews.set(data, view); }
+    if (view === undefined) {
+      view = new MutableEditField(data.dereference(28));
+      this.editViews.set(data, view);
+    }
     return view;
   }
   listData(): MutableListBox | undefined {
     const data = this.typeData;
     if (data === undefined) return undefined;
     let view = this.listViews.get(data);
-    if (view === undefined) { view = new MutableListBox(data.dereference(232)); this.listViews.set(data, view); }
+    if (view === undefined) {
+      view = new MutableListBox(data.dereference(232));
+      this.listViews.set(data, view);
+    }
     return view;
   }
   modelData(): MutableModel | undefined {
     const data = this.typeData;
     if (data === undefined) return undefined;
     let view = this.modelViews.get(data);
-    if (view === undefined) { view = new MutableModel(data.dereference(28)); this.modelViews.set(data, view); }
+    if (view === undefined) {
+      view = new MutableModel(data.dereference(28));
+      this.modelViews.set(data, view);
+    }
     return view;
   }
   multiData(): MutableMulti | undefined {
     const data = this.typeData;
     if (data === undefined) return undefined;
     let view = this.multiViews.get(data);
-    if (view === undefined) { view = new MutableMulti(data.dereference(392)); this.multiViews.set(data, view); }
+    if (view === undefined) {
+      view = new MutableMulti(data.dereference(392));
+      this.multiViews.set(data, view);
+    }
     return view;
   }
 
   get behavior(): MutableItemBehavior {
     const item = this;
     switch (this.type) {
-      case UiItemTypeCode.Text: return { kind: "text", type: UiItemTypeCode.Text, get edit() { return item.editData(); } };
-      case UiItemTypeCode.Button: return { kind: "button", type: UiItemTypeCode.Button };
-      case UiItemTypeCode.RadioButton: return { kind: "radio-button", type: UiItemTypeCode.RadioButton };
-      case UiItemTypeCode.CheckBox: return { kind: "check-box", type: UiItemTypeCode.CheckBox };
-      case UiItemTypeCode.EditField: return { kind: "edit-field", type: UiItemTypeCode.EditField, get edit() { return item.requiredEditData(); } };
-      case UiItemTypeCode.Combo: return { kind: "combo", type: UiItemTypeCode.Combo };
-      case UiItemTypeCode.ListBox: return { kind: "list-box", type: UiItemTypeCode.ListBox, get list() {
-        const data = item.listData(); if (data === undefined) throw new Error("UI list operation dereferences NULL typeData"); return data;
-      } };
-      case UiItemTypeCode.Model: return { kind: "model", type: UiItemTypeCode.Model, get model() { return item.modelData(); } };
-      case UiItemTypeCode.OwnerDraw: return { kind: "owner-draw", type: UiItemTypeCode.OwnerDraw };
-      case UiItemTypeCode.NumericField: return { kind: "numeric-field", type: UiItemTypeCode.NumericField, get edit() { return item.requiredEditData(); } };
-      case UiItemTypeCode.Slider: return { kind: "slider", type: UiItemTypeCode.Slider, get edit() { return item.requiredEditData(); } };
-      case UiItemTypeCode.YesNo: return { kind: "yes-no", type: UiItemTypeCode.YesNo, get edit() { return item.requiredEditData(); } };
-      case UiItemTypeCode.Multi: return { kind: "multi", type: UiItemTypeCode.Multi, get multi() { return item.multiData(); } };
-      case UiItemTypeCode.Bind: return { kind: "bind", type: UiItemTypeCode.Bind, get edit() { return item.requiredEditData(); } };
-      default: return { kind: "unknown", type: this.type };
+      case UiItemTypeCode.Text:
+        return {
+          kind: "text",
+          type: UiItemTypeCode.Text,
+          get edit() {
+            return item.editData();
+          },
+        };
+      case UiItemTypeCode.Button:
+        return { kind: "button", type: UiItemTypeCode.Button };
+      case UiItemTypeCode.RadioButton:
+        return { kind: "radio-button", type: UiItemTypeCode.RadioButton };
+      case UiItemTypeCode.CheckBox:
+        return { kind: "check-box", type: UiItemTypeCode.CheckBox };
+      case UiItemTypeCode.EditField:
+        return {
+          kind: "edit-field",
+          type: UiItemTypeCode.EditField,
+          get edit() {
+            return item.requiredEditData();
+          },
+        };
+      case UiItemTypeCode.Combo:
+        return { kind: "combo", type: UiItemTypeCode.Combo };
+      case UiItemTypeCode.ListBox:
+        return {
+          kind: "list-box",
+          type: UiItemTypeCode.ListBox,
+          get list() {
+            const data = item.listData();
+            if (data === undefined) throw new Error("UI list operation dereferences NULL typeData");
+            return data;
+          },
+        };
+      case UiItemTypeCode.Model:
+        return {
+          kind: "model",
+          type: UiItemTypeCode.Model,
+          get model() {
+            return item.modelData();
+          },
+        };
+      case UiItemTypeCode.OwnerDraw:
+        return { kind: "owner-draw", type: UiItemTypeCode.OwnerDraw };
+      case UiItemTypeCode.NumericField:
+        return {
+          kind: "numeric-field",
+          type: UiItemTypeCode.NumericField,
+          get edit() {
+            return item.requiredEditData();
+          },
+        };
+      case UiItemTypeCode.Slider:
+        return {
+          kind: "slider",
+          type: UiItemTypeCode.Slider,
+          get edit() {
+            return item.requiredEditData();
+          },
+        };
+      case UiItemTypeCode.YesNo:
+        return {
+          kind: "yes-no",
+          type: UiItemTypeCode.YesNo,
+          get edit() {
+            return item.requiredEditData();
+          },
+        };
+      case UiItemTypeCode.Multi:
+        return {
+          kind: "multi",
+          type: UiItemTypeCode.Multi,
+          get multi() {
+            return item.multiData();
+          },
+        };
+      case UiItemTypeCode.Bind:
+        return {
+          kind: "bind",
+          type: UiItemTypeCode.Bind,
+          get edit() {
+            return item.requiredEditData();
+          },
+        };
+      default:
+        return { kind: "unknown", type: this.type };
     }
   }
 
@@ -812,46 +1256,108 @@ class MutableMenu {
   private readonly focusView: UiMutableColor;
   private readonly disableView: UiMutableColor;
 
-  constructor(readonly allocation: UiMemoryAllocation, readonly location: SourceLocation) {
+  constructor(
+    readonly allocation: UiMemoryAllocation,
+    readonly location: SourceLocation,
+  ) {
     this.window = new MutableWindow(allocation.subrecord(0, 180));
-    this.focusView = retainedColor(allocation, 228); this.disableView = retainedColor(allocation, 244);
+    this.focusView = retainedColor(allocation, 228);
+    this.disableView = retainedColor(allocation, 244);
     this.definition = freezeMenu(this);
   }
   initialize(assets: MutableAssets): void {
-    this.allocation.clear(); this.cursorItem = -1;
-    this.fadeAmount = assets.fadeAmount; this.fadeClamp = assets.fadeClamp; this.fadeCycle = assets.fadeCycle;
+    this.allocation.clear();
+    this.cursorItem = -1;
+    this.fadeAmount = assets.fadeAmount;
+    this.fadeClamp = assets.fadeClamp;
+    this.fadeCycle = assets.fadeCycle;
     this.window.initialize();
   }
-  get sourceIndex(): number { return this.allocation.offset / 644; }
-  get font(): string | undefined { return this.allocation.getString(180); }
-  set font(value: string | undefined) { this.allocation.setString(180, value); }
-  get fullScreen(): number { return this.allocation.getInt32(184); }
-  set fullScreen(value: number) { this.allocation.setInt32(184, value); }
-  get itemCount(): number { return this.allocation.getInt32(188); }
-  set itemCount(value: number) { this.allocation.setInt32(188, value); }
-  get fontIndex(): number { return this.allocation.getInt32(192); }
-  get cursorItem(): number { return this.allocation.getInt32(196); }
-  set cursorItem(value: number) { this.allocation.setInt32(196, value); }
-  get fadeCycle(): number { return this.allocation.getInt32(200); }
-  set fadeCycle(value: number) { this.allocation.setInt32(200, value); }
-  get fadeClamp(): number { return this.allocation.getFloat32(204); }
-  set fadeClamp(value: number) { this.allocation.setFloat32(204, value); }
-  get fadeAmount(): number { return this.allocation.getFloat32(208); }
-  set fadeAmount(value: number) { this.allocation.setFloat32(208, value); }
-  get onOpen(): UiScript | undefined { return this.allocation.getScript(212); }
-  set onOpen(value: UiScript | undefined) { this.allocation.setScript(212, value); }
-  get onClose(): UiScript | undefined { return this.allocation.getScript(216); }
-  set onClose(value: UiScript | undefined) { this.allocation.setScript(216, value); }
-  get onEscape(): UiScript | undefined { return this.allocation.getScript(220); }
-  set onEscape(value: UiScript | undefined) { this.allocation.setScript(220, value); }
-  get soundLoop(): UiSoundReference | undefined {
-    const path = this.allocation.getString(224); return path === undefined ? undefined : sound(path);
+  get sourceIndex(): number {
+    return this.allocation.offset / 644;
   }
-  set soundLoop(value: UiSoundReference | undefined) { this.allocation.setString(224, value?.path ?? undefined); }
-  get focusColor(): UiMutableColor { return this.focusView; }
-  set focusColor(value: Vec4) { writeColor(this.focusView, value); }
-  get disableColor(): UiMutableColor { return this.disableView; }
-  set disableColor(value: Vec4) { writeColor(this.disableView, value); }
+  get font(): string | undefined {
+    return this.allocation.getString(180);
+  }
+  set font(value: string | undefined) {
+    this.allocation.setString(180, value);
+  }
+  get fullScreen(): number {
+    return this.allocation.getInt32(184);
+  }
+  set fullScreen(value: number) {
+    this.allocation.setInt32(184, value);
+  }
+  get itemCount(): number {
+    return this.allocation.getInt32(188);
+  }
+  set itemCount(value: number) {
+    this.allocation.setInt32(188, value);
+  }
+  get fontIndex(): number {
+    return this.allocation.getInt32(192);
+  }
+  get cursorItem(): number {
+    return this.allocation.getInt32(196);
+  }
+  set cursorItem(value: number) {
+    this.allocation.setInt32(196, value);
+  }
+  get fadeCycle(): number {
+    return this.allocation.getInt32(200);
+  }
+  set fadeCycle(value: number) {
+    this.allocation.setInt32(200, value);
+  }
+  get fadeClamp(): number {
+    return this.allocation.getFloat32(204);
+  }
+  set fadeClamp(value: number) {
+    this.allocation.setFloat32(204, value);
+  }
+  get fadeAmount(): number {
+    return this.allocation.getFloat32(208);
+  }
+  set fadeAmount(value: number) {
+    this.allocation.setFloat32(208, value);
+  }
+  get onOpen(): UiScript | undefined {
+    return this.allocation.getScript(212);
+  }
+  set onOpen(value: UiScript | undefined) {
+    this.allocation.setScript(212, value);
+  }
+  get onClose(): UiScript | undefined {
+    return this.allocation.getScript(216);
+  }
+  set onClose(value: UiScript | undefined) {
+    this.allocation.setScript(216, value);
+  }
+  get onEscape(): UiScript | undefined {
+    return this.allocation.getScript(220);
+  }
+  set onEscape(value: UiScript | undefined) {
+    this.allocation.setScript(220, value);
+  }
+  get soundLoop(): UiSoundReference | undefined {
+    const path = this.allocation.getString(224);
+    return path === undefined ? undefined : sound(path);
+  }
+  set soundLoop(value: UiSoundReference | undefined) {
+    this.allocation.setString(224, value?.path ?? undefined);
+  }
+  get focusColor(): UiMutableColor {
+    return this.focusView;
+  }
+  set focusColor(value: Vec4) {
+    writeColor(this.focusView, value);
+  }
+  get disableColor(): UiMutableColor {
+    return this.disableView;
+  }
+  set disableColor(value: Vec4) {
+    writeColor(this.disableView, value);
+  }
   setItem(index: number, item: UiItemDefinition | undefined): void {
     if (!Number.isInteger(index) || index < 0 || index >= MAX_UI_MENU_ITEMS) throw new RangeError("UI menu item slot exceeds the source array");
     this.allocation.setItem(260 + index * 4, item);
@@ -863,11 +1369,13 @@ class MutableMenu {
   get items(): readonly UiItemDefinition[] {
     const count = this.itemCount;
     if (count > MAX_UI_MENU_ITEMS) throw new RangeError("UI menu item count exceeds the source array");
-    return Object.freeze(Array.from({ length: Math.max(0, count) }, (_, index) => {
-      const item = this.allocation.getItem(260 + index * 4);
-      if (item === undefined) throw new Error("UI menu dereferences a NULL item pointer");
-      return item;
-    }));
+    return Object.freeze(
+      Array.from({ length: Math.max(0, count) }, (_, index) => {
+        const item = this.allocation.getItem(260 + index * 4);
+        if (item === undefined) throw new Error("UI menu dereferences a NULL item pointer");
+        return item;
+      }),
+    );
   }
 }
 
@@ -956,8 +1464,9 @@ export class UiMenuTokenCursor {
     return new UiMenuTokenCursor({
       path: source.path,
       next: () => {
-        try { return reader.next(); }
-        catch (error) {
+        try {
+          return reader.next();
+        } catch (error) {
           if (reader.isSourceFailure(error)) return undefined;
           throw error;
         }
@@ -994,14 +1503,27 @@ export class UiMenuTokenCursor {
     });
   }
 
-  get path(): string { return this.source.path; }
-  get position(): ScriptSourcePosition { return this.source.position(); }
-  next(): ScriptToken | undefined { return this.source.next()?.token; }
-  dispose(): void { this.source.dispose(); }
+  get path(): string {
+    return this.source.path;
+  }
+  get position(): ScriptSourcePosition {
+    return this.source.position();
+  }
+  next(): ScriptToken | undefined {
+    return this.source.next()?.token;
+  }
+  dispose(): void {
+    this.source.dispose();
+  }
 }
 
 class MenuParseFailure extends Error {
-  constructor(readonly cursor: UiMenuTokenCursor, message: string) { super(message); }
+  constructor(
+    readonly cursor: UiMenuTokenCursor,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 function cString(value: string): string {
@@ -1019,40 +1541,182 @@ function int32(value: number): number {
 
 function freezeItem(item: MutableItem): UiItemDefinition {
   return Object.freeze({
-    location: item.location, allocationOffset: item.allocationOffset, window: item.window,
-    get type() { return item.type; }, get parent() { return item.parent; }, set parent(value: UiMenuDefinition | undefined) { item.parent = value; },
-    get behavior(): UiItemBehavior { return item.behavior; },
-    get textRect() { return item.textRect; }, set textRect(value: UiRect) { item.textRect = value; },
-    get alignment() { return item.alignment; }, get textAlignment() { return item.textAlignment; },
-    get textAlignX() { return item.textAlignX; }, get textAlignY() { return item.textAlignY; },
-    get textScale() { return item.textScale; }, get textStyle() { return item.textStyle; }, get text() { return item.text; },
-    get asset() { return item.asset; }, get assetHandle() { return item.assetHandle; },
-    get mouseEnterText() { return item.mouseEnterText; }, get mouseExitText() { return item.mouseExitText; },
-    get mouseEnter() { return item.mouseEnter; }, get mouseExit() { return item.mouseExit; },
-    get action() { return item.action; }, get onFocus() { return item.onFocus; }, get leaveFocus() { return item.leaveFocus; },
-    get cvar() { return item.cvar; }, get cvarTest() { return item.cvarTest; }, get cvarRule() { return item.cvarRule; },
-    get cvarFlags() { return item.cvarFlags; }, get cvarScript() { return item.cvarScript; },
-    get focusSound() { return item.focusSound; }, get focusSoundHandle() { return item.focusSoundHandle; },
-    get colorRanges() { return item.colorRanges; },
-    get special() { return item.special; }, set special(value: number) { item.special = value; },
-    get cursorPosition() { return item.cursorPosition; }, set cursorPosition(value: number) { item.cursorPosition = value; },
-    editData() { return item.editData(); },
-    listData() { return item.listData(); },
-    modelData() { return item.modelData(); },
-    multiData() { return item.multiData(); },
+    location: item.location,
+    allocationOffset: item.allocationOffset,
+    window: item.window,
+    get type() {
+      return item.type;
+    },
+    get parent() {
+      return item.parent;
+    },
+    set parent(value: UiMenuDefinition | undefined) {
+      item.parent = value;
+    },
+    get behavior(): UiItemBehavior {
+      return item.behavior;
+    },
+    get textRect() {
+      return item.textRect;
+    },
+    set textRect(value: UiRect) {
+      item.textRect = value;
+    },
+    get alignment() {
+      return item.alignment;
+    },
+    get textAlignment() {
+      return item.textAlignment;
+    },
+    get textAlignX() {
+      return item.textAlignX;
+    },
+    get textAlignY() {
+      return item.textAlignY;
+    },
+    get textScale() {
+      return item.textScale;
+    },
+    get textStyle() {
+      return item.textStyle;
+    },
+    get text() {
+      return item.text;
+    },
+    get asset() {
+      return item.asset;
+    },
+    get assetHandle() {
+      return item.assetHandle;
+    },
+    get mouseEnterText() {
+      return item.mouseEnterText;
+    },
+    get mouseExitText() {
+      return item.mouseExitText;
+    },
+    get mouseEnter() {
+      return item.mouseEnter;
+    },
+    get mouseExit() {
+      return item.mouseExit;
+    },
+    get action() {
+      return item.action;
+    },
+    get onFocus() {
+      return item.onFocus;
+    },
+    get leaveFocus() {
+      return item.leaveFocus;
+    },
+    get cvar() {
+      return item.cvar;
+    },
+    get cvarTest() {
+      return item.cvarTest;
+    },
+    get cvarRule() {
+      return item.cvarRule;
+    },
+    get cvarFlags() {
+      return item.cvarFlags;
+    },
+    get cvarScript() {
+      return item.cvarScript;
+    },
+    get focusSound() {
+      return item.focusSound;
+    },
+    get focusSoundHandle() {
+      return item.focusSoundHandle;
+    },
+    get colorRanges() {
+      return item.colorRanges;
+    },
+    get special() {
+      return item.special;
+    },
+    set special(value: number) {
+      item.special = value;
+    },
+    get cursorPosition() {
+      return item.cursorPosition;
+    },
+    set cursorPosition(value: number) {
+      item.cursorPosition = value;
+    },
+    editData() {
+      return item.editData();
+    },
+    listData() {
+      return item.listData();
+    },
+    modelData() {
+      return item.modelData();
+    },
+    multiData() {
+      return item.multiData();
+    },
   });
 }
 
 function freezeMenu(menu: MutableMenu): UiMenuDefinition {
   return Object.freeze({
-    location: menu.location, sourceIndex: menu.sourceIndex, window: menu.window,
-    get font() { return menu.font; }, get fullScreen() { return menu.fullScreen; }, get fontIndex() { return menu.fontIndex; },
-    get cursorItem() { return menu.cursorItem; }, set cursorItem(value: number) { menu.cursorItem = value; },
-    get fadeCycle() { return menu.fadeCycle; }, get fadeClamp() { return menu.fadeClamp; }, get fadeAmount() { return menu.fadeAmount; },
-    get onOpen() { return menu.onOpen; }, get onClose() { return menu.onClose; }, get onEscape() { return menu.onEscape; },
-    get soundLoop() { return menu.soundLoop; }, get focusColor() { return menu.focusColor; }, get disableColor() { return menu.disableColor; },
-    get items() { return menu.items; }, get itemCount() { return menu.itemCount; },
-    itemAt(index: number) { return menu.item(index); },
+    location: menu.location,
+    sourceIndex: menu.sourceIndex,
+    window: menu.window,
+    get font() {
+      return menu.font;
+    },
+    get fullScreen() {
+      return menu.fullScreen;
+    },
+    get fontIndex() {
+      return menu.fontIndex;
+    },
+    get cursorItem() {
+      return menu.cursorItem;
+    },
+    set cursorItem(value: number) {
+      menu.cursorItem = value;
+    },
+    get fadeCycle() {
+      return menu.fadeCycle;
+    },
+    get fadeClamp() {
+      return menu.fadeClamp;
+    },
+    get fadeAmount() {
+      return menu.fadeAmount;
+    },
+    get onOpen() {
+      return menu.onOpen;
+    },
+    get onClose() {
+      return menu.onClose;
+    },
+    get onEscape() {
+      return menu.onEscape;
+    },
+    get soundLoop() {
+      return menu.soundLoop;
+    },
+    get focusColor() {
+      return menu.focusColor;
+    },
+    get disableColor() {
+      return menu.disableColor;
+    },
+    get items() {
+      return menu.items;
+    },
+    get itemCount() {
+      return menu.itemCount;
+    },
+    itemAt(index: number) {
+      return menu.item(index);
+    },
   });
 }
 
@@ -1174,8 +1838,9 @@ export class UiMenuSourceParser {
         }
         const keyword = tokenValue(token).toLowerCase();
         if (keyword === "assetglobaldef") {
-          try { await this.parseAssets(cursor, token.location); }
-          catch (error) {
+          try {
+            await this.parseAssets(cursor, token.location);
+          } catch (error) {
             if (!(error instanceof MenuParseFailure) || error.cursor !== cursor) throw error;
             break;
           }
@@ -1187,11 +1852,14 @@ export class UiMenuSourceParser {
           // Menu_New increments the current count after parsing its original slot.
           // A reentrant registration may already have advanced that count.
           const publishedIndex = this.menus.length;
-          this.menus.push(publishedIndex === index ? menu
-            : new MutableMenu(this.storage.menuRecord(publishedIndex), sourceLocation(token.location)).definition);
+          this.menus.push(
+            publishedIndex === index ? menu : new MutableMenu(this.storage.menuRecord(publishedIndex), sourceLocation(token.location)).definition,
+          );
         }
       }
-    } finally { cursor.dispose(); }
+    } finally {
+      cursor.dispose();
+    }
   }
 
   private async parseFontAsset(cursor: UiMenuTokenCursor, location: SourceLocation, key: "textFont" | "smallFont" | "bigFont"): Promise<void> {
@@ -1201,8 +1869,11 @@ export class UiMenuSourceParser {
     this.parseOptions.assetSink?.publish({ field: key, value: reference });
   }
 
-  private async parseSoundAsset(cursor: UiMenuTokenCursor, location: SourceLocation,
-    key: "menuEnterSound" | "menuExitSound" | "itemFocusSound" | "menuBuzzSound"): Promise<void> {
+  private async parseSoundAsset(
+    cursor: UiMenuTokenCursor,
+    location: SourceLocation,
+    key: "menuEnterSound" | "menuExitSound" | "itemFocusSound" | "menuBuzzSound",
+  ): Promise<void> {
     const reference = sound(this.readString(cursor, location) ?? null);
     await this.register({ kind: "sound", reference, location });
     this.assets[key] = reference;
@@ -1222,8 +1893,12 @@ export class UiMenuSourceParser {
           await this.parseFontAsset(cursor, field.location, "textFont");
           break;
         }
-        case "smallfont": await this.parseFontAsset(cursor, field.location, "smallFont"); break;
-        case "bigfont": await this.parseFontAsset(cursor, field.location, "bigFont"); break;
+        case "smallfont":
+          await this.parseFontAsset(cursor, field.location, "smallFont");
+          break;
+        case "bigfont":
+          await this.parseFontAsset(cursor, field.location, "bigFont");
+          break;
         case "gradientbar": {
           const reference = shader(this.readString(cursor, field.location) ?? null);
           await this.register({ kind: "picture", reference, location: field.location });
@@ -1231,10 +1906,18 @@ export class UiMenuSourceParser {
           this.parseOptions.assetSink?.publish({ field: "gradientBar", value: reference });
           break;
         }
-        case "menuentersound": await this.parseSoundAsset(cursor, field.location, "menuEnterSound"); break;
-        case "menuexitsound": await this.parseSoundAsset(cursor, field.location, "menuExitSound"); break;
-        case "itemfocussound": await this.parseSoundAsset(cursor, field.location, "itemFocusSound"); break;
-        case "menubuzzsound": await this.parseSoundAsset(cursor, field.location, "menuBuzzSound"); break;
+        case "menuentersound":
+          await this.parseSoundAsset(cursor, field.location, "menuEnterSound");
+          break;
+        case "menuexitsound":
+          await this.parseSoundAsset(cursor, field.location, "menuExitSound");
+          break;
+        case "itemfocussound":
+          await this.parseSoundAsset(cursor, field.location, "itemFocusSound");
+          break;
+        case "menubuzzsound":
+          await this.parseSoundAsset(cursor, field.location, "menuBuzzSound");
+          break;
         case "cursor": {
           const path = this.readStringReference(cursor, field.location);
           this.parseOptions.assetSink?.publish({ field: "cursorStr", value: path ?? null });
@@ -1246,19 +1929,24 @@ export class UiMenuSourceParser {
         }
         case "fadeclamp":
           this.assets.fadeClamp = this.readFloat(cursor, field.location);
-          this.parseOptions.assetSink?.publish({ field: "fadeClamp", value: this.assets.fadeClamp }); break;
+          this.parseOptions.assetSink?.publish({ field: "fadeClamp", value: this.assets.fadeClamp });
+          break;
         case "fadecycle":
           this.assets.fadeCycle = this.readInt(cursor, field.location);
-          this.parseOptions.assetSink?.publish({ field: "fadeCycle", value: this.assets.fadeCycle }); break;
+          this.parseOptions.assetSink?.publish({ field: "fadeCycle", value: this.assets.fadeCycle });
+          break;
         case "fadeamount":
           this.assets.fadeAmount = this.readFloat(cursor, field.location);
-          this.parseOptions.assetSink?.publish({ field: "fadeAmount", value: this.assets.fadeAmount }); break;
+          this.parseOptions.assetSink?.publish({ field: "fadeAmount", value: this.assets.fadeAmount });
+          break;
         case "shadowx":
           this.assets.shadowX = this.readFloat(cursor, field.location);
-          this.parseOptions.assetSink?.publish({ field: "shadowX", value: this.assets.shadowX }); break;
+          this.parseOptions.assetSink?.publish({ field: "shadowX", value: this.assets.shadowX });
+          break;
         case "shadowy":
           this.assets.shadowY = this.readFloat(cursor, field.location);
-          this.parseOptions.assetSink?.publish({ field: "shadowY", value: this.assets.shadowY }); break;
+          this.parseOptions.assetSink?.publish({ field: "shadowY", value: this.assets.shadowY });
+          break;
         case "shadowcolor": {
           for (const component of ["x", "y", "z", "w"] satisfies readonly (keyof Vec4)[]) {
             const value = this.readFloat(cursor, field.location);
@@ -1269,7 +1957,8 @@ export class UiMenuSourceParser {
           this.parseOptions.assetSink?.publish({ field: "shadowFadeClamp", value: this.assets.shadowFadeClamp });
           break;
         }
-        default: this.warn(`unknown asset keyword ${value}`, field.location);
+        default:
+          this.warn(`unknown asset keyword ${value}`, field.location);
       }
     }
   }
@@ -1290,69 +1979,126 @@ export class UiMenuSourceParser {
         this.postParse(menu);
         return menu.definition;
       }
-      try { switch (value.toLowerCase()) {
-        case "font": {
-          menu.allocation.setString(180, this.readStringReference(cursor, field.location));
-          if (!this.fontRegistered) {
-            const reference = font(menu.font ?? null, 48);
-            await this.register({ kind: "font", reference, location: field.location });
-            this.assets.textFont = reference;
-            this.parseOptions.assetSink?.publish({ field: "textFont", value: reference });
-            this.fontRegistered = true;
-            this.parseOptions.assetSink?.publish({ field: "fontRegistered", value: true });
+      try {
+        switch (value.toLowerCase()) {
+          case "font": {
+            menu.allocation.setString(180, this.readStringReference(cursor, field.location));
+            if (!this.fontRegistered) {
+              const reference = font(menu.font ?? null, 48);
+              await this.register({ kind: "font", reference, location: field.location });
+              this.assets.textFont = reference;
+              this.parseOptions.assetSink?.publish({ field: "textFont", value: reference });
+              this.fontRegistered = true;
+              this.parseOptions.assetSink?.publish({ field: "fontRegistered", value: true });
+            }
+            break;
           }
-          break;
-        }
-        case "name": menu.allocation.setString(32, this.readStringReference(cursor, field.location)); break;
-        case "fullscreen": menu.fullScreen = this.readInt(cursor, field.location); break;
-        case "rect": this.readRectInto(menu.window.rect, cursor, field.location); break;
-        case "style": menu.window.style = this.readInt(cursor, field.location); break;
-        case "visible": if (this.readInt(cursor, field.location) !== 0) menu.window.flags |= UiWindowFlag.Visible; break;
-        case "onopen": menu.onOpen = this.readScript(cursor, field.location); break;
-        case "onclose": menu.onClose = this.readScript(cursor, field.location); break;
-        case "onesc": menu.onEscape = this.readScript(cursor, field.location); break;
-        case "border": menu.window.border = this.readInt(cursor, field.location); break;
-        case "bordersize": menu.window.borderSize = this.readFloat(cursor, field.location); break;
-        case "backcolor": this.readColorInto(menu.window.backColor, cursor, field.location); break;
-        case "forecolor": this.readForeColor(menu.window, cursor, field.location); break;
-        case "bordercolor": this.readColorInto(menu.window.borderColor, cursor, field.location); break;
-        case "focuscolor": this.readColorInto(menu.focusColor, cursor, field.location); break;
-        case "disablecolor": this.readColorInto(menu.disableColor, cursor, field.location); break;
-        case "outlinecolor": this.readColorInto(menu.window.outlineColor, cursor, field.location); break;
-        case "background": {
-          const reference = shader(this.readString(cursor, field.location) ?? null);
-          const registration = await this.register({ kind: "picture", reference, location: field.location });
-          menu.window.setBackground(reference, registration?.handle);
-          break;
-        }
-        case "ownerdraw": menu.window.ownerDraw = this.readInt(cursor, field.location); break;
-        case "ownerdrawflag": menu.window.ownerDrawFlags = int32(menu.window.ownerDrawFlags | this.readInt(cursor, field.location)); break;
-        case "outofboundsclick": menu.window.flags |= UiWindowFlag.OutOfBoundsClick; break;
-        case "soundloop": {
-          menu.allocation.setString(224, this.readStringReference(cursor, field.location)); break;
-        }
-        case "itemdef": {
-          if (menu.itemCount >= MAX_UI_MENU_ITEMS) break;
-          if (await this.parseItem(cursor, field.location, menu) === undefined) throw new MenuParseFailure(cursor, "itemDef");
-          const item = menu.item(menu.itemCount);
-          if (item !== undefined && item.type === UiItemTypeCode.ListBox) {
-            const list = item.listData();
-            item.cursorPosition = 0;
-            if (list !== undefined) { list.cursorPosition = 0; list.startPosition = 0; list.endPosition = 0; list.cursorPosition = 0; }
+          case "name":
+            menu.allocation.setString(32, this.readStringReference(cursor, field.location));
+            break;
+          case "fullscreen":
+            menu.fullScreen = this.readInt(cursor, field.location);
+            break;
+          case "rect":
+            this.readRectInto(menu.window.rect, cursor, field.location);
+            break;
+          case "style":
+            menu.window.style = this.readInt(cursor, field.location);
+            break;
+          case "visible":
+            if (this.readInt(cursor, field.location) !== 0) menu.window.flags |= UiWindowFlag.Visible;
+            break;
+          case "onopen":
+            menu.onOpen = this.readScript(cursor, field.location);
+            break;
+          case "onclose":
+            menu.onClose = this.readScript(cursor, field.location);
+            break;
+          case "onesc":
+            menu.onEscape = this.readScript(cursor, field.location);
+            break;
+          case "border":
+            menu.window.border = this.readInt(cursor, field.location);
+            break;
+          case "bordersize":
+            menu.window.borderSize = this.readFloat(cursor, field.location);
+            break;
+          case "backcolor":
+            this.readColorInto(menu.window.backColor, cursor, field.location);
+            break;
+          case "forecolor":
+            this.readForeColor(menu.window, cursor, field.location);
+            break;
+          case "bordercolor":
+            this.readColorInto(menu.window.borderColor, cursor, field.location);
+            break;
+          case "focuscolor":
+            this.readColorInto(menu.focusColor, cursor, field.location);
+            break;
+          case "disablecolor":
+            this.readColorInto(menu.disableColor, cursor, field.location);
+            break;
+          case "outlinecolor":
+            this.readColorInto(menu.window.outlineColor, cursor, field.location);
+            break;
+          case "background": {
+            const reference = shader(this.readString(cursor, field.location) ?? null);
+            const registration = await this.register({ kind: "picture", reference, location: field.location });
+            menu.window.setBackground(reference, registration?.handle);
+            break;
           }
-          const parentItem = menu.item(menu.itemCount);
-          menu.itemCount++;
-          if (parentItem === undefined) this.fail("MenuParse_itemDef dereferences a NULL retained item parent", field.location);
-          parentItem.parent = menu.definition;
-          break;
+          case "ownerdraw":
+            menu.window.ownerDraw = this.readInt(cursor, field.location);
+            break;
+          case "ownerdrawflag":
+            menu.window.ownerDrawFlags = int32(menu.window.ownerDrawFlags | this.readInt(cursor, field.location));
+            break;
+          case "outofboundsclick":
+            menu.window.flags |= UiWindowFlag.OutOfBoundsClick;
+            break;
+          case "soundloop": {
+            menu.allocation.setString(224, this.readStringReference(cursor, field.location));
+            break;
+          }
+          case "itemdef": {
+            if (menu.itemCount >= MAX_UI_MENU_ITEMS) break;
+            if ((await this.parseItem(cursor, field.location, menu)) === undefined) throw new MenuParseFailure(cursor, "itemDef");
+            const item = menu.item(menu.itemCount);
+            if (item !== undefined && item.type === UiItemTypeCode.ListBox) {
+              const list = item.listData();
+              item.cursorPosition = 0;
+              if (list !== undefined) {
+                list.cursorPosition = 0;
+                list.startPosition = 0;
+                list.endPosition = 0;
+                list.cursorPosition = 0;
+              }
+            }
+            const parentItem = menu.item(menu.itemCount);
+            menu.itemCount++;
+            if (parentItem === undefined) this.fail("MenuParse_itemDef dereferences a NULL retained item parent", field.location);
+            parentItem.parent = menu.definition;
+            break;
+          }
+          case "cinematic":
+            menu.allocation.setString(40, this.readStringReference(cursor, field.location));
+            break;
+          case "popup":
+            menu.window.flags |= UiWindowFlag.Popup;
+            break;
+          case "fadeclamp":
+            menu.fadeClamp = this.readFloat(cursor, field.location);
+            break;
+          case "fadecycle":
+            menu.fadeCycle = this.readInt(cursor, field.location);
+            break;
+          case "fadeamount":
+            menu.fadeAmount = this.readFloat(cursor, field.location);
+            break;
+          default:
+            this.sourceError(`unknown menu keyword ${value}`, field.location, cursor);
         }
-        case "cinematic": menu.allocation.setString(40, this.readStringReference(cursor, field.location)); break;
-        case "popup": menu.window.flags |= UiWindowFlag.Popup; break;
-        case "fadeclamp": menu.fadeClamp = this.readFloat(cursor, field.location); break;
-        case "fadecycle": menu.fadeCycle = this.readInt(cursor, field.location); break;
-        case "fadeamount": menu.fadeAmount = this.readFloat(cursor, field.location); break;
-        default: this.sourceError(`unknown menu keyword ${value}`, field.location, cursor);
-      } } catch (error) {
+      } catch (error) {
         if (!(error instanceof MenuParseFailure) || error.cursor !== cursor) throw error;
         this.sourceError(`couldn't parse menu keyword ${value}`, field.location, cursor);
         return undefined;
@@ -1382,8 +2128,9 @@ export class UiMenuSourceParser {
       if (value.startsWith("}")) {
         return item;
       }
-      try { await this.parseItemField(item, cursor, value.toLowerCase(), value, field.location); }
-      catch (error) {
+      try {
+        await this.parseItemField(item, cursor, value.toLowerCase(), value, field.location);
+      } catch (error) {
         if (!(error instanceof MenuParseFailure) || error.cursor !== cursor) throw error;
         this.sourceError(`couldn't parse menu item keyword ${value}`, field.location, cursor);
         return undefined;
@@ -1391,17 +2138,17 @@ export class UiMenuSourceParser {
     }
   }
 
-  private async parseItemField(
-    item: MutableItem,
-    cursor: UiMenuTokenCursor,
-    keyword: string,
-    originalKeyword: string,
-    at: SourceLocation,
-  ): Promise<void> {
+  private async parseItemField(item: MutableItem, cursor: UiMenuTokenCursor, keyword: string, originalKeyword: string, at: SourceLocation): Promise<void> {
     switch (keyword) {
-      case "name": item.allocation.setString(32, this.readStringReference(cursor, at)); break;
-      case "text": item.allocation.setString(224, this.readStringReference(cursor, at)); break;
-      case "group": item.allocation.setString(36, this.readStringReference(cursor, at)); break;
+      case "name":
+        item.allocation.setString(32, this.readStringReference(cursor, at));
+        break;
+      case "text":
+        item.allocation.setString(224, this.readStringReference(cursor, at));
+        break;
+      case "group":
+        item.allocation.setString(36, this.readStringReference(cursor, at));
+        break;
       case "asset_model": {
         this.validateTypeData(item);
         const data = item.modelData();
@@ -1429,13 +2176,27 @@ export class UiMenuSourceParser {
         data.origin.z = this.readFloat(cursor, at);
         break;
       }
-      case "model_fovx": this.requireModel(item, at).fieldOfViewX = this.readFloat(cursor, at); break;
-      case "model_fovy": this.requireModel(item, at).fieldOfViewY = this.readFloat(cursor, at); break;
-      case "model_rotation": this.requireModel(item, at).rotationSpeed = this.readInt(cursor, at); break;
-      case "model_angle": this.requireModel(item, at).angle = this.readInt(cursor, at); break;
-      case "rect": this.readRectInto(item.window.clientRect, cursor, at); break;
-      case "style": item.window.style = this.readInt(cursor, at); break;
-      case "decoration": item.window.flags |= UiWindowFlag.Decoration; break;
+      case "model_fovx":
+        this.requireModel(item, at).fieldOfViewX = this.readFloat(cursor, at);
+        break;
+      case "model_fovy":
+        this.requireModel(item, at).fieldOfViewY = this.readFloat(cursor, at);
+        break;
+      case "model_rotation":
+        this.requireModel(item, at).rotationSpeed = this.readInt(cursor, at);
+        break;
+      case "model_angle":
+        this.requireModel(item, at).angle = this.readInt(cursor, at);
+        break;
+      case "rect":
+        this.readRectInto(item.window.clientRect, cursor, at);
+        break;
+      case "style":
+        item.window.style = this.readInt(cursor, at);
+        break;
+      case "decoration":
+        item.window.flags |= UiWindowFlag.Decoration;
+        break;
       case "notselectable": {
         this.validateTypeData(item);
         if (item.type === UiItemTypeCode.ListBox) {
@@ -1444,48 +2205,109 @@ export class UiMenuSourceParser {
         }
         break;
       }
-      case "wrapped": item.window.flags |= UiWindowFlag.Wrapped; break;
-      case "autowrapped": item.window.flags |= UiWindowFlag.AutoWrapped; break;
-      case "horizontalscroll": item.window.flags |= UiWindowFlag.Horizontal; break;
-      case "type": item.type = this.readInt(cursor, at); this.validateTypeData(item); break;
-      case "elementwidth": this.requireList(item, at).elementWidth = this.readFloat(cursor, at); break;
-      case "elementheight": this.requireList(item, at).elementHeight = this.readFloat(cursor, at); break;
-      case "feeder": item.special = this.readFloat(cursor, at); break;
-      case "elementtype": this.checkedList(item, cursor).elementStyle = this.readInt(cursor, at); break;
-      case "columns": this.readColumns(this.checkedList(item, cursor), cursor, at); break;
-      case "border": item.window.border = this.readInt(cursor, at); break;
-      case "bordersize": item.window.borderSize = this.readFloat(cursor, at); break;
-      case "visible": if (this.readInt(cursor, at) !== 0) item.window.flags |= UiWindowFlag.Visible; break;
+      case "wrapped":
+        item.window.flags |= UiWindowFlag.Wrapped;
+        break;
+      case "autowrapped":
+        item.window.flags |= UiWindowFlag.AutoWrapped;
+        break;
+      case "horizontalscroll":
+        item.window.flags |= UiWindowFlag.Horizontal;
+        break;
+      case "type":
+        item.type = this.readInt(cursor, at);
+        this.validateTypeData(item);
+        break;
+      case "elementwidth":
+        this.requireList(item, at).elementWidth = this.readFloat(cursor, at);
+        break;
+      case "elementheight":
+        this.requireList(item, at).elementHeight = this.readFloat(cursor, at);
+        break;
+      case "feeder":
+        item.special = this.readFloat(cursor, at);
+        break;
+      case "elementtype":
+        this.checkedList(item, cursor).elementStyle = this.readInt(cursor, at);
+        break;
+      case "columns":
+        this.readColumns(this.checkedList(item, cursor), cursor, at);
+        break;
+      case "border":
+        item.window.border = this.readInt(cursor, at);
+        break;
+      case "bordersize":
+        item.window.borderSize = this.readFloat(cursor, at);
+        break;
+      case "visible":
+        if (this.readInt(cursor, at) !== 0) item.window.flags |= UiWindowFlag.Visible;
+        break;
       case "ownerdraw": {
         item.window.ownerDraw = this.readInt(cursor, at);
         // ItemParse_ownerdraw changes type without clearing or validating typeData.
         item.type = UiItemTypeCode.OwnerDraw;
         break;
       }
-      case "align": item.alignment = this.readInt(cursor, at); break;
-      case "textalign": item.textAlignment = this.readInt(cursor, at); break;
-      case "textalignx": item.textAlignX = this.readFloat(cursor, at); break;
-      case "textaligny": item.textAlignY = this.readFloat(cursor, at); break;
-      case "textscale": item.textScale = this.readFloat(cursor, at); break;
-      case "textstyle": item.textStyle = this.readInt(cursor, at); break;
-      case "backcolor": this.readColorInto(item.window.backColor, cursor, at); break;
-      case "forecolor": this.readForeColor(item.window, cursor, at); break;
-      case "bordercolor": this.readColorInto(item.window.borderColor, cursor, at); break;
-      case "outlinecolor": this.readColorInto(item.window.outlineColor, cursor, at); break;
+      case "align":
+        item.alignment = this.readInt(cursor, at);
+        break;
+      case "textalign":
+        item.textAlignment = this.readInt(cursor, at);
+        break;
+      case "textalignx":
+        item.textAlignX = this.readFloat(cursor, at);
+        break;
+      case "textaligny":
+        item.textAlignY = this.readFloat(cursor, at);
+        break;
+      case "textscale":
+        item.textScale = this.readFloat(cursor, at);
+        break;
+      case "textstyle":
+        item.textStyle = this.readInt(cursor, at);
+        break;
+      case "backcolor":
+        this.readColorInto(item.window.backColor, cursor, at);
+        break;
+      case "forecolor":
+        this.readForeColor(item.window, cursor, at);
+        break;
+      case "bordercolor":
+        this.readColorInto(item.window.borderColor, cursor, at);
+        break;
+      case "outlinecolor":
+        this.readColorInto(item.window.outlineColor, cursor, at);
+        break;
       case "background": {
         const reference = shader(this.readString(cursor, at) ?? null);
         const registration = await this.register({ kind: "picture", reference, location: at });
         item.window.setBackground(reference, registration?.handle);
         break;
       }
-      case "onfocus": item.onFocus = this.readScript(cursor, at); break;
-      case "leavefocus": item.leaveFocus = this.readScript(cursor, at); break;
-      case "mouseenter": item.mouseEnter = this.readScript(cursor, at); break;
-      case "mouseexit": item.mouseExit = this.readScript(cursor, at); break;
-      case "mouseentertext": item.mouseEnterText = this.readScript(cursor, at); break;
-      case "mouseexittext": item.mouseExitText = this.readScript(cursor, at); break;
-      case "action": item.action = this.readScript(cursor, at); break;
-      case "special": item.special = this.readFloat(cursor, at); break;
+      case "onfocus":
+        item.onFocus = this.readScript(cursor, at);
+        break;
+      case "leavefocus":
+        item.leaveFocus = this.readScript(cursor, at);
+        break;
+      case "mouseenter":
+        item.mouseEnter = this.readScript(cursor, at);
+        break;
+      case "mouseexit":
+        item.mouseExit = this.readScript(cursor, at);
+        break;
+      case "mouseentertext":
+        item.mouseEnterText = this.readScript(cursor, at);
+        break;
+      case "mouseexittext":
+        item.mouseExitText = this.readScript(cursor, at);
+        break;
+      case "action":
+        item.action = this.readScript(cursor, at);
+        break;
+      case "special":
+        item.special = this.readFloat(cursor, at);
+        break;
       case "cvar": {
         this.validateTypeData(item);
         item.allocation.setString(264, this.readStringReference(cursor, at));
@@ -1497,8 +2319,12 @@ export class UiMenuSourceParser {
         }
         break;
       }
-      case "maxchars": this.requireEdit(item, cursor).maxChars = this.readInt(cursor, at); break;
-      case "maxpaintchars": this.requireEdit(item, cursor).maxPaintChars = this.readInt(cursor, at); break;
+      case "maxchars":
+        this.requireEdit(item, cursor).maxChars = this.readInt(cursor, at);
+        break;
+      case "maxpaintchars":
+        this.requireEdit(item, cursor).maxPaintChars = this.readInt(cursor, at);
+        break;
       case "focussound": {
         const reference = sound(this.readString(cursor, at) ?? null);
         const registration = await this.register({ kind: "sound", reference, location: at });
@@ -1513,30 +2339,59 @@ export class UiMenuSourceParser {
         edit.maximum = this.readFloat(cursor, at);
         break;
       }
-      case "cvarstrlist": this.readStringChoices(this.requireMulti(item, cursor), cursor, at); break;
-      case "cvarfloatlist": this.readNumberChoices(this.requireMulti(item, cursor), cursor, at); break;
+      case "cvarstrlist":
+        this.readStringChoices(this.requireMulti(item, cursor), cursor, at);
+        break;
+      case "cvarfloatlist":
+        this.readNumberChoices(this.requireMulti(item, cursor), cursor, at);
+        break;
       case "addcolorrange": {
         const range = Object.freeze({ low: this.readFloat(cursor, at), high: this.readFloat(cursor, at), color: this.readColor(cursor, at) });
         item.addColorRange(range);
         break;
       }
-      case "ownerdrawflag": item.window.ownerDrawFlags = int32(item.window.ownerDrawFlags | this.readInt(cursor, at)); break;
-      case "enablecvar": item.cvarRule = Object.freeze({ kind: "enable", script: this.readScript(cursor, at) }); break;
-      case "cvartest": item.allocation.setString(268, this.readStringReference(cursor, at)); break;
-      case "disablecvar": item.cvarRule = Object.freeze({ kind: "disable", script: this.readScript(cursor, at) }); break;
-      case "showcvar": item.cvarRule = Object.freeze({ kind: "show", script: this.readScript(cursor, at) }); break;
-      case "hidecvar": item.cvarRule = Object.freeze({ kind: "hide", script: this.readScript(cursor, at) }); break;
-      case "cinematic": item.allocation.setString(40, this.readStringReference(cursor, at)); break;
-      case "doubleclick": this.checkedList(item, cursor).doubleClick = this.readScript(cursor, at); break;
-      default: this.sourceError(`unknown menu item keyword ${originalKeyword}`, at, cursor);
+      case "ownerdrawflag":
+        item.window.ownerDrawFlags = int32(item.window.ownerDrawFlags | this.readInt(cursor, at));
+        break;
+      case "enablecvar":
+        item.cvarRule = Object.freeze({ kind: "enable", script: this.readScript(cursor, at) });
+        break;
+      case "cvartest":
+        item.allocation.setString(268, this.readStringReference(cursor, at));
+        break;
+      case "disablecvar":
+        item.cvarRule = Object.freeze({ kind: "disable", script: this.readScript(cursor, at) });
+        break;
+      case "showcvar":
+        item.cvarRule = Object.freeze({ kind: "show", script: this.readScript(cursor, at) });
+        break;
+      case "hidecvar":
+        item.cvarRule = Object.freeze({ kind: "hide", script: this.readScript(cursor, at) });
+        break;
+      case "cinematic":
+        item.allocation.setString(40, this.readStringReference(cursor, at));
+        break;
+      case "doubleclick":
+        this.checkedList(item, cursor).doubleClick = this.readScript(cursor, at);
+        break;
+      default:
+        this.sourceError(`unknown menu item keyword ${originalKeyword}`, at, cursor);
     }
   }
 
   private validateTypeData(item: MutableItem): void {
     if (item.hasTypeData) return;
     const type = item.type;
-    const kind = type === UiItemTypeCode.ListBox ? "list" : type === UiItemTypeCode.Model ? "model"
-      : type === UiItemTypeCode.Multi ? "multi" : isEditType(type) ? "edit" : null;
+    const kind =
+      type === UiItemTypeCode.ListBox
+        ? "list"
+        : type === UiItemTypeCode.Model
+          ? "model"
+          : type === UiItemTypeCode.Multi
+            ? "multi"
+            : isEditType(type)
+              ? "edit"
+              : null;
     if (kind === null) return;
     // Item_ValidateTypeData publishes the pointer before the edit/list memset.
     const allocated = this.allocate(kind === "list" ? 232 : kind === "multi" ? 392 : 28);
@@ -1612,7 +2467,8 @@ export class UiMenuSourceParser {
       if (value.startsWith("}")) return;
       if (value.startsWith(",") || value.startsWith(";")) continue;
       if (readingLabel) {
-        multi.setLabel(multi.count, this.allocateStringReference(value)); readingLabel = false;
+        multi.setLabel(multi.count, this.allocateStringReference(value));
+        readingLabel = false;
       } else {
         multi.setStringValue(multi.count, this.allocateStringReference(value));
         readingLabel = true;
@@ -1640,8 +2496,10 @@ export class UiMenuSourceParser {
 
   private postParse(menu: MutableMenu): void {
     if (menu.fullScreen !== 0) {
-      menu.window.rect.x = 0; menu.window.rect.y = 0;
-      menu.window.rect.width = 640; menu.window.rect.height = 480;
+      menu.window.rect.x = 0;
+      menu.window.rect.y = 0;
+      menu.window.rect.width = 640;
+      menu.window.rect.height = 480;
     }
     let x = menu.window.rect.x;
     let y = menu.window.rect.y;
@@ -1653,7 +2511,8 @@ export class UiMenuSourceParser {
       const item = menu.item(index);
       // Item_SetScreenCoords accepts a NULL member without touching it.
       if (item === undefined) continue;
-      let itemX = x, itemY = y;
+      let itemX = x,
+        itemY = y;
       if (item.window.border !== 0) {
         itemX = Math.fround(itemX + item.window.borderSize);
         itemY = Math.fround(itemY + item.window.borderSize);
@@ -1662,12 +2521,14 @@ export class UiMenuSourceParser {
       item.window.rect.y = Math.fround(itemY + item.window.clientRect.y);
       item.window.rect.width = item.window.clientRect.width;
       item.window.rect.height = item.window.clientRect.height;
-      item.textRect.width = 0; item.textRect.height = 0;
+      item.textRect.width = 0;
+      item.textRect.height = 0;
     }
   }
 
   private readFont(cursor: UiMenuTokenCursor, at: SourceLocation): UiFontReference {
-    const path = this.readString(cursor, at), pointSize = this.readInt(cursor, at);
+    const path = this.readString(cursor, at),
+      pointSize = this.readInt(cursor, at);
     return font(path ?? null, pointSize);
   }
 
@@ -1676,7 +2537,7 @@ export class UiMenuSourceParser {
   }
 
   private allocateStringReference(text: string): UiStringReference | undefined {
-    return this.memory.kind === "unaccounted" ? UiStringReference.literal(text) : this.memory.memory.stringAllocReference(text) ?? undefined;
+    return this.memory.kind === "unaccounted" ? UiStringReference.literal(text) : (this.memory.memory.stringAllocReference(text) ?? undefined);
   }
 
   private readStringReference(cursor: UiMenuTokenCursor, at: SourceLocation): UiStringReference | undefined {
@@ -1739,12 +2600,7 @@ export class UiMenuSourceParser {
   }
 
   private readColor(cursor: UiMenuTokenCursor, at: SourceLocation): Vec4 {
-    return color(
-      this.readFloat(cursor, at),
-      this.readFloat(cursor, at),
-      this.readFloat(cursor, at),
-      this.readFloat(cursor, at),
-    );
+    return color(this.readFloat(cursor, at), this.readFloat(cursor, at), this.readFloat(cursor, at), this.readFloat(cursor, at));
   }
 
   private readScript(cursor: UiMenuTokenCursor, at: SourceLocation): UiScript | undefined {
@@ -1758,7 +2614,15 @@ export class UiMenuSourceParser {
       if (value === "}") {
         if (truncated) this.warn(`script truncated to ${MAX_UI_SCRIPT_BYTES} bytes`, at);
         const allocated = this.allocateStringReference(text);
-        return allocated === undefined ? undefined : Object.freeze({ get text(): string { return allocated.read(); }, tokens: Object.freeze(tokens), truncated });
+        return allocated === undefined
+          ? undefined
+          : Object.freeze({
+              get text(): string {
+                return allocated.read();
+              },
+              tokens: Object.freeze(tokens),
+              truncated,
+            });
       }
       for (let index = 0; index < value.length; index++) {
         if (value.charCodeAt(index) > 255) throw new RangeError("PC_Script_Parse requires an 8-bit token string");
@@ -1797,8 +2661,13 @@ export class UiMenuSourceParser {
 
   private openFile(path: string): ScriptSource | UiMenuTokenCursor | undefined {
     const host = this.host;
-    return "resolver" in host ? host.resolver.resolveRoot(path)
-      : UiMenuTokenCursor.openHandle(path, () => host.scriptSources(), () => host.assertCurrentOperation());
+    return "resolver" in host
+      ? host.resolver.resolveRoot(path)
+      : UiMenuTokenCursor.openHandle(
+          path,
+          () => host.scriptSources(),
+          () => host.assertCurrentOperation(),
+        );
   }
 
   private resolveRoot(path: string, label: string): ScriptSource | UiMenuTokenCursor {
@@ -1816,8 +2685,9 @@ export class UiMenuSourceParser {
 
   private sourceError(message: string, at: SourceLocation, cursor: UiMenuTokenCursor): void {
     const position = cursor.position;
-    this.reportDiagnostic(Object.freeze({ severity: "error", message,
-      location: sourceLocation({ path: position.filename, line: position.line, column: at.column }) }));
+    this.reportDiagnostic(
+      Object.freeze({ severity: "error", message, location: sourceLocation({ path: position.filename, line: position.line, column: at.column }) }),
+    );
   }
 
   private warn(message: string, at: SourceLocation): void {
@@ -1832,9 +2702,14 @@ export class UiMenuSourceParser {
 }
 
 function isEditType(type: number): boolean {
-  return type === UiItemTypeCode.Text || type === UiItemTypeCode.EditField ||
-    type === UiItemTypeCode.NumericField || type === UiItemTypeCode.Slider ||
-    type === UiItemTypeCode.YesNo || type === UiItemTypeCode.Bind;
+  return (
+    type === UiItemTypeCode.Text ||
+    type === UiItemTypeCode.EditField ||
+    type === UiItemTypeCode.NumericField ||
+    type === UiItemTypeCode.Slider ||
+    type === UiItemTypeCode.YesNo ||
+    type === UiItemTypeCode.Bind
+  );
 }
 
 export async function loadMenuDefinitions(

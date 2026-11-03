@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from the reference port and q2repro/src/common/bsp.c.
  * Copyright (C) 1997-2001 Id Software, Inc.; 2008 Andrey Nazarov.
  * GPL-2.0-or-later. */
@@ -99,15 +100,27 @@ export function readQ2DecoupledLightmaps(lump: Q2BspxLump, faceCount: number, li
   return { faces, diagnostics };
 }
 
-export type Q2LightgridChild = { readonly kind: "occluded" }
+export type Q2LightgridChild =
+  | { readonly kind: "occluded" }
   | { readonly kind: "leaf"; readonly index: number }
   | { readonly kind: "node"; readonly index: number };
 export interface Q2LightgridNode {
   readonly point: Vec3;
-  readonly children: readonly [Q2LightgridChild, Q2LightgridChild, Q2LightgridChild, Q2LightgridChild,
-    Q2LightgridChild, Q2LightgridChild, Q2LightgridChild, Q2LightgridChild];
+  readonly children: readonly [
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+  ];
 }
-export interface Q2LightgridSample { readonly style: number; readonly rgb: Vec3; }
+export interface Q2LightgridSample {
+  readonly style: number;
+  readonly rgb: Vec3;
+}
 export interface Q2LightgridLeaf {
   readonly min: Vec3;
   readonly size: Vec3;
@@ -153,8 +166,10 @@ export function readQ2Lightgrid(lump: Q2BspxLump): Q2Lightgrid {
   reader.records(reader.offset, nodeCount * 44, 44);
   const nodes: Q2LightgridNode[] = [];
   for (let index = 0; index < nodeCount; index++) {
-    nodes.push({ point: integerVector(reader), children: [child(reader), child(reader), child(reader), child(reader),
-      child(reader), child(reader), child(reader), child(reader)] });
+    nodes.push({
+      point: integerVector(reader),
+      children: [child(reader), child(reader), child(reader), child(reader), child(reader), child(reader), child(reader), child(reader)],
+    });
   }
   const leafCount = reader.u32();
   if (leafCount > reader.remaining / 24) throw new BinaryError(reader.source, reader.offset - 4, "invalid lightgrid leaf count");
@@ -172,9 +187,7 @@ export function readQ2Lightgrid(lump: Q2BspxLump): Q2Lightgrid {
       const count = reader.u8();
       if (count !== 255 && count > styleCount) throw new BinaryError(reader.source, reader.offset - 1, "too many sample styles");
       for (let style = 0; style < styleCount; style++) {
-        samples.push(count !== 255 && style < count
-          ? { style: reader.u8(), rgb: { x: reader.u8(), y: reader.u8(), z: reader.u8() } }
-          : occludedSample);
+        samples.push(count !== 255 && style < count ? { style: reader.u8(), rgb: { x: reader.u8(), y: reader.u8(), z: reader.u8() } } : occludedSample);
       }
     }
     leaves.push({ min: leafMin, size: leafSize, firstSample, pointCount });

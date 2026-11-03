@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { BotKnowledgePersistence } from "./bot-knowledge-checkpoint.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";

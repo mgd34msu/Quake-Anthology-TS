@@ -90,4 +90,3 @@ export function shadowFactorLines(receiver: "world" | "model"): string[] {
     `      }`,
   ];
 }
-

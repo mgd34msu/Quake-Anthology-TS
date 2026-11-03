@@ -12,9 +12,11 @@ export function impulseAuthority(actors: SessionActorRegistry, callbacks: ActorC
   return new GameplayAuthority(actors, callbacks, {
     impulse: (actor, impulse) => {
       const body = bodies.read(actor.id);
-      if (body !== null) bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } });
+      if (body !== null)
+        bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } });
       return undefined;
     },
-    beforeReaction: () => undefined, confirmed: () => undefined,
+    beforeReaction: () => undefined,
+    confirmed: () => undefined,
   });
 }

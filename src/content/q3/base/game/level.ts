@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { MatchState } from "../../team-arena/match.ts";
 import { PlayerStateSlots } from "../shared/player-state.ts";
 export class GameLevel extends MatchState {
@@ -11,10 +12,11 @@ export class GameLevel extends MatchState {
     const fresh = new GameLevel();
     const { teamScores, numTeamVotingClients, sortedClients, vote, teamVotes } = this;
     for (let index = 0; index < teamScores.length; index++) teamScores.set(index, 0);
-    numTeamVotingClients.fill(0); sortedClients.fill(0);
+    numTeamVotingClients.fill(0);
+    sortedClients.fill(0);
     Object.assign(vote, fresh.vote);
-    Object.assign(teamVotes[0], fresh.teamVotes[0]); Object.assign(teamVotes[1], fresh.teamVotes[1]);
+    Object.assign(teamVotes[0], fresh.teamVotes[0]);
+    Object.assign(teamVotes[1], fresh.teamVotes[1]);
     Object.assign(this, fresh, { teamScores, numTeamVotingClients, sortedClients, vote, teamVotes });
   }
 }
-

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentDigest } from "./content.ts";
 import type { ModelTransform } from "./scene.ts";
 

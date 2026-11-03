@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +9,9 @@ import { isCredentialFileName, WorkspaceSnapshot } from "../../tools/verify/snap
 const temporary = await mkdtemp(join(tmpdir(), "quake-unified-build-"));
 const buildTool = resolve(import.meta.dir, "../../tools/build.ts");
 
-afterAll(async () => { await rm(temporary, { recursive: true, force: true }); });
+afterAll(async () => {
+  await rm(temporary, { recursive: true, force: true });
+});
 
 test("build CLI rejects unsupported flags and missing real application entries", async () => {
   expect(parseBuildKind([])).toBe("runtime");
@@ -23,9 +26,15 @@ test("build CLI rejects unsupported flags and missing real application entries",
   expect(await Bun.file(join(project, "dist/runtime.json")).exists()).toBe(false);
 });
 
-async function runFixtureBuild(project: string, environment: Readonly<Record<string, string>> = {}): Promise<{ readonly code: number; readonly output: string }> {
+async function runFixtureBuild(
+  project: string,
+  environment: Readonly<Record<string, string>> = {},
+): Promise<{ readonly code: number; readonly output: string }> {
   const child = Bun.spawn([process.execPath, buildTool], {
-    cwd: project, env: { ...process.env, ...environment }, stdout: "pipe", stderr: "pipe",
+    cwd: project,
+    env: { ...process.env, ...environment },
+    stdout: "pipe",
+    stderr: "pipe",
   });
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   return { code, output: stdout + stderr };
@@ -33,14 +42,24 @@ async function runFixtureBuild(project: string, environment: Readonly<Record<str
 
 test("compiled output runs away from sources and rejected builds preserve published evidence", async () => {
   const project = join(temporary, "isolated project");
-  await Bun.write(join(project, "package.json"), JSON.stringify({ type: "module", scripts: {
-    typecheck: "bun gate.ts", policy: "bun gate.ts",
-  } }));
-  await Bun.write(join(project, "gate.ts"), [
-    "if (process.env['FIXTURE_REJECT_BUILD'] === '1') process.exit(17);",
-    "const liveFile = process.env['FIXTURE_MUTATE_BUILD'];",
-    "if (liveFile !== undefined) await Bun.write(liveFile, 'export const changed = true;\\n');",
-  ].join("\n"));
+  await Bun.write(
+    join(project, "package.json"),
+    JSON.stringify({
+      type: "module",
+      scripts: {
+        typecheck: "bun gate.ts",
+        policy: "bun gate.ts",
+      },
+    }),
+  );
+  await Bun.write(
+    join(project, "gate.ts"),
+    [
+      "if (process.env['FIXTURE_REJECT_BUILD'] === '1') process.exit(17);",
+      "const liveFile = process.env['FIXTURE_MUTATE_BUILD'];",
+      "if (liveFile !== undefined) await Bun.write(liveFile, 'export const changed = true;\\n');",
+    ].join("\n"),
+  );
   await Bun.write(join(project, "src/main.ts"), "process.stdout.write(`${6 * 7}\\n`);\n");
   await Bun.write(join(project, "src/render/worker-entry.ts"), "export {};\n");
   await Bun.write(join(project, "src/render/cpu/row-worker.ts"), "export {};\n");

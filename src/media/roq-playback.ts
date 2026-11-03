@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/client/cl_cin.c, CIN_RunCinematic and RoQInterrupt.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -61,7 +62,8 @@ export interface RoqPlaybackTick {
 }
 
 function clockTime(time: number): number {
-  if (!Number.isFinite(time) || time < 0 || Math.fround(time) > 0x7fffffff) throw new RangeError("Cinematic clock must fit finite nonnegative signed milliseconds");
+  if (!Number.isFinite(time) || time < 0 || Math.fround(time) > 0x7fffffff)
+    throw new RangeError("Cinematic clock must fit finite nonnegative signed milliseconds");
   return time;
 }
 
@@ -105,25 +107,39 @@ export class RoqPlayback {
     this.onFrame = options.onFrame;
     this.scratch = options.scratch;
     this.beforeRawStreamReset = options.beforeRawStreamReset;
-    this.decoder = new RoqDecoder(this.data, this.source, { endPolicy: "cinematic-lookahead", silent: this.silent, ...(this.scratch === undefined ? {} : { scratch: this.scratch }) });
+    this.decoder = new RoqDecoder(this.data, this.source, {
+      endPolicy: "cinematic-lookahead",
+      silent: this.silent,
+      ...(this.scratch === undefined ? {} : { scratch: this.scratch }),
+    });
     this.epoch = Math.trunc(clockTime(options.clock.sample())) >>> 0;
     this.lastTime = this.epoch;
     if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
   }
 
   captureCheckpoint() {
-    return { decoder: this.decoder.captureCheckpoint(), epoch: this.epoch, lastTime: this.lastTime,
-      state: this.state, frame: this.currentFrame, pointer: this.currentPointer,
-      decodedFrames: this.decodedFrames, sourceSample: this.sourceSample, loopIndex: this.loopIndex };
+    return {
+      decoder: this.decoder.captureCheckpoint(),
+      epoch: this.epoch,
+      lastTime: this.lastTime,
+      state: this.state,
+      frame: this.currentFrame,
+      pointer: this.currentPointer,
+      decodedFrames: this.decodedFrames,
+      sourceSample: this.sourceSample,
+      loopIndex: this.loopIndex,
+    };
   }
   private restoreCheckpoint(value: unknown): void {
     const r = new SaveReader(value, "roq-playback");
     this.decoder.restoreCheckpoint(r.field("decoder").value);
-    this.epoch = r.field("epoch").integer(0); this.lastTime = r.field("lastTime").integer(0);
+    this.epoch = r.field("epoch").integer(0);
+    this.lastTime = r.field("lastTime").integer(0);
     this.state = r.field("state").choice("playing", "held", "ended", "looped");
     this.frame = readCinematicFrame(r.field("frame"));
     this.pointer = r.field("pointer").nullable(p => ({ offset: p.field("offset").integer(0), byteLength: p.field("byteLength").integer(0) }));
-    this.decodedFrames = r.field("decodedFrames").integer(-1); this.sourceSample = r.field("sourceSample").integer(0);
+    this.decodedFrames = r.field("decodedFrames").integer(-1);
+    this.sourceSample = r.field("sourceSample").integer(0);
     this.loopIndex = r.field("loopIndex").integer(0);
   }
 
@@ -135,9 +151,15 @@ export class RoqPlayback {
     return playback;
   }
 
-  get frameRate(): number { return this.decoder.frameRate; }
-  get currentFrame(): RoqPlaybackFrame | null { return this.frame === null ? null : copyFrame(this.frame); }
-  get currentPointer(): RoqFramePointer | null { return this.pointer === null ? null : { ...this.pointer }; }
+  get frameRate(): number {
+    return this.decoder.frameRate;
+  }
+  get currentFrame(): RoqPlaybackFrame | null {
+    return this.frame === null ? null : copyFrame(this.frame);
+  }
+  get currentPointer(): RoqFramePointer | null {
+    return this.pointer === null ? null : { ...this.pointer };
+  }
   get dimensions(): { readonly width: number; readonly height: number } | null {
     return this.decoder.width === 0 ? null : { width: this.decoder.width, height: this.decoder.height };
   }
@@ -145,7 +167,11 @@ export class RoqPlayback {
   /** Rewinds the decoder and clears the published frame. */
   reset(clock: RoqPlaybackClock): void {
     this.scratch?.clear();
-    this.decoder = new RoqDecoder(this.data, this.source, { endPolicy: "cinematic-lookahead", silent: this.silent, ...(this.scratch === undefined ? {} : { scratch: this.scratch }) });
+    this.decoder = new RoqDecoder(this.data, this.source, {
+      endPolicy: "cinematic-lookahead",
+      silent: this.silent,
+      ...(this.scratch === undefined ? {} : { scratch: this.scratch }),
+    });
     this.frame = null;
     this.pointer = null;
     this.restart(clock);
@@ -178,39 +204,53 @@ export class RoqPlayback {
     // CIN_RunCinematic uses 30 fps regardless of the RoQ header's rate.
     const targetFrames = (): number => {
       const time = clockTime(clock.sample());
-      return Math.trunc(Math.fround((time - this.epoch) * 3 / 100));
+      return Math.trunc(Math.fround(((time - this.epoch) * 3) / 100));
     };
     // Verified i386 GCC x87 profile spills this signed conversion to float32;
     // RoQ_init's unsigned epoch conversion instead truncates the extended value.
     const thisTime = Math.trunc(Math.fround(clockTime(clock.sample())));
     const gap = (thisTime - this.lastTime) | 0;
     if (this.shader && Math.abs(gap) > 100) this.epoch = (this.epoch + gap) >>> 0;
-    let target = targetFrames(), epoch = this.epoch;
+    let target = targetFrames(),
+      epoch = this.epoch;
     let dirty: RoqPlaybackFrame | null = null;
     while (this.state === "playing" && (target !== this.decodedFrames || this.decoder.inPacket || this.decoder.hasInvalidLookahead)) {
       const hadInvalidLookahead = this.decoder.hasInvalidLookahead;
-      const event = this.decoder.nextChunk(!this.silent && this.decodedFrames === -1 ? this.beforeRawStreamReset : undefined, () => {
-        if (this.decodedFrames === -1) {
-          this.onInfo?.(this.decoder.width, this.decoder.height);
-          this.epoch = Math.trunc(clockTime(clock.sample())) >>> 0;
-          this.lastTime = this.epoch;
-        }
-        if (this.decodedFrames !== 1) this.decodedFrames = 0;
-      }, event => {
-        const sourceTime = this.sourceSample * 1000 / event.sampleRate;
-        this.onAudio({
-          samples: event.samples, channels: event.channels, sampleRate: event.sampleRate,
-          loop: this.loopIndex, sourceSample: this.sourceSample, sourceTime, time: this.epoch + sourceTime,
-          resetStream: event.channels === 2 && this.decodedFrames === -1,
-        });
-        this.sourceSample += event.samples.length / event.channels;
-      });
+      const event = this.decoder.nextChunk(
+        !this.silent && this.decodedFrames === -1 ? this.beforeRawStreamReset : undefined,
+        () => {
+          if (this.decodedFrames === -1) {
+            this.onInfo?.(this.decoder.width, this.decoder.height);
+            this.epoch = Math.trunc(clockTime(clock.sample())) >>> 0;
+            this.lastTime = this.epoch;
+          }
+          if (this.decodedFrames !== 1) this.decodedFrames = 0;
+        },
+        event => {
+          const sourceTime = (this.sourceSample * 1000) / event.sampleRate;
+          this.onAudio({
+            samples: event.samples,
+            channels: event.channels,
+            sampleRate: event.sampleRate,
+            loop: this.loopIndex,
+            sourceSample: this.sourceSample,
+            sourceTime,
+            time: this.epoch + sourceTime,
+            resetStream: event.channels === 2 && this.decodedFrames === -1,
+          });
+          this.sourceSample += event.samples.length / event.channels;
+        },
+      );
       if (event.kind === "frame") {
         this.decodedFrames++;
         this.frame = {
-          rgba: event.rgba, width: this.decoder.width, height: this.decoder.height,
-          index: event.index, loop: this.loopIndex, sourceTime: event.time,
-          time: this.epoch + this.decodedFrames * 1000 / 30,
+          rgba: event.rgba,
+          width: this.decoder.width,
+          height: this.decoder.height,
+          index: event.index,
+          loop: this.loopIndex,
+          sourceTime: event.time,
+          time: this.epoch + (this.decodedFrames * 1000) / 30,
         };
         const byteLength = this.decoder.width * this.decoder.height * 4;
         this.pointer = { offset: byteLength * (event.index & 1), byteLength };

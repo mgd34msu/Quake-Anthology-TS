@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
@@ -21,27 +22,78 @@ export interface Q2AttackCheckpoint extends Omit<AttackProvenance, "attacker" | 
 
 export function saveQ2Attack(attack: AttackProvenance): Q2AttackCheckpoint {
   const { attacker, inflictor, originatingProjectile, ...values } = attack;
-  return { ...values, attacker: saveQ2Actor(attacker), inflictor: saveQ2Actor(inflictor),
-    ...(originatingProjectile === undefined ? {} : { originatingProjectile: { slot: originatingProjectile.slot, generation: originatingProjectile.generation } }) };
+  return {
+    ...values,
+    attacker: saveQ2Actor(attacker),
+    inflictor: saveQ2Actor(inflictor),
+    ...(originatingProjectile === undefined
+      ? {}
+      : { originatingProjectile: { slot: originatingProjectile.slot, generation: originatingProjectile.generation } }),
+  };
 }
 
 export function restoreQ2Attack(attack: Q2AttackCheckpoint, reference: (actor: SavedActorId) => ActorId): AttackProvenance {
   const { attacker, inflictor, originatingProjectile, ...values } = attack;
-  return { ...values, attacker: attacker === null ? null : reference(attacker),
+  return {
+    ...values,
+    attacker: attacker === null ? null : reference(attacker),
     inflictor: inflictor === null ? null : reference(inflictor),
-    ...(originatingProjectile === undefined ? {} : { originatingProjectile: reference(originatingProjectile) }) };
+    ...(originatingProjectile === undefined ? {} : { originatingProjectile: reference(originatingProjectile) }),
+  };
 }
 
 export interface Q2EntityCheckpoint {
   readonly actor: SavedActorId;
   readonly sourceSlot: number | null;
   readonly spawn: { readonly classname: string; readonly ordinal: number; readonly values: readonly { readonly key: string; readonly value: string }[] };
-  readonly values: Omit<Q2Entity, "flare" | "actor" | "spawn" | "activator" | "enemy" | "owner" | "goal" | "teamMaster" | "teamChain" | "chain" | "beam" | "beam2" | "proboscus" | "lastAttack" | "think" | "prethink" | "postthink" | "use" | "touch" | "pain" | "die" | "blocked">;
-  readonly links: { readonly activator: SavedActorId | null; readonly enemy: SavedActorId | null; readonly owner: SavedActorId | null; readonly goal: SavedActorId | null;
-    readonly teamMaster: SavedActorId | null; readonly teamChain: SavedActorId | null; readonly chain: SavedActorId | null; readonly beam: SavedActorId | null; readonly beam2: SavedActorId | null; readonly proboscus: SavedActorId | null; };
+  readonly values: Omit<
+    Q2Entity,
+    | "flare"
+    | "actor"
+    | "spawn"
+    | "activator"
+    | "enemy"
+    | "owner"
+    | "goal"
+    | "teamMaster"
+    | "teamChain"
+    | "chain"
+    | "beam"
+    | "beam2"
+    | "proboscus"
+    | "lastAttack"
+    | "think"
+    | "prethink"
+    | "postthink"
+    | "use"
+    | "touch"
+    | "pain"
+    | "die"
+    | "blocked"
+  >;
+  readonly links: {
+    readonly activator: SavedActorId | null;
+    readonly enemy: SavedActorId | null;
+    readonly owner: SavedActorId | null;
+    readonly goal: SavedActorId | null;
+    readonly teamMaster: SavedActorId | null;
+    readonly teamChain: SavedActorId | null;
+    readonly chain: SavedActorId | null;
+    readonly beam: SavedActorId | null;
+    readonly beam2: SavedActorId | null;
+    readonly proboscus: SavedActorId | null;
+  };
   readonly lastAttack: Q2AttackCheckpoint | null;
-  readonly callbacks: { readonly think: string | null; readonly prethink: string | null; readonly postthink: string | null; readonly use: string | null; readonly touch: string | null;
-    readonly pain: string | null; readonly die: string | null; readonly blocked: string | null; };
+  readonly callbacks: {
+    readonly think: string | null;
+    readonly prethink: string | null;
+    readonly postthink: string | null;
+    readonly use: string | null;
+    readonly touch: string | null;
+    readonly pain: string | null;
+    readonly die: string | null;
+    readonly blocked: string | null;
+  };
 }
 
 export interface Q2FoundationCheckpoint {

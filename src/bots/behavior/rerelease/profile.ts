@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { BotBrain } from "./brain.ts";
 import type { BotBrainCheckpoint, BotBrainConfigT, BotChatEventT } from "./brain.ts";
 import type { BotKnowledge, BotGameModeT } from "./data/knowledge.ts";
@@ -57,13 +58,22 @@ export class RereleaseBotBehavior implements RereleaseOrders {
   private pendingChats: { readonly time: number; readonly event: BotChatEventT }[] = [];
   constructor(readonly options: RereleaseProfileOptions) {
     this.random = new Xorshift32(options.seed);
-    const config: BotBrainConfigT = { knowledge: options.knowledge, skill: options.skill, rng: this.random,
-      gameMode: options.gameMode, maxHealth: options.maxHealth, runSpeed: options.runSpeed, walkSpeed: options.walkSpeed,
-      movement: options.movement, ...(options.character === undefined ? {} : { character: options.character }),
+    const config: BotBrainConfigT = {
+      knowledge: options.knowledge,
+      skill: options.skill,
+      rng: this.random,
+      gameMode: options.gameMode,
+      maxHealth: options.maxHealth,
+      runSpeed: options.runSpeed,
+      walkSpeed: options.walkSpeed,
+      movement: options.movement,
+      ...(options.character === undefined ? {} : { character: options.character }),
       onChat: event => this.pendingChats.push({ time: options.callbacks.time() + event.delayMs / 1000, event: { ...event } }),
       humanTeammateNear: () => options.callbacks.humanTeammateNear(),
-      ...(options.source === "q1-rerelease" ? { weaponImpulse: (number: number) => options.callbacks.weaponImpulse(number) }
-        : { onWeaponSelect: (number: number) => options.callbacks.selectWeapon(number) }) };
+      ...(options.source === "q1-rerelease"
+        ? { weaponImpulse: (number: number) => options.callbacks.weaponImpulse(number) }
+        : { onWeaponSelect: (number: number) => options.callbacks.selectWeapon(number) }),
+    };
     this.brain = new BotBrain(config);
   }
   think(world: BotWorldT): BotUsercmdT {
@@ -71,25 +81,47 @@ export class RereleaseBotBehavior implements RereleaseOrders {
     callbacks.preThink(this.options.source === "q1-rerelease" ? "Bot_PreThink" : "Bot_BeginFrame", this);
     const command = this.brain.think(world);
     callbacks.postThink(this.options.source === "q1-rerelease" ? "Bot_PostThink" : "Bot_EndFrame", command);
-    const now = callbacks.time(), ready = this.pendingChats.filter(entry => entry.time <= now);
+    const now = callbacks.time(),
+      ready = this.pendingChats.filter(entry => entry.time <= now);
     this.pendingChats = this.pendingChats.filter(entry => entry.time > now);
     for (const entry of ready) callbacks.chat({ ...entry.event });
     return command;
   }
-  setObjectiveGoal(point: BotVec3 | null): void { this.brain.setObjectiveGoal(point); }
-  requestMoveToPoint(point: BotVec3): void { this.brain.requestMoveToPoint(point); }
-  requestFollowEntity(entity: number, origin: BotVec3): void { this.brain.requestFollowEntity(entity, origin); }
-  clearExplicitGoal(): void { this.brain.clearExplicitGoal(); }
-  goalStatus(): number { return this.brain.goalStatus(); }
-  resetForLevel(mode: BotGameModeT): void { this.brain.resetForLevel(); this.brain.setGameMode(mode); this.pendingChats = []; }
+  setObjectiveGoal(point: BotVec3 | null): void {
+    this.brain.setObjectiveGoal(point);
+  }
+  requestMoveToPoint(point: BotVec3): void {
+    this.brain.requestMoveToPoint(point);
+  }
+  requestFollowEntity(entity: number, origin: BotVec3): void {
+    this.brain.requestFollowEntity(entity, origin);
+  }
+  clearExplicitGoal(): void {
+    this.brain.clearExplicitGoal();
+  }
+  goalStatus(): number {
+    return this.brain.goalStatus();
+  }
+  resetForLevel(mode: BotGameModeT): void {
+    this.brain.resetForLevel();
+    this.brain.setGameMode(mode);
+    this.pendingChats = [];
+  }
   checkpoint(): RereleaseBehaviorCheckpoint {
-    return { version: 1, source: this.options.source, definition: this.options.definition,
-      rng: this.random.peek(), brain: this.brain.checkpoint(), pendingChats: structuredClone(this.pendingChats) };
+    return {
+      version: 1,
+      source: this.options.source,
+      definition: this.options.definition,
+      rng: this.random.peek(),
+      brain: this.brain.checkpoint(),
+      pendingChats: structuredClone(this.pendingChats),
+    };
   }
   restore(checkpoint: RereleaseBehaviorCheckpoint): void {
     if (checkpoint.version !== 1 || checkpoint.source !== this.options.source || checkpoint.definition !== this.options.definition)
       throw new Error("Rerelease behavior checkpoint belongs to another mounted source definition");
-    this.brain.restore(checkpoint.brain); this.random.restore(checkpoint.rng);
+    this.brain.restore(checkpoint.brain);
+    this.random.restore(checkpoint.rng);
     this.pendingChats = checkpoint.pendingChats.map(entry => ({ time: entry.time, event: { ...entry.event } }));
   }
 }

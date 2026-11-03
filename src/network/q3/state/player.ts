@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source playerState_t wire storage. id Software, GPL-2.0-or-later.
 import { vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -6,7 +7,10 @@ export const ENTITYNUM_NONE = 1023;
 export class PlayerStateSlots {
   private readonly values: Int32Array;
 
-  constructor(readonly length: number, sourceValues: Int32Array | null = null) {
+  constructor(
+    readonly length: number,
+    sourceValues: Int32Array | null = null,
+  ) {
     if (sourceValues !== null && sourceValues.length !== length) {
       throw new RangeError(`Player state source slots require ${length} values, got ${sourceValues.length}`);
     }
@@ -26,11 +30,15 @@ export class PlayerStateSlots {
     this.values[index] = value;
   }
 
-  copy(): Int32Array { return this.values.slice(); }
+  copy(): Int32Array {
+    return this.values.slice();
+  }
 }
 
-export type PlayerStateFields<M extends number = number, W extends number = number, S extends number = number> =
-  Omit<PlayerStateRecord<M, W, S>, "copy" | "copyFrom">;
+export type PlayerStateFields<M extends number = number, W extends number = number, S extends number = number> = Omit<
+  PlayerStateRecord<M, W, S>,
+  "copy" | "copyFrom"
+>;
 
 function copyVector(value: Vec3): Vec3 {
   return { x: value.x, y: value.y, z: value.z };
@@ -88,13 +96,20 @@ export class PlayerStateRecord<M extends number, W extends number, S extends num
   jumppadFrame = 0;
   entityEventSequence = 0;
 
-  constructor(private stateProduct: Product, pmType: M, weapon: W, weaponState: S) {
+  constructor(
+    private stateProduct: Product,
+    pmType: M,
+    weapon: W,
+    weaponState: S,
+  ) {
     this.pmType = pmType;
     this.weapon = weapon;
     this.weaponState = weaponState;
   }
 
-  get product(): Product { return this.stateProduct; }
+  get product(): Product {
+    return this.stateProduct;
+  }
 
   copy(): PlayerStateRecord<M, W, S> {
     const result = new PlayerStateRecord(this.product, this.pmType, this.weapon, this.weaponState);
@@ -150,6 +165,5 @@ export class PlayerStateRecord<M extends number, W extends number, S extends num
     this.jumppadFrame = source.jumppadFrame;
     this.entityEventSequence = source.entityEventSequence;
   }
-
 }
 export type SourcePlayerState = PlayerStateRecord<number, number, number>;

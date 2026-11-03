@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { ProviderReference } from "../../src/contracts/content.ts";
 import { createContentId } from "../../src/contracts/content.ts";
@@ -9,17 +10,29 @@ import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { createStartupSource, resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 
-function selection(source: ProviderReference): Parameters<typeof createStartupSource>[1] { return { source, match: source }; }
+function selection(source: ProviderReference): Parameters<typeof createStartupSource>[1] {
+  return { source, match: source };
+}
 
 test("source aim defaults follow the Quake ABI and retain configured overrides", () => {
   const command = parseApplicationCommand(["--game", "q1-quakeworld"]);
   if (command.kind !== "run") throw new Error("Expected ordinary launch");
-  const context = { session: createIdentityOwner("startup-qc-aim").session, origin: { kind: "server-console" } } satisfies Parameters<typeof createStartupSource>[3];
+  const context = { session: createIdentityOwner("startup-qc-aim").session, origin: { kind: "server-console" } } satisfies Parameters<
+    typeof createStartupSource
+  >[3];
   const dialects: readonly Parameters<typeof createStartupSource>[2][] = ["q1-netquake", "q1-quakeworld"];
   for (const dialect of dialects) {
-    const cvars = createStartupSource(command.options, selection({ provider: "q1:official", content: "q1:classic:id1:installed" }), dialect, context, 1, () => {});
+    const cvars = createStartupSource(
+      command.options,
+      selection({ provider: "q1:official", content: "q1:classic:id1:installed" }),
+      dialect,
+      context,
+      1,
+      () => {},
+    );
     expect(cvars.variableString("sv_aim")).toBe(dialect === "q1-quakeworld" ? "2" : "0.93");
-    cvars.set("sv_aim", "0.97"); resolveStartupRules(command.options, cvars, 1, []);
+    cvars.set("sv_aim", "0.97");
+    resolveStartupRules(command.options, cvars, 1, []);
     expect(cvars.variableString("sv_aim")).toBe("0.97");
   }
 });
@@ -27,10 +40,29 @@ test("source aim defaults follow the Quake ABI and retain configured overrides",
 test("ordinary Q3 startup selects game cvars from map source content rather than provider spelling", () => {
   const command = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpq3ctf4"]);
   if (command.kind !== "run") throw new Error("Expected ordinary launch");
-  const context = { session: createIdentityOwner("startup-q3-product").session, origin: { kind: "server-console" } } satisfies Parameters<typeof createStartupSource>[3];
-  const missionpack = createStartupSource(command.options, selection({ provider: "q3:official", content: "q3:classic:missionpack:installed" }), "q3", context, 8, () => {});
-  expect(missionpack.get("g_redTeam")).toMatchObject({ name: "g_redteam", value: "Stroggs", resetValue: "Stroggs", flags: CvarFlag.Archive | CvarFlag.ServerInfo | CvarFlag.UserInfo });
-  expect(missionpack.get("g_blueTeam")).toMatchObject({ name: "g_blueteam", value: "Pagans", resetValue: "Pagans", flags: CvarFlag.Archive | CvarFlag.ServerInfo | CvarFlag.UserInfo });
+  const context = { session: createIdentityOwner("startup-q3-product").session, origin: { kind: "server-console" } } satisfies Parameters<
+    typeof createStartupSource
+  >[3];
+  const missionpack = createStartupSource(
+    command.options,
+    selection({ provider: "q3:official", content: "q3:classic:missionpack:installed" }),
+    "q3",
+    context,
+    8,
+    () => {},
+  );
+  expect(missionpack.get("g_redTeam")).toMatchObject({
+    name: "g_redteam",
+    value: "Stroggs",
+    resetValue: "Stroggs",
+    flags: CvarFlag.Archive | CvarFlag.ServerInfo | CvarFlag.UserInfo,
+  });
+  expect(missionpack.get("g_blueTeam")).toMatchObject({
+    name: "g_blueteam",
+    value: "Pagans",
+    resetValue: "Pagans",
+    flags: CvarFlag.Archive | CvarFlag.ServerInfo | CvarFlag.UserInfo,
+  });
   expect(missionpack.get("g_obeliskHealth")).toMatchObject({ value: "2500", resetValue: "2500", flags: 0 });
   expect(missionpack.get("g_obeliskRespawnDelay")).toMatchObject({ value: "10", flags: CvarFlag.ServerInfo });
   const base = createStartupSource(command.options, selection({ provider: "q3:official", content: "q3:classic:baseq3:installed" }), "q3", context, 8, () => {});
@@ -40,28 +72,54 @@ test("ordinary Q3 startup selects game cvars from map source content rather than
   expect(base.get("g_speed")).toMatchObject({ value: "320", resetValue: "320", flags: 0 });
 });
 
-for (const [configured, competitive] of [["0", "0"], ["1", "1"], ["2", "0"], ["2.5", "0"], ["3", "3"], ["4", "4"],
-  ["4.5", "4.5"], ["5", "5"], ["6", "6"], ["7", "7"], ["9", "9"]] satisfies readonly (readonly [string, string])[]) {
-  for (const mode of ["deathmatch", "singleplayer"] satisfies readonly ("deathmatch" | "singleplayer")[]) test(`explicit Q3 ${mode} resolves configured game type ${configured} using native map semantics`, () => {
-    const command = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpq3ctf4", "--mode", mode]);
-    if (command.kind !== "run") throw new Error("Expected ordinary launch");
-    const context = { session: createIdentityOwner(`startup-q3-mode-${mode}-${configured}`).session,
-      origin: { kind: "server-console" } } satisfies Parameters<typeof createStartupSource>[3];
-    const cvars = createStartupSource(command.options, selection({ provider: "q3:official", content: "q3:classic:missionpack:installed" }), "q3", context, 8, () => {});
-    cvars.set("g_gametype", configured);
-    const resolved = resolveStartupRules(command.options, cvars, 8, []);
-    expect(cvars.variableString("g_gametype")).toBe(mode === "singleplayer" ? "2" : competitive);
-    expect(cvars.get("g_gametype")?.latchedValue).toBeUndefined();
-    expect(resolved.options.mode).toBe(mode);
-    expect(resolved.maxClients).toBe(8);
-  });
+for (const [configured, competitive] of [
+  ["0", "0"],
+  ["1", "1"],
+  ["2", "0"],
+  ["2.5", "0"],
+  ["3", "3"],
+  ["4", "4"],
+  ["4.5", "4.5"],
+  ["5", "5"],
+  ["6", "6"],
+  ["7", "7"],
+  ["9", "9"],
+] satisfies readonly (readonly [string, string])[]) {
+  for (const mode of ["deathmatch", "singleplayer"] satisfies readonly ("deathmatch" | "singleplayer")[])
+    test(`explicit Q3 ${mode} resolves configured game type ${configured} using native map semantics`, () => {
+      const command = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpq3ctf4", "--mode", mode]);
+      if (command.kind !== "run") throw new Error("Expected ordinary launch");
+      const context = {
+        session: createIdentityOwner(`startup-q3-mode-${mode}-${configured}`).session,
+        origin: { kind: "server-console" },
+      } satisfies Parameters<typeof createStartupSource>[3];
+      const cvars = createStartupSource(
+        command.options,
+        selection({ provider: "q3:official", content: "q3:classic:missionpack:installed" }),
+        "q3",
+        context,
+        8,
+        () => {},
+      );
+      cvars.set("g_gametype", configured);
+      const resolved = resolveStartupRules(command.options, cvars, 8, []);
+      expect(cvars.variableString("g_gametype")).toBe(mode === "singleplayer" ? "2" : competitive);
+      expect(cvars.get("g_gametype")?.latchedValue).toBeUndefined();
+      expect(resolved.options.mode).toBe(mode);
+      expect(resolved.maxClients).toBe(8);
+    });
 }
 
 function metadataCatalog(): InstalledCatalog {
   const products: CatalogProduct[] = expectedProducts.map(expectation => ({
     expectation,
     id: createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "installed" }),
-    availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [],
+    availability: { kind: "installed" },
+    archives: [],
+    looseRoot: null,
+    userContent: null,
+    maps: [],
+    diagnostics: [],
   }));
   return new InstalledCatalog("/no-content-files", products, [], 0);
 }
@@ -77,7 +135,9 @@ test("startup providers resolve without a map, archive or executable recipe", ()
   const selected = applicationSourceSelection(catalog, { product: "q3-missionpack" });
   const command = parseApplicationCommand(["--game", "q3-missionpack"]);
   if (command.kind !== "run") throw new Error("Expected ordinary launch");
-  const context = { session: createIdentityOwner("mapless-source-metadata").session, origin: { kind: "local-console" } } satisfies Parameters<typeof createStartupSource>[3];
+  const context = { session: createIdentityOwner("mapless-source-metadata").session, origin: { kind: "local-console" } } satisfies Parameters<
+    typeof createStartupSource
+  >[3];
   expect(createStartupSource(command.options, selected, "q3", context, 8, () => {}).variableString("g_redteam")).toBe("Stroggs");
   expect(applicationSourceSelection(catalog, { product: "q2-classic-baseq2", rules: "ctf" }).match.content).toBe(catalog.require("q2-classic-ctf").id);
   expect(applicationSourceSelection(catalog, { product: "q3-baseq3", rules: "ctf" }).match.provider).toBe("q3:ctf");

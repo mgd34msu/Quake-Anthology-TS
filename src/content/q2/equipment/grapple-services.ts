@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { BodyState } from "../../../contracts/world.ts";
@@ -48,15 +49,35 @@ export class LmctfGrappleState {
 }
 
 export function captureCtfGrapple(state: CtfGrappleState) {
-  return { grapple: state.grapple === null ? null : { slot: state.grapple.slot, generation: state.grapple.generation }, grappleState: state.grappleState, grappleReleaseTime: state.grappleReleaseTime, grappleNoKnockback: state.grappleNoKnockback };
+  return {
+    grapple: state.grapple === null ? null : { slot: state.grapple.slot, generation: state.grapple.generation },
+    grappleState: state.grappleState,
+    grappleReleaseTime: state.grappleReleaseTime,
+    grappleNoKnockback: state.grappleNoKnockback,
+  };
 }
 export function captureLmctfGrapple(state: LmctfGrappleState) {
-  return { hook: state.hook === null ? null : { slot: state.hook.slot, generation: state.hook.generation }, hookState: state.hookState, hookLength: state.hookLength, hookHeld: state.hookHeld };
+  return {
+    hook: state.hook === null ? null : { slot: state.hook.slot, generation: state.hook.generation },
+    hookState: state.hookState,
+    hookLength: state.hookLength,
+    hookHeld: state.hookHeld,
+  };
 }
 
 export function restoreCtfGrapple(saved: ReturnType<typeof captureCtfGrapple>, game: Q2GameServices): CtfGrappleState {
-  return { grapple: saved.grapple === null ? null : game.host.actors.referenceSaved(saved.grapple), grappleState: saved.grappleState, grappleReleaseTime: saved.grappleReleaseTime, grappleNoKnockback: saved.grappleNoKnockback };
+  return {
+    grapple: saved.grapple === null ? null : game.host.actors.referenceSaved(saved.grapple),
+    grappleState: saved.grappleState,
+    grappleReleaseTime: saved.grappleReleaseTime,
+    grappleNoKnockback: saved.grappleNoKnockback,
+  };
 }
 export function restoreLmctfGrapple(saved: ReturnType<typeof captureLmctfGrapple>, game: Q2GameServices): LmctfGrappleState {
-  return { hook: saved.hook === null ? null : game.host.actors.referenceSaved(saved.hook), hookState: saved.hookState, hookLength: saved.hookLength, hookHeld: saved.hookHeld };
+  return {
+    hook: saved.hook === null ? null : game.host.actors.referenceSaved(saved.hook),
+    hookState: saved.hookState,
+    hookLength: saved.hookLength,
+    hookHeld: saved.hookHeld,
+  };
 }

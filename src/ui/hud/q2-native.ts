@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { q2RereleaseLayout, q2RereleaseInventory, type NativeQ2HudEnvironment } from "./q2-rerelease-layout.ts";
 export type { NativeQ2HudEnvironment } from "./q2-rerelease-layout.ts";
 import type { Q2ProtocolIdentity } from "../../contracts/protocol.ts";
@@ -24,13 +25,32 @@ export interface NativeQ2HudFrame {
 export type NativeQ2HudOperation =
   | { readonly kind: "font-text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean }
   | { readonly kind: "sized-picture"; readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly name: string }
-  | { readonly kind: "fill"; readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly color: import("../../contracts/math.ts").Vec4 }
+  | {
+      readonly kind: "fill";
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+      readonly color: import("../../contracts/math.ts").Vec4;
+    }
   | { readonly kind: "picture"; readonly x: number; readonly y: number; readonly name: string; readonly anchor?: "before" }
   | { readonly kind: "arsenal-picture"; readonly x: number; readonly y: number; readonly resource: ResourceId; readonly aspect: number }
-  | { readonly kind: "text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean; readonly shadow?: boolean; readonly xor?: boolean };
+  | {
+      readonly kind: "text";
+      readonly x: number;
+      readonly y: number;
+      readonly text: string;
+      readonly alternate: boolean;
+      readonly shadow?: boolean;
+      readonly xor?: boolean;
+    };
 
 export interface NativeQ2HudArsenal {
-  readonly selectedItem?: { readonly label: string; readonly localizedLabel: string; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
+  readonly selectedItem?: {
+    readonly label: string;
+    readonly localizedLabel: string;
+    readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null;
+  };
   readonly inventory?: import("../../compat/q2/native-primary-inventory.ts").NativeInventoryReadout;
   readonly ammunition?: { readonly count: number | null; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
 }
@@ -40,7 +60,8 @@ const layoutTokenCache = new Map<string, readonly string[]>();
 function layoutTokens(source: string): readonly string[] {
   const cached = layoutTokenCache.get(source);
   if (cached !== undefined) return cached;
-  const parser = new Tokenizer(source, "Q2 HUD layout"), tokens: string[] = [];
+  const parser = new Tokenizer(source, "Q2 HUD layout"),
+    tokens: string[] = [];
   for (let token = parser.next(); token !== undefined; token = parser.next()) tokens.push(token.value);
   if (layoutTokenCache.size >= 16) layoutTokenCache.clear();
   layoutTokenCache.set(source, tokens);
@@ -48,50 +69,93 @@ function layoutTokens(source: string): readonly string[] {
 }
 
 /** Q2 client/cl_scrn.c SCR_ExecuteLayoutString and SCR_DrawField. */
-export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
-  try { return layoutOperations(source, frame, width, height, arsenal, environment); }
-  catch (error) {
+export function q2LayoutOperations(
+  source: string,
+  frame: NativeQ2HudFrame,
+  width: number,
+  height: number,
+  arsenal?: NativeQ2HudArsenal,
+  environment?: NativeQ2HudEnvironment,
+): readonly NativeQ2HudOperation[] {
+  try {
+    return layoutOperations(source, frame, width, height, arsenal, environment);
+  } catch (error) {
     if (error instanceof TextParseError) throw new NativeQ2HudLayoutError(error.message);
     throw error;
   }
 }
-function layoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+function layoutOperations(
+  source: string,
+  frame: NativeQ2HudFrame,
+  width: number,
+  height: number,
+  arsenal?: NativeQ2HudArsenal,
+  environment?: NativeQ2HudEnvironment,
+): readonly NativeQ2HudOperation[] {
   if (frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo") {
     if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
     return q2RereleaseLayout(source, frame, width, height, environment, arsenal);
   }
-  const out: NativeQ2HudOperation[] = [], tokens = layoutTokens(source), config = q2ApplicationLayout(frame.protocol);
+  const out: NativeQ2HudOperation[] = [],
+    tokens = layoutTokens(source),
+    config = q2ApplicationLayout(frame.protocol);
   let cursor = 0;
-  const parser = { next: (): { readonly value: string } | undefined => { const value = tokens[cursor++]; return value === undefined ? undefined : { value }; } };
-  let x = 0, y = 0;
+  const parser = {
+    next: (): { readonly value: string } | undefined => {
+      const value = tokens[cursor++];
+      return value === undefined ? undefined : { value };
+    },
+  };
+  let x = 0,
+    y = 0;
   const next = (): string => parser.next()?.value ?? "";
   const integer = (): number => gameAtoi(next());
   const stat = (index: number): number => nativeQ2HudStat(frame, index, arsenal);
-  const picture = (name: string): void => { if (name !== "") out.push({ kind: "picture", x, y, name }); };
-  const text = (value: string, alternate = false, atX = x, atY = y): void => { out.push({ kind: "text", x: atX, y: atY, text: value, alternate }); };
+  const picture = (name: string): void => {
+    if (name !== "") out.push({ kind: "picture", x, y, name });
+  };
+  const text = (value: string, alternate = false, atX = x, atY = y): void => {
+    out.push({ kind: "text", x: atX, y: atY, text: value, alternate });
+  };
   const number = (value: number, digits: number, alternate: boolean): void => {
-    const count = Math.min(5, digits); if (count < 1) return;
-    const valueText = String(Math.trunc(value)), length = Math.min(valueText.length, count);
+    const count = Math.min(5, digits);
+    if (count < 1) return;
+    const valueText = String(Math.trunc(value)),
+      length = Math.min(valueText.length, count);
     let px = x + 2 + 16 * (count - length);
     for (const digit of valueText.slice(0, length)) {
-      out.push({ kind: "picture", x: px, y, name: `${alternate ? "anum" : "num"}_${digit === "-" ? "minus" : digit}` }); px += 16;
+      out.push({ kind: "picture", x: px, y, name: `${alternate ? "anum" : "num"}_${digit === "-" ? "minus" : digit}` });
+      px += 16;
     }
   };
   const client = (index: number): { readonly name: string; readonly icon: string } => {
     const max = Number(frame.configstrings.get(config.maxClients) ?? "256");
     if (index < 0 || index >= Math.max(1, max)) throw new NativeQ2HudLayoutError(`Q2 HUD client ${index} is outside clientinfo`);
-    const info = frame.configstrings.get(config.playerSkins + index) ?? "", slash = info.indexOf("\\");
+    const info = frame.configstrings.get(config.playerSkins + index) ?? "",
+      slash = info.indexOf("\\");
     const skin = slash < 0 ? "male/grunt" : info.slice(slash + 1);
     return { name: slash < 0 ? info : info.slice(0, slash), icon: `/players/${skin || "male/grunt"}_i.pcx` };
   };
   for (let token = parser.next(); token !== undefined; token = parser.next()) {
     switch (token.value) {
-      case "xl": x = integer(); break;
-      case "xr": x = width + integer(); break;
-      case "xv": x = Math.trunc(width / 2) - 160 + integer(); break;
-      case "yt": y = integer(); break;
-      case "yb": y = height + integer(); break;
-      case "yv": y = Math.trunc(height / 2) - 120 + integer(); break;
+      case "xl":
+        x = integer();
+        break;
+      case "xr":
+        x = width + integer();
+        break;
+      case "xv":
+        x = Math.trunc(width / 2) - 160 + integer();
+        break;
+      case "yt":
+        y = integer();
+        break;
+      case "yb":
+        y = height + integer();
+        break;
+      case "yv":
+        y = Math.trunc(height / 2) - 120 + integer();
+        break;
       case "pic": {
         const index = integer();
         if (index === 2 && arsenal?.ammunition !== undefined) {
@@ -104,30 +168,80 @@ function layoutOperations(source: string, frame: NativeQ2HudFrame, width: number
         }
         const image = stat(index);
         if (image < 0 || image >= config.maxImages) throw new NativeQ2HudLayoutError(`Q2 HUD image ${image} is outside configstrings`);
-        picture(frame.configstrings.get(config.images + image) ?? ""); break;
+        picture(frame.configstrings.get(config.images + image) ?? "");
+        break;
       }
-      case "picn": picture(next()); break;
-      case "num": { const digits = integer(); number(stat(integer()), digits, false); break; }
-      case "hnum": { const value = stat(1); if ((stat(15) & 1) !== 0) picture("field_3"); number(value, 3, value <= 0 || value <= 25 && ((frame.serverFrame >> 2) & 1) !== 0); break; }
-      case "anum": { const value = stat(3); if (value < 0) break; if ((stat(15) & 4) !== 0) picture("field_3"); number(value, 3, value <= 5 && ((frame.serverFrame >> 2) & 1) !== 0); break; }
-      case "rnum": { const value = stat(5); if (value < 1) break; if ((stat(15) & 2) !== 0) picture("field_3"); number(value, 3, false); break; }
-      case "stat_string": { const index = stat(integer()); if (index < 0 || index >= config.maxConfigStrings) throw new NativeQ2HudLayoutError("Q2 HUD stat_string is outside configstrings"); text(frame.configstrings.get(index) ?? ""); break; }
-      case "string": case "string2": text(next(), token.value === "string2"); break;
-      case "cstring": case "cstring2": {
+      case "picn":
+        picture(next());
+        break;
+      case "num": {
+        const digits = integer();
+        number(stat(integer()), digits, false);
+        break;
+      }
+      case "hnum": {
+        const value = stat(1);
+        if ((stat(15) & 1) !== 0) picture("field_3");
+        number(value, 3, value <= 0 || (value <= 25 && ((frame.serverFrame >> 2) & 1) !== 0));
+        break;
+      }
+      case "anum": {
+        const value = stat(3);
+        if (value < 0) break;
+        if ((stat(15) & 4) !== 0) picture("field_3");
+        number(value, 3, value <= 5 && ((frame.serverFrame >> 2) & 1) !== 0);
+        break;
+      }
+      case "rnum": {
+        const value = stat(5);
+        if (value < 1) break;
+        if ((stat(15) & 2) !== 0) picture("field_3");
+        number(value, 3, false);
+        break;
+      }
+      case "stat_string": {
+        const index = stat(integer());
+        if (index < 0 || index >= config.maxConfigStrings) throw new NativeQ2HudLayoutError("Q2 HUD stat_string is outside configstrings");
+        text(frame.configstrings.get(index) ?? "");
+        break;
+      }
+      case "string":
+      case "string2":
+        text(next(), token.value === "string2");
+        break;
+      case "cstring":
+      case "cstring2": {
         let py = y;
-        for (const line of next().split("\n")) { text(line, token.value === "cstring2", x + Math.trunc((320 - line.length * 8) / 2), py); py += 8; }
+        for (const line of next().split("\n")) {
+          text(line, token.value === "cstring2", x + Math.trunc((320 - line.length * 8) / 2), py);
+          py += 8;
+        }
         break;
       }
       case "client": {
-        x = Math.trunc(width / 2) - 160 + integer(); y = Math.trunc(height / 2) - 120 + integer();
-        const row = client(integer()), score = integer(), ping = integer(), time = integer();
-        text(row.name, true, x + 32); text("Score: ", false, x + 32, y + 8); text(String(score), true, x + 88, y + 8);
-        text(`Ping:  ${ping}`, false, x + 32, y + 16); text(`Time:  ${time}`, false, x + 32, y + 24); picture(row.icon); break;
+        x = Math.trunc(width / 2) - 160 + integer();
+        y = Math.trunc(height / 2) - 120 + integer();
+        const row = client(integer()),
+          score = integer(),
+          ping = integer(),
+          time = integer();
+        text(row.name, true, x + 32);
+        text("Score: ", false, x + 32, y + 8);
+        text(String(score), true, x + 88, y + 8);
+        text(`Ping:  ${ping}`, false, x + 32, y + 16);
+        text(`Time:  ${time}`, false, x + 32, y + 24);
+        picture(row.icon);
+        break;
       }
       case "ctf": {
-        x = Math.trunc(width / 2) - 160 + integer(); y = Math.trunc(height / 2) - 120 + integer();
-        const index = integer(), row = client(index), score = integer(), ping = Math.min(999, integer());
-        text(`${String(score).padStart(3)} ${String(ping).padStart(3)} ${row.name.slice(0, 12).padEnd(12)}`, index === frame.playerNumber); break;
+        x = Math.trunc(width / 2) - 160 + integer();
+        y = Math.trunc(height / 2) - 120 + integer();
+        const index = integer(),
+          row = client(index),
+          score = integer(),
+          ping = Math.min(999, integer());
+        text(`${String(score).padStart(3)} ${String(ping).padStart(3)} ${row.name.slice(0, 12).padEnd(12)}`, index === frame.playerNumber);
+        break;
       }
       case "if": {
         if (stat(integer()) !== 0) break;
@@ -140,11 +254,21 @@ function layoutOperations(source: string, frame: NativeQ2HudFrame, width: number
 }
 
 /** Q2 client/cl_inv.c: fixed authored background, selected-item scroll and source bindings. */
-export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, height: number,
-  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+export function q2NativeHudOperations(
+  frame: NativeQ2HudFrame,
+  width: number,
+  height: number,
+  binding: (command: string) => string = () => "",
+  mode: "layout-overlay" | "replace-status" = "replace-status",
+  arsenal?: NativeQ2HudArsenal,
+  environment?: NativeQ2HudEnvironment,
+): readonly NativeQ2HudOperation[] {
   const rerelease = frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo";
   if (rerelease && environment !== undefined && environment.table === undefined) environment = { ...environment, table: { rows: [], columns: [] } };
-  const out = mode === "layout-overlay" || rerelease && ((frame.stats[13] ?? 0) & 4) !== 0 ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height, arsenal, environment)];
+  const out =
+    mode === "layout-overlay" || (rerelease && ((frame.stats[13] ?? 0) & 4) !== 0)
+      ? []
+      : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height, arsenal, environment)];
   const layouts = frame.stats[13] ?? 0;
   if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height, arsenal, environment));
   if (mode === "layout-overlay") return out;
@@ -153,20 +277,40 @@ export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, he
     if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
     return [...out, ...q2RereleaseInventory(frame, width, height, environment, arsenal?.inventory)];
   }
-  const config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;
-  const items = arsenal?.inventory?.items.map(row => ({ name: row.label, count: row.count, selected: row.item === arsenal.inventory?.selected }))
-    ?? frame.inventory.flatMap((count, index) => count === 0 ? [] : [{ name: frame.configstrings.get(config.items + index) ?? "", count, selected: index === selected }]);
-  const selectedRow = arsenal?.inventory === undefined
-    ? selected >= 0 && selected < frame.inventory.length ? frame.inventory.slice(0, selected).filter(count => count !== 0).length : 0
-    : Math.max(0, items.findIndex(row => row.selected));
+  const config = q2ApplicationLayout(frame.protocol),
+    selected = frame.stats[12] ?? 0;
+  const items =
+    arsenal?.inventory?.items.map(row => ({ name: row.label, count: row.count, selected: row.item === arsenal.inventory?.selected })) ??
+    frame.inventory.flatMap((count, index) =>
+      count === 0 ? [] : [{ name: frame.configstrings.get(config.items + index) ?? "", count, selected: index === selected }],
+    );
+  const selectedRow =
+    arsenal?.inventory === undefined
+      ? selected >= 0 && selected < frame.inventory.length
+        ? frame.inventory.slice(0, selected).filter(count => count !== 0).length
+        : 0
+      : Math.max(
+          0,
+          items.findIndex(row => row.selected),
+        );
   const top = Math.max(0, Math.min(items.length - 17, selectedRow - 8));
-  const x = Math.floor((width - 256) / 2), y = Math.floor((height - 240) / 2);
-  out.push({ kind: "picture", x, y: y + 8, name: "inventory" },
+  const x = Math.floor((width - 256) / 2),
+    y = Math.floor((height - 240) / 2);
+  out.push(
+    { kind: "picture", x, y: y + 8, name: "inventory" },
     { kind: "text", x: x + 24, y: y + 24, text: "hotkey ### item", alternate: false },
-    { kind: "text", x: x + 24, y: y + 32, text: "------ --- ----", alternate: false });
+    { kind: "text", x: x + 24, y: y + 32, text: "------ --- ----", alternate: false },
+  );
   for (const [row, item] of items.slice(top, top + 17).entries()) {
-    const name = item.name, py = y + 40 + row * 8;
-    out.push({ kind: "text", x: x + 24, y: py, text: `${binding(`use ${name}`).padStart(6)} ${String(item.count).padStart(3)} ${name}`, alternate: !item.selected });
+    const name = item.name,
+      py = y + 40 + row * 8;
+    out.push({
+      kind: "text",
+      x: x + 24,
+      y: py,
+      text: `${binding(`use ${name}`).padStart(6)} ${String(item.count).padStart(3)} ${name}`,
+      alternate: !item.selected,
+    });
     if (item.selected && (Math.trunc(frame.timeMilliseconds / 100) & 1) !== 0) out.push({ kind: "text", x: x + 16, y: py, text: "\x0f", alternate: false });
   }
   return out;

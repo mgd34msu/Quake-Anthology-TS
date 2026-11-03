@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../persistence/value.ts";
 import { copyCinematicFrame, readCinematicFrame } from "./types.ts";
 import { CinPlayback } from "./cin-playback.ts";
@@ -7,10 +8,18 @@ import { RoqPlayback } from "./roq-playback.ts";
 import { RoqDecoderScratch } from "./roq.ts";
 import { RoqStream } from "./roq-stream.ts";
 import { mediaBytes, readMedia, type MediaInput } from "./source.ts";
-import { type CinematicEndReason, type CinematicFrame, type CinematicOptions,
-  type CinematicStatus, type CinematicTick, type CinematicTimeline, type MediaClock } from "./types.ts";
+import {
+  type CinematicEndReason,
+  type CinematicFrame,
+  type CinematicOptions,
+  type CinematicStatus,
+  type CinematicTick,
+  type CinematicTimeline,
+  type MediaClock,
+} from "./types.ts";
 
-export type CinematicSource = { readonly format: "roq" | "cin" | "ogv"; readonly source: string; readonly open: () => MediaInput }
+export type CinematicSource =
+  | { readonly format: "roq" | "cin" | "ogv"; readonly source: string; readonly open: () => MediaInput }
   | { readonly format: "image"; readonly source: string; readonly width: number; readonly height: number; readonly rgba: Uint8Array };
 
 /** The clock is local to one movie, so pausing a seat cannot pause another movie. */
@@ -19,21 +28,31 @@ class PlaybackClock implements MediaClock {
   private pausedAt: number | null = null;
   private pausedDuration = 0;
   private readonly offset: number;
-  constructor(private readonly wall: MediaClock, checkpoint?: unknown) {
-    this.start = this.readWall(); this.offset = 0;
+  constructor(
+    private readonly wall: MediaClock,
+    checkpoint?: unknown,
+  ) {
+    this.start = this.readWall();
+    this.offset = 0;
     if (checkpoint !== undefined) {
-      const r = new SaveReader(checkpoint, "cinematic-clock"), elapsed = r.field("elapsed").finite();
+      const r = new SaveReader(checkpoint, "cinematic-clock"),
+        elapsed = r.field("elapsed").finite();
       if (elapsed < 0) r.fail("negative elapsed time");
-      this.offset = elapsed; this.pausedAt = r.field("paused").boolean() ? this.start : null;
+      this.offset = elapsed;
+      this.pausedAt = r.field("paused").boolean() ? this.start : null;
     }
   }
-  captureCheckpoint() { return { elapsed: this.sample(), paused: this.pausedAt !== null }; }
+  captureCheckpoint() {
+    return { elapsed: this.sample(), paused: this.pausedAt !== null };
+  }
   private readWall(): number {
     const time = this.wall.sample();
     if (!Number.isFinite(time) || time < 0) throw new RangeError("Media clock must be finite and nonnegative");
     return time;
   }
-  sample(): number { return Math.max(0, this.offset + (this.pausedAt ?? this.readWall()) - this.start - this.pausedDuration); }
+  sample(): number {
+    return Math.max(0, this.offset + (this.pausedAt ?? this.readWall()) - this.start - this.pausedDuration);
+  }
   pause(paused: boolean): void {
     if (paused && this.pausedAt === null) this.pausedAt = this.readWall();
     else if (!paused && this.pausedAt !== null) {
@@ -43,7 +62,8 @@ class PlaybackClock implements MediaClock {
   }
 }
 
-type Movie = { readonly kind: "roq"; readonly playback: RoqPlayback; readonly stream: RoqStream }
+type Movie =
+  | { readonly kind: "roq"; readonly playback: RoqPlayback; readonly stream: RoqStream }
   | { readonly kind: "cin"; readonly playback: CinPlayback }
   | { readonly kind: "ogv"; readonly playback: OgvPlayback }
   | { readonly kind: "image"; readonly frame: CinematicFrame };
@@ -65,18 +85,28 @@ export class CinematicPlayback {
   private closed = false;
   private readonly source: string;
 
-  constructor(source: CinematicSource, private readonly options: CinematicOptions, checkpoint?: unknown) {
+  constructor(
+    source: CinematicSource,
+    private readonly options: CinematicOptions,
+    checkpoint?: unknown,
+  ) {
     this.source = source.source;
     this.target = options.target;
     const saved = checkpoint === undefined ? null : new SaveReader(checkpoint, "cinematic");
     if (saved !== null) {
-      saved.field("version").literal(1); saved.field("source").literal(source.source); saved.field("format").literal(source.format);
-      saved.field("loop").literal(options.loop ?? false); saved.field("hold").literal(options.hold ?? false);
-      saved.field("silent").literal(options.silent ?? false); saved.field("shader").literal(options.target.kind === "material");
+      saved.field("version").literal(1);
+      saved.field("source").literal(source.source);
+      saved.field("format").literal(source.format);
+      saved.field("loop").literal(options.loop ?? false);
+      saved.field("hold").literal(options.hold ?? false);
+      saved.field("silent").literal(options.silent ?? false);
+      saved.field("shader").literal(options.target.kind === "material");
       this.state = saved.field("state").choice("playing", "paused", "held", "ended", "stopped");
       this.decoderStatus = saved.field("decoderStatus").choice("playing", "paused", "held", "ended", "stopped", "looped");
-      this.picture = readCinematicFrame(saved.field("picture")); this.dirty = saved.field("dirty").boolean();
-      this.frameRevision = saved.field("frameRevision").integer(0); this.completed = saved.field("completed").boolean();
+      this.picture = readCinematicFrame(saved.field("picture"));
+      this.dirty = saved.field("dirty").boolean();
+      this.frameRevision = saved.field("frameRevision").integer(0);
+      this.completed = saved.field("completed").boolean();
       this.closed = saved.field("closed").boolean();
     }
     this.clock = new PlaybackClock(options.clock, saved?.field("clock").value);
@@ -84,17 +114,31 @@ export class CinematicPlayback {
       options.onAudio(audio, this.target);
       return undefined;
     };
-    const common = { clock: this.clock, source: source.source, loop: options.loop ?? false,
-      hold: options.hold ?? false, silent: options.silent ?? false, onAudio,
-      developerPrint: (text: string): undefined => { options.developerPrint?.(text); return undefined; } };
+    const common = {
+      clock: this.clock,
+      source: source.source,
+      loop: options.loop ?? false,
+      hold: options.hold ?? false,
+      silent: options.silent ?? false,
+      onAudio,
+      developerPrint: (text: string): undefined => {
+        options.developerPrint?.(text);
+        return undefined;
+      },
+    };
     switch (source.format) {
       case "ogv": {
         const input = source.open();
         try {
           if (input.byteLength > MAX_OGG_MOVIE_BYTES) throw new RangeError("Ogg movie exceeds 512 MiB");
           this.movie = { kind: "ogv", playback: new OgvPlayback(readMedia(input, 0, input.byteLength), common, saved?.field("decoder").value) };
-        } finally { input.close(); }
-        if (saved === null) { this.picture = this.movie.playback.currentFrame; this.dirty = true; }
+        } finally {
+          input.close();
+        }
+        if (saved === null) {
+          this.picture = this.movie.playback.currentFrame;
+          this.dirty = true;
+        }
         break;
       }
       case "roq": {
@@ -102,50 +146,112 @@ export class CinematicPlayback {
         const stream = RoqStream.open(source.open, source.source, scratch.file);
         if (stream === undefined) throw new Error(`Empty cinematic: ${source.source}`);
         try {
-          this.movie = { kind: "roq", stream,
-            playback: new RoqPlayback(stream, { ...common, scratch, shader: options.target.kind === "material",
-              beforeRawStreamReset: () => { options.onAudioReset(this.target); return undefined; } }, saved?.field("decoder").value) };
-        } catch (error: unknown) { stream.close(); throw error; }
+          this.movie = {
+            kind: "roq",
+            stream,
+            playback: new RoqPlayback(
+              stream,
+              {
+                ...common,
+                scratch,
+                shader: options.target.kind === "material",
+                beforeRawStreamReset: () => {
+                  options.onAudioReset(this.target);
+                  return undefined;
+                },
+              },
+              saved?.field("decoder").value,
+            ),
+          };
+        } catch (error: unknown) {
+          stream.close();
+          throw error;
+        }
         break;
       }
       case "cin": {
         const input = source.open();
-        try { this.movie = { kind: "cin", playback: new CinPlayback(input, common, saved?.field("decoder").value) }; }
-        catch (error: unknown) { input.close(); throw error; }
-        if (saved === null) { this.picture = this.movie.playback.currentFrame; this.dirty = true; }
+        try {
+          this.movie = { kind: "cin", playback: new CinPlayback(input, common, saved?.field("decoder").value) };
+        } catch (error: unknown) {
+          input.close();
+          throw error;
+        }
+        if (saved === null) {
+          this.picture = this.movie.playback.currentFrame;
+          this.dirty = true;
+        }
         break;
       }
       case "image": {
-        if (!Number.isSafeInteger(source.width) || !Number.isSafeInteger(source.height) || source.width <= 0
-          || source.height <= 0 || source.rgba.length !== source.width * source.height * 4) throw new RangeError("Invalid cinematic still image");
-        const frame: CinematicFrame = { rgba: source.rgba.slice(), width: source.width, height: source.height,
-          index: 0, sourceTime: 0, time: 0, loop: 0 };
+        if (
+          !Number.isSafeInteger(source.width) ||
+          !Number.isSafeInteger(source.height) ||
+          source.width <= 0 ||
+          source.height <= 0 ||
+          source.rgba.length !== source.width * source.height * 4
+        )
+          throw new RangeError("Invalid cinematic still image");
+        const frame: CinematicFrame = { rgba: source.rgba.slice(), width: source.width, height: source.height, index: 0, sourceTime: 0, time: 0, loop: 0 };
         this.movie = { kind: "image", frame };
-        if (saved === null) { this.picture = frame; this.dirty = true; this.state = "held"; this.clock.pause(true); }
+        if (saved === null) {
+          this.picture = frame;
+          this.dirty = true;
+          this.state = "held";
+          this.clock.pause(true);
+        }
         break;
       }
     }
   }
 
   captureCheckpoint() {
-    return { version: 1, source: this.source, format: this.movie.kind, loop: this.options.loop ?? false,
-      hold: this.options.hold ?? false, silent: this.options.silent ?? false, shader: this.target.kind === "material",
-      clock: this.clock.captureCheckpoint(), state: this.state, decoderStatus: this.decoderStatus,
-      picture: copyCinematicFrame(this.picture), dirty: this.dirty, frameRevision: this.frameRevision,
-      completed: this.completed, closed: this.closed,
-      decoder: this.movie.kind === "image" ? null : this.movie.playback.captureCheckpoint() };
+    return {
+      version: 1,
+      source: this.source,
+      format: this.movie.kind,
+      loop: this.options.loop ?? false,
+      hold: this.options.hold ?? false,
+      silent: this.options.silent ?? false,
+      shader: this.target.kind === "material",
+      clock: this.clock.captureCheckpoint(),
+      state: this.state,
+      decoderStatus: this.decoderStatus,
+      picture: copyCinematicFrame(this.picture),
+      dirty: this.dirty,
+      frameRevision: this.frameRevision,
+      completed: this.completed,
+      closed: this.closed,
+      decoder: this.movie.kind === "image" ? null : this.movie.playback.captureCheckpoint(),
+    };
   }
 
-  get status(): CinematicStatus { return this.state; }
-  get sourceStatus(): CinematicStatus | "looped" { return this.state === "playing" ? this.decoderStatus : this.state; }
-  get revision(): number { return this.frameRevision; }
-  get playbackTimeMilliseconds(): number { return this.clock.sample(); }
-  get timeline(): CinematicTimeline {
-    const elapsedMilliseconds = this.clock.sample(), frame = this.picture;
-    return { source: this.source, elapsedMilliseconds, status: this.state, loop: frame?.loop ?? 0,
-      sourceTimeMilliseconds: frame === null ? elapsedMilliseconds : frame.sourceTime + Math.max(0, elapsedMilliseconds - frame.time) };
+  get status(): CinematicStatus {
+    return this.state;
   }
-  get currentFrame(): CinematicFrame | null { return this.picture === null ? null : { ...this.picture, rgba: this.picture.rgba.slice() }; }
+  get sourceStatus(): CinematicStatus | "looped" {
+    return this.state === "playing" ? this.decoderStatus : this.state;
+  }
+  get revision(): number {
+    return this.frameRevision;
+  }
+  get playbackTimeMilliseconds(): number {
+    return this.clock.sample();
+  }
+  get timeline(): CinematicTimeline {
+    const elapsedMilliseconds = this.clock.sample(),
+      frame = this.picture;
+    return {
+      source: this.source,
+      elapsedMilliseconds,
+      status: this.state,
+      loop: frame?.loop ?? 0,
+      sourceTimeMilliseconds: frame === null ? elapsedMilliseconds : frame.sourceTime + Math.max(0, elapsedMilliseconds - frame.time),
+    };
+  }
+  get currentFrame(): CinematicFrame | null {
+    return this.picture === null ? null : { ...this.picture, rgba: this.picture.rgba.slice() };
+  }
 
   tick(): CinematicTick {
     let changed = this.dirty;
@@ -153,9 +259,18 @@ export class CinematicPlayback {
     if (this.state === "playing" && this.movie.kind !== "image") {
       const tick = this.movie.playback.run(this.clock);
       this.decoderStatus = tick.status;
-      if (tick.update.kind === "frame") { this.picture = tick.update.frame; this.frameRevision++; changed = true; }
-      if (tick.status === "held") { this.state = "held"; this.clock.pause(true); }
-      else if (tick.status === "ended") { this.state = "ended"; this.finish("finished"); }
+      if (tick.update.kind === "frame") {
+        this.picture = tick.update.frame;
+        this.frameRevision++;
+        changed = true;
+      }
+      if (tick.status === "held") {
+        this.state = "held";
+        this.clock.pause(true);
+      } else if (tick.status === "ended") {
+        this.state = "ended";
+        this.finish("finished");
+      }
     }
     // The tick shares the retained picture; callers read it and copy only what they keep (currentFrame copies).
     return { status: this.state, frame: this.picture, changed };
@@ -196,5 +311,8 @@ export class CinematicPlayback {
     else if (this.movie.kind === "cin" || this.movie.kind === "ogv") this.movie.playback.close();
   }
 
-  close(): void { this.stop(); this.releaseInput(); }
+  close(): void {
+    this.stop();
+    this.releaseInput();
+  }
 }

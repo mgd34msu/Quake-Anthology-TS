@@ -17,7 +17,8 @@ export function readGuestString(memory: MappedGuestMemory, address: GuestAddress
     if (length < 0) throw new RangeError("Q2 guest string has no terminator within its source limit");
     return new TextDecoder().decode(memory.copy(address, length));
   }
-  for (let length = 0; length < maximum; length++) if (memory.readUint8(memory.offset(address, BigInt(length))) === 0) return new TextDecoder().decode(memory.copy(address, length));
+  for (let length = 0; length < maximum; length++)
+    if (memory.readUint8(memory.offset(address, BigInt(length))) === 0) return new TextDecoder().decode(memory.copy(address, length));
   throw new RangeError("Q2 guest string has no terminator within its source limit");
 }
 export interface RereleaseCoreServices {
@@ -34,10 +35,16 @@ export interface RereleaseCoreServices {
   /** Transport, localization, rendering and optional APIs retain their exact typed ABI call. */
   invoke?(call: RereleaseImportCall): GuestCallResult | undefined;
 }
-interface Allocation { readonly address: GuestAddress; readonly size: number; readonly tag: number; }
+interface Allocation {
+  readonly address: GuestAddress;
+  readonly size: number;
+  readonly tag: number;
+}
 interface GuestCvar {
-  readonly address: GuestAddress; readonly name: string;
-  readonly text: ReusableGuestString; readonly latchedText: ReusableGuestString;
+  readonly address: GuestAddress;
+  readonly name: string;
+  readonly text: ReusableGuestString;
+  readonly latchedText: ReusableGuestString;
   readonly fields: Readonly<Record<"string" | "latched_string" | "flags" | "modified_count" | "value" | "integer", GuestAddress>>;
 }
 /** Guest cvar records mirror one session registry; tagged bytes remain source-owned. */
@@ -47,7 +54,10 @@ export class RereleaseCoreImports {
   readonly #cvars = new Map<string, GuestCvar>();
   #lastCvar: GuestAddress | null = null;
   readonly #commandStrings: CommandGuestStrings;
-  constructor(readonly memory: MappedGuestMemory, readonly services: RereleaseCoreServices) {
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly services: RereleaseCoreServices,
+  ) {
     this.#commandStrings = new CommandGuestStrings(memory, "Q2 command text", text => new TextEncoder().encode(text));
   }
   string(text: string): GuestAddress {
@@ -60,12 +70,16 @@ export class RereleaseCoreImports {
     return address;
   }
   refreshCvars(): void {
-    for (const record of this.#cvars.values()) { const value = this.services.cvars.get(record.name); if (value !== undefined) this.#writeCvar(record, value); }
+    for (const record of this.#cvars.values()) {
+      const value = this.services.cvars.get(record.name);
+      if (value !== undefined) this.#writeCvar(record, value);
+    }
   }
   #writeCvar(record: GuestCvar, value: CvarSnapshot): void {
     const fields = record.fields;
     // Private cvars (rcon passwords) exist for the guest but never reveal their contents.
-    const hidden = (value.flags & Q2CvarFlag.Private) !== 0, encode = (text: string) => new TextEncoder().encode(text);
+    const hidden = (value.flags & Q2CvarFlag.Private) !== 0,
+      encode = (text: string) => new TextEncoder().encode(text);
     this.memory.writePointer(fields.string, record.text.setText(hidden ? "" : value.value, encode));
     this.memory.writePointer(fields.latched_string, value.latchedValue === undefined || hidden ? null : record.latchedText.setText(value.latchedValue, encode));
     this.memory.writeUint32(fields.flags, value.flags);
@@ -79,9 +93,20 @@ export class RereleaseCoreImports {
     if (record === undefined) {
       const address = this.memory.allocate({ byteLength: cvarLayout.byteLength, alignment: 8n, label: `Q2 cvar ${value.name}` });
       const at = (name: string) => this.memory.offset(address, BigInt(fieldOffset(cvarLayout, name)));
-      record = { name: value.name, address, text: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} value`),
-        latchedText: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} latched`), fields: { string: at("string"), latched_string: at("latched_string"),
-        flags: at("flags"), modified_count: at("modified_count"), value: at("value"), integer: at("integer") } };
+      record = {
+        name: value.name,
+        address,
+        text: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} value`),
+        latchedText: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} latched`),
+        fields: {
+          string: at("string"),
+          latched_string: at("latched_string"),
+          flags: at("flags"),
+          modified_count: at("modified_count"),
+          value: at("value"),
+          integer: at("integer"),
+        },
+      };
       this.memory.writePointer(address, this.string(value.name));
       this.memory.writePointer(this.memory.offset(address, BigInt(fieldOffset(cvarLayout, "next"))), this.#lastCvar);
       this.#lastCvar = address;
@@ -105,50 +130,81 @@ export class RereleaseCoreImports {
     const text = (index: number) => readGuestString(this.memory, requiredPointer(args, index));
     const number = (index: number) => Number(integer(args, index));
     switch (call.name) {
-      case "Com_Print": this.services.print(text(0)); return { kind: "void" };
-      case "Com_Error": throw new Error(`Q2 ${call.api}: ${text(0)}`);
-      case "get_configstring": return guestPointer(this.string(this.services.getConfigstring(number(0))));
-      case "configstring": { const value = pointer(args, 1); this.services.setConfigstring(number(0), value === null ? "" : readGuestString(this.memory, value)); return { kind: "void" }; }
-      case "modelindex": return guestInt(this.services.resourceIndex("model", text(0)));
-      case "soundindex": return guestInt(this.services.resourceIndex("sound", text(0)));
-      case "imageindex": return guestInt(this.services.resourceIndex("image", text(0)));
-      case "ServerFrame": return { kind: "uint32", value: this.services.serverFrame() };
-      case "argc": return guestInt(this.services.commandArguments().length);
-      case "argv": { const command = this.services.commandArguments(); return guestPointer(this.#commandStrings.get(`${command.join("\0")}\0\0${this.services.commandTail()}`, command[number(0)] ?? "")); }
-      case "args": { const tail = this.services.commandTail(); return guestPointer(this.#commandStrings.get(`${this.services.commandArguments().join("\0")}\0\0${tail}`, tail)); }
+      case "Com_Print":
+        this.services.print(text(0));
+        return { kind: "void" };
+      case "Com_Error":
+        throw new Error(`Q2 ${call.api}: ${text(0)}`);
+      case "get_configstring":
+        return guestPointer(this.string(this.services.getConfigstring(number(0))));
+      case "configstring": {
+        const value = pointer(args, 1);
+        this.services.setConfigstring(number(0), value === null ? "" : readGuestString(this.memory, value));
+        return { kind: "void" };
+      }
+      case "modelindex":
+        return guestInt(this.services.resourceIndex("model", text(0)));
+      case "soundindex":
+        return guestInt(this.services.resourceIndex("sound", text(0)));
+      case "imageindex":
+        return guestInt(this.services.resourceIndex("image", text(0)));
+      case "ServerFrame":
+        return { kind: "uint32", value: this.services.serverFrame() };
+      case "argc":
+        return guestInt(this.services.commandArguments().length);
+      case "argv": {
+        const command = this.services.commandArguments();
+        return guestPointer(this.#commandStrings.get(`${command.join("\0")}\0\0${this.services.commandTail()}`, command[number(0)] ?? ""));
+      }
+      case "args": {
+        const tail = this.services.commandTail();
+        return guestPointer(this.#commandStrings.get(`${this.services.commandArguments().join("\0")}\0\0${tail}`, tail));
+      }
       case "AddCommandString": {
         const filtered = filterGuestConsole(text(0));
         if (filtered.refused.length !== 0) this.services.print(`game module console command refused: ${filtered.refused.join(", ")}\n`);
         if (filtered.text !== "") this.services.addCommand(filtered.text);
         return { kind: "void" };
       }
-      case "GetExtension": return guestPointer(this.services.extension(text(0), call.api));
+      case "GetExtension":
+        return guestPointer(this.services.extension(text(0), call.api));
       case "Info_ValueForKey": {
         // q2repro src/server/game.c PF_Info_ValueForKey delegates to the
         // case-sensitive shared.c reader and Q_strlcpy (full source length).
-        const input = requiredPointer(args, 0), key = text(1), maximum = integer(args, 3);
+        const input = requiredPointer(args, 0),
+          key = text(1),
+          maximum = integer(args, 3);
         if (maximum < 0n || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Invalid Q2 info output size");
         const value = readGuestString(this.memory, input, 2048);
-        let cursor = value.startsWith("\\") ? 1 : 0, found = "";
+        let cursor = value.startsWith("\\") ? 1 : 0,
+          found = "";
         while (cursor < value.length) {
           const separator = value.indexOf("\\", cursor);
           if (separator < 0) break;
-          const next = value.indexOf("\\", separator + 1), end = next < 0 ? value.length : next;
-          if (value.slice(cursor, separator) === key) { found = value.slice(separator + 1, end); break; }
+          const next = value.indexOf("\\", separator + 1),
+            end = next < 0 ? value.length : next;
+          if (value.slice(cursor, separator) === key) {
+            found = value.slice(separator + 1, end);
+            break;
+          }
           cursor = end + 1;
         }
         const bytes = new TextEncoder().encode(found);
         if (maximum !== 0n) {
-          const output = requiredPointer(args, 2), count = Math.min(bytes.length, Number(maximum) - 1);
+          const output = requiredPointer(args, 2),
+            count = Math.min(bytes.length, Number(maximum) - 1);
           this.memory.check(output, count + 1, "write");
           this.memory.write(output, bytes.subarray(0, count));
           this.memory.writeUint8(this.memory.offset(output, BigInt(count)), 0);
         }
         return { kind: "uint64", value: BigInt(bytes.length) };
       }
-      case "cvar": return guestPointer(this.cvar(this.services.cvars.register(text(0), text(1), number(2))));
-      case "cvar_set": case "cvar_forceset": {
-        const name = text(0), existing = this.services.cvars.get(name);
+      case "cvar":
+        return guestPointer(this.cvar(this.services.cvars.register(text(0), text(1), number(2))));
+      case "cvar_set":
+      case "cvar_forceset": {
+        const name = text(0),
+          existing = this.services.cvars.get(name);
         // A guest may not overwrite the credentials it is not allowed to read.
         if (existing !== undefined && (existing.flags & Q2CvarFlag.Private) !== 0) return guestPointer(this.cvar(existing));
         return guestPointer(this.cvar(this.services.cvars.set(name, text(1), call.name === "cvar_forceset")));
@@ -156,14 +212,20 @@ export class RereleaseCoreImports {
       case "TagMalloc": {
         const rawSize = integer(args, 0);
         if (rawSize < 0n || rawSize > 0x1000_0000n) throw new RangeError("Q2 TagMalloc size exceeds mapped-memory allocation limit");
-        const size = Math.max(1, Number(rawSize)), tag = number(1);
+        const size = Math.max(1, Number(rawSize)),
+          tag = number(1);
         const address = allocateNativeMemory(this.memory, size, `Q2 tag ${tag}`);
         this.#allocations.set(address.byteOffset, { address, size, tag });
         return guestPointer(address);
       }
-      case "TagFree": this.free(pointer(args, 0)); return { kind: "void" };
-      case "FreeTags": for (const allocation of this.#allocations.values()) if (allocation.tag === number(0)) this.free(allocation.address); return { kind: "void" };
-      default: throw new MissingRereleaseImport(call);
+      case "TagFree":
+        this.free(pointer(args, 0));
+        return { kind: "void" };
+      case "FreeTags":
+        for (const allocation of this.#allocations.values()) if (allocation.tag === number(0)) this.free(allocation.address);
+        return { kind: "void" };
+      default:
+        throw new MissingRereleaseImport(call);
     }
   }
 }

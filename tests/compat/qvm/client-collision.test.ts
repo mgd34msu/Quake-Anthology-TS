@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -20,24 +21,48 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
   try {
     const entry = archive.findEntries("maps/q3dm1.bsp")[0];
     if (entry === undefined) throw new Error("Missing retail map");
-    const world = decodeQ3World(await archive.readEntry(entry)), scene = createSceneQueries(world);
+    const world = decodeQ3World(await archive.readEntry(entry)),
+      scene = createSceneQueries(world);
     const models = scene.nativeQ3ClipModels();
     if (models === null) throw new Error("Missing native owner");
     expect(scene.nativeQ3ClipModels()).toBe(models);
     const guest = new QvmMemory(new Uint8Array(4096));
     let loaded = "";
-    const services = { models: () => models, loadMap: async (name: string) => {
-      if (name !== "maps/q3dm1.bsp") throw new Error("Map lifetime mismatch");
-      loaded = name;
-    } };
+    const services = {
+      models: () => models,
+      loadMap: async (name: string) => {
+        if (name !== "maps/q3dm1.bsp") throw new Error("Map lifetime mismatch");
+        loaded = name;
+      },
+    };
     const call = (code: QvmCgameImport, args: readonly number[] = []): QvmHostCall => {
       const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
-      words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
-      return { words, memory: guest.bytes, guest, code, role: "cgame", kind: "engine", commandArguments: null,
-        invoke: () => { throw new Error("Unexpected callback"); }, invokeAsync: async () => { throw new Error("Unexpected callback"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
+      words.setInt32(0, code, true);
+      args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
+      return {
+        words,
+        memory: guest.bytes,
+        guest,
+        code,
+        role: "cgame",
+        kind: "engine",
+        commandArguments: null,
+        invoke: () => {
+          throw new Error("Unexpected callback");
+        },
+        invokeAsync: async () => {
+          throw new Error("Unexpected callback");
+        },
+        cancelFunction: () => {
+          throw new Error("Unexpected cancellation");
+        },
+      };
     };
     const vector = (offset: number, value: Vec3) => {
-      const view = guest.view(offset, 12); view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);
+      const view = guest.view(offset, 12);
+      view.setFloat32(0, value.x, true);
+      view.setFloat32(4, value.y, true);
+      view.setFloat32(8, value.z, true);
     };
     guest.bytes.set(new TextEncoder().encode("maps/q3dm1.bsp\0"), 64);
     expect(await qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_LOADMAP, [64]), services)).toBe(0);
@@ -45,21 +70,41 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_NUMINLINEMODELS), services)).toBe(world.models.length);
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_INLINEMODEL, [0]), services)).toBe(0);
     expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_INLINEMODEL, [world.models.length]), services)).toThrow("CM_InlineModel: bad number");
-    const origin = parseEntities(world.entities).find(entity => entity.get("classname") === "info_player_deathmatch")?.get("origin")?.trim().split(/\s+/).map(Number);
+    const origin = parseEntities(world.entities)
+      .find(entity => entity.get("classname") === "info_player_deathmatch")
+      ?.get("origin")
+      ?.trim()
+      .split(/\s+/)
+      .map(Number);
     if (origin?.[0] === undefined || origin[1] === undefined || origin[2] === undefined) throw new Error("No spawn");
-    const start = { x: origin[0], y: origin[1], z: origin[2] + 32 }, end = { ...start, z: start.z - 512 };
-    const mins = { x: -15, y: -15, z: -24 }, maxs = { x: 15, y: 15, z: 32 }, zero = { x: 0, y: 0, z: 0 };
-    vector(128, start); vector(144, end); vector(160, mins); vector(176, maxs); vector(192, zero); vector(208, { x: 0, y: 90, z: 0 });
+    const start = { x: origin[0], y: origin[1], z: origin[2] + 32 },
+      end = { ...start, z: start.z - 512 };
+    const mins = { x: -15, y: -15, z: -24 },
+      maxs = { x: 15, y: 15, z: 32 },
+      zero = { x: 0, y: 0, z: 0 };
+    vector(128, start);
+    vector(144, end);
+    vector(160, mins);
+    vector(176, maxs);
+    vector(192, zero);
+    vector(208, { x: 0, y: 90, z: 0 });
     for (const shape of ["box", "capsule"]) {
       if (shape !== "box" && shape !== "capsule") throw new Error("Invalid shape");
       for (const transformed of [false, true]) {
-        const code = shape === "box" ? transformed ? QvmCgameImport.CG_CM_TRANSFORMEDBOXTRACE : QvmCgameImport.CG_CM_BOXTRACE
-          : transformed ? QvmCgameImport.CG_CM_TRANSFORMEDCAPSULETRACE : QvmCgameImport.CG_CM_CAPSULETRACE;
+        const code =
+          shape === "box"
+            ? transformed
+              ? QvmCgameImport.CG_CM_TRANSFORMEDBOXTRACE
+              : QvmCgameImport.CG_CM_BOXTRACE
+            : transformed
+              ? QvmCgameImport.CG_CM_TRANSFORMEDCAPSULETRACE
+              : QvmCgameImport.CG_CM_CAPSULETRACE;
         const query: TemporaryTraceQuery = { start, end, shape: { kind: shape, mins, maxs }, mask: 0x02010001 };
         const expected = transformed ? models.transformedTrace(query, 0, zero, zero) : models.trace(query, 0);
         expect(expected.fraction).toBeLessThan(1);
         expect(qvmClientCollisionSyscall(call(code, [256, 128, 144, 160, 176, 0, query.mask, 192, 192]), services)).toBe(0);
-        const bytes = new Uint8Array(56); writeQvmTrace(new DataView(bytes.buffer), { ...expected, entityNum: 0 });
+        const bytes = new Uint8Array(56);
+        writeQvmTrace(new DataView(bytes.buffer), { ...expected, entityNum: 0 });
         expect(guest.bytes.slice(256, 312)).toEqual(bytes);
         const record = guest.view(256, 56);
         expect(record.getInt32(0, true)).toBe(Number(expected.allSolid));
@@ -77,18 +122,28 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
       }
     }
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_POINTCONTENTS, [128, 0]), services)).toBe(models.pointContents(start, 0));
-    expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TRANSFORMEDPOINTCONTENTS, [128, 0, 192, 208]), services)).toBe(models.transformedPointContents(start, 0, zero, { x: 0, y: 90, z: 0 }));
+    expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TRANSFORMEDPOINTCONTENTS, [128, 0, 192, 208]), services)).toBe(
+      models.transformedPointContents(start, 0, zero, { x: 0, y: 90, z: 0 }),
+    );
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TEMPBOXMODEL, [160, 176]), services)).toBe(255);
     // Source handle 255 ignores the rotation pointer, including an otherwise invalid pointer.
-    expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TRANSFORMEDPOINTCONTENTS, [192, 255, 192, 999999]), services)).toBe(models.pointContents(zero, 255));
+    expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TRANSFORMEDPOINTCONTENTS, [192, 255, 192, 999999]), services)).toBe(
+      models.pointContents(zero, 255),
+    );
     const temporary = models.transformedTrace({ start, end, shape: { kind: "box", mins: zero, maxs: zero }, mask: -1 }, 255, zero, zero);
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TRANSFORMEDBOXTRACE, [256, 128, 144, 0, 0, 255, -1, 192, 999999]), services)).toBe(0);
     expect(guest.view(256, 56).getFloat32(8, true)).toBe(Math.fround(temporary.fraction));
     guest.bytes.set(new TextEncoder().encode("maps/other.bsp\0"), 64);
     await expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_LOADMAP, [64]), services)).rejects.toThrow("Map lifetime mismatch");
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TEMPCAPSULEMODEL, [160, 176]), services)).toBe(254);
-    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_POINTCONTENTS, [192, 254]), services)).toThrow("CM_ClipHandleToModel: bad handle 1 < 254 < 256");
-    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_BOXTRACE, [4090, 128, 144, 0, 0, 0, 1]), services)).toThrow("QVM memory span exceeds allocation or has an invalid length");
+    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_POINTCONTENTS, [192, 254]), services)).toThrow(
+      "CM_ClipHandleToModel: bad handle 1 < 254 < 256",
+    );
+    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_BOXTRACE, [4090, 128, 144, 0, 0, 0, 1]), services)).toThrow(
+      "QVM memory span exceeds allocation or has an invalid length",
+    );
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_LOADMODEL), services)).toBeNull();
-  } finally { await archive.close(); }
+  } finally {
+    await archive.close();
+  }
 });

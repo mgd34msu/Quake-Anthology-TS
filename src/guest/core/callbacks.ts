@@ -43,27 +43,46 @@ export class GuestCallbackTable {
     GuestCallbackTable.#managed.add(table);
     return table;
   }
-  static managed(table: GuestCallbackTable): boolean { return GuestCallbackTable.#managed.has(table); }
+  static managed(table: GuestCallbackTable): boolean {
+    return GuestCallbackTable.#managed.has(table);
+  }
   constructor(readonly memory: MappedGuestMemory) {}
-  get entryRevision(): symbol { return this.#entryRevision; }
-  instructionUnhooked(byteOffset: bigint): boolean { return !this.#byAddress.has(byteOffset) && !this.#entryObservers.has(byteOffset); }
-  #changedEntries(): void { this.#entryRevision = Symbol("guest instruction entries"); }
+  get entryRevision(): symbol {
+    return this.#entryRevision;
+  }
+  instructionUnhooked(byteOffset: bigint): boolean {
+    return !this.#byAddress.has(byteOffset) && !this.#entryObservers.has(byteOffset);
+  }
+  #changedEntries(): void {
+    this.#entryRevision = Symbol("guest instruction entries");
+  }
 
   /** Host-owned native entry hooks leave the guest instruction bytes untouched. */
   bindEntry(address: GuestAddress, callback: GuestHostCallback, accepts: () => boolean): () => void {
     this.memory.check(address, 1, "execute");
-    if (callback.signature.abi.pointerBytes !== this.memory.pointerBytes || this.#byAddress.has(address.byteOffset)) throw new Error("Invalid or occupied native callback entry");
+    if (callback.signature.abi.pointerBytes !== this.memory.pointerBytes || this.#byAddress.has(address.byteOffset))
+      throw new Error("Invalid or occupied native callback entry");
     const entry: CallbackEntry = { id: callback.id, signature: callback.signature, address, byteOffset: address.byteOffset, callback, accepts };
     this.#byAddress.set(address.byteOffset, entry);
     this.#changedEntries();
-    return () => { if (this.#byAddress.get(address.byteOffset) === entry) { this.#byAddress.delete(address.byteOffset); this.#changedEntries(); } };
+    return () => {
+      if (this.#byAddress.get(address.byteOffset) === entry) {
+        this.#byAddress.delete(address.byteOffset);
+        this.#changedEntries();
+      }
+    };
   }
 
   observeEntry(address: GuestAddress, before: () => void): () => void {
     this.memory.check(address, 1, "execute");
     let observers = this.#entryObservers.get(address.byteOffset);
-    if (observers === undefined) { observers = new Set<() => void>(); this.#entryObservers.set(address.byteOffset, observers); }
-    const owned = observers; owned.add(before); this.#changedEntries();
+    if (observers === undefined) {
+      observers = new Set<() => void>();
+      this.#entryObservers.set(address.byteOffset, observers);
+    }
+    const owned = observers;
+    owned.add(before);
+    this.#changedEntries();
     return () => {
       if (owned.delete(before)) this.#changedEntries();
       if (owned.size === 0 && this.#entryObservers.get(address.byteOffset) === owned) this.#entryObservers.delete(address.byteOffset);
@@ -89,7 +108,8 @@ export class GuestCallbackTable {
     if (previous !== undefined) {
       if (previous.callback !== null && previous.callback !== callback) throw new Error(`Callback ${callback.id} is already bound`);
       if (!sameSignature(previous.signature, callback.signature)) throw new Error(`Callback ${callback.id} changed ABI or signature`);
-      previous.callback = callback; this.#changedEntries();
+      previous.callback = callback;
+      this.#changedEntries();
       return previous.address;
     }
     // INT3 is a trap if the CPU misses the table dispatch. No native executable memory is allocated.
@@ -105,11 +125,16 @@ export class GuestCallbackTable {
 
   unbind(id: CallbackId): undefined {
     const entry = this.#byId.get(id);
-    if (entry !== undefined) { entry.callback = null; this.#changedEntries(); }
+    if (entry !== undefined) {
+      entry.callback = null;
+      this.#changedEntries();
+    }
     return undefined;
   }
 
-  address(id: CallbackId): GuestAddress | null { return this.#byId.get(id)?.address ?? null; }
+  address(id: CallbackId): GuestAddress | null {
+    return this.#byId.get(id)?.address ?? null;
+  }
 
   hasBoundTrap(byteOffset: bigint): boolean {
     const entry = this.#byAddress.get(byteOffset);
@@ -134,15 +159,27 @@ export class GuestCallbackTable {
   /** For callers that cannot await: a host callback that completes asynchronously is an error here. */
   invokeSync(address: GuestAddress, context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult {
     const result = this.invoke(address, context, arguments_);
-    if (result instanceof Promise) { void result.catch(() => undefined); throw new Error("Host callback completed asynchronously"); }
+    if (result instanceof Promise) {
+      void result.catch(() => undefined);
+      throw new Error("Host callback completed asynchronously");
+    }
     return result;
   }
 
   checkpoint(): readonly SavedHostCallbackAddress[] {
-    return [...this.#byId.values()].map(({ id, byteOffset, signature, callback }) => ({ id, byteOffset, signature, binding: callback === null ? "unbound" : "bound" }));
+    return [...this.#byId.values()].map(({ id, byteOffset, signature, callback }) => ({
+      id,
+      byteOffset,
+      signature,
+      binding: callback === null ? "unbound" : "bound",
+    }));
   }
 
-  static restore(memory: MappedGuestMemory, saved: readonly SavedHostCallbackAddress[], resolve: (id: CallbackId) => GuestHostCallback | null): GuestCallbackTable {
+  static restore(
+    memory: MappedGuestMemory,
+    saved: readonly SavedHostCallbackAddress[],
+    resolve: (id: CallbackId) => GuestHostCallback | null,
+  ): GuestCallbackTable {
     const table = new GuestCallbackTable(memory);
     for (const record of saved) {
       if (table.#byId.has(record.id) || table.#byAddress.has(record.byteOffset)) throw new Error("Duplicate restored guest callback identity or address");
@@ -164,20 +201,39 @@ export class GuestCallbackTable {
 }
 
 function sameSignature(left: GuestCallSignature, right: GuestCallSignature): boolean {
-  return left.abi.kind === right.abi.kind && left.abi.call === right.abi.call && left.variadic === right.variadic
-    && left.parameters.length === right.parameters.length && left.parameters.every((value, index) => {
+  return (
+    left.abi.kind === right.abi.kind &&
+    left.abi.call === right.abi.call &&
+    left.variadic === right.variadic &&
+    left.parameters.length === right.parameters.length &&
+    left.parameters.every((value, index) => {
       const other = right.parameters[index];
       return other !== undefined && sameValueLayout(value, other);
-    }) && (left.result === "void" ? right.result === "void" : right.result !== "void" && sameValueLayout(left.result, right.result));
+    }) &&
+    (left.result === "void" ? right.result === "void" : right.result !== "void" && sameValueLayout(left.result, right.result))
+  );
 }
 function sameValueLayout(left: GuestValueLayout, right: GuestValueLayout): boolean {
   if (left.kind === "scalar") return right.kind === "scalar" && left.storage === right.storage;
   if (right.kind !== "aggregate") return false;
   const a = left.layout;
   const b = right.layout;
-  return a.id === b.id && a.byteLength === b.byteLength && a.alignment === b.alignment && a.pointerBytes === b.pointerBytes
-    && a.byteOrder === b.byteOrder && a.fields.length === b.fields.length && a.fields.every((field, index) => {
+  return (
+    a.id === b.id &&
+    a.byteLength === b.byteLength &&
+    a.alignment === b.alignment &&
+    a.pointerBytes === b.pointerBytes &&
+    a.byteOrder === b.byteOrder &&
+    a.fields.length === b.fields.length &&
+    a.fields.every((field, index) => {
       const other = b.fields[index];
-      return other !== undefined && field.name === other.name && field.byteOffset === other.byteOffset && field.storage === other.storage && field.count === other.count;
-    });
+      return (
+        other !== undefined &&
+        field.name === other.name &&
+        field.byteOffset === other.byteOffset &&
+        field.storage === other.storage &&
+        field.count === other.count
+      );
+    })
+  );
 }

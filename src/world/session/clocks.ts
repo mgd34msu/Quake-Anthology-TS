@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { FrameContext, FramePhase, SourceTime } from "../../contracts/time.ts";
 
 export function copyTime(time: SourceTime): SourceTime {
@@ -28,7 +29,9 @@ export class SourceClock {
     this.current = copyFrame({ frame, time: initial, elapsed: { kind: initial.kind, value: 0 }, phase: "frame-entry" });
   }
 
-  get frame(): FrameContext { return this.current; }
+  get frame(): FrameContext {
+    return this.current;
+  }
 
   advance(elapsed: SourceTime, phase: FramePhase = "frame-entry"): FrameContext {
     validateTime(elapsed);

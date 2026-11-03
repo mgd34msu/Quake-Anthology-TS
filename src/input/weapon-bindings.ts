@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q1Weapon } from "../content/q1/foundation/types.ts";
 import { WEAPONS, weaponItem } from "../content/q1/foundation/types.ts";
 import { q1WeaponDisplayName } from "../content/q1/foundation/weapon-names.ts";
@@ -10,19 +11,43 @@ import { ItemType } from "../content/q3/base/shared/definitions.ts";
 import { rogueWeaponDefinitions, xatrixWeaponDefinitions } from "../content/q2/missionpacks/weapons/definitions.ts";
 import { q2MissionWeaponDisplayName } from "../content/q2/missionpacks/items.ts";
 
-export interface WeaponBindingItem { readonly id: string; readonly label: string; readonly kind: "weapon" | "powerup"; }
+export interface WeaponBindingItem {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "weapon" | "powerup";
+}
 
 /** Official boot catalog. A running game's registered items supersede this list. */
 export function baseWeaponBindingItems(family: "q1" | "q2" | "q3", campaign = "", edition = "classic"): readonly WeaponBindingItem[] {
   switch (family) {
-    case "q1": return [...WEAPONS, ...(campaign === "mg3" ? ["mg3:laser", "mg3:mjolnir"] satisfies readonly Q1Weapon[] : []), ...missionWeapons.filter(weapon => (campaign === "hipnotic" || campaign === "rogue") && weapon.id.startsWith(`${campaign}:`)).map(weapon => weapon.id)]
-      .map(weapon => ({ id: weaponItem(weapon), label: q1WeaponDisplayName(weapon), kind: "weapon" }));
-    case "q2": return [...Q2_BASE_WEAPONS, ...(edition === "rerelease" && ["baseq2", "xatrix", "rogue", "mg2"].includes(campaign) ? [...xatrixWeaponDefinitions, ...rogueWeaponDefinitions] : campaign === "xatrix" ? xatrixWeaponDefinitions : campaign === "rogue" ? rogueWeaponDefinitions : [])]
-      .map(weapon => ({ id: weapon.item, label: q2BaseWeaponDisplayName(weapon.item) ?? q2MissionWeaponDisplayName(weapon.name) ?? weapon.name, kind: "weapon" }));
+    case "q1":
+      return [
+        ...WEAPONS,
+        ...(campaign === "mg3" ? (["mg3:laser", "mg3:mjolnir"] satisfies readonly Q1Weapon[]) : []),
+        ...missionWeapons.filter(weapon => (campaign === "hipnotic" || campaign === "rogue") && weapon.id.startsWith(`${campaign}:`)).map(weapon => weapon.id),
+      ].map(weapon => ({ id: weaponItem(weapon), label: q1WeaponDisplayName(weapon), kind: "weapon" }));
+    case "q2":
+      return [
+        ...Q2_BASE_WEAPONS,
+        ...(edition === "rerelease" && ["baseq2", "xatrix", "rogue", "mg2"].includes(campaign)
+          ? [...xatrixWeaponDefinitions, ...rogueWeaponDefinitions]
+          : campaign === "xatrix"
+            ? xatrixWeaponDefinitions
+            : campaign === "rogue"
+              ? rogueWeaponDefinitions
+              : []),
+      ].map(weapon => ({
+        id: weapon.item,
+        label: q2BaseWeaponDisplayName(weapon.item) ?? q2MissionWeaponDisplayName(weapon.name) ?? weapon.name,
+        kind: "weapon",
+      }));
     case "q3": {
       const product = campaign === "missionpack" ? "missionpack" : "baseq3";
-      return Q3_WEAPON_ITEMS.filter(weapon => product === "missionpack" || weapon.weapon <= 10).map(weapon => ({ id: weapon.item,
-        label: itemList(product).find(item => item.type === ItemType.IT_WEAPON && item.tag === weapon.weapon)?.pickupName ?? "Grappling Hook", kind: "weapon" }));
+      return Q3_WEAPON_ITEMS.filter(weapon => product === "missionpack" || weapon.weapon <= 10).map(weapon => ({
+        id: weapon.item,
+        label: itemList(product).find(item => item.type === ItemType.IT_WEAPON && item.tag === weapon.weapon)?.pickupName ?? "Grappling Hook",
+        kind: "weapon",
+      }));
     }
   }
 }
@@ -40,7 +65,10 @@ export function defaultWeaponBindings(items: readonly WeaponBindingItem[]): read
   let slot = 1;
   for (const weapon of Q2_BASE_WEAPONS) {
     if (weapon.name === "grenades") append(weapon.item, "g");
-    else { append(weapon.item, String(slot % 10)); slot++; }
+    else {
+      append(weapon.item, String(slot % 10));
+      slot++;
+    }
   }
   for (const weapon of Q3_WEAPON_ITEMS) if (weapon.weapon <= 10) append(weapon.item, String(weapon.weapon % 10));
   return result;
@@ -48,7 +76,10 @@ export function defaultWeaponBindings(items: readonly WeaponBindingItem[]): read
 
 const normalized = (value: string): string => value.toLowerCase().replaceAll(" ", "");
 
-export interface ResolvedWeaponSelection { readonly kind: WeaponBindingItem["kind"]; readonly item: string; }
+export interface ResolvedWeaponSelection {
+  readonly kind: WeaponBindingItem["kind"];
+  readonly item: string;
+}
 
 /** Used by command dispatch and binding display against the same selected item catalog. */
 export function resolveWeaponSelection(command: string, args: readonly string[], items: readonly WeaponBindingItem[]): ResolvedWeaponSelection | null {
@@ -66,8 +97,8 @@ export function resolveWeaponSelection(command: string, args: readonly string[],
       const q3 = Q3_WEAPON_ITEMS.find(weapon => weapon.item === item.id);
       if (q3 !== undefined && normalized(q3.item.slice("q3:weapon/".length)) === requested) return true;
       const q2 = [...Q2_BASE_WEAPONS, ...xatrixWeaponDefinitions, ...rogueWeaponDefinitions].find(weapon => weapon.item === item.id);
-      const label = q2 === undefined ? null : q2BaseWeaponDisplayName(q2.item) ?? q2MissionWeaponDisplayName(q2.name);
-      return q2 !== undefined && normalized(q2.name) === requested || label !== null && normalized(label) === requested;
+      const label = q2 === undefined ? null : (q2BaseWeaponDisplayName(q2.item) ?? q2MissionWeaponDisplayName(q2.name));
+      return (q2 !== undefined && normalized(q2.name) === requested) || (label !== null && normalized(label) === requested);
     });
     const item = matching.length === 1 ? matching[0] : undefined;
     return item === undefined ? null : { kind: item.kind, item: item.id };
@@ -77,8 +108,12 @@ export function resolveWeaponSelection(command: string, args: readonly string[],
   const number = Number(argument);
   // Expansion impulses can toggle paired weapons or fall back to another item.
   if (name === "impulse" && items.some(item => item.kind === "weapon" && !WEAPONS.some(weapon => item.id === `q1:weapon/${weapon}`))) return null;
-  const id = name === "weapon" ? Q3_WEAPON_ITEMS.find(weapon => weapon.weapon === number)?.item
-    : WEAPONS[number - 1] === undefined ? undefined : `q1:weapon/${WEAPONS[number - 1]}`;
+  const id =
+    name === "weapon"
+      ? Q3_WEAPON_ITEMS.find(weapon => weapon.weapon === number)?.item
+      : WEAPONS[number - 1] === undefined
+        ? undefined
+        : `q1:weapon/${WEAPONS[number - 1]}`;
   const item = items.find(item => item.kind === "weapon" && item.id === id);
   return item === undefined ? null : { kind: item.kind, item: item.id };
 }
@@ -88,6 +123,7 @@ export function weaponBindingItem(text: string, items: readonly WeaponBindingIte
   if (/[;\r\n\\]/u.test(text) || text.includes("//") || text.includes("/*")) return null;
   const command = /^\s*(use|weapon|impulse)\s+(?:"([^"\r\n]+)"|([^"\r\n]+?))\s*$/iu.exec(text);
   if (command === null) return null;
-  const name = command[1], argument = command[2] ?? command[3];
-  return name === undefined || argument === undefined ? null : resolveWeaponSelection(name, [argument], items)?.item ?? null;
+  const name = command[1],
+    argument = command[2] ?? command[3];
+  return name === undefined || argument === undefined ? null : (resolveWeaponSelection(name, [argument], items)?.item ?? null);
 }

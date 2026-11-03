@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Intro/loop and CD track selection adapted from Q3 snd_dma.c and Q1/Q2 cd_ogg.ts.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { RawAudioStream } from "./streams.ts";
@@ -5,159 +6,199 @@ import type { PcmStream } from "./streams.ts";
 import type { SoundFamily, StreamPcm } from "./types.ts";
 export type MusicVolumeMode = "source" | "immediate";
 export class MusicControls {
-    enabled = true;
-    private readonly remap: number[] = Array.from({ length: 100 }, (_, index) => index);
-    get remappedTracks(): readonly number[] { return this.remap.slice(1); }
-    mappedTrack(track: number): number { return this.remap[track] ?? track; }
-    setRemap(tracks: readonly number[]): void {
-        if (tracks.length >= this.remap.length) throw new RangeError("CD remap exceeds 99 tracks");
-        for (const track of tracks) if (!Number.isInteger(track) || track < 0 || track > 255) throw new RangeError("Invalid CD track");
-        tracks.forEach((track, index) => { this.remap[index + 1] = track; });
-    }
-    reset(): void { this.enabled = true; for (let index = 0; index < this.remap.length; index++) this.remap[index] = index; }
+  enabled = true;
+  private readonly remap: number[] = Array.from({ length: 100 }, (_, index) => index);
+  get remappedTracks(): readonly number[] {
+    return this.remap.slice(1);
+  }
+  mappedTrack(track: number): number {
+    return this.remap[track] ?? track;
+  }
+  setRemap(tracks: readonly number[]): void {
+    if (tracks.length >= this.remap.length) throw new RangeError("CD remap exceeds 99 tracks");
+    for (const track of tracks) if (!Number.isInteger(track) || track < 0 || track > 255) throw new RangeError("Invalid CD track");
+    tracks.forEach((track, index) => {
+      this.remap[index + 1] = track;
+    });
+  }
+  reset(): void {
+    this.enabled = true;
+    for (let index = 0; index < this.remap.length; index++) this.remap[index] = index;
+  }
 }
 export class MusicPlayer {
-    private stream: PcmStream | null = null;
-    private loop: PcmStream | null = null;
-    private pcm: RawAudioStream;
-    private targetVolume = 0.25;
-    private smoothedVolume = Math.fround(0.5);
-    paused = false;
-    /** Receives a decoder failure; the damaged track is stopped instead of ending the session. */
-    onFault: ((error: unknown) => void) | null = null;
-    private completions = 0;
-    get completedPlays(): number { return this.completions; }
-    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {
-        this.pcm = new RawAudioStream(outputRate);
+  private stream: PcmStream | null = null;
+  private loop: PcmStream | null = null;
+  private pcm: RawAudioStream;
+  private targetVolume = 0.25;
+  private smoothedVolume = Math.fround(0.5);
+  paused = false;
+  /** Receives a decoder failure; the damaged track is stopped instead of ending the session. */
+  onFault: ((error: unknown) => void) | null = null;
+  private completions = 0;
+  get completedPlays(): number {
+    return this.completions;
+  }
+  constructor(
+    readonly outputRate: number,
+    readonly family: SoundFamily = "q3",
+    private readonly volumeMode: MusicVolumeMode = "source",
+    readonly controls: MusicControls = new MusicControls(),
+  ) {
+    this.pcm = new RawAudioStream(outputRate);
+  }
+  get playing(): boolean {
+    return this.stream !== null;
+  }
+  get sourcePosition(): number {
+    return this.pcm.sourcePosition;
+  }
+  get volume(): number {
+    return this.family === "q3" && this.volumeMode === "source" ? this.smoothedVolume : this.targetVolume;
+  }
+  setVolume(value: number): void {
+    if (!Number.isFinite(value) || value < 0) throw new RangeError("Invalid music volume");
+    this.targetVolume = value;
+  }
+  /** Called once by the presentation frame, matching Q3's source smoothing clock. */
+  update(): void {
+    if (this.family === "q3" && this.volumeMode === "source" && this.stream !== null && !this.paused && this.controls.enabled)
+      this.smoothedVolume = Math.fround(Math.fround(this.smoothedVolume + Math.fround(Math.fround(this.targetVolume) * 2)) / 4);
+  }
+  start(intro: PcmStream, loop: PcmStream | null = null): void {
+    this.stop();
+    this.stream = intro;
+    this.loop = loop;
+    this.pcm = new RawAudioStream(this.outputRate);
+    this.paused = false;
+  }
+  stop(): void {
+    const stream = this.stream,
+      loop = this.loop;
+    this.stream = null;
+    this.loop = null;
+    try {
+      stream?.close();
+    } finally {
+      if (loop !== stream) loop?.close();
     }
-    get playing(): boolean { return this.stream !== null; }
-    get sourcePosition(): number { return this.pcm.sourcePosition; }
-    get volume(): number { return this.family === "q3" && this.volumeMode === "source" ? this.smoothedVolume : this.targetVolume; }
-    setVolume(value: number): void { if (!Number.isFinite(value) || value < 0)
-        throw new RangeError("Invalid music volume"); this.targetVolume = value; }
-    /** Called once by the presentation frame, matching Q3's source smoothing clock. */
-    update(): void {
-        if (this.family === "q3" && this.volumeMode === "source" && this.stream !== null && !this.paused && this.controls.enabled)
-            this.smoothedVolume = Math.fround(Math.fround(this.smoothedVolume + Math.fround(Math.fround(this.targetVolume) * 2)) / 4);
+  }
+  private nextChunk(): StreamPcm | null {
+    const stream = this.stream;
+    if (stream === null) return null;
+    const sourceSample = stream.positionFrames;
+    const chunk = stream.read(16384);
+    if (chunk !== null) return { ...chunk, sourceSample, resetStream: false };
+    if (this.loop === null) {
+      this.stream = null;
+      this.completions++;
+      stream.close();
+      return null;
     }
-    start(intro: PcmStream, loop: PcmStream | null = null): void {
-        this.stop();
-        this.stream = intro;
-        this.loop = loop;
-        this.pcm = new RawAudioStream(this.outputRate);
-        this.paused = false;
+    if (this.loop !== stream) stream.close();
+    this.stream = this.loop;
+    this.stream.seek(0);
+    const loopChunk = this.stream.read(16384);
+    if (loopChunk === null) {
+      this.stop();
+      return null;
     }
-    stop(): void {
-        const stream = this.stream, loop = this.loop;
-        this.stream = null;
-        this.loop = null;
-        try {
-            stream?.close();
-        }
-        finally {
-            if (loop !== stream)
-                loop?.close();
-        }
+    return { ...loopChunk, sourceSample: 0, resetStream: true };
+  }
+  mix(frames: number): Float64Array {
+    if (!this.controls.enabled || this.paused || this.volume <= 0 || this.stream === null) return new Float64Array(frames * 2);
+    try {
+      return this.pcm.mix(frames, this.volume, () => this.nextChunk());
+    } catch (error) {
+      this.stop();
+      this.onFault?.(error);
+      return new Float64Array(frames * 2);
     }
-    private nextChunk(): StreamPcm | null {
-        const stream = this.stream;
-        if (stream === null)
-            return null;
-        const sourceSample = stream.positionFrames;
-        const chunk = stream.read(16384);
-        if (chunk !== null)
-            return { ...chunk, sourceSample, resetStream: false };
-        if (this.loop === null) {
-            this.stream = null;
-            this.completions++;
-            stream.close();
-            return null;
-        }
-        if (this.loop !== stream)
-            stream.close();
-        this.stream = this.loop;
-        this.stream.seek(0);
-        const loopChunk = this.stream.read(16384);
-        if (loopChunk === null) {
-            this.stop();
-            return null;
-        }
-        return { ...loopChunk, sourceSample: 0, resetStream: true };
-    }
-    mix(frames: number): Float64Array {
-        if (!this.controls.enabled || this.paused || this.volume <= 0 || this.stream === null)
-            return new Float64Array(frames * 2);
-        try {
-            return this.pcm.mix(frames, this.volume, () => this.nextChunk());
-        }
-        catch (error) {
-            this.stop();
-            this.onFault?.(error);
-            return new Float64Array(frames * 2);
-        }
-    }
-    close(): void { this.stop(); }
+  }
+  close(): void {
+    this.stop();
+  }
 }
 export type OpenMusicTrack = (path: string) => Promise<PcmStream | null>;
 /** Track remapping precedes the ordered loose/archive search through the caller's mount plan. */
 export class CdMusic {
-    private track: number | null = null;
-    private request = 0;
-    get enabled(): boolean { return this.player.controls.enabled; }
-    set enabled(value: boolean) { this.player.controls.enabled = value; }
-    constructor(readonly player: MusicPlayer, private readonly open: OpenMusicTrack) { }
-    get playingTrack(): number | null { return this.track; }
-    get remappedTracks(): readonly number[] { return this.player.controls.remappedTracks; }
-    setRemap(tracks: readonly number[]): void { this.player.controls.setRemap(tracks); }
-    reset(): void { this.stop(); this.player.controls.reset(); }
-    async play(track: number, looping: boolean): Promise<boolean> {
-        if (!this.enabled)
-            return false;
-        if (!Number.isInteger(track) || track < 0 || track > 255)
-            throw new RangeError("Invalid CD track");
-        const mapped = this.player.controls.mappedTrack(track);
-        if (mapped < 1)
-            return false;
-        if (this.track === mapped && this.player.playing)
-            return true;
-        const request = ++this.request;
-        this.player.stop();
-        this.track = null;
-        const number = String(mapped).padStart(2, "0");
-        const candidates = [`music/${number}.ogg`, `music/track${number}.ogg`, `music/${number}.wav`, `music/track${number}.wav`];
-        for (const path of candidates) {
-            const stream = await this.open(path);
-            if (request !== this.request || !this.enabled) {
-                stream?.close();
-                return false;
-            }
-            if (stream === null) continue;
-            this.player.start(stream, looping ? stream : null);
-            this.track = mapped;
-            return true;
-        }
+  private track: number | null = null;
+  private request = 0;
+  get enabled(): boolean {
+    return this.player.controls.enabled;
+  }
+  set enabled(value: boolean) {
+    this.player.controls.enabled = value;
+  }
+  constructor(
+    readonly player: MusicPlayer,
+    private readonly open: OpenMusicTrack,
+  ) {}
+  get playingTrack(): number | null {
+    return this.track;
+  }
+  get remappedTracks(): readonly number[] {
+    return this.player.controls.remappedTracks;
+  }
+  setRemap(tracks: readonly number[]): void {
+    this.player.controls.setRemap(tracks);
+  }
+  reset(): void {
+    this.stop();
+    this.player.controls.reset();
+  }
+  async play(track: number, looping: boolean): Promise<boolean> {
+    if (!this.enabled) return false;
+    if (!Number.isInteger(track) || track < 0 || track > 255) throw new RangeError("Invalid CD track");
+    const mapped = this.player.controls.mappedTrack(track);
+    if (mapped < 1) return false;
+    if (this.track === mapped && this.player.playing) return true;
+    const request = ++this.request;
+    this.player.stop();
+    this.track = null;
+    const number = String(mapped).padStart(2, "0");
+    const candidates = [`music/${number}.ogg`, `music/track${number}.ogg`, `music/${number}.wav`, `music/track${number}.wav`];
+    for (const path of candidates) {
+      const stream = await this.open(path);
+      if (request !== this.request || !this.enabled) {
+        stream?.close();
         return false;
+      }
+      if (stream === null) continue;
+      this.player.start(stream, looping ? stream : null);
+      this.track = mapped;
+      return true;
     }
-    pause(): void { this.player.paused = true; }
-    resume(): void { if (this.enabled)
-        this.player.paused = false; }
-    invalidatePending(): void { this.request++; }
-    stop(): void { this.request++; this.player.stop(); this.track = null; }
-    close(): void { this.stop(); }
+    return false;
+  }
+  pause(): void {
+    this.player.paused = true;
+  }
+  resume(): void {
+    if (this.enabled) this.player.paused = false;
+  }
+  invalidatePending(): void {
+    this.request++;
+  }
+  stop(): void {
+    this.request++;
+    this.player.stop();
+    this.track = null;
+  }
+  close(): void {
+    this.stop();
+  }
 }
 const xatrixTracks: readonly number[] = [9, 13, 14, 7, 16, 2, 15, 3, 4, 18];
 export type Q2SoundtrackProfile = { readonly kind: "disc" } | { readonly kind: "remastered"; readonly campaign: string };
 export function remapQ2MusicTrack(track: number, profile: Q2SoundtrackProfile): number {
-    if (profile.kind === "disc" || track < 2 || track > 11)
-        return track;
-    const game = profile.campaign.toLowerCase();
-    if (game === "rogue")
-        return track + 10;
-    if (game === "xatrix") {
-        const remapped = xatrixTracks[track - 2];
-        if (remapped === undefined)
-            throw new RangeError("Expansion soundtrack index outside CD range");
-        return remapped;
-    }
-    return track;
+  if (profile.kind === "disc" || track < 2 || track > 11) return track;
+  const game = profile.campaign.toLowerCase();
+  if (game === "rogue") return track + 10;
+  if (game === "xatrix") {
+    const remapped = xatrixTracks[track - 2];
+    if (remapped === undefined) throw new RangeError("Expansion soundtrack index outside CD range");
+    return remapped;
+  }
+  return track;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { parseSaveRequest, parseLoadRequest, saveCommandDocumentation } from "../../src/app/bootstrap/save-requests.ts";
 import { corpusFile, corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 
@@ -6,15 +7,24 @@ import { decodeSavedGame } from "../../src/persistence/saved-game.ts";
 import { encodeQ1Save, type Q1SaveData } from "../../src/persistence/q1.ts";
 
 function save(version: 5 | 6): Q1SaveData {
-  return { format: version === 5 ? { version } : { version, gameDirectories: "id1;hipnotic" }, comment: "native_save",
-    spawnParameters: Array.from({ length: 16 }, (_, index) => index), skill: 2, map: "e1m1", time: 42.5,
-    lightStyles: Array.from({ length: 64 }, () => "m"), globals: [{ key: "serverflags", value: "1" }],
-    entities: [[{ key: "classname", value: "worldspawn" }], [{ key: "health", value: "73" }]], extensionText: "// source extension\n" };
+  return {
+    format: version === 5 ? { version } : { version, gameDirectories: "id1;hipnotic" },
+    comment: "native_save",
+    spawnParameters: Array.from({ length: 16 }, (_, index) => index),
+    skill: 2,
+    map: "e1m1",
+    time: 42.5,
+    lightStyles: Array.from({ length: 64 }, () => "m"),
+    globals: [{ key: "serverflags", value: "1" }],
+    entities: [[{ key: "classname", value: "worldspawn" }], [{ key: "health", value: "73" }]],
+    extensionText: "// source extension\n",
+  };
 }
-for (const version of [5, 6] satisfies readonly (5 | 6)[]) test(`detects original Quake v${version} without losing source records`, () => {
-  const data = save(version);
-  expect(decodeSavedGame(encodeQ1Save(data))).toEqual({ kind: "q1-source", data });
-});
+for (const version of [5, 6] satisfies readonly (5 | 6)[])
+  test(`detects original Quake v${version} without losing source records`, () => {
+    const data = save(version);
+    expect(decodeSavedGame(encodeQ1Save(data))).toEqual({ kind: "q1-source", data });
+  });
 test("malformed shared headers do not fall back to native formats", () => {
   expect(() => decodeSavedGame(new TextEncoder().encode("QTSAVE9\n"))).toThrow("signature/version");
   expect(() => decodeSavedGame(encodeQ1Save({ ...save(5), map: "../e1m1" }))).toThrow("map");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import { CvarFlag, Q2CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
@@ -19,8 +20,11 @@ export function q3ServerPaused(cvars: CvarRegistry, requested: boolean, connecte
 }
 
 export function frameTimeCvarNames(dialect: CommandDialect): readonly string[] {
-  return dialect.startsWith("q1") ? ["timescale", "host_framerate"]
-    : dialect.startsWith("q2") ? ["timescale", "fixedtime"] : ["timescale", "fixedtime", "com_cameraMode"];
+  return dialect.startsWith("q1")
+    ? ["timescale", "host_framerate"]
+    : dialect.startsWith("q2")
+      ? ["timescale", "fixedtime"]
+      : ["timescale", "fixedtime", "com_cameraMode"];
 }
 
 /** Host_FilterTime: Q1 hosts never run above 72 Hz, and dedicated servers pace to sys_ticrate. */
@@ -40,32 +44,47 @@ export function refreshFrameTimeCvars(owner: CvarRegistry, mirror: CvarRegistry)
 /** Cgame accesses a seat registry while engine time remains owned by its source world. */
 export class FrameTimeCvarMirror extends SharedCvarMirror {
   constructor(owner: CvarRegistry, mirror: CvarRegistry, assertCurrent: () => void) {
-    super(owner, mirror, frameTimeCvarNames(owner.dialect).filter(name => owner.find(name) !== undefined), assertCurrent);
+    super(
+      owner,
+      mirror,
+      frameTimeCvarNames(owner.dialect).filter(name => owner.find(name) !== undefined),
+      assertCurrent,
+    );
   }
 }
 
 export function registerFrameTimeCvars(cvars: CvarRegistry): void {
-  const q1 = cvars.dialect.startsWith("q1"), q2 = cvars.dialect.startsWith("q2");
+  const q1 = cvars.dialect.startsWith("q1"),
+    q2 = cvars.dialect.startsWith("q2");
   const register = (name: string, value: string, flags: number): void => {
     if (!q1 || cvars.find(name) === undefined) cvars.register(name, value, flags);
   };
   register("timescale", "1", q1 ? 0 : q2 ? Q2CvarFlag.Cheat : CvarFlag.Cheat | CvarFlag.SystemInfo);
-  if (q1) { register("host_framerate", "0", 0); register("sys_ticrate", "0.05", 0); }
-  else {
+  if (q1) {
+    register("host_framerate", "0", 0);
+    register("sys_ticrate", "0.05", 0);
+  } else {
     register("fixedtime", "0", q2 ? Q2CvarFlag.Cheat : CvarFlag.Cheat);
     if (!q2) register("com_cameraMode", "0", CvarFlag.Cheat);
   }
 }
 
 export function readFrameTimeControls(cvars: CvarRegistry): FrameTimeControls {
-  return { timescale: cvars.find("timescale")?.numericValue ?? 1,
-    fixedtime: cvars.dialect === "q3" ? cvars.find("fixedtime")?.integerValue ?? 0 : cvars.variableValue("fixedtime"),
-    hostFramerate: cvars.variableValue("host_framerate"), cameraMode: cvars.find("com_cameraMode")?.integerValue ?? 0 };
+  return {
+    timescale: cvars.find("timescale")?.numericValue ?? 1,
+    fixedtime: cvars.dialect === "q3" ? (cvars.find("fixedtime")?.integerValue ?? 0) : cvars.variableValue("fixedtime"),
+    hostFramerate: cvars.variableValue("host_framerate"),
+    cameraMode: cvars.find("com_cameraMode")?.integerValue ?? 0,
+  };
 }
 
 /** Transform simulation/client frame deltas; socket timestamps remain wall time. */
-export function sourceFrameMilliseconds(dialect: CommandDialect, rawMilliseconds: number, controls: FrameTimeControls,
-  host: { readonly dedicated: boolean; readonly localServer: boolean }): number {
+export function sourceFrameMilliseconds(
+  dialect: CommandDialect,
+  rawMilliseconds: number,
+  controls: FrameTimeControls,
+  host: { readonly dedicated: boolean; readonly localServer: boolean },
+): number {
   if (!Number.isFinite(rawMilliseconds) || rawMilliseconds < 0) throw new RangeError("Frame milliseconds must be finite and nonnegative");
   if (![controls.timescale, controls.fixedtime, controls.hostFramerate, controls.cameraMode].every(Number.isFinite))
     throw new RangeError("Frame time controls must be finite");
@@ -82,7 +101,8 @@ export function sourceFrameMilliseconds(dialect: CommandDialect, rawMilliseconds
   }
   let milliseconds = Math.trunc(rawMilliseconds);
   const scale = Math.fround(controls.timescale);
-  const fixedtime = Math.trunc(controls.fixedtime), cameraMode = Math.trunc(controls.cameraMode);
+  const fixedtime = Math.trunc(controls.fixedtime),
+    cameraMode = Math.trunc(controls.cameraMode);
   if (fixedtime !== 0) milliseconds = fixedtime;
   else if (scale !== 0 || cameraMode !== 0) {
     const product = Math.fround(Math.fround(milliseconds) * scale);

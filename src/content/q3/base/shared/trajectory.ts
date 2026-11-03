@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/bg_misc.c, BG_EvaluateTrajectory/Delta,
 // and code/game/q_shared.h, trType_t. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.

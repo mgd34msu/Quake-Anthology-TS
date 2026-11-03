@@ -7,7 +7,8 @@ import type { CvarRegistry } from "../../../core/cvars/index.ts";
 export function writeGuestString(memory: MappedGuestMemory, address: GuestAddress, value: string, capacity: number): void {
   if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Native string output requires positive source capacity");
   memory.check(address, capacity, "write");
-  const bytes = new Uint8Array(capacity), end = Math.min(value.length, capacity - 1);
+  const bytes = new Uint8Array(capacity),
+    end = Math.min(value.length, capacity - 1);
   for (let i = 0; i < end; i++) bytes[i] = value.charCodeAt(i) & 255;
   memory.write(address, bytes);
 }

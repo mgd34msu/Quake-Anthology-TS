@@ -9,7 +9,9 @@ export interface ElfTlsModule {
   /** Signed displacement from FS/GS thread pointer to this module's TLS block. */
   readonly threadPointerOffset: bigint | null;
 }
-export interface ElfTlsResolution extends ElfTlsModule { readonly offset: bigint; }
+export interface ElfTlsResolution extends ElfTlsModule {
+  readonly offset: bigint;
+}
 export interface ElfTlsBindings {
   readonly current: ElfTlsModule;
   resolve(import_: GuestImport, requesting: GuestImage): ElfTlsResolution | null;
@@ -33,7 +35,12 @@ export function elfAddress(memory: MappedGuestMemory, value: bigint): GuestAddre
   return pointer;
 }
 export function symbolImport(symbol: ElfSymbol, slot: GuestAddress): GuestImport {
-  return { library: symbol.version?.library ?? "", symbol: { kind: "name", name: symbol.name, version: symbol.version?.name ?? null }, slot, weak: symbol.binding === 2 };
+  return {
+    library: symbol.version?.library ?? "",
+    symbol: { kind: "name", name: symbol.name, version: symbol.version?.name ?? null },
+    slot,
+    weak: symbol.binding === 2,
+  };
 }
 
 /** Dynamic binding is eager. No host address or lazy host PLT trampoline is installed. */
@@ -53,24 +60,44 @@ function apply(context: ElfRelocationContext, relocation: ElfRelocation): void {
   const wide = elf.abi.pointerBytes === 8;
   const type = relocation.type;
   if (type === 0) return;
-  const width = wide ? (type === 12 || type === 13 ? 2 : type === 14 || type === 15 ? 1
-    : type === 2 || type === 4 || type === 10 || type === 11 || type === 23 || type === 32 ? 4 : 8) : 4;
+  const width = wide
+    ? type === 12 || type === 13
+      ? 2
+      : type === 14 || type === 15
+        ? 1
+        : type === 2 || type === 4 || type === 10 || type === 11 || type === 23 || type === 32
+          ? 4
+          : 8
+    : 4;
   const symbol = elf.symbols[relocation.symbolIndex];
   const byteLength = type === 5 && symbol !== undefined ? symbol.size : width;
-  if (!elf.segments.some(segment => segment.type === 1 && relocation.address >= segment.address
-    && relocation.address + BigInt(byteLength) <= segment.address + BigInt(segment.memorySize))) {
+  if (
+    !elf.segments.some(
+      segment =>
+        segment.type === 1 && relocation.address >= segment.address && relocation.address + BigInt(byteLength) <= segment.address + BigInt(segment.memorySize),
+    )
+  ) {
     throw new ElfError(`relocation target 0x${relocation.address.toString(16)} lies outside this image`);
   }
   const slot = elfAddress(memory, loadBias + relocation.address);
   const bytes = memory.copy(slot, byteLength);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const addend = type === 5 ? 0n : relocation.addend ?? (width === 8 ? view.getBigInt64(0, true) : width === 4 ? BigInt(view.getInt32(0, true))
-    : width === 2 ? BigInt(view.getInt16(0, true)) : BigInt(view.getInt8(0)));
+  const addend =
+    type === 5
+      ? 0n
+      : (relocation.addend ??
+        (width === 8
+          ? view.getBigInt64(0, true)
+          : width === 4
+            ? BigInt(view.getInt32(0, true))
+            : width === 2
+              ? BigInt(view.getInt16(0, true))
+              : BigInt(view.getInt8(0))));
   const place = slot.byteOffset;
   let result: bigint;
   let signed = false;
   let checked = wide;
-  if (type === 8 || wide && type === 38) {
+  if (type === 8 || (wide && type === 38)) {
     if (relocation.symbolIndex !== 0) throw new ElfError("relative relocation has a symbol");
     result = loadBias + addend;
   } else if (type === (wide ? 37 : 42)) {
@@ -88,8 +115,10 @@ function apply(context: ElfRelocationContext, relocation: ElfRelocation): void {
       const import_ = symbolImport(symbol, slot);
       const local = symbol.section !== 0 && (symbol.binding === 0 || symbol.visibility !== 0 || symbolicBinding(elf));
       const resolved = local ? null : bindings.resolve(import_, image);
-      if (resolved !== null) { target = resolved; context.imports.push(import_); }
-      else if (symbol.section !== 0) target = { ...bindings.current, offset: symbol.value };
+      if (resolved !== null) {
+        target = resolved;
+        context.imports.push(import_);
+      } else if (symbol.section !== 0) target = { ...bindings.current, offset: symbol.value };
       else throw new ElfError(`unresolved TLS symbol ${symbol.name}`);
     }
     if (target.moduleId <= 0n) throw new ElfError("ELF TLS module IDs begin at one");
@@ -105,38 +134,68 @@ function apply(context: ElfRelocationContext, relocation: ElfRelocation): void {
     if (symbol === undefined) throw new ElfError(`relocation ${type} lacks symbol ${relocation.symbolIndex}`);
     const symbolAddress = resolveSymbol(context, symbol, slot, type === 5);
     if (type === 5) {
-      if (symbolAddress === 0n) { if (!symbolImport(symbol, slot).weak) throw new ElfError("COPY source is null"); return; }
-      if (image.mappings.some(mapping => symbolAddress >= mapping.base && symbolAddress < mapping.base + BigInt(mapping.byteLength))) throw new ElfError("COPY must resolve a definition outside the requesting image");
+      if (symbolAddress === 0n) {
+        if (!symbolImport(symbol, slot).weak) throw new ElfError("COPY source is null");
+        return;
+      }
+      if (image.mappings.some(mapping => symbolAddress >= mapping.base && symbolAddress < mapping.base + BigInt(mapping.byteLength)))
+        throw new ElfError("COPY must resolve a definition outside the requesting image");
       const sourceSize = externalSymbolSize(context, symbol, slot);
       memory.write(slot, memory.copy(elfAddress(memory, symbolAddress), Math.min(sourceSize, symbol.size)));
       return;
     }
     switch (type) {
-      case 1: result = symbolAddress + addend; break;
-      case 2: result = symbolAddress + addend - place; signed = true; break;
-      case 4: throw new ElfError("PLT32 relocation requires a link-editor PLT address");
-      case 6: case 7: result = symbolAddress; break;
+      case 1:
+        result = symbolAddress + addend;
+        break;
+      case 2:
+        result = symbolAddress + addend - place;
+        signed = true;
+        break;
+      case 4:
+        throw new ElfError("PLT32 relocation requires a link-editor PLT address");
+      case 6:
+      case 7:
+        result = symbolAddress;
+        break;
       case 9:
         if (wide) throw new ElfError("dynamic x64 GOTPCREL requires a link-editor GOT slot");
-        result = symbolAddress + addend - gotAddress(context); break;
+        result = symbolAddress + addend - gotAddress(context);
+        break;
       case 10:
         if (wide) result = symbolAddress + addend;
         else result = gotAddress(context) + addend - place;
         break;
       case 11:
         if (!wide) throw new ElfError("R_386_32PLT requires a link-editor PLT address");
-        result = symbolAddress + addend; signed = true; break;
-      case 12: case 14:
+        result = symbolAddress + addend;
+        signed = true;
+        break;
+      case 12:
+      case 14:
         if (!wide) throw new ElfError(`unsupported i386 relocation ${type}`);
-        result = symbolAddress + addend; break;
-      case 13: case 15: case 24:
+        result = symbolAddress + addend;
+        break;
+      case 13:
+      case 15:
+      case 24:
         if (!wide) throw new ElfError(`unsupported i386 relocation ${type}`);
-        result = symbolAddress + addend - place; signed = true; break;
-      case 32: case 33: case 38:
+        result = symbolAddress + addend - place;
+        signed = true;
+        break;
+      case 32:
+      case 33:
+      case 38:
         if (wide ? type === 38 : type !== 38) throw new ElfError(`unsupported relocation ${type}`);
-        result = BigInt(symbol.section !== 0 && symbolAddress === (symbol.section === 0xfff1 ? symbol.value : loadBias + symbol.value)
-          ? symbol.size : externalSymbolSize(context, symbol, slot)) + addend; break;
-      default: throw new ElfError(`unsupported ${wide ? "x86-64" : "i386"} relocation ${type} for ${symbol.name}`);
+        result =
+          BigInt(
+            symbol.section !== 0 && symbolAddress === (symbol.section === 0xfff1 ? symbol.value : loadBias + symbol.value)
+              ? symbol.size
+              : externalSymbolSize(context, symbol, slot),
+          ) + addend;
+        break;
+      default:
+        throw new ElfError(`unsupported ${wide ? "x86-64" : "i386"} relocation ${type} for ${symbol.name}`);
     }
   }
   // x86-32 relocation arithmetic is modulo 2^32. AMD64 narrow forms have ABI overflow checks.
@@ -180,7 +239,8 @@ export function definedSymbolAddress(context: Pick<ElfRelocationContext, "loadBi
 
 export function resolveSymbol(context: ElfRelocationContext, symbol: ElfSymbol, slot: GuestAddress, copy: boolean): bigint {
   if (symbol.index === 0) return 0n;
-  if (symbol.binding !== 0 && symbol.binding !== 1 && symbol.binding !== 2 && symbol.binding !== 10) throw new ElfError(`unsupported symbol binding ${symbol.binding} for ${symbol.name}`);
+  if (symbol.binding !== 0 && symbol.binding !== 1 && symbol.binding !== 2 && symbol.binding !== 10)
+    throw new ElfError(`unsupported symbol binding ${symbol.binding} for ${symbol.name}`);
   const own = symbol.section !== 0;
   const unique = symbol.binding === 10;
   if (unique && context.uniqueSymbols === null) throw new ElfError("GNU unique symbols require a process-wide symbol registry");
@@ -208,7 +268,9 @@ export function resolveSymbol(context: ElfRelocationContext, symbol: ElfSymbol, 
   }
   context.imports.push(import_);
   if (symbol.binding === 2) return 0n;
-  throw new ElfError(`unresolved import ${import_.library || "<global>"}:${symbol.name}${symbol.version === null ? "" : "@" + symbol.version.name}: ${resolution.detail}`);
+  throw new ElfError(
+    `unresolved import ${import_.library || "<global>"}:${symbol.name}${symbol.version === null ? "" : "@" + symbol.version.name}: ${resolution.detail}`,
+  );
 }
 
 function symbolicBinding(elf: ElfInspection): boolean {

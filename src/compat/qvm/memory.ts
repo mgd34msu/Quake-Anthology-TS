@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * VM_ArgPtr from qcommon/vm.c and Q_strncpyz from game/q_shared.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -25,35 +26,63 @@ function qStrncpyz(destination: Uint8Array | null, source: string, size: number)
 /** Borrows an interpreter allocation; pointer masking applies only to its start. */
 export class QvmMemory implements Q3GameMemory {
   private readonly writes: QvmMemoryWrites;
-  constructor(readonly bytes: Uint8Array, effect?: (perform: () => undefined) => undefined) {
+  constructor(
+    readonly bytes: Uint8Array,
+    effect?: (perform: () => undefined) => undefined,
+  ) {
     const length = bytes.byteLength;
     if (length === 0 || length > 0x40000000 || (length & (length - 1)) !== 0) {
       throw new RangeError("QVM memory allocation must be a nonzero power of two at most 2^30 bytes");
     }
     this.writes = new QvmMemoryWrites(bytes, effect);
   }
-  observeWrites(ranges: readonly QvmWriteRange[], publish: (event: QvmCommittedWrite) => undefined,
-    afterPublication?: (event: QvmCommittedWrite) => undefined): () => undefined { return this.writes.observe(ranges, publish, afterPublication); }
-  get observesWrites(): boolean { return this.writes.intercepts; }
-  assertLive(): void { this.writes.assertLive(); }
-  assertNotPublishing(): void { this.writes.assertNotPublishing(); }
-  clearWriteObservers(): void { this.writes.clear(); }
-  close(): void { this.writes.close(); }
-  dataView(byteOffset: number, byteLength: number): DataView { this.writes.range(byteOffset, byteLength); return new QvmWritableView(this.bytes, byteOffset, byteLength, this.writes); }
+  observeWrites(
+    ranges: readonly QvmWriteRange[],
+    publish: (event: QvmCommittedWrite) => undefined,
+    afterPublication?: (event: QvmCommittedWrite) => undefined,
+  ): () => undefined {
+    return this.writes.observe(ranges, publish, afterPublication);
+  }
+  get observesWrites(): boolean {
+    return this.writes.intercepts;
+  }
+  assertLive(): void {
+    this.writes.assertLive();
+  }
+  assertNotPublishing(): void {
+    this.writes.assertNotPublishing();
+  }
+  clearWriteObservers(): void {
+    this.writes.clear();
+  }
+  close(): void {
+    this.writes.close();
+  }
+  dataView(byteOffset: number, byteLength: number): DataView {
+    this.writes.range(byteOffset, byteLength);
+    return new QvmWritableView(this.bytes, byteOffset, byteLength, this.writes);
+  }
   writeBytes(byteOffset: number, bytes: Uint8Array): void {
-    this.writes.assertWritable(); this.writes.range(byteOffset, bytes.length);
+    this.writes.assertWritable();
+    this.writes.range(byteOffset, bytes.length);
     const capture = this.writes.intercepts ? this.writes.before(byteOffset, bytes.length) : null;
-    this.bytes.set(bytes, byteOffset); this.writes.after(capture);
+    this.bytes.set(bytes, byteOffset);
+    this.writes.after(capture);
   }
   fillBytes(byteOffset: number, byteLength: number, value: number): void {
-    this.writes.assertWritable(); this.writes.range(byteOffset, byteLength);
+    this.writes.assertWritable();
+    this.writes.range(byteOffset, byteLength);
     const capture = this.writes.intercepts ? this.writes.before(byteOffset, byteLength) : null;
-    this.bytes.fill(value, byteOffset, byteOffset + byteLength); this.writes.after(capture);
+    this.bytes.fill(value, byteOffset, byteOffset + byteLength);
+    this.writes.after(capture);
   }
   copyBytes(destinationOffset: number, sourceOffset: number, byteLength: number): void {
-    this.writes.assertWritable(); this.writes.range(destinationOffset, byteLength); this.writes.range(sourceOffset, byteLength);
+    this.writes.assertWritable();
+    this.writes.range(destinationOffset, byteLength);
+    this.writes.range(sourceOffset, byteLength);
     const capture = this.writes.intercepts ? this.writes.before(destinationOffset, byteLength) : null;
-    this.bytes.copyWithin(destinationOffset, sourceOffset, sourceOffset + byteLength); this.writes.after(capture);
+    this.bytes.copyWithin(destinationOffset, sourceOffset, sourceOffset + byteLength);
+    this.writes.after(capture);
   }
 
   address(word: number): number | null {
@@ -61,12 +90,18 @@ export class QvmMemory implements Q3GameMemory {
     return pointer === null ? null : pointer.byteOffset - this.bytes.byteOffset;
   }
   /** Offset zero is the pointer word that names the allocation size, which masks to zero. */
-  pointerWord(address: number | null): number { return address === null ? 0 : address === 0 ? this.bytes.length : address; }
-  viewAt(address: number, length: number): DataView { return this.dataView(address, length); }
+  pointerWord(address: number | null): number {
+    return address === null ? 0 : address === 0 ? this.bytes.length : address;
+  }
+  viewAt(address: number, length: number): DataView {
+    return this.dataView(address, length);
+  }
   regionView(region: Uint8Array, offset = 0, length = region.byteLength - offset): DataView {
     return this.dataView(region.byteOffset - this.bytes.byteOffset + offset, length);
   }
-  regionWrite(region: Uint8Array, bytes: Uint8Array): void { this.writeBytes(region.byteOffset - this.bytes.byteOffset, bytes); }
+  regionWrite(region: Uint8Array, bytes: Uint8Array): void {
+    this.writeBytes(region.byteOffset - this.bytes.byteOffset, bytes);
+  }
   regionFill(region: Uint8Array, start: number, length: number, value: number): void {
     this.fillBytes(region.byteOffset - this.bytes.byteOffset + start, length, value);
   }
@@ -82,8 +117,14 @@ export class QvmMemory implements Q3GameMemory {
     const pointer = this.pointer(word);
     if (pointer === null) throw new RangeError("QVM memory span requires a nonnull pointer");
     const start = pointer.byteOffset - this.bytes.byteOffset + relativeOffset;
-    if (!Number.isSafeInteger(relativeOffset) || !Number.isSafeInteger(length) || length < 0
-      || start < 0 || start > this.bytes.byteLength || length > this.bytes.byteLength - start) {
+    if (
+      !Number.isSafeInteger(relativeOffset) ||
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      start < 0 ||
+      start > this.bytes.byteLength ||
+      length > this.bytes.byteLength - start
+    ) {
       throw new RangeError("QVM memory span exceeds allocation or has an invalid length");
     }
     return this.bytes.subarray(start, start + length);
@@ -110,12 +151,19 @@ export class QvmMemory implements Q3GameMemory {
     if (pointer !== null && (!Number.isInteger(capacity) || capacity > pointer.length)) {
       throw new RangeError("Q_strncpyz destination exceeds QVM allocation");
     }
-    if (pointer === null) { qStrncpyz(pointer, text, capacity); return; }
+    if (pointer === null) {
+      qStrncpyz(pointer, text, capacity);
+      return;
+    }
     const offset = pointer.byteOffset - this.bytes.byteOffset;
     this.writes.assertWritable();
-    if (!Number.isInteger(capacity) || capacity < 1) { qStrncpyz(pointer, text, capacity); return; }
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      qStrncpyz(pointer, text, capacity);
+      return;
+    }
     const capture = this.writes.intercepts ? this.writes.before(offset, capacity) : null;
-    qStrncpyz(pointer, text, capacity); this.writes.after(capture);
+    qStrncpyz(pointer, text, capacity);
+    this.writes.after(capture);
   }
 
   /** Raw strncpy(size - 1) plus NUL has no source Com_Error for invalid pointers or sizes. */
@@ -126,6 +174,7 @@ export class QvmMemory implements Q3GameMemory {
     }
     this.writes.assertWritable();
     const capture = this.writes.intercepts ? this.writes.before(pointer.byteOffset - this.bytes.byteOffset, capacity) : null;
-    qStrncpyz(pointer, text, capacity); this.writes.after(capture);
+    qStrncpyz(pointer, text, capacity);
+    this.writes.after(capture);
   }
 }

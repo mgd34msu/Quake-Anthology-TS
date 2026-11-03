@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // R_IssueRenderCommands/R_SyncRenderThread and GLimp renderer sleep/wake ownership.
 // Original renderer copyright (C) 1999-2005 Id Software, Inc.
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -15,11 +16,8 @@ export interface RenderWorkerRuntime {
   close(): undefined;
 }
 
-type Failure =
-  | { readonly kind: "error"; readonly name: string; readonly message: string }
-  | { readonly kind: "host"; readonly token: number };
-type Response = { readonly kind: "success"; readonly payload: unknown }
-  | { readonly kind: "failure"; readonly failure: Failure };
+type Failure = { readonly kind: "error"; readonly name: string; readonly message: string } | { readonly kind: "host"; readonly token: number };
+type Response = { readonly kind: "success"; readonly payload: unknown } | { readonly kind: "failure"; readonly failure: Failure };
 type Message =
   | { readonly kind: "request" | "reply" | "complete"; readonly sequence: number; readonly parent: number | null; readonly response: Response }
   | { readonly kind: "dispatch" | "initialize"; readonly sequence: number; readonly parent: number | null; readonly payload: unknown }
@@ -30,8 +28,7 @@ function record(input: unknown): input is Record<string, unknown> {
 }
 
 function sequence(input: unknown): number {
-  if (typeof input !== "number" || !Number.isSafeInteger(input) || input <= 0)
-    throw new Error("Invalid render thread message sequence");
+  if (typeof input !== "number" || !Number.isSafeInteger(input) || input <= 0) throw new Error("Invalid render thread message sequence");
   return input;
 }
 
@@ -40,8 +37,7 @@ function decodeFailure(input: unknown): Failure {
   if (input["kind"] === "host") return { kind: "host", token: sequence(input["token"]) };
   const message = input["message"];
   if (typeof message !== "string") throw new Error("Invalid render thread error message");
-  if (input["kind"] === "error" && typeof input["name"] === "string")
-    return { kind: "error", name: input["name"], message };
+  if (input["kind"] === "error" && typeof input["name"] === "string") return { kind: "error", name: input["name"], message };
   throw new Error("Invalid render thread error kind");
 }
 
@@ -54,17 +50,19 @@ function decodeResponse(input: unknown): Response {
 
 function decodeMessage(input: unknown): Message {
   if (!record(input)) throw new Error("Invalid render thread message");
-  const kind = input["kind"], number = sequence(input["sequence"]);
+  const kind = input["kind"],
+    number = sequence(input["sequence"]);
   if (kind === "close") return { kind, sequence: number };
   const parent = input["parent"] === null ? null : sequence(input["parent"]);
   if (kind === "dispatch" || kind === "initialize") return { kind, sequence: number, parent, payload: input["payload"] };
-  if (kind === "request" || kind === "reply" || kind === "complete")
-    return { kind, sequence: number, parent, response: decodeResponse(input["response"]) };
+  if (kind === "request" || kind === "reply" || kind === "complete") return { kind, sequence: number, parent, response: decodeResponse(input["response"]) };
   throw new Error("Invalid render thread message kind");
 }
 
 class HostFailure extends Error {
-  constructor(readonly token: number) { super("Renderer host callback failed"); }
+  constructor(readonly token: number) {
+    super("Renderer host callback failed");
+  }
 }
 
 function failure(error: unknown): Failure {
@@ -75,10 +73,11 @@ function failure(error: unknown): Failure {
 
 function restoreFailure(input: Failure): Error {
   switch (input.kind) {
-    case "host": return new HostFailure(input.token);
+    case "host":
+      return new HostFailure(input.token);
     case "error": {
-      const error = input.name === "RangeError" ? new RangeError(input.message)
-        : input.name === "TypeError" ? new TypeError(input.message) : new Error(input.message);
+      const error =
+        input.name === "RangeError" ? new RangeError(input.message) : input.name === "TypeError" ? new TypeError(input.message) : new Error(input.message);
       error.name = input.name;
       return error;
     }
@@ -123,13 +122,21 @@ export class RenderWorkerTransport {
   private closePending: Pending | null = null;
   private initialDescription: unknown;
 
-  private constructor(private readonly worker: Worker, private readonly host: RenderWorkerHost,
-    private readonly timeoutMilliseconds: number) {
+  private constructor(
+    private readonly worker: Worker,
+    private readonly host: RenderWorkerHost,
+    private readonly timeoutMilliseconds: number,
+  ) {
     this.channel.port1.on("message", (input: unknown) => {
-      try { this.accept(decodeMessage(input)); }
-      catch (error: unknown) { this.fail(error); }
+      try {
+        this.accept(decodeMessage(input));
+      } catch (error: unknown) {
+        this.fail(error);
+      }
     });
-    worker.on("error", error => { if (!this.closed) this.fail(error); });
+    worker.on("error", error => {
+      if (!this.closed) this.fail(error);
+    });
     worker.on("exit", code => {
       if (!this.closed && this.closePending?.response?.kind !== "success") this.fail(new Error(`Render thread exited before shutdown (${code})`));
     });
@@ -152,16 +159,27 @@ export class RenderWorkerTransport {
       return backend;
     } catch (error: unknown) {
       const problem = backend.fail(error);
-      try { backend.close(); }
-      catch { /* Preserve startup failure; an unacknowledged context remains borrowed. */ }
+      try {
+        backend.close();
+      } catch {
+        /* Preserve startup failure; an unacknowledged context remains borrowed. */
+      }
       throw problem;
     }
   }
 
-  get active(): boolean { return Atomics.load(this.signal, 1) !== 0; }
-  get settled(): boolean { return this.closed || this.pending === null || this.pending.response !== null; }
-  get retired(): boolean { return this.closed; }
-  get description(): unknown { return this.initialDescription; }
+  get active(): boolean {
+    return Atomics.load(this.signal, 1) !== 0;
+  }
+  get settled(): boolean {
+    return this.closed || this.pending === null || this.pending.response !== null;
+  }
+  get retired(): boolean {
+    return this.closed;
+  }
+  get description(): unknown {
+    return this.initialDescription;
+  }
 
   /** R_IssueRenderCommands waits for the previous buffer, then wakes this buffer. */
   issue(payload: unknown): void {
@@ -186,7 +204,9 @@ export class RenderWorkerTransport {
     try {
       this.begin("dispatch", payload, false, callback.request);
       return this.waitPending();
-    } finally { this.pending = suspended; }
+    } finally {
+      this.pending = suspended;
+    }
   }
 
   synchronize(): unknown {
@@ -198,7 +218,10 @@ export class RenderWorkerTransport {
     try {
       if (this.closed) throw new Error("Render thread is closed");
       const pending = this.pending;
-      if (pending === null) { this.assertHealthy(); return undefined; }
+      if (pending === null) {
+        this.assertHealthy();
+        return undefined;
+      }
       const deadline = performance.now() + this.timeoutMilliseconds;
       while (pending.response === null) {
         const wake = Atomics.load(this.signal, 0);
@@ -213,9 +236,14 @@ export class RenderWorkerTransport {
       }
       this.pending = null;
       const response = pending.response;
-      if (response.kind === "success") { this.assertHealthy(); return response.payload; }
-      const error = response.failure.kind === "host" && this.hostFailures.has(response.failure.token)
-        ? this.hostFailures.get(response.failure.token) : restoreFailure(response.failure);
+      if (response.kind === "success") {
+        this.assertHealthy();
+        return response.payload;
+      }
+      const error =
+        response.failure.kind === "host" && this.hostFailures.has(response.failure.token)
+          ? this.hostFailures.get(response.failure.token)
+          : restoreFailure(response.failure);
       throw this.fail(error);
     } catch (error: unknown) {
       if (this.fault !== null && this.fault.error === error) this.observedFault = this.fault;
@@ -238,7 +266,11 @@ export class RenderWorkerTransport {
     if (this.callbacks.length !== 0 || this.deliveringCompletion) throw new Error("Reentrant render thread close");
     let first: { readonly error: unknown } | null = this.fault;
     this.fault = null;
-    try { this.synchronize(); } catch (error: unknown) { first = { error }; }
+    try {
+      this.synchronize();
+    } catch (error: unknown) {
+      first = { error };
+    }
     if (this.pending !== null && this.pending.response === null) {
       if (first !== null) throw first.error;
       throw new Error("Renderer cannot retire before its current operation completes");
@@ -257,8 +289,11 @@ export class RenderWorkerTransport {
     try {
       send(this.channel.port1, this.signal, { kind: "close", sequence: pending.sequence });
       this.synchronize();
-    } catch (error: unknown) { first ??= { error: this.fail(error) }; }
-    finally { if (pending.response?.kind === "success") this.retire(); }
+    } catch (error: unknown) {
+      first ??= { error: this.fail(error) };
+    } finally {
+      if (pending.response?.kind === "success") this.retire();
+    }
     if (first !== null) throw first.error;
   }
 
@@ -277,15 +312,22 @@ export class RenderWorkerTransport {
     this.fault ??= this.notifiedFailure;
     if (this.failureDelivered) return this.fault.error;
     this.failureDelivered = true;
-    try { this.host.failed?.(this.fault.error); }
-    catch { /* Notification cannot replace the original terminal failure. */ }
+    try {
+      this.host.failed?.(this.fault.error);
+    } catch {
+      /* Notification cannot replace the original terminal failure. */
+    }
     return this.fault.error;
   }
   private failureDelivered = false;
   private armTimeout(pending: Pending): void {
     pending.timeout = setTimeout(() => {
       if (this.closed || pending.response !== null) return;
-      try { this.drain(); } catch (error) { this.fail(error); }
+      try {
+        this.drain();
+      } catch (error) {
+        this.fail(error);
+      }
       if (pending.response === null) this.fail(new Error("Render thread did not complete its issued buffer"));
     }, this.timeoutMilliseconds);
   }
@@ -293,7 +335,9 @@ export class RenderWorkerTransport {
     if (pending?.timeout !== null && pending?.timeout !== undefined) clearTimeout(pending.timeout);
     if (pending !== null) pending.timeout = null;
   }
-  private assertHealthy(): void { if (this.fault !== null) throw this.fault.error; }
+  private assertHealthy(): void {
+    if (this.fault !== null) throw this.fault.error;
+  }
 
   private begin(kind: "initialize" | "dispatch", payload: unknown, publish: boolean, parent: number | null = null): void {
     if (this.closed) throw new Error("Render thread is closed");
@@ -304,8 +348,16 @@ export class RenderWorkerTransport {
     this.pending = { sequence, publish, response: null, timeout: null };
     this.outstanding.set(sequence, this.pending);
     this.armTimeout(this.pending);
-    try { send(this.channel.port1, this.signal, { kind, sequence, parent, payload }); }
-    catch (error: unknown) { this.clearTimeout(this.pending); this.outstanding.delete(sequence); this.pending = null; this.fail(error); this.observedFault = this.fault; throw error; }
+    try {
+      send(this.channel.port1, this.signal, { kind, sequence, parent, payload });
+    } catch (error: unknown) {
+      this.clearTimeout(this.pending);
+      this.outstanding.delete(sequence);
+      this.pending = null;
+      this.fail(error);
+      this.observedFault = this.fault;
+      throw error;
+    }
   }
 
   private drain(): void {
@@ -314,7 +366,9 @@ export class RenderWorkerTransport {
         const message = receive(this.channel.port1);
         if (message === null) return;
         this.accept(message);
-      } catch (error) { throw this.fail(error); }
+      } catch (error) {
+        throw this.fail(error);
+      }
     }
   }
 
@@ -322,22 +376,25 @@ export class RenderWorkerTransport {
     if (message.kind === "request") {
       if (message.response.kind !== "success") throw new Error("Worker request carried an error response");
       const pending = this.pending;
-      if (pending === null || pending.response !== null || message.parent !== pending.sequence) throw new Error("Worker callback has no matching parent operation");
+      if (pending === null || pending.response !== null || message.parent !== pending.sequence)
+        throw new Error("Worker callback has no matching parent operation");
       let response: Response;
       this.callbacks.push({ request: message.sequence, parent: pending.sequence, pending });
-      try { response = { kind: "success", payload: this.host.request(message.response.payload) }; }
-      catch (error: unknown) {
+      try {
+        response = { kind: "success", payload: this.host.request(message.response.payload) };
+      } catch (error: unknown) {
         const token = this.nextHostFailure++;
         this.hostFailures.set(token, error);
         response = { kind: "failure", failure: { kind: "host", token } };
-      } finally { this.callbacks.pop(); }
+      } finally {
+        this.callbacks.pop();
+      }
       send(this.channel.port1, this.signal, { kind: "reply", sequence: message.sequence, parent: pending.sequence, response });
       return;
     }
     if (message.kind !== "complete") throw new Error("Unexpected renderer worker message");
     const pending = this.outstanding.get(message.sequence);
-    if (pending === undefined || message.parent !== null || pending.response !== null)
-      throw new Error("Renderer completed an unowned command buffer");
+    if (pending === undefined || message.parent !== null || pending.response !== null) throw new Error("Renderer completed an unowned command buffer");
     pending.response = message.response;
     this.clearTimeout(pending);
     this.outstanding.delete(message.sequence);
@@ -347,9 +404,13 @@ export class RenderWorkerTransport {
     }
     if (pending.publish && message.response.kind === "success") {
       this.deliveringCompletion = true;
-      try { this.host.completed(message.response.payload); }
-      catch (error: unknown) { throw this.fail(error); }
-      finally { this.deliveringCompletion = false; }
+      try {
+        this.host.completed(message.response.payload);
+      } catch (error: unknown) {
+        throw this.fail(error);
+      } finally {
+        this.deliveringCompletion = false;
+      }
     }
   }
 }
@@ -358,16 +419,27 @@ export class RenderWorkerTransport {
 export function serveRenderWorker(initialize: (payload: unknown, request: (payload: unknown) => unknown) => RenderWorkerRuntime): void {
   if (parentPort === null) throw new Error("Render worker bootstrap requires a worker parent");
   parentPort.once("message", (input: unknown) => {
-    if (!record(input) || !(input["port"] instanceof MessagePort) || !(input["signal"] instanceof Int32Array)
-      || !(input["signal"].buffer instanceof SharedArrayBuffer) || input["signal"].length !== 2
-      || typeof input["timeoutMilliseconds"] !== "number" || !Number.isFinite(input["timeoutMilliseconds"]) || input["timeoutMilliseconds"] <= 0)
+    if (
+      !record(input) ||
+      !(input["port"] instanceof MessagePort) ||
+      !(input["signal"] instanceof Int32Array) ||
+      !(input["signal"].buffer instanceof SharedArrayBuffer) ||
+      input["signal"].length !== 2 ||
+      typeof input["timeoutMilliseconds"] !== "number" ||
+      !Number.isFinite(input["timeoutMilliseconds"]) ||
+      input["timeoutMilliseconds"] <= 0
+    )
       throw new Error("Invalid render worker bootstrap");
     servePort(input["port"], new Int32Array(input["signal"].buffer), input["timeoutMilliseconds"], initialize);
   });
 }
 
-function servePort(port: MessagePort, signal: Int32Array<SharedArrayBuffer>, timeoutMilliseconds: number,
-  initialize: (payload: unknown, request: (payload: unknown) => unknown) => RenderWorkerRuntime): void {
+function servePort(
+  port: MessagePort,
+  signal: Int32Array<SharedArrayBuffer>,
+  timeoutMilliseconds: number,
+  initialize: (payload: unknown, request: (payload: unknown) => unknown) => RenderWorkerRuntime,
+): void {
   let runtime: RenderWorkerRuntime | null = null;
   let terminal: Failure | null = null;
   let nextRequest = 1;
@@ -376,12 +448,14 @@ function servePort(port: MessagePort, signal: Int32Array<SharedArrayBuffer>, tim
   const request = (payload: unknown): unknown => {
     const parent = operations.at(-1);
     if (parent === undefined) throw new Error("Worker callback requires an executing operation");
-    const id = nextRequest++, deadline = performance.now() + timeoutMilliseconds;
+    const id = nextRequest++,
+      deadline = performance.now() + timeoutMilliseconds;
     callbacks.push({ sequence: id, parent });
     try {
       send(port, signal, { kind: "request", sequence: id, parent, response: { kind: "success", payload } });
       for (;;) {
-        const wake = Atomics.load(signal, 0), message = receive(port);
+        const wake = Atomics.load(signal, 0),
+          message = receive(port);
         if (message !== null) {
           if (message.kind === "dispatch" && message.parent === id && runtime !== null) {
             execute(message);
@@ -394,7 +468,9 @@ function servePort(port: MessagePort, signal: Int32Array<SharedArrayBuffer>, tim
         if (performance.now() >= deadline) throw new Error("Render worker host callback timed out");
         Atomics.wait(signal, 0, wake, Math.min(10, Math.max(0, deadline - performance.now())));
       }
-    } finally { callbacks.pop(); }
+    } finally {
+      callbacks.pop();
+    }
   };
   const execute = (message: Message): void => {
     let response: Response;
@@ -422,7 +498,12 @@ function servePort(port: MessagePort, signal: Int32Array<SharedArrayBuffer>, tim
       Atomics.store(signal, 1, Number(operations.length !== 0));
     }
     send(port, signal, { kind: "complete", sequence: message.sequence, parent: null, response });
-    if (message.kind === "close" && response.kind === "success") { port.close(); parentPort?.close(); }
+    if (message.kind === "close" && response.kind === "success") {
+      port.close();
+      parentPort?.close();
+    }
   };
-  port.on("message", (input: unknown) => { execute(decodeMessage(input)); });
+  port.on("message", (input: unknown) => {
+    execute(decodeMessage(input));
+  });
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import type { LmctfTravel } from "../../q2/multiplayer/lmctf/types.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -13,7 +14,12 @@ import type { Q2RereleaseCampaignState } from "../../q2/rerelease/entities.ts";
 
 export type Q2ClassicProgram = "baseq2" | "xatrix" | "rogue";
 export type Q2RereleaseProgram = Q2ClassicProgram | "mg2" | "n64";
-export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf"; readonly travel?: LmctfTravel } | { readonly kind: "standard" } | { readonly kind: "tag" } | { readonly kind: "horde" }
+export type Q2MatchSelection =
+  | { readonly kind: "ctf" }
+  | { readonly kind: "lmctf"; readonly travel?: LmctfTravel }
+  | { readonly kind: "standard" }
+  | { readonly kind: "tag" }
+  | { readonly kind: "horde" }
   | { readonly kind: "deathball"; readonly team1Skin: string; readonly team2Skin: string; readonly goalLimit: number };
 export type Q2CompositionEvent =
   | { readonly kind: "ctf"; readonly event: import("../../q2/multiplayer/ctf/types.ts").Q2CtfEvent }
@@ -50,10 +56,14 @@ export interface Q2CompositionCommon {
   readonly services: Q2CompositionServices;
 }
 
-export type Q2CompositionOptions = Q2CompositionCommon & (
-  | { readonly edition: "classic"; readonly program: Q2ClassicProgram }
-  | { readonly edition: "rerelease"; readonly program: Q2RereleaseProgram;
-      readonly rereleaseHooks: Q2RereleaseHooks;
-      readonly rereleaseOptions?: Partial<Q2RereleaseOptions>;
-      readonly campaign?: Q2RereleaseCampaignState }
-);
+export type Q2CompositionOptions = Q2CompositionCommon &
+  (
+    | { readonly edition: "classic"; readonly program: Q2ClassicProgram }
+    | {
+        readonly edition: "rerelease";
+        readonly program: Q2RereleaseProgram;
+        readonly rereleaseHooks: Q2RereleaseHooks;
+        readonly rereleaseOptions?: Partial<Q2RereleaseOptions>;
+        readonly campaign?: Q2RereleaseCampaignState;
+      }
+  );

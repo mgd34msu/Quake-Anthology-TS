@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* quakec_mg3/ai.qc: source targeting, liquid damage and Horde movement policy.
  * Copyright (C) 1996-2026 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
@@ -14,7 +15,9 @@ function same(first: ActorId | null, second: ActorId | null): boolean {
 /** Shares the base source animation/combat owner; MG3 supplies only its differing AI policy. */
 
 export class Mg3Monster extends BaseMonster {
-  override makeVectors() { return this.game.makeVectors(this.game.body(this.entity).angles); }
+  override makeVectors() {
+    return this.game.makeVectors(this.game.body(this.entity).angles);
+  }
   override attackFinished(seconds: number): undefined {
     this.state.refired = false;
     this.state.attackFinished = Math.fround(this.game.time + seconds);
@@ -34,25 +37,35 @@ export class Mg3Monster extends BaseMonster {
   override found(target: ActorId): undefined {
     const { game, entity } = this;
     this.enemy = target;
-    if (game.isPlayer(target)) { game.sightEntity = entity; game.sightTime = game.time; }
+    if (game.isPlayer(target)) {
+      game.sightEntity = entity;
+      game.sightTime = game.time;
+    }
     if (entity.classname === "monster_hell_knight" && (entity.spawnflags & (65536 | 8388608)) !== 0 && this.state.painFinished > game.time) return undefined;
     entity.fields.set("show_hostile", String(Math.fround(game.time + 1)));
     this.sightSound();
     return this.huntTarget();
   }
   checkAttack(): boolean {
-    const { game, entity, spec } = this, enemy = this.enemy;
-    const start = this.eye(), end = enemy === null ? null : this.eye(enemy);
+    const { game, entity, spec } = this,
+      enemy = this.enemy;
+    const start = this.eye(),
+      end = enemy === null ? null : this.eye(enemy);
     if (enemy === null || start === null || end === null) return false;
     const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
-    if (trace.actor === null || !sameActor(trace.actor, enemy) || trace.inOpen && trace.inWater) return false;
+    if (trace.actor === null || !sameActor(trace.actor, enemy) || (trace.inOpen && trace.inWater)) return false;
     const range = this.word("enemy_range");
-    if (range === 0 && spec.melee) { this.meleeAttack(); return true; }
+    if (range === 0 && spec.melee) {
+      this.meleeAttack();
+      return true;
+    }
     if (spec.missile === null || game.time < this.state.attackFinished || range === 3) return false;
     if (range === 0) this.state.attackFinished = 0;
-    const chance = range === 0 ? 0.9 : range === 1 ? spec.melee ? 0.2 : 0.4 : range === 2 ? spec.melee ? 0.05 : 0.1 : 0;
+    const chance = range === 0 ? 0.9 : range === 1 ? (spec.melee ? 0.2 : 0.4) : range === 2 ? (spec.melee ? 0.05 : 0.1) : 0;
     if (game.host.random() >= chance) return false;
-    this.play(spec.missile); this.attackFinished(2 * game.host.random()); return true;
+    this.play(spec.missile);
+    this.attackFinished(2 * game.host.random());
+    return true;
   }
   /** QC keeps these AI globals on world; a foreign world has no Q1 world actor, so they live in the game's saved sourceWorldWords. */
   sourceWord(name: string, value: number): undefined {
@@ -63,22 +76,26 @@ export class Mg3Monster extends BaseMonster {
   }
   word(name: string): number {
     const world = this.game.world;
-    return world === null ? this.game.sourceWorldWords.get(name) ?? 0 : world.number(name);
+    return world === null ? (this.game.sourceWorldWords.get(name) ?? 0) : world.number(name);
   }
   rangeCategory(target = this.enemy): 0 | 1 | 2 | 3 {
-    const distance = this.rangeDistance(target), nearSighted = (this.entity.spawnflags & 8192) !== 0;
-    const ranges = nearSighted ? this.enemy === null ? [120, 300, 340] : [96, 400, 800] : [120, 500, 1000];
-    const melee = ranges[0], near = ranges[1], mid = ranges[2];
+    const distance = this.rangeDistance(target),
+      nearSighted = (this.entity.spawnflags & 8192) !== 0;
+    const ranges = nearSighted ? (this.enemy === null ? [120, 300, 340] : [96, 400, 800]) : [120, 500, 1000];
+    const melee = ranges[0],
+      near = ranges[1],
+      mid = ranges[2];
     if (melee === undefined || near === undefined || mid === undefined) throw new Error("Missing source vision ranges");
     return distance < melee ? 0 : distance < near ? 1 : distance < mid ? 2 : 3;
   }
   inFront(target: ActorId): boolean {
-    const body = this.game.host.bodies.read(target); if (body === null) return false;
+    const body = this.game.host.bodies.read(target);
+    if (body === null) return false;
     // MG3 infront passes self.angles directly, unlike the id1 rerelease pitch adjustment.
     const basis = this.game.makeVectors(this.game.body(this.entity).angles);
     const facing = dot(normalize(vsub(body.origin, this.origin)), basis.forward);
     const threshold = (this.entity.spawnflags & 8192) !== 0 ? Math.fround(0.866) : Math.fround(0.3);
-    return facing > threshold || this.entity.classname === "monster_orb" && -facing > threshold;
+    return facing > threshold || (this.entity.classname === "monster_orb" && -facing > threshold);
   }
   override findTarget(): boolean {
     const { game, entity } = this;
@@ -87,7 +104,9 @@ export class Mg3Monster extends BaseMonster {
       if (targets.length > 0) {
         const target = targets[Math.floor(targets.length * game.host.random())];
         if (target === undefined) throw new Error("Source random target index exceeds candidates");
-        this.enemy = target.actor.id; this.found(target.actor.id); return true;
+        this.enemy = target.actor.id;
+        this.found(target.actor.id);
+        return true;
       }
     }
     let candidate: ActorId | null;
@@ -97,18 +116,23 @@ export class Mg3Monster extends BaseMonster {
       candidate = sight?.actor.id ?? null;
     } else candidate = game.host.checkClient(entity.actor);
     if (candidate === null || same(candidate, this.enemy)) return false;
-    const actor = game.entity(candidate), player = game.player(candidate);
+    const actor = game.entity(candidate),
+      player = game.player(candidate);
     if (((actor?.movementFlags ?? 0) & 128) !== 0 || (player?.powerups.get("invisibility") ?? 0) > game.time) return false;
     const range = this.rangeCategory(candidate);
     if (range === 3 || !this.visible(candidate)) return false;
     const hostile = player?.hostileUntil ?? actor?.number("show_hostile") ?? 0;
-    if (range === 1 && hostile < game.time && !this.inFront(candidate) || range === 2 && !this.inFront(candidate)) return false;
+    if ((range === 1 && hostile < game.time && !this.inFront(candidate)) || (range === 2 && !this.inFront(candidate))) return false;
     this.enemy = candidate;
     if (!game.isPlayer(candidate)) {
       this.enemy = actor?.monster?.enemy ?? null;
-      if (this.enemy === null || !game.isPlayer(this.enemy)) { this.enemy = null; return false; }
+      if (this.enemy === null || !game.isPlayer(this.enemy)) {
+        this.enemy = null;
+        return false;
+      }
     }
-    this.found(this.enemy); return true;
+    this.found(this.enemy);
+    return true;
   }
   checkContentsDamage(): boolean {
     const { game, entity } = this;
@@ -118,8 +142,8 @@ export class Mg3Monster extends BaseMonster {
     const source = game.world?.actor.id ?? entity.actor.id;
     const lava = entity.waterType === -5;
     entity.fields.set("dmgtime", String(Math.fround(game.time + (lava ? 0.2 : 1))));
-    game.damage(entity.actor.id, source, source, lava ? entity.classname === "monster_zombie" ? 120 : 30 * entity.waterLevel : 4 * entity.waterLevel);
-    return lava && entity.classname === "monster_zombie" || game.health(entity.actor.id) <= 0;
+    game.damage(entity.actor.id, source, source, lava ? (entity.classname === "monster_zombie" ? 120 : 30 * entity.waterLevel) : 4 * entity.waterLevel);
+    return (lava && entity.classname === "monster_zombie") || game.health(entity.actor.id) <= 0;
   }
   override ai(mode: MonsterAi, distance: number): undefined {
     switch (mode) {
@@ -134,16 +158,23 @@ export class Mg3Monster extends BaseMonster {
         if (goal !== null) this.game.host.moveToGoal(this.entity.actor, goal.actor.id, distance);
         return undefined;
       }
-      case "turn": return this.findTarget() ? undefined : this.changeYaw();
-      case "painforward": this.game.host.walkMove(this.entity.actor, this.entity.idealYaw, distance); return undefined;
-      default: return super.ai(mode, distance);
+      case "turn":
+        return this.findTarget() ? undefined : this.changeYaw();
+      case "painforward":
+        this.game.host.walkMove(this.entity.actor, this.entity.idealYaw, distance);
+        return undefined;
+      default:
+        return super.ai(mode, distance);
     }
   }
   override huntTarget(): undefined {
     const target = this.target;
     if (target === null) return undefined;
-    this.state.mode = "run"; this.entity.idealYaw = yawFor(vsub(target, this.origin));
-    this.nextFrame = this.spec.run; this.delay(0.1); return this.attackFinished(1);
+    this.state.mode = "run";
+    this.entity.idealYaw = yawFor(vsub(target, this.origin));
+    this.nextFrame = this.spec.run;
+    this.delay(0.1);
+    return this.attackFinished(1);
   }
   override updateRunKnowledge(): undefined {
     this.sourceWord("enemy_range", this.rangeCategory());
@@ -157,39 +188,54 @@ export class Mg3Monster extends BaseMonster {
     this.sourceWord("movedist", distance);
     if (this.enemy === null || game.health(this.enemy) <= 0) {
       this.enemy = null;
-      if (this.state.oldEnemy !== null && game.health(this.state.oldEnemy) > 0) { this.enemy = this.state.oldEnemy; this.huntTarget(); }
-      else return this.play(this.state.path === "" ? this.spec.stand : this.spec.walk);
+      if (this.state.oldEnemy !== null && game.health(this.state.oldEnemy) > 0) {
+        this.enemy = this.state.oldEnemy;
+        this.huntTarget();
+      } else return this.play(this.state.path === "" ? this.spec.stand : this.spec.walk);
     }
     entity.fields.set("show_hostile", String(Math.fround(game.time + 1)));
-    const seen = this.visible(); this.sourceWord("enemy_visible", Number(seen));
+    const seen = this.visible();
+    this.sourceWord("enemy_visible", Number(seen));
     if (seen) this.state.searchUntil = Math.fround(game.time + 5);
     if (this.searchForCoopTarget()) return undefined;
     this.updateRunKnowledge();
     if (entity.attackState === "missile" || entity.attackState === "melee") {
-      entity.idealYaw = this.word("enemy_yaw"); this.changeYaw();
-      const delta = ((game.body(entity).angles.y - entity.idealYaw) % 360 + 360) % 360;
+      entity.idealYaw = this.word("enemy_yaw");
+      this.changeYaw();
+      const delta = (((game.body(entity).angles.y - entity.idealYaw) % 360) + 360) % 360;
       if (delta <= 45 || delta >= 315) {
-        if (entity.attackState === "melee") this.meleeAttack(); else if (this.spec.missile !== null) this.play(this.spec.missile);
+        if (entity.attackState === "melee") this.meleeAttack();
+        else if (this.spec.missile !== null) this.play(this.spec.missile);
         entity.attackState = "straight";
       }
       return undefined;
     }
     if (seen && this.tryAttack()) return undefined;
     if (this.sliding) {
-      entity.idealYaw = this.word("enemy_yaw"); this.changeYaw();
+      entity.idealYaw = this.word("enemy_yaw");
+      this.changeYaw();
       const offset = this.lefty ? 90 : -90;
       if (game.host.walkMove(entity.actor, entity.idealYaw + offset, distance)) return undefined;
       this.lefty = !this.lefty;
-      if (entity.classname === "monster_orb") { this.sliding = false; entity.attackState = "straight"; this.nextFrame = this.spec.run; return undefined; }
-      game.host.walkMove(entity.actor, entity.idealYaw - offset, distance); return undefined;
+      if (entity.classname === "monster_orb") {
+        this.sliding = false;
+        entity.attackState = "straight";
+        this.nextFrame = this.spec.run;
+        return undefined;
+      }
+      game.host.walkMove(entity.actor, entity.idealYaw - offset, distance);
+      return undefined;
     }
-    return (this.word("isHordeMode")) !== 0 ? this.pathToGoal(distance) : this.moveToEnemy(distance);
+    return this.word("isHordeMode") !== 0 ? this.pathToGoal(distance) : this.moveToEnemy(distance);
   }
   pathToGoal(distance: number): undefined {
-    const { entity } = this, target = this.target;
+    const { entity } = this,
+      target = this.target;
     if (entity.number("allowPathFind") === 0 || target === null) return this.moveToEnemy(distance);
-    const seen = (this.word("enemy_visible")) !== 0, range = this.word("enemy_range"), style = entity.number("combat_style");
-    if (!seen || style === 2 && range > 1 || style === 3 && range > 2) {
+    const seen = this.word("enemy_visible") !== 0,
+      range = this.word("enemy_range"),
+      style = entity.number("combat_style");
+    if (!seen || (style === 2 && range > 1) || (style === 3 && range > 2)) {
       if (walkMg3PathToGoal(this, distance, target) === Mg3PathResult.IN_PROGRESS) return undefined;
     }
     return this.moveToEnemy(distance);

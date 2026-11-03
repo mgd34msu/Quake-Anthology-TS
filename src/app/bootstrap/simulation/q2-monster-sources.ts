@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q2EntityServices } from "../../../content/q2/foundation/entity-services.ts";
 import type { Q2Edition, Q2SpawnModule } from "../../../content/q2/foundation/host.ts";
@@ -33,23 +34,44 @@ export function createSelectedQ2MonsterModules(options: {
   const ballistics = new Q2Ballistics({ ...options.weapons, noise: (actor, origin, secondary) => monsters.reportNoise(actor, origin, secondary) });
   monsters = new Q2Monsters(ballistics, options.behavior);
   const base = registerQ2ClassicBaseMonsters(monsters);
-  const movers = new Q2MoverModule({ pathCorner: (entity, game, actor) => monsters.touchPathCorner(entity, game, actor),
-    combatPoint: (entity, game, actor) => monsters.touchCombatPoint(entity, game, actor) });
-  const projectiles = new Q2MissionPackProjectiles({ base: ballistics, monster: actor => monsters.context(actor), gravity: options.gravity, playerEffect: options.playerEffect });
+  const movers = new Q2MoverModule({
+    pathCorner: (entity, game, actor) => monsters.touchPathCorner(entity, game, actor),
+    combatPoint: (entity, game, actor) => monsters.touchCombatPoint(entity, game, actor),
+  });
+  const projectiles = new Q2MissionPackProjectiles({
+    base: ballistics,
+    monster: actor => monsters.context(actor),
+    gravity: options.gravity,
+    playerEffect: options.playerEffect,
+  });
   let game: Q2EntityServices;
-  const services: Q2MissionPackMonsterServices = { movers, gravity: options.gravity, powerups: options.powerups,
-    badArea: actor => projectiles.badArea(actor, game), badAreaEntity: (actor, origin) => projectiles.badAreaEntity(actor, game, origin),
-    markTeslaArea: (self, tesla) => projectiles.markTeslaArea(self, game, tesla) };
-  const selectedPacks: readonly ("xatrix" | "rogue")[] = options.edition === "rerelease" ? ["xatrix", "rogue"] : options.program === "xatrix" ? ["xatrix"] : options.program === "rogue" ? ["rogue"] : [];
+  const services: Q2MissionPackMonsterServices = {
+    movers,
+    gravity: options.gravity,
+    powerups: options.powerups,
+    badArea: actor => projectiles.badArea(actor, game),
+    badAreaEntity: (actor, origin) => projectiles.badAreaEntity(actor, game, origin),
+    markTeslaArea: (self, tesla) => projectiles.markTeslaArea(self, game, tesla),
+  };
+  const selectedPacks: readonly ("xatrix" | "rogue")[] =
+    options.edition === "rerelease" ? ["xatrix", "rogue"] : options.program === "xatrix" ? ["xatrix"] : options.program === "rogue" ? ["rogue"] : [];
   const packs = selectedPacks.map(pack => ({ pack, monsters: registerQ2MissionPackMonsters(monsters, pack, projectiles, services, options.edition) }));
   const modules: Q2SpawnModule[] = [base, ...packs.map(pack => pack.monsters)];
   if (options.edition === "rerelease") {
     const source = packs.find(pack => pack.pack === "rogue")?.monsters.source;
     if (source === undefined) throw new Error("Rerelease monster registration requires its Rogue state");
-    modules.push(registerQ2RereleaseMonsters(monsters, { source, weapons: projectiles, isN64: false,
-      expansion: options.program === "baseq2" ? "base" : options.program === "mg2" ? "mg1" : options.program }));
+    modules.push(
+      registerQ2RereleaseMonsters(monsters, {
+        source,
+        weapons: projectiles,
+        isN64: false,
+        expansion: options.program === "baseq2" ? "base" : options.program === "mg2" ? "mg1" : options.program,
+      }),
+    );
   }
   game = options.createGame(monsters, modules);
-  ballistics.registerCallbacks(game); game.sourceCallbacks.register(projectiles.callbacks); game.sourceCallbacks.register(movers.callbacks);
+  ballistics.registerCallbacks(game);
+  game.sourceCallbacks.register(projectiles.callbacks);
+  game.sourceCallbacks.register(movers.callbacks);
   return { game, monsters, ballistics, movers, packs };
 }

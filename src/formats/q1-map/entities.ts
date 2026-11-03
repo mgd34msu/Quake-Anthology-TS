@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake COM_Parse entity syntax. Copyright (C) 1996 Id Software, Inc.
  * GPL-2.0-or-later. Backslash interpretation belongs to the entity provider. */
 import type { Q1Entity } from "./types.ts";
@@ -10,7 +11,10 @@ export function parseQ1Entities(text: string): readonly Q1Entity[] {
     while (position < text.length) {
       const character = text.charAt(position);
       if (character === "\0") return null;
-      if (character <= " ") { position++; continue; }
+      if (character <= " ") {
+        position++;
+        continue;
+      }
       if (text.startsWith("//", position)) {
         const end = text.indexOf("\n", position + 2);
         position = end < 0 ? text.length : end + 1;
@@ -29,8 +33,7 @@ export function parseQ1Entities(text: string): readonly Q1Entity[] {
       return { kind: "text", value: text.slice(start, position++) };
     }
     const start = position - 1;
-    while (position < text.length && text.charAt(position) > " "
-      && text.charAt(position) !== "{" && text.charAt(position) !== "}") position++;
+    while (position < text.length && text.charAt(position) > " " && text.charAt(position) !== "{" && text.charAt(position) !== "}") position++;
     return { kind: "text", value: text.slice(start, position) };
   };
   const entities: Q1Entity[] = [];

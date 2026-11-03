@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { frameTimeCvarNames } from "./frame-time.ts";
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
@@ -57,15 +58,17 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     const dialect = this.options.sourceDialect();
     if (source.session !== this.options.fallback.context.session) throw new Error("Console command belongs to another session");
     if (dialect !== this.options.fallback.dialect) throw new Error("Changing source command dialect requires a new console owner");
-    const server = this.options.server(), origin = caller(source.origin);
+    const server = this.options.server(),
+      origin = caller(source.origin);
     if (origin.kind === "remote-client") throw new Error("Remote client cvars require an explicit client owner");
     const seat = origin.kind === "local-seat" ? this.options.seat(origin.seat) : null;
-    const input = origin.kind === "server-console" ? null : this.options.input?.(origin.kind === "local-seat" ? origin.seat : null) ?? null;
+    const input = origin.kind === "server-console" ? null : (this.options.input?.(origin.kind === "local-seat" ? origin.seat : null) ?? null);
     const movement = this.options.movement?.() ?? null;
     if (movement !== null && movement.context.session !== source.session) throw new Error("Movement cvars belong to another session");
     for (const registry of [server?.cvars, seat, input]) {
       if (registry === undefined || registry === null) continue;
-      if (registry.context.session !== source.session || registry.dialect !== dialect) throw new Error("Console cvar registry has another session or source dialect");
+      if (registry.context.session !== source.session || registry.dialect !== dialect)
+        throw new Error("Console cvar registry has another session or source dialect");
     }
     if (input !== null && caller(input.context.origin).kind !== "local-seat") throw new Error("Mouse settings require a local seat owner");
     if (origin.kind === "local-seat") {
@@ -82,7 +85,8 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
   }
 
   owner(nameInput: string, source: CommandContext): CvarRegistry {
-    const name = sourceCommandText(nameInput), { server, seat, input, movement, origin } = this.owners(source);
+    const name = sourceCommandText(nameInput),
+      { server, seat, input, movement, origin } = this.owners(source);
     const shared = this.options.shared?.();
     if (shared?.find(name) !== undefined) return shared;
     // The current world defines the meaning of names also declared by selected content.
@@ -101,8 +105,10 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
   }
 
   visible(source: CommandContext): readonly CvarRegistry[] {
-    const { server, seat, input, movement } = this.owners(source), registries = new Set<CvarRegistry>();
-    const shared = this.options.shared?.(); if (shared !== undefined && shared !== null) registries.add(shared);
+    const { server, seat, input, movement } = this.owners(source),
+      registries = new Set<CvarRegistry>();
+    const shared = this.options.shared?.();
+    if (shared !== undefined && shared !== null) registries.add(shared);
     if (input !== null) registries.add(input);
     if (server !== null) registries.add(server.cvars);
     if (seat !== null) registries.add(seat);
@@ -111,5 +117,7 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     return Object.freeze([...registries]);
   }
 
-  close(): void { this.closed = true; }
+  close(): void {
+    this.closed = true;
+  }
 }

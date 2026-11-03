@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { stepQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { QuakeCSource } from "./quakec-source.ts";
 import type { ContentId } from "../../../contracts/content.ts";
@@ -18,13 +19,30 @@ import type { SharedPhysics, SharedPhysicsFlags, SharedSolid } from "./physics.t
 export type ActorExecution =
   | { readonly kind: "quakec"; readonly actor: OwnedActor; readonly source: QuakeCSource; readonly content: ContentId }
   | { readonly kind: "q1"; readonly entity: Q1Actor; readonly services: Q1EntityServices; readonly content: ContentId }
-  | { readonly kind: "q2"; readonly entity: Q2Entity; readonly services: Q2EntityServices; readonly content: ContentId;
-      readMonster(): MonsterState | undefined }
-  | { readonly kind: "q3"; readonly actor: OwnedActor; readonly owner: ActorId; readonly provider: ProviderId; readonly content: ContentId;
-      step(previousMilliseconds: number, milliseconds: number): void }
-  | { readonly kind: "q3-source"; readonly actor: OwnedActor; readonly provider: ProviderId; readonly content: ContentId;
-      motion(body: BodyState): Q2Motion; collision(): SharedSolid;
-      step(previousMilliseconds: number, milliseconds: number): void };
+  | {
+      readonly kind: "q2";
+      readonly entity: Q2Entity;
+      readonly services: Q2EntityServices;
+      readonly content: ContentId;
+      readMonster(): MonsterState | undefined;
+    }
+  | {
+      readonly kind: "q3";
+      readonly actor: OwnedActor;
+      readonly owner: ActorId;
+      readonly provider: ProviderId;
+      readonly content: ContentId;
+      step(previousMilliseconds: number, milliseconds: number): void;
+    }
+  | {
+      readonly kind: "q3-source";
+      readonly actor: OwnedActor;
+      readonly provider: ProviderId;
+      readonly content: ContentId;
+      motion(body: BodyState): Q2Motion;
+      collision(): SharedSolid;
+      step(previousMilliseconds: number, milliseconds: number): void;
+    };
 
 export interface ActorExecutionFrame {
   readonly actors: SessionActorRegistry;
@@ -38,39 +56,102 @@ export interface ActorExecutionFrame {
 }
 
 const down: Vec3 = { x: 0, y: 0, z: -1 };
-function model(path: string): number | null { return /^\*[0-9]+$/.test(path) ? Number(path.slice(1)) : null; }
-export function seconds(time: SourceTime): number { return time.kind === "seconds" ? time.value : time.value / 1000; }
-function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
+function model(path: string): number | null {
+  return /^\*[0-9]+$/.test(path) ? Number(path.slice(1)) : null;
+}
+export function seconds(time: SourceTime): number {
+  return time.kind === "seconds" ? time.value : time.value / 1000;
+}
+function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) };
+}
 
 export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
   if (entry.kind === "q3-source") return entry.motion(body);
-  if (entry.kind === "quakec") { const motion = entry.source.motion(entry.actor, body); if (motion === null) throw new Error("Missing live QC motion"); return motion; }
-  if (entry.kind === "q3") return { actor: entry.actor, velocity: body.velocity, angularVelocity: { x: 0, y: 0, z: 0 }, kind: "stationary", gravity: 1, gravityVector: down, clipMask: 0x6000001, owner: entry.owner };
+  if (entry.kind === "quakec") {
+    const motion = entry.source.motion(entry.actor, body);
+    if (motion === null) throw new Error("Missing live QC motion");
+    return motion;
+  }
+  if (entry.kind === "q3")
+    return {
+      actor: entry.actor,
+      velocity: body.velocity,
+      angularVelocity: { x: 0, y: 0, z: 0 },
+      kind: "stationary",
+      gravity: 1,
+      gravityVector: down,
+      clipMask: 0x6000001,
+      owner: entry.owner,
+    };
   const entity = entry.entity;
-  if (entry.kind === "q2") return { actor: entry.entity.actor, velocity: body.velocity, angularVelocity: entry.entity.angularVelocity,
-    kind: entry.entity.motion, gravity: entry.entity.gravity, gravityVector: entry.entity.gravityVector, clipMask: entry.entity.clipMask, owner: entry.entity.owner };
+  if (entry.kind === "q2")
+    return {
+      actor: entry.entity.actor,
+      velocity: body.velocity,
+      angularVelocity: entry.entity.angularVelocity,
+      kind: entry.entity.motion,
+      gravity: entry.entity.gravity,
+      gravityVector: entry.entity.gravityVector,
+      clipMask: entry.entity.clipMask,
+      owner: entry.entity.owner,
+    };
   if (entry.entity.movement === "gib" && (entry.services.options.physicsEdition ?? entry.services.options.edition) !== "rerelease")
     throw new Error("Q1 gib movement requires rerelease engine behavior");
-  return { actor: entity.actor, velocity: body.velocity, angularVelocity: entity.angularVelocity,
-    kind: entry.entity.movement === "gib" ? "bounce" : entry.entity.movement === "flymissile" ? "fly-missile" : entry.entity.movement === "none" || entry.entity.movement === "noclip" ? "stationary" : entry.entity.movement,
-    gravity: entry.entity.number("gravity") || 1, gravityVector: down, clipMask: 0x6000003, owner: entity.owner };
+  return {
+    actor: entity.actor,
+    velocity: body.velocity,
+    angularVelocity: entity.angularVelocity,
+    kind:
+      entry.entity.movement === "gib"
+        ? "bounce"
+        : entry.entity.movement === "flymissile"
+          ? "fly-missile"
+          : entry.entity.movement === "none" || entry.entity.movement === "noclip"
+            ? "stationary"
+            : entry.entity.movement,
+    gravity: entry.entity.number("gravity") || 1,
+    gravityVector: down,
+    clipMask: 0x6000003,
+    owner: entity.owner,
+  };
 }
 
 export function actorCollision(entry: ActorExecution): SharedSolid {
   if (entry.kind === "q3-source") return entry.collision();
-  if (entry.kind === "quakec") { const collision = entry.source.collision(entry.actor); if (collision === null) throw new Error("Missing live QC collision"); return collision; }
+  if (entry.kind === "quakec") {
+    const collision = entry.source.collision(entry.actor);
+    if (collision === null) throw new Error("Missing live QC collision");
+    return collision;
+  }
   if (entry.kind === "q3") return { family: "q3", solid: "none", model: null, owner: entry.owner };
   if (entry.kind === "q1") {
     const entity = entry.entity;
-    if (entity.solid === "corpse") return { family: "q1", model: null, owner: entity.owner,
-      ...((entry.services.options.physicsEdition ?? entry.services.options.edition) === "rerelease"
-        ? { solid: "box", q1Corpse: true } : { solid: "none" }) };
-    return { family: "q1", solid: entity.solid === "none" ? "none" : entity.solid === "trigger" ? "trigger" : entity.solid === "bsp" ? "brush" : "box",
-      model: model(entity.model || entity.originalModel), owner: entity.owner, monster: entity.monster !== null, item: (entity.movementFlags & 256) !== 0 };
+    if (entity.solid === "corpse")
+      return {
+        family: "q1",
+        model: null,
+        owner: entity.owner,
+        ...((entry.services.options.physicsEdition ?? entry.services.options.edition) === "rerelease" ? { solid: "box", q1Corpse: true } : { solid: "none" }),
+      };
+    return {
+      family: "q1",
+      solid: entity.solid === "none" ? "none" : entity.solid === "trigger" ? "trigger" : entity.solid === "bsp" ? "brush" : "box",
+      model: model(entity.model || entity.originalModel),
+      owner: entity.owner,
+      monster: entity.monster !== null,
+      item: (entity.movementFlags & 256) !== 0,
+    };
   }
   const entity = entry.entity;
-  return { family: "q2", solid: entity.solid, model: model(entity.model), owner: entity.owner,
-    monster: (entity.serverFlags & 4) !== 0, deadMonster: (entity.serverFlags & 2) !== 0 };
+  return {
+    family: "q2",
+    solid: entity.solid,
+    model: model(entity.model),
+    owner: entity.owner,
+    monster: (entity.serverFlags & 4) !== 0,
+    deadMonster: (entity.serverFlags & 2) !== 0,
+  };
 }
 
 export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
@@ -78,12 +159,30 @@ export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
   if (entry.kind === "q3" || entry.kind === "q3-source") return {};
   if (entry.kind === "q1") {
     const entity = entry.entity;
-    return { fly: (entity.movementFlags & 1) !== 0, swim: (entity.movementFlags & 2) !== 0, partialGround: (entity.movementFlags & 1024) !== 0,
-      waterLevel: entity.waterLevel, waterType: entity.waterType, enemy: entity.monster?.enemy ?? null };
+    return {
+      fly: (entity.movementFlags & 1) !== 0,
+      swim: (entity.movementFlags & 2) !== 0,
+      partialGround: (entity.movementFlags & 1024) !== 0,
+      waterLevel: entity.waterLevel,
+      waterType: entity.waterType,
+      enemy: entity.monster?.enemy ?? null,
+    };
   }
-  const entity = entry.entity, monster = entry.readMonster();
-  return { teamSlave: (entity.flags & 1024) !== 0, alwaysTouch: (entity.flags & 0x10000000) !== 0,
-    ...(monster === undefined ? {} : { fly: monster.locomotion === "fly", swim: monster.locomotion === "swim", dead: monster.dead, waterLevel: monster.waterLevel, waterType: monster.waterType }) };
+  const entity = entry.entity,
+    monster = entry.readMonster();
+  return {
+    teamSlave: (entity.flags & 1024) !== 0,
+    alwaysTouch: (entity.flags & 0x10000000) !== 0,
+    ...(monster === undefined
+      ? {}
+      : {
+          fly: monster.locomotion === "fly",
+          swim: monster.locomotion === "swim",
+          dead: monster.dead,
+          waterLevel: monster.waterLevel,
+          waterType: monster.waterType,
+        }),
+  };
 }
 
 export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFlags): undefined {
@@ -92,7 +191,8 @@ export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFla
   if (entry.kind === "q1") {
     if (changes.waterLevel !== undefined) entry.entity.waterLevel = changes.waterLevel;
     const waterType = changes.waterType;
-    if (waterType === 0 || waterType === -1 || waterType === -2 || waterType === -3 || waterType === -4 || waterType === -5 || waterType === -6) entry.entity.waterType = waterType;
+    if (waterType === 0 || waterType === -1 || waterType === -2 || waterType === -3 || waterType === -4 || waterType === -5 || waterType === -6)
+      entry.entity.waterType = waterType;
   } else {
     const monster = entry.readMonster();
     if (monster !== undefined) {
@@ -108,10 +208,14 @@ export function executeActor(entry: Exclude<ActorExecution, { readonly kind: "q3
 }
 
 function moveQ1Noclip(actor: OwnedActor, angularVelocity: Vec3, context: Pick<ActorExecutionFrame, "bodies" | "elapsed">): undefined {
-  const { bodies, elapsed } = context, body = bodies.read(actor.id);
+  const { bodies, elapsed } = context,
+    body = bodies.read(actor.id);
   if (body === null) return undefined;
-  bodies.write(actor, { ...body, origin: add(body.origin, { x: body.velocity.x * elapsed, y: body.velocity.y * elapsed, z: body.velocity.z * elapsed }),
-    angles: add(body.angles, { x: angularVelocity.x * elapsed, y: angularVelocity.y * elapsed, z: angularVelocity.z * elapsed }) });
+  bodies.write(actor, {
+    ...body,
+    origin: add(body.origin, { x: body.velocity.x * elapsed, y: body.velocity.y * elapsed, z: body.velocity.z * elapsed }),
+    angles: add(body.angles, { x: angularVelocity.x * elapsed, y: angularVelocity.y * elapsed, z: angularVelocity.z * elapsed }),
+  });
   bodies.link(actor);
   return undefined;
 }
@@ -123,8 +227,11 @@ function executeQuakeCActor(entry: Extract<ActorExecution, { readonly kind: "qua
   return executeQuakeCPhysics(source, actor, context);
 }
 
-export function executeQuakeCPhysics(source: Pick<QuakeCSource, "readMoveType" | "runThink" | "checkWaterTransition" | "motion" | "pusherServices">,
-  actor: OwnedActor, context: Pick<ActorExecutionFrame, "actors" | "bodies" | "frame" | "elapsed"> & { readonly physics: Pick<SharedPhysics, "step"> }): undefined {
+export function executeQuakeCPhysics(
+  source: Pick<QuakeCSource, "readMoveType" | "runThink" | "checkWaterTransition" | "motion" | "pusherServices">,
+  actor: OwnedActor,
+  context: Pick<ActorExecutionFrame, "actors" | "bodies" | "frame" | "elapsed"> & { readonly physics: Pick<SharedPhysics, "step"> },
+): undefined {
   const move = source.readMoveType(actor.id);
   if (move === null) return undefined;
   if (move === 7) {
@@ -137,21 +244,23 @@ export function executeQuakeCPhysics(source: Pick<QuakeCSource, "readMoveType" |
     if (context.actors.isLive(actor.id)) source.checkWaterTransition(actor);
     return undefined;
   }
-  if (move !== 0 && move !== 5 && move !== 6 && move !== 8 && move !== 9 && move !== 10)
-    throw new Error(`Unsupported nonclient QuakeC movetype ${move}`);
+  if (move !== 0 && move !== 5 && move !== 6 && move !== 8 && move !== 9 && move !== 10) throw new Error(`Unsupported nonclient QuakeC movetype ${move}`);
   source.runThink(actor, context.frame);
   if (!context.actors.isLive(actor.id) || move === 0) return undefined;
   if (move === 8) {
-    const body = context.bodies.read(actor.id), motion = body === null ? null : source.motion(actor, body);
+    const body = context.bodies.read(actor.id),
+      motion = body === null ? null : source.motion(actor, body);
     if (motion !== null) moveQ1Noclip(actor, motion.angularVelocity, context);
   } else context.physics.step(actor, context.elapsed);
   return undefined;
 }
 
 function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>, context: ActorExecutionFrame): undefined {
-  const { entity, services } = entry, actor = entity.actor;
+  const { entity, services } = entry,
+    actor = entity.actor;
   const { actors, bodies, physics, scheduler, elapsed } = context;
-  const pusher = entity.movement === "push", step = entity.movement === "step";
+  const pusher = entity.movement === "push",
+    step = entity.movement === "step";
   const frame: FrameContext = { ...context.frame, phase: "entity-think" };
   if (!pusher && !step) scheduler.run(actor.id, frame, "during-physics");
   if (actors.isLive(actor.id)) {
@@ -160,7 +269,10 @@ function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>,
     } else if (step) {
       physics.step(actor, elapsed);
       entity.movementFlags = (entity.movementFlags & ~512) | (bodies.read(actor.id)?.ground == null ? 0 : 512);
-    } else if (entity.move === null && (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile")) {
+    } else if (
+      entity.move === null &&
+      (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile")
+    ) {
       services.applyProjectileBehavior(actor, context.timeSeconds);
       physics.step(actor, elapsed);
     } else services.physicsEntity(actor, context.timeSeconds, elapsed);
@@ -171,7 +283,8 @@ function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>,
 }
 
 function executeQ2Actor(entry: Extract<ActorExecution, { readonly kind: "q2" }>, context: ActorExecutionFrame): undefined {
-  const { services } = entry, actor = entry.entity.actor;
+  const { services } = entry,
+    actor = entry.entity.actor;
   const { actors, bodies, physics, scheduler, elapsed, visited } = context;
   const frame: FrameContext = { ...context.frame, phase: "entity-think" };
   return services.runActor(actor.id, () => {
@@ -179,7 +292,8 @@ function executeQ2Actor(entry: Extract<ActorExecution, { readonly kind: "q2" }>,
     if (!actors.isLive(actor.id)) return undefined;
     const entity = entry.entity;
     if (entity.motion === "push" || entity.motion === "stop") {
-      const team = services.pushTeam(actor.id), master = team[0];
+      const team = services.pushTeam(actor.id),
+        master = team[0];
       if (master !== undefined && !sameActor(master.id, actor.id)) return undefined;
       for (const member of team) visited.add(member);
       const blocked = physics.pushTeam(team, elapsed);
@@ -189,7 +303,8 @@ function executeQ2Actor(entry: Extract<ActorExecution, { readonly kind: "q2" }>,
           if (pending !== null && actors.isLive(member.id)) {
             const due = { kind: pending.timing.due.kind, value: pending.timing.due.value + (pending.timing.due.kind === "seconds" ? elapsed : elapsed * 1000) };
             scheduler.schedule(member, pending.callback, { ...pending.timing, due });
-            const part = services.entity(member.id); if (part !== null) part.nextThink = seconds(due);
+            const part = services.entity(member.id);
+            if (part !== null) part.nextThink = seconds(due);
           }
         }
       } else for (const member of team) if (actors.isLive(member.id)) scheduler.run(member.id, frame, "during-physics");
@@ -200,12 +315,24 @@ function executeQ2Actor(entry: Extract<ActorExecution, { readonly kind: "q2" }>,
     if (!after) scheduler.run(actor.id, frame, "during-physics");
     if (actors.isLive(actor.id)) services.applyProjectileBehavior(actor.id, context.timeSeconds);
     const moved = actors.isLive(actor.id) ? physics.step(actor, elapsed) : undefined;
-    if (actors.isLive(actor.id) && (entity.motion === "new-toss" && moved === "moved" || entity.motion === "toss" || entity.motion === "bounce" || entity.motion === "fly" || entity.motion === "fly-missile" || entity.motion === "wall-bounce")) {
+    if (
+      actors.isLive(actor.id) &&
+      ((entity.motion === "new-toss" && moved === "moved") ||
+        entity.motion === "toss" ||
+        entity.motion === "bounce" ||
+        entity.motion === "fly" ||
+        entity.motion === "fly-missile" ||
+        entity.motion === "wall-bounce")
+    ) {
       const body = bodies.read(actor.id);
-      for (let next = entity.teamChain; body !== null && next !== null;) {
-        const follower = services.entity(next); if (follower === null) break;
+      for (let next = entity.teamChain; body !== null && next !== null; ) {
+        const follower = services.entity(next);
+        if (follower === null) break;
         const current = bodies.read(follower.actor.id);
-        if (current !== null) { bodies.write(follower.actor, { ...current, origin: body.origin }); bodies.link(follower.actor); }
+        if (current !== null) {
+          bodies.write(follower.actor, { ...current, origin: body.origin });
+          bodies.link(follower.actor);
+        }
         next = follower.teamChain;
       }
     }

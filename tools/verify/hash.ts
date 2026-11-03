@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
@@ -16,7 +17,10 @@ export function canonicalJson(value: unknown): string {
     return `[${value.map(canonicalJson).join(",")}]`;
   }
   if (isObject(value)) {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
   }
   throw new Error("Fingerprints require finite JSON data");
 }

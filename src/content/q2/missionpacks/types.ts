@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q2Ballistics } from "../foundation/weapons/ballistics.ts";
@@ -21,8 +22,26 @@ export interface Q2MissionPackProjectileHooks {
 
 /** Internal Q2 combat identities; guest APIs translate their edition's raw MOD ordinals separately. */
 export const q2MissionPackDamage = {
-  ripper: 34, phalanx: 35, brainTentacle: 36, blastoff: 37, gekk: 38, trap: 39,
-  chainfist: 40, disintegrator: 41, flechette: 42, blaster2: 43, heatbeam: 44, tesla: 45, prox: 46,
-  nuke: 47, vengeanceSphere: 48, hunterSphere: 49, defenderSphere: 50, tracker: 51,
-  deathballCrush: 52, doppleExplode: 53, doppleVengeance: 54, doppleHunter: 55,
+  ripper: 34,
+  phalanx: 35,
+  brainTentacle: 36,
+  blastoff: 37,
+  gekk: 38,
+  trap: 39,
+  chainfist: 40,
+  disintegrator: 41,
+  flechette: 42,
+  blaster2: 43,
+  heatbeam: 44,
+  tesla: 45,
+  prox: 46,
+  nuke: 47,
+  vengeanceSphere: 48,
+  hunterSphere: 49,
+  defenderSphere: 50,
+  tracker: 51,
+  deathballCrush: 52,
+  doppleExplode: 53,
+  doppleVengeance: 54,
+  doppleHunter: 55,
 };

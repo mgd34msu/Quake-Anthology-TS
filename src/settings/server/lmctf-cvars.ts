@@ -1,10 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { Q2CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import type { LmctfRules } from "../../content/q2/multiplayer/lmctf/types.ts";
 type NumericRule = "ctfFlags" | "refFlags" | "runes" | "skinSet" | "disabledWeapons" | "timeLimitMinutes" | "fragLimit" | "countdownSeconds";
 type BooleanRule = "flagInit" | "fastSwitch" | "autoLock";
 type StringRule = "refPassword" | "rconPassword";
-interface Definition<Key> { readonly name: string; readonly value: string; readonly flags: number; readonly key: Key; }
+interface Definition<Key> {
+  readonly name: string;
+  readonly value: string;
+  readonly flags: number;
+  readonly key: Key;
+}
 const numeric: readonly Definition<NumericRule>[] = [
   { name: "ctfflags", value: "0", flags: Q2CvarFlag.ServerInfo, key: "ctfFlags" },
   { name: "refset", value: "0", flags: Q2CvarFlag.ServerInfo, key: "refFlags" },
@@ -35,19 +41,36 @@ export function bindLmctfConsoleRules(cvars: CvarRegistry, rules: LmctfRules): v
   };
   for (const definition of numeric) {
     registerValue(definition, String(rules[definition.key]));
-    Object.defineProperty(rules, definition.key, { enumerable: true, configurable: true,
-      get: () => cvars.variableValue(definition.name), set: (value: number) => { cvars.set(definition.name, String(value)); } });
+    Object.defineProperty(rules, definition.key, {
+      enumerable: true,
+      configurable: true,
+      get: () => cvars.variableValue(definition.name),
+      set: (value: number) => {
+        cvars.set(definition.name, String(value));
+      },
+    });
   }
   for (const definition of boolean) {
     registerValue(definition, rules[definition.key] ? "1" : "0");
-    Object.defineProperty(rules, definition.key, { enumerable: true, configurable: true,
-      get: () => (definition.key === "autoLock" ? Math.trunc(cvars.variableValue(definition.name)) : cvars.variableValue(definition.name)) !== 0, set: (value: boolean) => { cvars.set(definition.name, value ? "1" : "0"); } });
+    Object.defineProperty(rules, definition.key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (definition.key === "autoLock" ? Math.trunc(cvars.variableValue(definition.name)) : cvars.variableValue(definition.name)) !== 0,
+      set: (value: boolean) => {
+        cvars.set(definition.name, value ? "1" : "0");
+      },
+    });
   }
   for (const definition of strings) {
     registerValue(definition, rules[definition.key]);
-    Object.defineProperty(rules, definition.key, { enumerable: true, configurable: true,
-      get: () => cvars.variableString(definition.name), set: (value: string) => { cvars.set(definition.name, value); } });
+    Object.defineProperty(rules, definition.key, {
+      enumerable: true,
+      configurable: true,
+      get: () => cvars.variableString(definition.name),
+      set: (value: string) => {
+        cvars.set(definition.name, value);
+      },
+    });
   }
   cvars.register("maplist_file", "maplist.txt", 0);
 }
-

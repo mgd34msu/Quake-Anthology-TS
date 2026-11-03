@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Named source callbacks retained for animation identity and save state. */
 export type MonsterCallback =
-  "InfantryMachineGun"
+  | "InfantryMachineGun"
   | "infantry_attack4_refire"
   | "infantry_cock_gun"
   | "infantry_dead"

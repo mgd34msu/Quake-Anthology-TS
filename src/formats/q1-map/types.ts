@@ -1,12 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake BSP records, derived from id Software bspfile.h, Ironwail and FTE.
  * Copyright (C) 1996-2026 their respective authors. GPL-2.0-or-later. */
 import type { Vec3 } from "../../contracts/math.ts";
 import type { Q1WorldGeometry } from "../../contracts/scene.ts";
 
 export type Q1BspFormat = "bsp29" | "bsp2" | "2psb" | "quake64";
-export type Q1LumpName = "entities" | "planes" | "textures" | "vertices" | "visibility"
-  | "nodes" | "textureInfo" | "faces" | "lighting" | "clipnodes" | "leaves"
-  | "leafFaces" | "edges" | "surfaceEdges" | "models";
+export type Q1LumpName =
+  | "entities"
+  | "planes"
+  | "textures"
+  | "vertices"
+  | "visibility"
+  | "nodes"
+  | "textureInfo"
+  | "faces"
+  | "lighting"
+  | "clipnodes"
+  | "leaves"
+  | "leafFaces"
+  | "edges"
+  | "surfaceEdges"
+  | "models";
 
 export interface Q1Lump {
   readonly name: Q1LumpName;

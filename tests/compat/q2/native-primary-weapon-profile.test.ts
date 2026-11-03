@@ -20,7 +20,9 @@ function slice(file: { readonly bytes: Uint8Array; readonly pe: PeFile }, rva: n
   const start = section.rawOffset + rva - section.rva;
   return [...file.bytes.subarray(start, start + length)];
 }
-function le32(value: number): number[] { return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]; }
+function le32(value: number): number[] {
+  return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+}
 function contains(haystack: readonly number[], needle: readonly number[]): boolean {
   for (let i = 0; i + needle.length <= haystack.length; i++) if (needle.every((byte, j) => haystack[i + j] === byte)) return true;
   return false;
@@ -33,7 +35,8 @@ corpusTest(path)("1998 Xatrix native primary weapon profile matches the shipped 
   if (profile === null) throw new Error("1998 Xatrix has no native primary weapon profile");
   expect(profile.abi.pointerBytes).toBe(4);
   const base = 0x20000000;
-  const buttons = profile.client.buttons.offset, latched = profile.client.latchedButtons.offset;
+  const buttons = profile.client.buttons.offset,
+    latched = profile.client.latchedButtons.offset;
 
   // All seven decision ranges read the button word; the first three also read the latched word; each closes on the original conditional jump.
   expect(profile.decisions.length).toBe(7);
@@ -54,7 +57,9 @@ corpusTest(path)("1998 Xatrix native primary weapon profile matches the shipped 
   if (damage.kind !== "source-flag") throw new Error("expected a source-flag damage rule");
   expect(damage.region.entry).toBe(0x352f8);
   expect(contains(slice(file, damage.region.entry, damage.region.join - damage.region.entry), le32(base + damage.address))).toBe(true);
-  expect(contains(slice(file, profile.delay.region.entry, profile.delay.region.join - profile.delay.region.entry), le32(base + profile.delay.flag.offset))).toBe(true);
+  expect(
+    contains(slice(file, profile.delay.region.entry, profile.delay.region.join - profile.delay.region.entry), le32(base + profile.delay.flag.offset)),
+  ).toBe(true);
   expect(damage.region.join).toBe(profile.delay.region.entry);
   expect(profile.delay.flag.offset).toBe(damage.address + 4);
 
@@ -64,7 +69,11 @@ corpusTest(path)("1998 Xatrix native primary weapon profile matches the shipped 
   const state = profile.continuations[0]?.[0];
   if (state?.kind !== "scalar") throw new Error("expected a weapon-state continuation");
   expect(contains(slice(file, generic.entry, 0x40), [0x8b, 0x88, ...le32(state.field.offset)])).toBe(true);
-  expect(generic.skip.map(region => [region.entry, region.join])).toEqual([[0x3571b, 0x35795], [0x3579a, 0x35996], [0x358e1, 0x3597c]]);
+  expect(generic.skip.map(region => [region.entry, region.join])).toEqual([
+    [0x3571b, 0x35795],
+    [0x3579a, 0x35996],
+    [0x358e1, 0x3597c],
+  ]);
   expect(slice(file, 0x35795, 5)).toEqual([0xba, 0x01, 0x00, 0x00, 0x00]);
   expect(slice(file, 0x35996, 3)).toEqual([0x8b, 0x4e, 0x54]);
   expect(slice(file, 0x3597c, 2)).toEqual([0x5f, 0x5e]);
@@ -73,8 +82,9 @@ corpusTest(path)("1998 Xatrix native primary weapon profile matches the shipped 
   expect(contains(generic0, [0xc7, 0x80, ...le32(profile.animation.priority.offset), 0x06, 0x00, 0x00, 0x00])).toBe(true);
   expect(contains(generic0, [0xc7, 0x40, 0x38, 0xad, 0x00, 0x00, 0x00])).toBe(false);
   expect(contains(generic0, [0xc7, 0x80, ...le32(profile.animation.end.offset), 0xa9, 0x00, 0x00, 0x00])).toBe(true);
-  expect([profile.animation.end.offset, profile.animation.priority.offset, profile.animation.duck.offset, profile.animation.run.offset])
-    .toEqual([0, 4, 8, 12].map(delta => profile.client.viewAngles + 56 + delta));
+  expect([profile.animation.end.offset, profile.animation.priority.offset, profile.animation.duck.offset, profile.animation.run.offset]).toEqual(
+    [0, 4, 8, 12].map(delta => profile.client.viewAngles + 56 + delta),
+  );
 
   // v_angle is written by ClientThink in the same record as the invincible frame the combat profile derived.
   expect(profile.client.viewAngles).toBe(xatrix1998CombatProfile.client.viewAngles);

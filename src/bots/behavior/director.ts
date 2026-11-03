@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { botClearActivateGoalStack } from "./q3/ai-navigation.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
@@ -60,10 +61,18 @@ export class SourceBotDirector {
   readonly library: BotLibrary;
   private round: { readonly navigation: BotNavigation & GoalNavigation; readonly ai: GameAi; readonly catalog: GameBotCatalog };
   private roundPhase: "active" | "detached" | "bound" = "active";
-  get navigation(): BotNavigation & GoalNavigation { return this.round.navigation; }
-  get ai(): GameAi { return this.round.ai; }
-  get catalog(): GameBotCatalog { return this.round.catalog; }
-  get options(): SourceBotDirectorOptions { return this.currentOptions; }
+  get navigation(): BotNavigation & GoalNavigation {
+    return this.round.navigation;
+  }
+  get ai(): GameAi {
+    return this.round.ai;
+  }
+  get catalog(): GameBotCatalog {
+    return this.round.catalog;
+  }
+  get options(): SourceBotDirectorOptions {
+    return this.currentOptions;
+  }
   readonly bspEntities: AasBspEntities;
   private readonly sequences = new Map<OwnedActor, number>();
   private readonly generated = new EventRing<ActorCommand>(4096);
@@ -80,8 +89,11 @@ export class SourceBotDirector {
     this.round = this.createRound(options.host, options.navigation);
   }
   private createRound(host: SourceBotDirectorHost, navigationFor: SourceBotDirectorOptions["navigation"]) {
-    const game = host.game, navigation = navigationFor(this.library, this.bspEntities);
-    const ai = new GameAi(game, this.library, { navigation, bspEntities: this.bspEntities,
+    const game = host.game,
+      navigation = navigationFor(this.library, this.bspEntities);
+    const ai = new GameAi(game, this.library, {
+      navigation,
+      bspEntities: this.bspEntities,
       pointContents: point => host.pointContents(point),
       getSnapshotEntity: (client, sequence) => host.snapshotEntity(client, sequence),
       getConsoleMessage: client => host.consoleMessage(client),
@@ -93,12 +105,22 @@ export class SourceBotDirector {
         if (actor === null) throw new Error(`Bot command has no admitted shared actor for client ${client}`);
         const sequence = this.sequences.get(actor) ?? 0;
         this.sequences.set(actor, sequence + 1);
-        this.generated.admit({ actor: actor.id, source: { kind: "bot", provider: host.provider }, sequence,
-          ...host.encodeCommand(client, { ...command, angles: { ...command.angles } }) });
-      } });
+        this.generated.admit({
+          actor: actor.id,
+          source: { kind: "bot", provider: host.provider },
+          sequence,
+          ...host.encodeCommand(client, { ...command, angles: { ...command.angles } }),
+        });
+      },
+    });
     const catalog = new GameBotCatalog(game, this.options.files, new CommonParseState(), {
-      allocateClient: () => host.allocateClient(), setupClient: (client, settings, restart) => ai.setupClient(client, settings, restart),
-      shutdownClient: (client, restart) => { ai.shutdownClient(client, restart); const actor = host.actor(client); if (actor !== null) this.sequences.delete(actor); },
+      allocateClient: () => host.allocateClient(),
+      setupClient: (client, settings, restart) => ai.setupClient(client, settings, restart),
+      shutdownClient: (client, restart) => {
+        ai.shutdownClient(client, restart);
+        const actor = host.actor(client);
+        if (actor !== null) this.sequences.delete(actor);
+      },
     });
     return { ai, catalog, navigation };
   }
@@ -129,28 +151,52 @@ export class SourceBotDirector {
   }
 
   private goalWorld(): GoalWorld {
-    const { host } = this.options, game = host.game;
-    return { bspEntities: this.bspEntities, navigation: this.navigation,
+    const { host } = this.options,
+      game = host.game;
+    return {
+      bspEntities: this.bspEntities,
+      navigation: this.navigation,
       ...(game.pickups === null ? {} : { sourcePickups: this.sourcePickupGoals(game) }),
-      pointArea: origin => this.navigation.pointArea(origin), host: {
-        trace: (start, end, bounds, passEntity, mask) => game.world.trace({ start, end, passEntityNum: passEntity, mask,
-          shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max } }),
-        pointContents: point => host.pointContents(point), nextEntity: after => this.ai.context.observations.nextEntity(after),
+      pointArea: origin => this.navigation.pointArea(origin),
+      host: {
+        trace: (start, end, bounds, passEntity, mask) =>
+          game.world.trace({
+            start,
+            end,
+            passEntityNum: passEntity,
+            mask,
+            shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max },
+          }),
+        pointContents: point => host.pointContents(point),
+        nextEntity: after => this.ai.context.observations.nextEntity(after),
         entityInfo: entity => this.ai.context.observations.info(entity),
-      } };
+      },
+    };
   }
 
   captureSaveState() {
-    const orchestration = this.checkpointOrchestration(), assets = this.options.files.provenance?.();
+    const orchestration = this.checkpointOrchestration(),
+      assets = this.options.files.provenance?.();
     if (assets === undefined) throw new Error("Exact bot persistence requires complete mounted asset provenance");
     const memory = this.library.memory.checkpoint();
-    return { version: 2, assets, memory: memory.image, bsp: this.bspEntities.checkpoint(memory),
-      library: this.library.captureSaveState(memory), ai: this.ai.captureSaveState(), catalog: this.catalog.captureSaveState(), orchestration };
+    return {
+      version: 2,
+      assets,
+      memory: memory.image,
+      bsp: this.bspEntities.checkpoint(memory),
+      library: this.library.captureSaveState(memory),
+      ai: this.ai.captureSaveState(),
+      catalog: this.catalog.captureSaveState(),
+      orchestration,
+    };
   }
-  restoreSaveState(value: unknown, resolveActor: (saved: SavedActorId) => import("../../contracts/identity.ts").ActorId,
+  restoreSaveState(
+    value: unknown,
+    resolveActor: (saved: SavedActorId) => import("../../contracts/identity.ts").ActorId,
     resolveOwned: (saved: SavedActorId) => OwnedActor | null,
     edge: (client: number, id: number) => import("../navigation/types.ts").NavigationEdge | null,
-    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number },
+  ): void {
     if (this.loaded || this.closed || this.options.restoring !== true) throw new Error("Bot director restoration requires an inert constructor");
     const reader = new SaveReader(value, "bot.director");
     // Version 1 digested every file under bots/, navigation graphs included; version 2 leaves them out.
@@ -173,19 +219,31 @@ export class SourceBotDirector {
     const pickups = game.pickups;
     const goal = (client: number, pickup: BotObservedPickup | null): SourcePickupGoal | null => {
       const state = this.ai.context.states.get(client);
-      if (pickup === null || state === undefined || state === null || pickup.observation.availability.kind !== "ready" || !pickup.observation.availability.eligible) return null;
+      if (
+        pickup === null ||
+        state === undefined ||
+        state === null ||
+        pickup.observation.availability.kind !== "ready" ||
+        !pickup.observation.availability.eligible
+      )
+        return null;
       const utility = game.knowledge.pickupUtility(this.library, state, pickup.preview);
-      return utility > 0 ? { actor: pickup.observation.actor, entity: pickup.entity, origin: pickup.origin,
-        bounds: pickup.bounds, name: pickup.name, utility } : null;
+      return utility > 0
+        ? { actor: pickup.observation.actor, entity: pickup.entity, origin: pickup.origin, bounds: pickup.bounds, name: pickup.name, utility }
+        : null;
     };
-    return { ...(pickups?.ownsItemGoal === undefined ? {} : { ownsItemGoal: pickups.ownsItemGoal.bind(pickups) }), candidates: client => {
-      const candidates: SourcePickupGoal[] = [];
-      for (const pickup of game.pickups?.candidates(client) ?? []) {
-        const candidate = goal(client, pickup);
-        if (candidate !== null) candidates.push(candidate);
-      }
-      return candidates;
-    }, inspect: (client, actor) => goal(client, game.pickups?.inspect(client, actor) ?? null) };
+    return {
+      ...(pickups?.ownsItemGoal === undefined ? {} : { ownsItemGoal: pickups.ownsItemGoal.bind(pickups) }),
+      candidates: client => {
+        const candidates: SourcePickupGoal[] = [];
+        for (const pickup of game.pickups?.candidates(client) ?? []) {
+          const candidate = goal(client, pickup);
+          if (candidate !== null) candidates.push(candidate);
+        }
+        return candidates;
+      },
+      inspect: (client, actor) => goal(client, game.pickups?.inspect(client, actor) ?? null),
+    };
   }
 
   load(restart = false): void {
@@ -205,20 +263,40 @@ export class SourceBotDirector {
     if (!this.loaded || this.closed || this.running || this.roundPhase !== "active") throw new Error("Bot commands require a live idle director");
     if (this.generated.pending(this.generatedCursor) !== 0) throw new Error("Bot command output from the previous source frame was not drained");
     this.running = true;
-    try { this.ai.startFrame(milliseconds); const taken = this.generated.take(this.generatedCursor); this.generated.retire(); return taken; }
-    finally { this.running = false; }
+    try {
+      this.ai.startFrame(milliseconds);
+      const taken = this.generated.take(this.generatedCursor);
+      this.generated.retire();
+      return taken;
+    } finally {
+      this.running = false;
+    }
   }
   checkpointOrchestration(): SourceBotDirectorOrchestration {
-    if (!this.loaded || this.closed || this.running || this.generated.pending(this.generatedCursor) !== 0 || this.roundPhase !== "active") throw new Error("Bot director checkpoint requires a completed frame in a live map");
-    return { version: 1, sequences: [...this.sequences].map(([actor, next]) => ({
-      actor: { slot: actor.id.slot, generation: actor.id.generation }, owner: actor.owner, next,
-    })) };
+    if (!this.loaded || this.closed || this.running || this.generated.pending(this.generatedCursor) !== 0 || this.roundPhase !== "active")
+      throw new Error("Bot director checkpoint requires a completed frame in a live map");
+    return {
+      version: 1,
+      sequences: [...this.sequences].map(([actor, next]) => ({
+        actor: { slot: actor.id.slot, generation: actor.id.generation },
+        owner: actor.owner,
+        next,
+      })),
+    };
   }
   /** Call after restoring the child owners and transport; this never initializes them. */
   restoreOrchestration(value: unknown, resolve: (actor: SavedActorId) => OwnedActor | null): void {
-    const reader = new SaveReader(value, "bot.director.orchestration"), image = { version: reader.field("version").literal(1),
-      sequences: reader.field("sequences").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, owner: namespaced(entry.field("owner")), next: entry.field("next").integer(0) })) };
-    if (!this.loaded || this.closed || this.generated.pending(this.generatedCursor) !== 0) throw new Error("Restore bot director orchestration only after its child owners are live");
+    const reader = new SaveReader(value, "bot.director.orchestration"),
+      image = {
+        version: reader.field("version").literal(1),
+        sequences: reader.field("sequences").list(entry => ({
+          actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) },
+          owner: namespaced(entry.field("owner")),
+          next: entry.field("next").integer(0),
+        })),
+      };
+    if (!this.loaded || this.closed || this.generated.pending(this.generatedCursor) !== 0)
+      throw new Error("Restore bot director orchestration only after its child owners are live");
     if (image.version !== 1) throw new Error("Unsupported bot director orchestration version");
     const sequences = new Map<OwnedActor, number>();
     for (const entry of image.sequences) {
@@ -227,7 +305,10 @@ export class SourceBotDirector {
       if (actor === null || actor.owner !== entry.owner || sequences.has(actor)) throw new Error("Saved bot sequence has an invalid or duplicate actor");
       let connected = false;
       for (let client = 0; client < this.options.host.game.maxClients; client++) {
-        if (this.options.host.actor(client) === actor) { connected = true; break; }
+        if (this.options.host.actor(client) === actor) {
+          connected = true;
+          break;
+        }
       }
       if (!connected) throw new Error("Saved bot command sequence has no restored transport connection");
       sequences.set(actor, entry.next);
@@ -235,17 +316,32 @@ export class SourceBotDirector {
     this.sequences.clear();
     for (const [actor, next] of sequences) this.sequences.set(actor, next);
   }
-  connect(client: number, restart: boolean): boolean { return this.catalog.connect(client, restart); }
-  shutdownClient(client: number, restart: boolean): void { this.catalog.shutdownClient(client, restart); }
-  removeQueuedBegin(client: number): void { this.catalog.removeQueuedBegin(client); }
-  consoleCommand(argv: readonly string[]): void { this.catalog.consoleCommand(argv); }
-  addMatchBot(): boolean { return this.catalog.addMatchBot(); }
-  testAas(origin: import("../../contracts/math.ts").Vec3): void { this.ai.testAas(origin); }
-  interbreedEndMatch(): void { this.ai.interbreedEndMatch(); }
+  connect(client: number, restart: boolean): boolean {
+    return this.catalog.connect(client, restart);
+  }
+  shutdownClient(client: number, restart: boolean): void {
+    this.catalog.shutdownClient(client, restart);
+  }
+  removeQueuedBegin(client: number): void {
+    this.catalog.removeQueuedBegin(client);
+  }
+  consoleCommand(argv: readonly string[]): void {
+    this.catalog.consoleCommand(argv);
+  }
+  addMatchBot(): boolean {
+    return this.catalog.addMatchBot();
+  }
+  testAas(origin: import("../../contracts/math.ts").Vec3): void {
+    this.ai.testAas(origin);
+  }
+  interbreedEndMatch(): void {
+    this.ai.interbreedEndMatch();
+  }
   roster(): readonly SourceBotRosterEntry[] {
     const result: SourceBotRosterEntry[] = [];
     for (let client = 0; client < this.options.host.game.maxClients; client++) {
-      const state = this.ai.context.states.get(client), actor = this.options.host.actor(client);
+      const state = this.ai.context.states.get(client),
+        actor = this.options.host.actor(client);
       if (state !== null && state.inuse && actor !== null) result.push({ actor, sourceClient: client, settings: { ...state.settings }, state });
     }
     return result;
@@ -271,10 +367,12 @@ export class SourceBotDirector {
     this.library.moveStates.resetAvoidReach(state.ms);
   }
   goalStatus(client: number): BotGoalStatus {
-    const state = this.orderState(client), order = state?.scriptedOrder;
+    const state = this.orderState(client),
+      order = state?.scriptedOrder;
     if (state === null || order === undefined || order === null) return 0;
     if (order.order.kind === "follow") {
-      const reference = order.order.entity, entity = this.options.host.game.entity(reference.number);
+      const reference = order.order.entity,
+        entity = this.options.host.game.entity(reference.number);
       if (!entity.present || entity.generation !== reference.generation) state.scriptedOrder = { ...order, progress: "error" };
     }
     return botOrderStatus(state.scriptedOrder);
@@ -297,16 +395,22 @@ export class SourceBotDirector {
   arenaRoster(map: string): readonly { readonly name: string; readonly info: string }[] {
     const info = this.catalog.getArenaInfoByMap(map);
     if (info === null) return [];
-    return infoValueForKey(info, "bots").split(" ").filter(Boolean).map(name => {
-      const bot = this.catalog.getBotInfoByName(name);
-      if (bot === null) throw new Error(`Arena ${map} names undefined source bot ${name}`);
-      return { name, info: bot };
-    });
+    return infoValueForKey(info, "bots")
+      .split(" ")
+      .filter(Boolean)
+      .map(name => {
+        const bot = this.catalog.getBotInfoByName(name);
+        if (bot === null) throw new Error(`Arena ${map} names undefined source bot ${name}`);
+        return { name, info: bot };
+      });
   }
   close(restart = false): void {
     if (this.closed) return;
     for (const entry of this.roster()) this.catalog.shutdownClient(entry.sourceClient, restart);
-    this.bspEntities.dump(); this.library.shutdown();
-    this.sequences.clear(); this.generated.reset(); this.closed = true;
+    this.bspEntities.dump();
+    this.library.shutdown();
+    this.sequences.clear();
+    this.generated.reset();
+    this.closed = true;
   }
 }

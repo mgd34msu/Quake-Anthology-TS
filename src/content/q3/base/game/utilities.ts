@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { UseParticipant } from "./state.ts";
 // Source game/g_utils.c configstring indices, target dispatch, team commands
 // and editor direction conversion. GPL-2.0-or-later, id Software 1999-2005.
@@ -17,20 +18,31 @@ class TemporaryVector {
   #x = 0;
   #y = 0;
   #z = 0;
-  get x(): number { return this.#x; }
-  set x(value: number) { this.#x = Math.fround(value); }
-  get y(): number { return this.#y; }
-  set y(value: number) { this.#y = Math.fround(value); }
-  get z(): number { return this.#z; }
-  set z(value: number) { this.#z = Math.fround(value); }
+  get x(): number {
+    return this.#x;
+  }
+  set x(value: number) {
+    this.#x = Math.fround(value);
+  }
+  get y(): number {
+    return this.#y;
+  }
+  set y(value: number) {
+    this.#y = Math.fround(value);
+  }
+  get z(): number {
+    return this.#z;
+  }
+  set z(value: number) {
+    this.#z = Math.fround(value);
+  }
 }
 
 /** g_utils.c tv/vtos have separate static rings for each loaded game. */
 export class GameUtilityScratch {
   readonly #vectors = Array.from({ length: 8 }, () => new TemporaryVector());
   readonly #stringBytes = new Uint8Array(8 * 32);
-  readonly #strings = Array.from({ length: 8 }, (_, index) =>
-    new GameMemoryAllocation(this.#stringBytes.subarray(index * 32, (index + 1) * 32)));
+  readonly #strings = Array.from({ length: 8 }, (_, index) => new GameMemoryAllocation(this.#stringBytes.subarray(index * 32, (index + 1) * 32)));
   #vectorIndex = 0;
   #stringIndex = 0;
 
@@ -40,7 +52,9 @@ export class GameUtilityScratch {
     const vector = this.#vectors[this.#vectorIndex];
     if (vector === undefined) throw new Error("Game temporary vector ring index invariant");
     this.#vectorIndex = (this.#vectorIndex + 1) & 7;
-    vector.x = x; vector.y = y; vector.z = z;
+    vector.x = x;
+    vector.y = y;
+    vector.z = z;
     return vector;
   }
 
@@ -48,8 +62,7 @@ export class GameUtilityScratch {
     const string = this.#strings[this.#stringIndex];
     if (string === undefined) throw new Error("Game vector string ring index invariant");
     this.#stringIndex = (this.#stringIndex + 1) & 7;
-    const value = gameFormat("(%i %i %i)",
-      [qvmFloatToInt(vector.x), qvmFloatToInt(vector.y), qvmFloatToInt(vector.z)]);
+    const value = gameFormat("(%i %i %i)", [qvmFloatToInt(vector.x), qvmFloatToInt(vector.y), qvmFloatToInt(vector.z)]);
     if (value.length >= 32) this.print(gameFormat("Com_sprintf: overflow of %i in %i\n", [value.length, 32]));
     string.writeString(value.slice(0, 31));
     return string;
@@ -61,10 +74,8 @@ export function debugLine(start: Vec3, end: Vec3, color: number, polygons: Pick<
   const direction = normalize3(sub3(end, start));
   const up = vec3(0, 0, 1);
   const dot = dot3(direction, up);
-  const cross = normalize3(dot > Math.fround(0.99) || dot < Math.fround(-0.99)
-    ? vec3(1, 0, 0) : cross3(direction, up));
-  return polygons.create(color, 4, [add3(start, scale3(cross, 2)), add3(start, scale3(cross, -2)),
-    add3(end, scale3(cross, -2)), add3(end, scale3(cross, 2))]);
+  const cross = normalize3(dot > Math.fround(0.99) || dot < Math.fround(-0.99) ? vec3(1, 0, 0) : cross3(direction, up));
+  return polygons.create(color, 4, [add3(start, scale3(cross, 2)), add3(start, scale3(cross, -2)), add3(end, scale3(cross, -2)), add3(end, scale3(cross, 2))]);
 }
 
 export interface ConfigStringStore {
@@ -104,12 +115,16 @@ export class ConfigStringRegistry {
     return index;
   }
 
-  modelIndex(name: string | null): number { return this.find(name, 32, 256, true); }
-  soundIndex(name: string | null): number { return this.find(name, 288, 256, true); }
+  modelIndex(name: string | null): number {
+    return this.find(name, 32, 256, true);
+  }
+  soundIndex(name: string | null): number {
+    return this.find(name, 288, 256, true);
+  }
 }
 
 export type EntityStringField = {
-  [Key in keyof GameEntity]: GameEntity[Key] extends string | null ? Key : never
+  [Key in keyof GameEntity]: GameEntity[Key] extends string | null ? Key : never;
 }[keyof GameEntity];
 
 function asciiFold(value: string): string {
@@ -122,7 +137,8 @@ export function findEntity(pool: EntityPool, after: GameEntity | null, field: En
   if (match === null) return null;
   const folded = asciiFold(match);
   for (let index = after === null ? 0 : after.slot + 1; index < pool.numEntities; index++) {
-    const entity = pool.at(index), value = entity[field];
+    const entity = pool.at(index),
+      value = entity[field];
     if (entity.inuse && value !== null && asciiFold(value) === folded) return entity;
   }
   return null;
@@ -193,7 +209,6 @@ export function teamCommand(pool: EntityPool, team: Team, command: string, send:
 /** Returns both source out-parameters without mutating a shared readonly vector. */
 export function moveDirection(angles: Vec3): { readonly direction: Vec3; readonly angles: Vec3 } {
   const vertical = angles.x === 0 && angles.z === 0;
-  const direction = vertical && angles.y === -1 ? vec3(0, 0, 1)
-    : vertical && angles.y === -2 ? vec3(0, 0, -1) : qvmAngleVectors(angles).forward;
+  const direction = vertical && angles.y === -1 ? vec3(0, 0, 1) : vertical && angles.y === -2 ? vec3(0, 0, -1) : qvmAngleVectors(angles).forward;
   return { direction, angles: vec3(0, 0, 0) };
 }

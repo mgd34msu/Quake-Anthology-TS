@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../../support/corpus.ts";
 
@@ -29,47 +30,139 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   const archive = await openArchive(archivePath, "pk3");
   const entry = archive.findEntries("maps/q3dm1.bsp")[0];
   if (entry === undefined) throw new Error("Retail q3dm1 is missing");
-  const bytes = await archive.readEntry(entry); archive.close();
+  const bytes = await archive.readEntry(entry);
+  archive.close();
   const queries = new SharedSceneQueries(adaptQ3Bsp(parseQ3Bsp(bytes)));
   const actors = new SessionActorRegistry(createIdentityOwner("q3-gameplay-smoke"));
-  const callbacks = new ActorCallbackTable(actors), collisions = new Map<ActorId, ActorCollision>();
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds,
-    onLink: body => { const shape = collisions.get(body.actor); if (shape !== undefined) queries.link(body, shape); return undefined; },
-    onUnlink: actor => { queries.unlink(actor); return undefined; } });
+  const callbacks = new ActorCallbackTable(actors),
+    collisions = new Map<ActorId, ActorCollision>();
+  const bodies = new SharedBodyTable(actors, {
+    absoluteBounds: translatedBodyBounds,
+    onLink: body => {
+      const shape = collisions.get(body.actor);
+      if (shape !== undefined) queries.link(body, shape);
+      return undefined;
+    },
+    onUnlink: actor => {
+      queries.unlink(actor);
+      return undefined;
+    },
+  });
   let bridge: Q3CombatBridge | null = null;
   const combat = new GameplayAuthority(actors, callbacks, {
-    impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing damage body");
-      bodies.write(actor, { ...body, velocity: { x: Math.fround(body.velocity.x + impulse.x), y: Math.fround(body.velocity.y + impulse.y), z: Math.fround(body.velocity.z + impulse.z) } }); return undefined; },
-    beforeReaction: (_actor, decision) => { if (bridge === null) throw new Error("Combat bridge is not initialized"); bridge.beforeReaction(decision); return undefined; },
+    impulse: (actor, impulse) => {
+      const body = bodies.read(actor.id);
+      if (body === null) throw new Error("Missing damage body");
+      bodies.write(actor, {
+        ...body,
+        velocity: { x: Math.fround(body.velocity.x + impulse.x), y: Math.fround(body.velocity.y + impulse.y), z: Math.fround(body.velocity.z + impulse.z) },
+      });
+      return undefined;
+    },
+    beforeReaction: (_actor, decision) => {
+      if (bridge === null) throw new Error("Combat bridge is not initialized");
+      bridge.beforeReaction(decision);
+      return undefined;
+    },
     confirmed: () => undefined,
   });
   const inventory = new SharedInventoryTable(actors);
   const profile: ClockProfile = { kind: "q3", serverFrameMilliseconds: 100, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 };
-  const scheduler = new FrameScheduler({ actors, ordering: { kind: "native", traversal: "source-slot-order", clock: profile },
-    clocks: [{ provider: "q3:game-smoke", profile }], resolve: () => (actor, frame) => { callbacks.think(actor, frame); return undefined; } });
+  const scheduler = new FrameScheduler({
+    actors,
+    ordering: { kind: "native", traversal: "source-slot-order", clock: profile },
+    clocks: [{ provider: "q3:game-smoke", profile }],
+    resolve: () => (actor, frame) => {
+      callbacks.think(actor, frame);
+      return undefined;
+    },
+  });
   let time = 100;
-  const frame = (): FrameContext => ({ frame: Math.trunc(time / 100), time: { kind: "milliseconds", value: time },
-    elapsed: { kind: "milliseconds", value: 100 }, phase: "entity-physics" });
-  const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks, foreign: () => null, isPlayer: () => false,
-    damageCall: () => bridge?.currentCall ?? null,
-    runThink: actor => { scheduler.run(actor.id, frame(), "during-physics"); return undefined; },
-    schedule: (actor, due) => { if (due === null) scheduler.cancel(actor); else scheduler.schedule(actor, "q3:think", {
-      due: { kind: "milliseconds", value: due }, boundary: "during-physics", order: { actor: actor.id, provider: actor.owner, sequence: 0 } }); return undefined; },
-  }, "q3:game-smoke", "baseq3");
-  const world = new Q3WorldAdapter({ queries, bodies, collision: (actor, shape) => { collisions.set(actor.id, shape); return undefined; },
-    curves: () => true, playerCurveClip: () => true }, records);
-  const pool = new EntityPool({ records, product: "baseq3", maxClients: 2, mapStartTime: 0, time: () => time,
-    print: () => {}, link: entity => world.link(entity), unlink: entity => world.unlink(entity.slot) });
-  bridge = new Q3CombatBridge({ authority: combat, entities: pool, records, world, product: "baseq3",
-    weaponProvider: "q3:weapons", combatProvider: "q3:combat", inventoryProvider: "q3:inventory", movementProvider: "q3:movement",
-    armorContext: () => ({ screenFacingDot: 1, arithmetic: "binary32" }), time: () => time, intermissionQueued: () => 0,
-    gameType: () => GameType.GT_FFA, friendlyFire: () => false, knockback: () => 1000, debugDamage: null,
-    checkHurtCarrier: () => {}, logAccuracyHit: () => true });
+  const frame = (): FrameContext => ({
+    frame: Math.trunc(time / 100),
+    time: { kind: "milliseconds", value: time },
+    elapsed: { kind: "milliseconds", value: 100 },
+    phase: "entity-physics",
+  });
+  const records = new Q3EntityRecords(
+    {
+      actors,
+      bodies,
+      combat,
+      inventory,
+      callbacks,
+      foreign: () => null,
+      isPlayer: () => false,
+      damageCall: () => bridge?.currentCall ?? null,
+      runThink: actor => {
+        scheduler.run(actor.id, frame(), "during-physics");
+        return undefined;
+      },
+      schedule: (actor, due) => {
+        if (due === null) scheduler.cancel(actor);
+        else
+          scheduler.schedule(actor, "q3:think", {
+            due: { kind: "milliseconds", value: due },
+            boundary: "during-physics",
+            order: { actor: actor.id, provider: actor.owner, sequence: 0 },
+          });
+        return undefined;
+      },
+    },
+    "q3:game-smoke",
+    "baseq3",
+  );
+  const world = new Q3WorldAdapter(
+    {
+      queries,
+      bodies,
+      collision: (actor, shape) => {
+        collisions.set(actor.id, shape);
+        return undefined;
+      },
+      curves: () => true,
+      playerCurveClip: () => true,
+    },
+    records,
+  );
+  const pool = new EntityPool({
+    records,
+    product: "baseq3",
+    maxClients: 2,
+    mapStartTime: 0,
+    time: () => time,
+    print: () => {},
+    link: entity => world.link(entity),
+    unlink: entity => world.unlink(entity.slot),
+  });
+  bridge = new Q3CombatBridge({
+    authority: combat,
+    entities: pool,
+    records,
+    world,
+    product: "baseq3",
+    weaponProvider: "q3:weapons",
+    combatProvider: "q3:combat",
+    inventoryProvider: "q3:inventory",
+    movementProvider: "q3:movement",
+    armorContext: () => ({ screenFacingDot: 1, arithmetic: "binary32" }),
+    time: () => time,
+    intermissionQueued: () => 0,
+    gameType: () => GameType.GT_FFA,
+    friendlyFire: () => false,
+    knockback: () => 1000,
+    debugDamage: null,
+    checkHurtCarrier: () => {},
+    logAccuracyHit: () => true,
+  });
   combat.register(bridge.policy());
-  const attacker = pool.activateClient(0), victim = pool.activateClient(1);
-  initGameEntity(attacker); initGameEntity(victim);
+  const attacker = pool.activateClient(0),
+    victim = pool.activateClient(1);
+  initGameEntity(attacker);
+  initGameEntity(victim);
   expect(logAccuracyHit(GameType.GT_FFA, pool.at(1023), attacker)).toBe(false);
-  attacker.health = victim.health = 100; attacker.takedamage = victim.takedamage = true;
+  attacker.health = victim.health = 100;
+  attacker.takedamage = victim.takedamage = true;
   pool.clientAt(0).sess.sessionTeam = pool.clientAt(1).sess.sessionTeam = Team.TEAM_RED;
   expect(logAccuracyHit(GameType.GT_CTF, victim, attacker)).toBe(false);
   expect(logAccuracyHit(GameType.GT_FFA, victim, attacker)).toBe(true);
@@ -89,20 +182,36 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   expect(combat.read(victim.actor.id)?.health).toBe(83);
   expect(pool.clientAt(1).ps.externalEvent & 255).toBe(62);
   attacker.s.eType = victim.s.eType = EntityType.ET_PLAYER;
-  const sourceAttacker = pool.clientAt(0), sourceVictim = pool.clientAt(1);
+  const sourceAttacker = pool.clientAt(0),
+    sourceVictim = pool.clientAt(1);
   sourceVictim.ps.powerups.set(Powerup.PW_BATTLESUIT, 0);
-  const foreignHit = (amount: number, flags = 0, radius = false) => combat.apply({
-    attack: { sequence: 12, time: { kind: "seconds", value: 0.1 }, attacker: attacker.actor.id,
-      inflictor: attacker.actor.id, weapon: "q2:weapon_shotgun", weaponProvider: "q2:official",
-      combatProvider: "q3:combat", inventoryProvider: "q3:inventory", movementProvider: "q3:movement",
-      cause: { kind: "q2", meansOfDeath: 2, damageFlags: flags } },
-    target: victim.actor.id, amount, knockback: 2, direction: { x: 2, y: 0, z: 0 },
-    point: victim.r.currentOrigin, normal: { x: 0, y: 0, z: 0 }, delivery: radius ? "radius" : "direct",
-  });
+  const foreignHit = (amount: number, flags = 0, radius = false) =>
+    combat.apply({
+      attack: {
+        sequence: 12,
+        time: { kind: "seconds", value: 0.1 },
+        attacker: attacker.actor.id,
+        inflictor: attacker.actor.id,
+        weapon: "q2:weapon_shotgun",
+        weaponProvider: "q2:official",
+        combatProvider: "q3:combat",
+        inventoryProvider: "q3:inventory",
+        movementProvider: "q3:movement",
+        cause: { kind: "q2", meansOfDeath: 2, damageFlags: flags },
+      },
+      target: victim.actor.id,
+      amount,
+      knockback: 2,
+      direction: { x: 2, y: 0, z: 0 },
+      point: victim.r.currentOrigin,
+      normal: { x: 0, y: 0, z: 0 },
+      delivery: radius ? "radius" : "direct",
+    });
   sourceVictim.ps.stats.set(statSchema("baseq3").armor, 0);
   sourceVictim.ps.pmTime = 0;
   const hits = sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS);
-  const blood = sourceVictim.damageBlood, knockback = sourceVictim.damageKnockback;
+  const blood = sourceVictim.damageBlood,
+    knockback = sourceVictim.damageKnockback;
   foreignHit(8);
   expect(victim.health).toBe(75);
   expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 1);
@@ -119,7 +228,8 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   expect(sourceVictim.damageKnockback).toBe(knockback + 8);
   expect(bodies.read(victim.actor.id)?.velocity.x).toBe(velocity);
   sourceVictim.ps.stats.set(statSchema("baseq3").armor, 100);
-  const armorBlood = sourceVictim.damageBlood, armorSaved = sourceVictim.damageArmor;
+  const armorBlood = sourceVictim.damageBlood,
+    armorSaved = sourceVictim.damageArmor;
   foreignHit(1);
   expect(sourceVictim.damageBlood).toBe(armorBlood);
   expect(sourceVictim.damageArmor).toBe(armorSaved + 1);
@@ -141,8 +251,10 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 3);
   sourceVictim.ps.powerups.set(Powerup.PW_BATTLESUIT, 0);
   sourceVictim.ps.pmTime = 0;
-  bridge.context.dispatch({ target: victim, source: attacker, owner: attacker, direction: null, point: null,
-    amount: 1, flags: DamageFlags.NO_KNOCKBACK, methodOfDeath: 7 }, () => foreignHit(8));
+  bridge.context.dispatch(
+    { target: victim, source: attacker, owner: attacker, direction: null, point: null, amount: 1, flags: DamageFlags.NO_KNOCKBACK, methodOfDeath: 7 },
+    () => foreignHit(8),
+  );
   expect(sourceVictim.ps.pmTime).toBe(50);
   expect(sourceVictim.lastHurtMod).toBe(0);
   expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 4);
@@ -158,5 +270,6 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   expect(grenade.freeAfterEvent).toBe(true);
   expect(grenade.s.event & 255).toBe(51);
   expect(scheduler.pending(grenade.actor.id)).toBeNull();
-  actors.close(); scheduler.close();
+  actors.close();
+  scheduler.close();
 });

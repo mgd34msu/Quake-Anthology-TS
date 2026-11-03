@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -15,27 +16,60 @@ import { BotLibrary } from "../../src/bots/behavior/q3/library.ts";
 import { q3BotGame } from "../../src/bots/behavior/q3/source-game.ts";
 import { WeaponLoadResult } from "../../src/bots/behavior/library/weapons.ts";
 
-function unavailable(): never { throw new Error("Unexpected presentation service"); }
+function unavailable(): never {
+  throw new Error("Unexpected presentation service");
+}
 function server() {
-  return new Q3ServerState({ session: createIdentityOwner("serverinfo-proof").session,
-    settings: { gameType: 0, singlePlayer: false, maxClients: 4, mapName: "q3dm1" }, now: () => 0, print: unavailable });
+  return new Q3ServerState({
+    session: createIdentityOwner("serverinfo-proof").session,
+    settings: { gameType: 0, singlePlayer: false, maxClients: 4, mapName: "q3dm1" },
+    now: () => 0,
+    print: unavailable,
+  });
 }
 
 test("canonical Q3 serverinfo reaches the real cgame parser without a network host", async () => {
-  const source = server(), state = new ClientGameState("baseq3", 0, 0), staticState = new ClientGameStaticState("baseq3");
-  const runtime = new ClientServerCommandRuntime({ state, staticState,
-    clients: { clientInfo: index => {
-      const info = staticState.clientInfo[index]; if (info === undefined) throw new Error("Invalid client slot"); return info;
-    }, newClientInfo: unavailable, loadDeferredPlayers: unavailable, reset: () => {} },
+  const source = server(),
+    state = new ClientGameState("baseq3", 0, 0),
+    staticState = new ClientGameStaticState("baseq3");
+  const runtime = new ClientServerCommandRuntime({
+    state,
+    staticState,
+    clients: {
+      clientInfo: index => {
+        const info = staticState.clientInfo[index];
+        if (info === undefined) throw new Error("Invalid client slot");
+        return info;
+      },
+      newClientInfo: unavailable,
+      loadDeferredPlayers: unavailable,
+      reset: () => {},
+    },
     resources: { registerModel: unavailable },
     assets: { read: unavailable, readSync: unavailable, readFileLength: unavailable, has: unavailable, list: unavailable },
-    random: { random: unavailable }, resetPlayerEntity: unavailable, getServerCommand: unavailable,
-    refreshGameState: () => {}, configString: index => source.configstrings.get(index),
-    readVmCvar: unavailable, setCvar: () => {}, print: unavailable, centerPrint: unavailable,
-    sendConsoleCommand: unavailable, sound: unavailable, registerSound: unavailable, startLocalSound: unavailable,
-    startBackgroundTrack: unavailable, remapShader: unavailable, clearLocalEntities: unavailable, clearMarks: unavailable,
-    clearParticles: unavailable, clearLoopingSounds: unavailable, setScoreSelection: unavailable,
-    showResponseHead: unavailable, memoryRemaining: unavailable });
+    random: { random: unavailable },
+    resetPlayerEntity: unavailable,
+    getServerCommand: unavailable,
+    refreshGameState: () => {},
+    configString: index => source.configstrings.get(index),
+    readVmCvar: unavailable,
+    setCvar: () => {},
+    print: unavailable,
+    centerPrint: unavailable,
+    sendConsoleCommand: unavailable,
+    sound: unavailable,
+    registerSound: unavailable,
+    startLocalSound: unavailable,
+    startBackgroundTrack: unavailable,
+    remapShader: unavailable,
+    clearLocalEntities: unavailable,
+    clearMarks: unavailable,
+    clearParticles: unavailable,
+    clearLoopingSounds: unavailable,
+    setScoreSelection: unavailable,
+    showResponseHead: unavailable,
+    memoryRemaining: unavailable,
+  });
   try {
     expect(source.cvars.get("sv_maxclients")?.flags).toBe(CvarFlag.ServerInfo | CvarFlag.Latch);
     runtime.parseServerInfo();
@@ -50,13 +84,16 @@ test("canonical Q3 serverinfo reaches the real cgame parser without a network ho
     expect(staticState.fraglimit).toBe(20);
     expect(staticState.maxclients).toBe(4);
     expect(source.refreshServerInfo()).toBeNull();
-  } finally { runtime.dispose(); }
+  } finally {
+    runtime.dispose();
+  }
 });
 
 test("serverinfo capture and restore preserve pending metadata and exact cvar storage", () => {
   const source = server();
   source.cvars.register("fraglimit", "20", CvarFlag.ServerInfo);
-  const storedInfo = source.configstrings.get(0), saved = source.captureSaveState();
+  const storedInfo = source.configstrings.get(0),
+    saved = source.captureSaveState();
   expect(source.captureSaveState()).toEqual(saved);
   expect(source.configstrings.get(0)).toBe(storedInfo);
   const restored = server();
@@ -68,40 +105,73 @@ test("serverinfo capture and restore preserve pending metadata and exact cvar st
 });
 
 const corpus = testCorpusRoot();
-test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("actual Q3 source arsenal refresh never asks botlib for WP_NONE", async () => {
-  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--dedicated"]);
-  if (launch.kind !== "run") throw new Error("Expected Q3 runtime options");
-  const content = await loadApplicationContent(launch.options);
-  let simulation: SharedSimulation | null = null, library: BotLibrary | null = null;
-  try {
-    simulation = new SharedSimulation({ identity: createIdentityOwner("arsenal-warning-proof"), recipe: content.recipe,
-      world: content.world, mounts: content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4, dedicated: true });
-    const source = simulation.q3Source();
-    if (source === null) throw new Error("Missing actual Q3 source runtime");
-    const initial = source.sourceState().configstrings.find(entry => entry.index === 0)?.value ?? "";
-    expect(infoValueForKey(initial, "sv_maxclients")).toBe("4");
-    expect(infoValueForKey(initial, "g_gametype")).toBe("0");
-    simulation.drainPresentationEvents();
-    source.host.cvars.set("fraglimit", "23", true);
-    source.endFrame();
-    const updates = simulation.drainPresentationEvents().filter(event => event.kind === "q3-source" && event.event.kind === "configstring" && event.event.index === 0);
-    expect(updates).toHaveLength(1);
-    expect(infoValueForKey(source.host.configstrings.get(0), "fraglimit")).toBe("23");
-    source.endFrame();
-    expect(simulation.drainPresentationEvents().filter(event => event.kind === "q3-source" && event.event.kind === "configstring" && event.event.index === 0)).toHaveLength(0);
-    const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
-    const diagnostics: string[] = [];
-    library = new BotLibrary({ files, random: { nextInt: () => 0 }, debug: false, milliseconds: () => 0,
-      print: (_severity, text) => { diagnostics.push(text); return undefined; }, clientCommand: () => undefined, openLog: unavailable });
-    expect(library.weapons.setup()).toBe(WeaponLoadResult.NoError);
-    const handle = library.weapons.allocateState(), knowledge = q3BotGame(source, unavailable).knowledge;
-    diagnostics.length = 0;
-    for (let refresh = 0; refresh < 4; refresh++) {
-      expect(knowledge.weaponInfo(library, handle, 1)?.name).toBe("Gauntlet");
-      expect(knowledge.weaponInfo(library, handle, 5)?.name).toBe("Rocket Launcher");
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))(
+  "actual Q3 source arsenal refresh never asks botlib for WP_NONE",
+  async () => {
+    const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--dedicated"]);
+    if (launch.kind !== "run") throw new Error("Expected Q3 runtime options");
+    const content = await loadApplicationContent(launch.options);
+    let simulation: SharedSimulation | null = null,
+      library: BotLibrary | null = null;
+    try {
+      simulation = new SharedSimulation({
+        identity: createIdentityOwner("arsenal-warning-proof"),
+        recipe: content.recipe,
+        world: content.world,
+        mounts: content.mounts,
+        mode: "deathmatch",
+        skill: 3,
+        seed: 7,
+        maxClients: 4,
+        dedicated: true,
+      });
+      const source = simulation.q3Source();
+      if (source === null) throw new Error("Missing actual Q3 source runtime");
+      const initial = source.sourceState().configstrings.find(entry => entry.index === 0)?.value ?? "";
+      expect(infoValueForKey(initial, "sv_maxclients")).toBe("4");
+      expect(infoValueForKey(initial, "g_gametype")).toBe("0");
+      simulation.drainPresentationEvents();
+      source.host.cvars.set("fraglimit", "23", true);
+      source.endFrame();
+      const updates = simulation
+        .drainPresentationEvents()
+        .filter(event => event.kind === "q3-source" && event.event.kind === "configstring" && event.event.index === 0);
+      expect(updates).toHaveLength(1);
+      expect(infoValueForKey(source.host.configstrings.get(0), "fraglimit")).toBe("23");
+      source.endFrame();
+      expect(
+        simulation.drainPresentationEvents().filter(event => event.kind === "q3-source" && event.event.kind === "configstring" && event.event.index === 0),
+      ).toHaveLength(0);
+      const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+      const diagnostics: string[] = [];
+      library = new BotLibrary({
+        files,
+        random: { nextInt: () => 0 },
+        debug: false,
+        milliseconds: () => 0,
+        print: (_severity, text) => {
+          diagnostics.push(text);
+          return undefined;
+        },
+        clientCommand: () => undefined,
+        openLog: unavailable,
+      });
+      expect(library.weapons.setup()).toBe(WeaponLoadResult.NoError);
+      const handle = library.weapons.allocateState(),
+        knowledge = q3BotGame(source, unavailable).knowledge;
+      diagnostics.length = 0;
+      for (let refresh = 0; refresh < 4; refresh++) {
+        expect(knowledge.weaponInfo(library, handle, 1)?.name).toBe("Gauntlet");
+        expect(knowledge.weaponInfo(library, handle, 5)?.name).toBe("Rocket Launcher");
+      }
+      expect(diagnostics).toEqual([]);
+      expect(library.weapons.getWeaponInfo(handle, 0)).toBeUndefined();
+      expect(diagnostics).toContain("weapon number out of range");
+    } finally {
+      library?.shutdown();
+      simulation?.close();
+      await content.close();
     }
-    expect(diagnostics).toEqual([]);
-    expect(library.weapons.getWeaponInfo(handle, 0)).toBeUndefined();
-    expect(diagnostics).toContain("weapon number out of range");
-  } finally { library?.shutdown(); simulation?.close(); await content.close(); }
-}, 30000);
+  },
+  30000,
+);

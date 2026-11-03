@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Sys_SnapVector from unix/snapvector.nasm, reached through G_SNAPVECTOR in
  * server/sv_game.c and CG_SNAPVECTOR in client/cl_cgame.c.
@@ -11,20 +12,14 @@ import type { Q3GameMemory } from "./game-memory.ts";
 function snapComponent(value: number): number {
   const lower = Math.floor(value);
   const fraction = value - lower;
-  const integer = fraction < 0.5 ? lower
-    : fraction > 0.5 ? lower + 1
-    : lower % 2 === 0 ? lower : lower + 1;
+  const integer = fraction < 0.5 ? lower : fraction > 0.5 ? lower + 1 : lower % 2 === 0 ? lower : lower + 1;
   if (!Number.isFinite(integer) || integer < -2147483648 || integer > 2147483647) {
     return -2147483648;
   }
   return integer === 0 ? 0 : integer;
 }
 
-export function qvmSnapVectorSyscall(
-  role: "game" | "cgame" | "ui",
-  words: DataView,
-  memory: Q3GameMemory,
-): number | null {
+export function qvmSnapVectorSyscall(role: "game" | "cgame" | "ui", words: DataView, memory: Q3GameMemory): number | null {
   if (role === "ui") return null;
   if (words.getInt32(0, true) !== (role === "game" ? 42 : 71)) return null;
   const pointer = memory.pointer(words.getInt32(4, true));

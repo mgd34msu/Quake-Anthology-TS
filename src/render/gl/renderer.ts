@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createTextureResolver } from "../commands/dynamic-texture.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q3 tr_backend.c, tr_shade.c, tr_sky.c and tr_shadows.c backend operations.
@@ -5,7 +6,21 @@ import { createTextureResolver } from "../commands/dynamic-texture.ts";
 import { loadGl } from "../../platform/gl.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
 import type { Vec4 } from "../../contracts/math.ts";
-import type { BlendFactor, DepthImageLevel, DrawBatch, ImageResourceOperation, PreparedBackendDraw, Rect, RendererBackend, RendererDrawBuffer, RendererImage, RendererResourceOwner, RenderOperation, RenderState, RenderViewState } from "../../contracts/render.ts";
+import type {
+  BlendFactor,
+  DepthImageLevel,
+  DrawBatch,
+  ImageResourceOperation,
+  PreparedBackendDraw,
+  Rect,
+  RendererBackend,
+  RendererDrawBuffer,
+  RendererImage,
+  RendererResourceOwner,
+  RenderOperation,
+  RenderState,
+  RenderViewState,
+} from "../../contracts/render.ts";
 import { GeometryBuffer, type GeometryArrays } from "./buffers.ts";
 import { StageProgram } from "./programs.ts";
 import { GlTextures, withPixelStore } from "./textures.ts";
@@ -16,15 +31,27 @@ import { GlOutputGamma } from "./output-gamma.ts";
 import { outputGammaTable } from "../output-gamma.ts";
 
 const blendFactors: Record<BlendFactor, number> = {
-  zero: 0, one: 1, "src-color": 0x300, "one-minus-src-color": 0x301,
-  "src-alpha": 0x302, "one-minus-src-alpha": 0x303, "dst-alpha": 0x304,
-  "one-minus-dst-alpha": 0x305, "dst-color": 0x306, "one-minus-dst-color": 0x307, "src-alpha-saturate": 0x308,
+  zero: 0,
+  one: 1,
+  "src-color": 0x300,
+  "one-minus-src-color": 0x301,
+  "src-alpha": 0x302,
+  "one-minus-src-alpha": 0x303,
+  "dst-alpha": 0x304,
+  "one-minus-dst-alpha": 0x305,
+  "dst-color": 0x306,
+  "one-minus-dst-color": 0x307,
+  "src-alpha-saturate": 0x308,
 };
 const drawBuffers: Record<RendererDrawBuffer, number> = { front: 0x404, back: 0x405, "back-left": 0x402, "back-right": 0x403 };
 const activeContexts = new WeakSet<SdlRenderContext>();
 
-function positionValues(position: Vec4): readonly number[] { return [position.x, position.y, position.z, position.w]; }
-function finite32(value: number): boolean { return Number.isFinite(Math.fround(value)); }
+function positionValues(position: Vec4): readonly number[] {
+  return [position.x, position.y, position.z, position.w];
+}
+function finite32(value: number): boolean {
+  return Number.isFinite(Math.fround(value));
+}
 
 export class GlRenderer implements RendererBackend {
   private readonly library: ReturnType<typeof loadGl>;
@@ -61,7 +88,10 @@ export class GlRenderer implements RendererBackend {
   readonly stereoEnabled: boolean;
   readonly driver: { readonly vendor: string; readonly renderer: string; readonly version: string; readonly shadingLanguage: string };
 
-  constructor(readonly window: SdlRenderContext, readonly owner: RendererResourceOwner) {
+  constructor(
+    readonly window: SdlRenderContext,
+    readonly owner: RendererResourceOwner,
+  ) {
     if (activeContexts.has(window)) throw new Error("SDL context already has an active OpenGL renderer");
     activeContexts.add(window);
     let library: ReturnType<typeof loadGl> | null = null;
@@ -73,8 +103,12 @@ export class GlRenderer implements RendererBackend {
       library = this.library;
       this.gl = this.library.symbols;
       const gl = this.gl;
-      this.driver = { vendor: String(gl.glGetString(0x1f00)), renderer: String(gl.glGetString(0x1f01)),
-        version: String(gl.glGetString(0x1f02)), shadingLanguage: String(gl.glGetString(0x8b8c)) };
+      this.driver = {
+        vendor: String(gl.glGetString(0x1f00)),
+        renderer: String(gl.glGetString(0x1f01)),
+        version: String(gl.glGetString(0x1f02)),
+        shadingLanguage: String(gl.glGetString(0x8b8c)),
+      };
       this.stencilBits = this.integer(0xd57);
       this.depthBits = this.integer(0xd56);
       this.colorBits = this.integer(0xd52) + this.integer(0xd53) + this.integer(0xd54);
@@ -111,31 +145,47 @@ export class GlRenderer implements RendererBackend {
     }
   }
 
-  get width(): number { return this.window.drawableSize.width; }
-  get height(): number { return this.window.drawableSize.height; }
+  get width(): number {
+    return this.window.drawableSize.width;
+  }
+  get height(): number {
+    return this.window.drawableSize.height;
+  }
 
   private opened(): void {
     if (this.closed) throw new Error("OpenGL renderer is closed");
-    try { this.window.makeCurrent(); }
-    catch (error) { this.invalidateState(); throw error; }
+    try {
+      this.window.makeCurrent();
+    } catch (error) {
+      this.invalidateState();
+      throw error;
+    }
   }
 
   setOutputGamma(gamma: number): undefined {
-    const table = outputGammaTable(gamma); this.opened();
+    const table = outputGammaTable(gamma);
+    this.opened();
     if (gamma === this.gamma) return undefined;
     if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
     this.invalidateState();
     if (table === null) {
-      this.outputGamma?.restore(this.drawBuffer); this.outputGamma?.close(); this.outputGamma = null;
+      this.outputGamma?.restore(this.drawBuffer);
+      this.outputGamma?.close();
+      this.outputGamma = null;
     } else {
       if (this.outputGamma === null) {
         const pass = new GlOutputGamma(this.window, this.gl, this, table);
-        try { pass.bind(this.drawBuffer, this.width, this.height); }
-        catch (error) { pass.close(); throw error; }
+        try {
+          pass.bind(this.drawBuffer, this.width, this.height);
+        } catch (error) {
+          pass.close();
+          throw error;
+        }
         this.outputGamma = pass;
       } else this.outputGamma.update(table);
     }
-    this.gamma = gamma; this.gammaFinished = false;
+    this.gamma = gamma;
+    this.gammaFinished = false;
     return undefined;
   }
 
@@ -144,8 +194,12 @@ export class GlRenderer implements RendererBackend {
     if (this.outputGamma !== null) {
       if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL gamma target exceeds maximum texture size");
       let changed: boolean;
-      try { changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height); }
-      catch (error) { this.invalidateState(); throw error; }
+      try {
+        changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height);
+      } catch (error) {
+        this.invalidateState();
+        throw error;
+      }
       if (rendering || changed) this.gammaFinished = false;
     }
   }
@@ -168,7 +222,10 @@ export class GlRenderer implements RendererBackend {
 
   private identityMatrices(): void {
     if (this.matricesIdentity) return;
-    for (const matrix of [0x1700, 0x1701]) { this.gl.glMatrixMode(matrix); this.gl.glLoadIdentity(); }
+    for (const matrix of [0x1700, 0x1701]) {
+      this.gl.glMatrixMode(matrix);
+      this.gl.glLoadIdentity();
+    }
     this.matricesIdentity = true;
   }
 
@@ -176,8 +233,10 @@ export class GlRenderer implements RendererBackend {
   private worldMatrices(): void {
     const projection = this.viewProjection;
     if (projection === null) throw new Error("OpenGL world-space batch requires a view projection");
-    this.gl.glMatrixMode(0x1701); this.gl.glLoadMatrixf(projection);
-    this.gl.glMatrixMode(0x1700); this.gl.glLoadIdentity();
+    this.gl.glMatrixMode(0x1701);
+    this.gl.glLoadMatrixf(projection);
+    this.gl.glMatrixMode(0x1700);
+    this.gl.glLoadIdentity();
     this.matricesIdentity = false;
   }
 
@@ -196,7 +255,10 @@ export class GlRenderer implements RendererBackend {
     if (this.currentCull === cull) return;
     this.currentCull = undefined;
     if (cull === "none") this.gl.glDisable(0xb44);
-    else { this.gl.glEnable(0xb44); this.gl.glCullFace(cull === "back" ? 0x405 : 0x404); }
+    else {
+      this.gl.glEnable(0xb44);
+      this.gl.glCullFace(cull === "back" ? 0x405 : 0x404);
+    }
     this.currentCull = cull;
   }
 
@@ -206,8 +268,7 @@ export class GlRenderer implements RendererBackend {
       this.offsetEnabled = undefined;
       this.gl.glDisable(0x8037);
       this.offsetEnabled = false;
-    }
-    else {
+    } else {
       if (!finite32(value.factor) || !finite32(value.units)) throw new RangeError("OpenGL polygon offset must be finite");
       if (this.offsetEnabled === true && this.offsetFactor === value.factor && this.offsetUnits === value.units) return;
       this.offsetEnabled = undefined;
@@ -255,26 +316,33 @@ export class GlRenderer implements RendererBackend {
     const previous = saved[0];
     if (previous === undefined) throw new Error("OpenGL texture binding is unavailable");
     const released = operation.kind === "release-image" ? this.textures.registered(operation.image).name : null;
-    try { this.textures.apply(operation); }
-    finally { this.gl.glBindTexture(0xde1, previous === released ? 0 : previous); }
+    try {
+      this.textures.apply(operation);
+    } finally {
+      this.gl.glBindTexture(0xde1, previous === released ? 0 : previous);
+    }
   }
 
   selectDrawBuffer(buffer: RendererDrawBuffer, clear: boolean): undefined {
     this.opened();
-    if (buffer === "back-right" && !this.stereoEnabled)
-      throw new Error("OpenGL stereo draw buffer requires a stereo context");
+    if (buffer === "back-right" && !this.stereoEnabled) throw new Error("OpenGL stereo draw buffer requires a stereo context");
     this.drawBuffer = drawBuffers[buffer];
-    if (this.outputGamma === null) this.gl.glDrawBuffer(this.drawBuffer); else this.drawTarget();
-    if (clear) { this.gl.glClearColor(1, 0, 0.5, 1); this.gl.glClear(0x4000 | 0x100); }
+    if (this.outputGamma === null) this.gl.glDrawBuffer(this.drawBuffer);
+    else this.drawTarget();
+    if (clear) {
+      this.gl.glClearColor(1, 0, 0.5, 1);
+      this.gl.glClear(0x4000 | 0x100);
+    }
   }
 
   beginView(view: RenderViewState): undefined {
     this.invalidateState();
-    this.opened(); this.drawTarget();
+    this.opened();
+    this.drawTarget();
     const { x, y, width, height } = view.viewport;
     const bottom = this.height - y - height;
-    if (![x, y, width, height, bottom].every(value => Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff)
-      || width < 1 || height < 1) throw new RangeError("OpenGL viewport requires positive int32 dimensions");
+    if (![x, y, width, height, bottom].every(value => Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff) || width < 1 || height < 1)
+      throw new RangeError("OpenGL viewport requires positive int32 dimensions");
     const gl = this.gl;
     this.viewProjection = view.viewProjection === undefined ? null : Float32Array.from(view.viewProjection);
     if (this.viewProjection !== null && ![...this.viewProjection].every(Number.isFinite)) throw new RangeError("OpenGL view projection must be finite");
@@ -291,28 +359,37 @@ export class GlRenderer implements RendererBackend {
     }
     if (view.clear !== null) {
       const { depth, color, stencil } = view.clear;
-      if (!Number.isFinite(depth) || color !== null && !positionValues(color).every(finite32))
-        throw new RangeError("OpenGL clear values must be finite");
+      if (!Number.isFinite(depth) || (color !== null && !positionValues(color).every(finite32))) throw new RangeError("OpenGL clear values must be finite");
       gl.glDepthMask(1);
       gl.glClearDepth(depth);
       if (color !== null) gl.glClearColor(color.x, color.y, color.z, color.w);
-      if (stencil) { gl.glStencilMask(0xffffffff); gl.glClearStencil(0); }
+      if (stencil) {
+        gl.glStencilMask(0xffffffff);
+        gl.glClearStencil(0);
+      }
       gl.glClear(0x100 | (color === null ? 0 : 0x4000) | (stencil ? 0x400 : 0));
     }
   }
 
   prepareGeometry(batch: DrawBatch): PreparedBackendDraw {
     this.opened();
-    const dynamic = batch.texture.kind === "dynamic-image" || batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image";
+    const dynamic = batch.texture.kind === "dynamic-image" || (batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image");
     const resolveTexture = dynamic ? createTextureResolver(resource => this.applyImageResource(resource)) : undefined;
     const buffer = this.idleGeometry ?? new GeometryBuffer();
     this.idleGeometry = null;
     let arrays: GeometryArrays;
-    try { arrays = buffer.pack(batch); }
-    catch (error) { this.idleGeometry = buffer; throw error; }
-    const state: RenderState = { ...batch.state, blend: { ...batch.state.blend },
+    try {
+      arrays = buffer.pack(batch);
+    } catch (error) {
+      this.idleGeometry = buffer;
+      throw error;
+    }
+    const state: RenderState = {
+      ...batch.state,
+      blend: { ...batch.state.blend },
       depthRange: [batch.state.depthRange[0], batch.state.depthRange[1]],
-      polygonOffset: batch.state.polygonOffset === null ? null : { ...batch.state.polygonOffset } };
+      polygonOffset: batch.state.polygonOffset === null ? null : { ...batch.state.polygonOffset },
+    };
     const paired = batch.texturing === "pair";
     const environment = paired ? batch.secondTexture.environment : null;
     const mode = batch.primitive === "lines" ? 1 : 4;
@@ -323,12 +400,12 @@ export class GlRenderer implements RendererBackend {
       begin: () => {
         this.opened();
         if (phase !== "prepared" || this.activeArrays !== null) throw new Error("OpenGL prepared draw is already active");
-        const atlas = batch.lighting.kind !== "vertex" && batch.lighting.atlas !== null
-          ? this.textures.registered(batch.lighting.atlas.image) : null;
+        const atlas = batch.lighting.kind !== "vertex" && batch.lighting.atlas !== null ? this.textures.registered(batch.lighting.atlas.image) : null;
         if (atlas !== null && atlas.content.kind !== "depth32f") throw new Error("Q2 shadow atlas requires a depth32f image");
         this.drawTarget();
         this.state(state);
-        if (batch.space === "world") this.worldMatrices(); else this.identityMatrices();
+        if (batch.space === "world") this.worldMatrices();
+        else this.identityMatrices();
         this.program.use(environment, state.alphaTest, batch.lighting, batch.textureEffect === "luminance-alpha", batch.fog);
         this.activeArrays = arrays;
         phase = "active";
@@ -339,7 +416,10 @@ export class GlRenderer implements RendererBackend {
           gl.glVertexPointer(4, 0x1406, 0, arrays.positions);
           gl.glColorPointer(4, 0x1406, 0, arrays.colors);
         }
-        for (const [unit, coordinates] of [[2, arrays.worldPositions], [3, arrays.normals]] satisfies readonly (readonly [2 | 3, Float32Array])[]) {
+        for (const [unit, coordinates] of [
+          [2, arrays.worldPositions],
+          [3, arrays.normals],
+        ] satisfies readonly (readonly [2 | 3, Float32Array])[]) {
           this.selectTexture(unit);
           if (coordinates.length > 0) {
             gl.glEnableClientState(0x8078);
@@ -355,7 +435,7 @@ export class GlRenderer implements RendererBackend {
       },
       applyTexture: (unit, operation) => {
         this.opened();
-        if (phase !== "active" || unit !== nextUnit || unit !== 0 && unit !== 1 || unit === 1 && !paired)
+        if (phase !== "active" || unit !== nextUnit || (unit !== 0 && unit !== 1) || (unit === 1 && !paired))
           throw new Error("OpenGL prepared texture order is invalid");
         const binding = resolveTexture === undefined ? operation : resolveTexture(operation);
         this.selectTexture(unit);
@@ -373,7 +453,10 @@ export class GlRenderer implements RendererBackend {
       },
       cleanup: () => {
         if (phase === "cleaned") return;
-        if (this.closed) { phase = "cleaned"; return; }
+        if (this.closed) {
+          phase = "cleaned";
+          return;
+        }
         this.opened();
         if (phase !== "prepared") {
           this.disableArrays();
@@ -412,11 +495,15 @@ export class GlRenderer implements RendererBackend {
         this.invalidateState();
         return draw();
       });
-    } finally { this.opacityActive = false; this.invalidateState(); }
+    } finally {
+      this.opacityActive = false;
+      this.invalidateState();
+    }
   }
 
   drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined {
-    this.opened(); this.drawTarget();
+    this.opened();
+    this.drawTarget();
     const gl = this.gl;
     switch (operation.kind) {
       case "q2-fog": {
@@ -435,10 +522,18 @@ export class GlRenderer implements RendererBackend {
         this.depthAtlas.draw(texture.name, operation.image.width, operation.image.height, operation.passes);
         return;
       }
-      case "depth-range": this.depthRange(operation.range); return;
-      case "cull": this.cull(operation.cull); return;
-      case "polygon-offset": this.polygonOffset(operation.value); return;
-      case "disable-portal-clip": gl.glDisable(0x3000); return;
+      case "depth-range":
+        this.depthRange(operation.range);
+        return;
+      case "cull":
+        this.cull(operation.cull);
+        return;
+      case "polygon-offset":
+        this.polygonOffset(operation.value);
+        return;
+      case "disable-portal-clip":
+        gl.glDisable(0x3000);
+        return;
       case "sky-side": {
         for (const strip of operation.strips) {
           if (strip.length < 2 || strip.length % 2 !== 0) throw new RangeError("OpenGL sky strips require paired row vertices");
@@ -463,16 +558,20 @@ export class GlRenderer implements RendererBackend {
         }
         return;
       }
-      case "shadow-volume": case "shadow-finish": {
+      case "shadow-volume":
+      case "shadow-finish": {
         // RB_ShadowTessEnd and RB_ShadowFinish draw nothing without a stencil buffer.
         if (this.stencilBits < 4) return;
         for (const position of operation.positions)
           if (!positionValues(position).every(finite32)) throw new RangeError("OpenGL shadow positions must be finite");
-        const positions = operation.kind === "shadow-finish" ? operation.positions : operation.indices.map(index => {
-          const position = operation.positions[index];
-          if (!Number.isInteger(index) || index < 0 || position === undefined) throw new RangeError("OpenGL shadow vertex index is invalid");
-          return position;
-        });
+        const positions =
+          operation.kind === "shadow-finish"
+            ? operation.positions
+            : operation.indices.map(index => {
+                const position = operation.positions[index];
+                if (!Number.isInteger(index) || index < 0 || position === undefined) throw new RangeError("OpenGL shadow vertex index is invalid");
+                return position;
+              });
         if (operation.kind === "shadow-volume" && positions.length % 3 !== 0) throw new RangeError("OpenGL shadow triangles are incomplete");
         this.selectTexture(0);
         this.textures.bind({ kind: "bind-image", image: operation.whiteImage });
@@ -508,45 +607,64 @@ export class GlRenderer implements RendererBackend {
           gl.glStencilFunc(0x207, 1, 255);
           try {
             gl.glCullFace(operation.mirror ? 0x404 : 0x405);
-            gl.glStencilOp(0x1e00, 0x1e00, 0x1e02); draw(4);
+            gl.glStencilOp(0x1e00, 0x1e00, 0x1e02);
+            draw(4);
             gl.glCullFace(operation.mirror ? 0x405 : 0x404);
-            gl.glStencilOp(0x1e00, 0x1e00, 0x1e03); draw(4);
-          } finally { gl.glColorMask(1, 1, 1, 1); }
+            gl.glStencilOp(0x1e00, 0x1e00, 0x1e03);
+            draw(4);
+          } finally {
+            gl.glColorMask(1, 1, 1, 1);
+          }
         }
         return;
       }
     }
   }
 
-  clearColorBuffer(): undefined { this.opened(); this.drawTarget(); this.gl.glClear(0x4000); }
+  clearColorBuffer(): undefined {
+    this.opened();
+    this.drawTarget();
+    this.gl.glClear(0x4000);
+  }
 
   drawShowImage(image: RendererImage, rect: Rect, proportional: boolean): undefined {
-    this.opened(); this.drawTarget();
+    this.opened();
+    this.drawTarget();
     this.textures.registered(image);
     const width = Math.fround(rect.width * (proportional ? image.width / 512 : 1));
     const height = Math.fround(rect.height * (proportional ? image.height / 512 : 1));
-    if (![rect.x, rect.y, width, height, rect.x + width, rect.y + height].every(finite32))
-      throw new RangeError("OpenGL image grid rectangle must be finite");
+    if (![rect.x, rect.y, width, height, rect.x + width, rect.y + height].every(finite32)) throw new RangeError("OpenGL image grid rectangle must be finite");
     const gl = this.gl;
     this.matricesIdentity = false;
-    gl.glMatrixMode(0x1701); gl.glLoadIdentity(); gl.glOrtho(0, this.width, this.height, 0, 0, 1);
-    gl.glMatrixMode(0x1700); gl.glLoadIdentity();
+    gl.glMatrixMode(0x1701);
+    gl.glLoadIdentity();
+    gl.glOrtho(0, this.width, this.height, 0, 0, 1);
+    gl.glMatrixMode(0x1700);
+    gl.glLoadIdentity();
     this.program.use(null, this.alphaTest);
     this.selectTexture(0);
     this.textures.bind({ kind: "bind-image", image });
     gl.glColor4f(1, 1, 1, 1);
     gl.glBegin(7);
-    gl.glTexCoord2f(0, 0); gl.glVertex2f(rect.x, rect.y);
-    gl.glTexCoord2f(1, 0); gl.glVertex2f(rect.x + width, rect.y);
-    gl.glTexCoord2f(1, 1); gl.glVertex2f(rect.x + width, rect.y + height);
-    gl.glTexCoord2f(0, 1); gl.glVertex2f(rect.x, rect.y + height);
+    gl.glTexCoord2f(0, 0);
+    gl.glVertex2f(rect.x, rect.y);
+    gl.glTexCoord2f(1, 0);
+    gl.glVertex2f(rect.x + width, rect.y);
+    gl.glTexCoord2f(1, 1);
+    gl.glVertex2f(rect.x + width, rect.y + height);
+    gl.glTexCoord2f(0, 1);
+    gl.glVertex2f(rect.x, rect.y + height);
     gl.glEnd();
   }
 
   setOverdrawMeasurement(enabled: boolean): undefined {
-    this.opened(); this.drawTarget();
+    this.opened();
+    this.drawTarget();
     const gl = this.gl;
-    if (!enabled) { gl.glDisable(0xb90); return; }
+    if (!enabled) {
+      gl.glDisable(0xb90);
+      return;
+    }
     if (this.stencilBits === 0) throw new Error("OpenGL overdraw measurement requires a stencil framebuffer");
     gl.glEnable(0xb90);
     gl.glStencilMask(0xffffffff);
@@ -556,15 +674,18 @@ export class GlRenderer implements RendererBackend {
   }
 
   readStencilOverdraw(destination: Uint8Array): undefined {
-    this.opened(); this.drawTarget(false);
-    const width = this.width, height = this.height;
+    this.opened();
+    this.drawTarget(false);
+    const width = this.width,
+      height = this.height;
     if (destination.length < width * height) throw new RangeError("OpenGL stencil destination is too small");
     withPixelStore(this.gl, "pack", () => this.gl.glReadPixels(0, 0, width, height, 0x1901, 0x1401, destination));
   }
 
   /** Absolute window coordinates use OpenGL's bottom-left origin, matching Q3 flares. */
   readDepthPixel(windowX: number, windowY: number): number {
-    this.opened(); this.drawTarget(false);
+    this.opened();
+    this.drawTarget(false);
     if (!Number.isInteger(windowX) || !Number.isInteger(windowY) || windowX < 0 || windowY < 0 || windowX >= this.width || windowY >= this.height)
       throw new RangeError("OpenGL depth coordinates are outside the framebuffer");
     const pixel = new Float32Array(1);
@@ -578,11 +699,12 @@ export class GlRenderer implements RendererBackend {
   readPixels(): Uint8Array {
     this.opened();
     this.resolveOutput();
-    const width = this.width, height = this.height;
-    const pixels = new Uint8Array(width * height * 4), topDown = new Uint8Array(pixels.length);
+    const width = this.width,
+      height = this.height;
+    const pixels = new Uint8Array(width * height * 4),
+      topDown = new Uint8Array(pixels.length);
     withPixelStore(this.gl, "pack", () => this.gl.glReadPixels(0, 0, width, height, 0x1908, 0x1401, pixels));
-    for (let row = 0; row < height; row++)
-      topDown.set(pixels.subarray(row * width * 4, (row + 1) * width * 4), (height - row - 1) * width * 4);
+    for (let row = 0; row < height; row++) topDown.set(pixels.subarray(row * width * 4, (row + 1) * width * 4), (height - row - 1) * width * 4);
     return topDown;
   }
 
@@ -591,11 +713,15 @@ export class GlRenderer implements RendererBackend {
     const texture = this.textures.registered(image);
     if (texture.content.kind !== "depth32f") throw new Error("OpenGL depth readback requires a depth32f image");
     this.selectTexture(2);
-    const previous = this.integer(0x8069), pixels = new Float32Array(image.width * image.height);
+    const previous = this.integer(0x8069),
+      pixels = new Float32Array(image.width * image.height);
     try {
       this.gl.glBindTexture(0xde1, texture.name);
       withPixelStore(this.gl, "pack", () => this.gl.glGetTexImage(0xde1, 0, 0x1902, 0x1406, pixels));
-    } finally { this.gl.glBindTexture(0xde1, previous); this.selectTexture(0); }
+    } finally {
+      this.gl.glBindTexture(0xde1, previous);
+      this.selectTexture(0);
+    }
     return { width: image.width, height: image.height, pixels };
   }
 
@@ -605,16 +731,28 @@ export class GlRenderer implements RendererBackend {
       this.drawTarget(false);
       if (!this.gammaFinished) {
         this.invalidateState();
-        this.outputGamma.finish(this.drawBuffer); this.gammaFinished = true;
-      }
-      else this.outputGamma.selectDefault(this.drawBuffer);
+        this.outputGamma.finish(this.drawBuffer);
+        this.gammaFinished = true;
+      } else this.outputGamma.selectDefault(this.drawBuffer);
     }
   }
-  finish(): undefined { this.opened(); this.resolveOutput(); this.gl.glFinish(); }
-  getError(): number { this.opened(); return this.gl.glGetError(); }
+  finish(): undefined {
+    this.opened();
+    this.resolveOutput();
+    this.gl.glFinish();
+  }
+  getError(): number {
+    this.opened();
+    return this.gl.glGetError();
+  }
   present(): void {
-    try { this.opened(); this.resolveOutput(); this.window.swap(); }
-    finally { this.invalidateState(); }
+    try {
+      this.opened();
+      this.resolveOutput();
+      this.window.swap();
+    } finally {
+      this.invalidateState();
+    }
   }
 
   close(): undefined {
@@ -624,18 +762,27 @@ export class GlRenderer implements RendererBackend {
     this.window.makeCurrent();
     this.disableArrays();
     this.idleGeometry = null;
-    this.outputGamma?.close(); this.outputGamma = null;
-    this.objectOpacity?.close(); this.objectOpacity = null;
-    this.depthAtlas?.close(); this.depthAtlas = null;
-    this.fog?.close(); this.fog = null;
+    this.outputGamma?.close();
+    this.outputGamma = null;
+    this.objectOpacity?.close();
+    this.objectOpacity = null;
+    this.depthAtlas?.close();
+    this.depthAtlas = null;
+    this.fog?.close();
+    this.fog = null;
     this.invalidateState();
     this.textures.close();
-    for (const unit of [3, 2, 1, 0] satisfies readonly (0 | 1 | 2 | 3)[]) { this.selectTexture(unit); this.gl.glBindTexture(0xde1, 0); }
+    for (const unit of [3, 2, 1, 0] satisfies readonly (0 | 1 | 2 | 3)[]) {
+      this.selectTexture(unit);
+      this.gl.glBindTexture(0xde1, 0);
+    }
     this.program.close();
     this.library.close();
     this.closed = true;
     activeContexts.delete(this.window);
   }
 
-  [Symbol.dispose](): void { this.close(); }
+  [Symbol.dispose](): void {
+    this.close();
+  }
 }

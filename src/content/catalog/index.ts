@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { managedAddonHidden, managedAddonTitle, readNightdiveAddons } from "./addons.ts";
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
@@ -70,8 +71,9 @@ function remoteExpectation(selection: RemoteContentSelection, products: readonly
   const base = products.find(product => product.id === context.base);
   if (base === undefined) throw new Error(`Missing remote base product ${context.base}`);
   const directory = `${dirname(base.contentDirectory)}/${context.directory}`;
-  const known = products.find(product => product.contentDirectory.toLowerCase() === directory.toLowerCase()
-    && product.family === base.family && product.edition === base.edition);
+  const known = products.find(
+    product => product.contentDirectory.toLowerCase() === directory.toLowerCase() && product.family === base.family && product.edition === base.edition,
+  );
   if (known !== undefined) {
     const visited = new Set<string>();
     let current: ProductExpectation | undefined = known;
@@ -82,9 +84,19 @@ function remoteExpectation(selection: RemoteContentSelection, products: readonly
     }
     throw new Error(`Remote product ${known.id} does not inherit ${base.id}`);
   }
-  return { id: `${base.id}-mod-${context.directory}`, family: base.family, edition: base.edition,
-    campaign: `mod-${context.directory}`, title: context.directory, contentDirectory: directory, baseProduct: base.id,
-    requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null };
+  return {
+    id: `${base.id}-mod-${context.directory}`,
+    family: base.family,
+    edition: base.edition,
+    campaign: `mod-${context.directory}`,
+    title: context.directory,
+    contentDirectory: directory,
+    baseProduct: base.id,
+    requiredContentArchives: [],
+    requiredPrograms: [],
+    mapWitness: null,
+    unresolvedReason: null,
+  };
 }
 
 export function remoteContentProduct(selection: RemoteContentSelection, products: readonly ProductExpectation[] = expectedProducts): string {
@@ -114,42 +126,64 @@ export interface MountPlanSelection {
 
 function archiveFormat(name: string): ArchiveFormat | null {
   switch (extname(name).toLowerCase()) {
-    case ".pak": return "pak";
-    case ".pk3": return "pk3";
-    case ".kpf": return "kpf";
-    case ".zip": case ".pkz": return "zip";
-    default: return null;
+    case ".pak":
+      return "pak";
+    case ".pk3":
+      return "pk3";
+    case ".kpf":
+      return "kpf";
+    case ".zip":
+    case ".pkz":
+      return "zip";
+    default:
+      return null;
   }
 }
 
-function sourceCompare(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
+function sourceCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
 
 /** q2repro files.c pakcmp: numeric pak prefixes first, then case-insensitive names. */
 function compareQ2Archives(left: CatalogArchive, right: CatalogArchive): number {
-  const first = basename(left.path).toLowerCase(), second = basename(right.path).toLowerCase();
-  const firstPak = first.startsWith("pak"), secondPak = second.startsWith("pak");
+  const first = basename(left.path).toLowerCase(),
+    second = basename(right.path).toLowerCase();
+  const firstPak = first.startsWith("pak"),
+    secondPak = second.startsWith("pak");
   if (!firstPak || !secondPak) return firstPak ? -1 : secondPak ? 1 : sourceCompare(first, second);
   const parse = (name: string): { readonly number: bigint; readonly suffix: string } => {
-    const tail = name.slice(3), match = /^[ \t\n\r\f\v]*[+-]?\d+/.exec(tail);
+    const tail = name.slice(3),
+      match = /^[ \t\n\r\f\v]*[+-]?\d+/.exec(tail);
     if (match === null) return { number: 0n, suffix: tail };
-    const value = BigInt(match[0].trim()), magnitude = value < 0n ? -value : value;
+    const value = BigInt(match[0].trim()),
+      magnitude = value < 0n ? -value : value;
     const maximum = 0xffffffffffffffffn;
     return { number: magnitude > maximum ? maximum : BigInt.asUintN(64, value), suffix: tail.slice(match[0].length) };
   };
-  const a = parse(first), b = parse(second);
+  const a = parse(first),
+    b = parse(second);
   return a.number < b.number ? -1 : a.number > b.number ? 1 : sourceCompare(a.suffix, b.suffix);
 }
 
 /** FS_PathCmp folds ASCII letters to upper case and treats `\` and `:` as `/`. */
-function q3PathKey(name: string): string { return name.replace(/[a-z]/g, letter => letter.toUpperCase()).replace(/[\\:]/g, "/"); }
+function q3PathKey(name: string): string {
+  return name.replace(/[a-z]/g, letter => letter.toUpperCase()).replace(/[\\:]/g, "/");
+}
 
 /** Highest priority first, matching each source engine's prepend order. */
 export function orderGameArchives(product: ProductExpectation, archives: readonly CatalogArchive[]): readonly CatalogArchive[] {
   const sorted = [...archives].sort((left, right) => sourceCompare(basename(left.path), basename(right.path)));
-  if (product.family === "q3") return sorted.filter(archive => archive.format === "pk3").slice(0, 1024)
-    .sort((left, right) => sourceCompare(q3PathKey(basename(left.path)), q3PathKey(basename(right.path)))).reverse();
-  if (product.family === "q2") return archives.filter(archive => archive.format === "pak" || archive.format === "zip" && /\.pkz$/i.test(archive.path))
-    .sort(compareQ2Archives).reverse();
+  if (product.family === "q3")
+    return sorted
+      .filter(archive => archive.format === "pk3")
+      .slice(0, 1024)
+      .sort((left, right) => sourceCompare(q3PathKey(basename(left.path)), q3PathKey(basename(right.path))))
+      .reverse();
+  if (product.family === "q2")
+    return archives
+      .filter(archive => archive.format === "pak" || (archive.format === "zip" && /\.pkz$/i.test(archive.path)))
+      .sort(compareQ2Archives)
+      .reverse();
   const numbered: CatalogArchive[] = [];
   const limit = archives.length + 1;
   for (let index = 0; index < limit; index++) {
@@ -162,10 +196,12 @@ export function orderGameArchives(product: ProductExpectation, archives: readonl
 }
 
 function productDirectories(product: CatalogProduct): readonly { readonly root: string | null; readonly archives: readonly CatalogArchive[] }[] {
-  const user = product.userContent, addon = product.addonContent ?? null;
-  const userArchives = new Set(user?.archives ?? []), addonArchives = new Set(addon?.archives ?? []);
+  const user = product.userContent,
+    addon = product.addonContent ?? null;
+  const userArchives = new Set(user?.archives ?? []),
+    addonArchives = new Set(addon?.archives ?? []);
   const corpus = { root: product.looseRoot, archives: product.archives.filter(archive => !userArchives.has(archive) && !addonArchives.has(archive)) };
-  return [...user === null ? [] : [user], corpus, ...addon === null ? [] : [addon]];
+  return [...(user === null ? [] : [user]), corpus, ...(addon === null ? [] : [addon])];
 }
 
 /** Resolve a canonical content path against its family's anchored game root, falling back to the canonical corpus path. */
@@ -181,7 +217,10 @@ async function anchoredPath(gameRoots: GameRoots, corpusRoot: string, family: Ga
 }
 
 /** Q3 FS_GetModList reads loose description bytes, home before base, bounded to 48. */
-async function modDescription(product: ProductExpectation, roots: readonly { readonly root: string; readonly gameRoots: GameRoots }[]): Promise<ProductExpectation> {
+async function modDescription(
+  product: ProductExpectation,
+  roots: readonly { readonly root: string; readonly gameRoots: GameRoots }[],
+): Promise<ProductExpectation> {
   if (product.family !== "q3") return product;
   for (const { root, gameRoots } of roots) {
     const path = await anchoredPath(gameRoots, root, product.family, `${product.contentDirectory}/description.txt`);
@@ -193,14 +232,22 @@ async function modDescription(product: ProductExpectation, roots: readonly { rea
       if (bytesRead === 0) return product;
       const end = bytes.subarray(0, bytesRead).indexOf(0);
       return { ...product, title: bytes.toString("latin1", 0, end < 0 ? bytesRead : end) };
-    } finally { await file.close(); }
+    } finally {
+      await file.close();
+    }
   }
   return product;
 }
 
-async function discoverMods(root: string, products: readonly ProductExpectation[], inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>, gameRoots: GameRoots): Promise<readonly ProductExpectation[]> {
+async function discoverMods(
+  root: string,
+  products: readonly ProductExpectation[],
+  inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>,
+  gameRoots: GameRoots,
+): Promise<readonly ProductExpectation[]> {
   const roots = new Map<string, ProductExpectation>();
-  for (const product of products) if (product.baseProduct === null && !roots.has(dirname(product.contentDirectory))) roots.set(dirname(product.contentDirectory), product);
+  for (const product of products)
+    if (product.baseProduct === null && !roots.has(dirname(product.contentDirectory))) roots.set(dirname(product.contentDirectory), product);
   const found: ProductExpectation[] = [];
   for (const [directory, base] of roots) {
     const installed = await anchoredPath(gameRoots, root, base.family, directory);
@@ -214,7 +261,9 @@ async function discoverMods(root: string, products: readonly ProductExpectation[
       const inspected = await inspectModDirectory(resolve(installed, entry.name), base, inspect);
       if (inspected === null) continue;
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) continue; // A folder name can't stop the game from starting; it just isn't a mod.
-      found.push(...modExpectations(directory, entry.name, contentDirectory, await managedAddonTitle(root, contentDirectory), base, products, known, inspected));
+      found.push(
+        ...modExpectations(directory, entry.name, contentDirectory, await managedAddonTitle(root, contentDirectory), base, products, known, inspected),
+      );
     }
   }
   return found;
@@ -226,19 +275,28 @@ interface InspectedModDirectory {
 }
 
 /** Content sniff for one candidate mod directory; null when it holds nothing playable. */
-async function inspectModDirectory(physical: string, base: ProductExpectation, inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>): Promise<InspectedModDirectory | null> {
+async function inspectModDirectory(
+  physical: string,
+  base: ProductExpectation,
+  inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>,
+): Promise<InspectedModDirectory | null> {
   const members = await readdir(physical, { withFileTypes: true });
   const archives = members.filter(member => member.isFile() && archiveFormat(member.name) !== null);
-  const hasContent = archives.length > 0 || members.some(member => member.isDirectory() && ["maps", "models", "vm"].includes(member.name.toLowerCase())
-    || member.isFile() && /^(?:qw?progs\.dat|progs\.dat|(?:qa)?game.*\.(?:dll|so))$/i.test(member.name));
+  const hasContent =
+    archives.length > 0 ||
+    members.some(
+      member =>
+        (member.isDirectory() && ["maps", "models", "vm"].includes(member.name.toLowerCase())) ||
+        (member.isFile() && /^(?:qw?progs\.dat|progs\.dat|(?:qa)?game.*\.(?:dll|so))$/i.test(member.name)),
+    );
   if (!hasContent) return null;
   const programNames = members.filter(member => member.isFile()).map(member => member.name.toLowerCase());
-  if (base.family === "q3" && await findContentPath(physical, "vm/qagame.qvm") !== null) programNames.push("vm/qagame.qvm");
+  if (base.family === "q3" && (await findContentPath(physical, "vm/qagame.qvm")) !== null) programNames.push("vm/qagame.qvm");
   for (const archive of archives) {
     const format = archiveFormat(archive.name);
-    if (format === null || base.family === "q2" && format !== "pak" && !(format === "zip" && archive.name.toLowerCase().endsWith(".pkz"))) continue;
+    if (format === null || (base.family === "q2" && format !== "pak" && !(format === "zip" && archive.name.toLowerCase().endsWith(".pkz")))) continue;
     const inspected = await inspect(resolve(physical, archive.name), format).catch(() => null);
-    programNames.push(...inspected?.entries.map(member => member.path.toLowerCase()) ?? []);
+    programNames.push(...(inspected?.entries.map(member => member.path.toLowerCase()) ?? []));
   }
   return { archiveNames: archives.map(archive => archive.name), programNames };
 }
@@ -248,23 +306,56 @@ export function q3NativeModules(programNames: readonly string[]): string[] {
   return ["qagamex86.dll", "qagamei386.so"].filter(name => programNames.includes(name));
 }
 
-function modExpectations(directory: string, name: string, contentDirectory: string, title: string | null, base: ProductExpectation, products: readonly ProductExpectation[], known: readonly ProductExpectation[], inspected: InspectedModDirectory): ProductExpectation[] {
+function modExpectations(
+  directory: string,
+  name: string,
+  contentDirectory: string,
+  title: string | null,
+  base: ProductExpectation,
+  products: readonly ProductExpectation[],
+  known: readonly ProductExpectation[],
+  inspected: InspectedModDirectory,
+): ProductExpectation[] {
   const variants = [base];
-  const quakeworld = base.family === "q1" ? products.find(product => product.edition === "quakeworld" && dirname(product.contentDirectory) === directory) : undefined;
+  const quakeworld =
+    base.family === "q1" ? products.find(product => product.edition === "quakeworld" && dirname(product.contentDirectory) === directory) : undefined;
   if (quakeworld !== undefined && inspected.programNames.includes("qwprogs.dat")) variants.push(quakeworld);
   const q2Library = base.edition === "rerelease" ? "game_x64.dll" : "gamex86.dll";
   const q2WindowsGame = base.family === "q2" && inspected.programNames.includes(q2Library);
   const q3Native = base.family === "q3" ? q3NativeModules(inspected.programNames) : [];
   const q2OtherGame = base.family === "q2" && inspected.programNames.some(program => /^game[^/]*\.(?:dll|so)$/.test(program));
-  return variants.filter(candidate => !known.some(product => product.edition === candidate.edition)
-    && !products.some(product => product.id === `${candidate.family}-${candidate.edition}-${name}`)).map(variant => ({ id: `${variant.family}-${variant.edition}-${name}`, family: variant.family, edition: variant.edition, campaign: name,
-    title: title ?? (variant.edition === "quakeworld" ? `${name} (QuakeWorld)` : name), contentDirectory, baseProduct: variant.id,
-    requiredContentArchives: inspected.archiveNames.map(archive => `${contentDirectory}/${archive}`),
-    requiredPrograms: variant.edition === "quakeworld" ? ["qwprogs.dat"] : q2WindowsGame ? [q2Library]
-      : variant.family === "q1" && inspected.programNames.includes("progs.dat") ? ["progs.dat"]
-      : variant.family === "q3" && inspected.programNames.includes("vm/qagame.qvm") ? ["vm/qagame.qvm"] : [],
-    ...(variant.family === "q3" && q3Native.length !== 0 ? { nativePrograms: q3Native } : {}), mapWitness: null,
-    unresolvedReason: q2OtherGame && !q2WindowsGame ? `This Quake II add-on needs ${base.edition === "rerelease" ? "a Windows x64 game_x64.dll" : "a Windows i386 gamex86.dll"}; its installed game module is unsupported.` : null }));
+  return variants
+    .filter(
+      candidate =>
+        !known.some(product => product.edition === candidate.edition) &&
+        !products.some(product => product.id === `${candidate.family}-${candidate.edition}-${name}`),
+    )
+    .map(variant => ({
+      id: `${variant.family}-${variant.edition}-${name}`,
+      family: variant.family,
+      edition: variant.edition,
+      campaign: name,
+      title: title ?? (variant.edition === "quakeworld" ? `${name} (QuakeWorld)` : name),
+      contentDirectory,
+      baseProduct: variant.id,
+      requiredContentArchives: inspected.archiveNames.map(archive => `${contentDirectory}/${archive}`),
+      requiredPrograms:
+        variant.edition === "quakeworld"
+          ? ["qwprogs.dat"]
+          : q2WindowsGame
+            ? [q2Library]
+            : variant.family === "q1" && inspected.programNames.includes("progs.dat")
+              ? ["progs.dat"]
+              : variant.family === "q3" && inspected.programNames.includes("vm/qagame.qvm")
+                ? ["vm/qagame.qvm"]
+                : [],
+      ...(variant.family === "q3" && q3Native.length !== 0 ? { nativePrograms: q3Native } : {}),
+      mapWitness: null,
+      unresolvedReason:
+        q2OtherGame && !q2WindowsGame
+          ? `This Quake II add-on needs ${base.edition === "rerelease" ? "a Windows x64 game_x64.dll" : "a Windows i386 gamex86.dll"}; its installed game module is unsupported.`
+          : null,
+    }));
 }
 
 export interface AddonDirectory {
@@ -292,7 +383,13 @@ export async function discoverAddonDirectories(roots: readonly NightdiveAddonRoo
       if (["id1", "baseq2", "baseq3", "rerelease", "save"].includes(lower)) continue;
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) continue;
       const physical = resolve(root, entry.name);
-      const isDir = entry.isDirectory() || entry.isSymbolicLink() && await stat(physical).then(info => info.isDirectory(), () => false);
+      const isDir =
+        entry.isDirectory() ||
+        (entry.isSymbolicLink() &&
+          (await stat(physical).then(
+            info => info.isDirectory(),
+            () => false,
+          )));
       if (!isDir) continue;
       const contentDirectory = `${prefix}/${entry.name}`;
       if (!found.has(contentDirectory.toLowerCase()))
@@ -309,15 +406,18 @@ export async function discoverAddonDirectories(roots: readonly NightdiveAddonRoo
  * exact-tree copies are resolved before this fallback layer is consulted.
  */
 async function discoverSiblingDirectories(roots: readonly { readonly gameRoots: GameRoots }[]): Promise<ReadonlyMap<string, AddonDirectory>> {
-  const found = new Map<string, AddonDirectory>(), families: readonly GameFamily[] = ["q1", "q2"];
+  const found = new Map<string, AddonDirectory>(),
+    families: readonly GameFamily[] = ["q1", "q2"];
   for (const { gameRoots } of roots) {
     for (const family of families) {
       const gameRoot = gameRoots.get(family) ?? null;
       if (gameRoot === null) continue;
       const canonical = gameFamilyDirectory(family);
       const rereleaseRoot = await findContentPath(gameRoot, "rerelease");
-      const trees = [{ physical: gameRoot, other: `${canonical}/rerelease` },
-        ...rereleaseRoot === null ? [] : [{ physical: rereleaseRoot, other: canonical }]];
+      const trees = [
+        { physical: gameRoot, other: `${canonical}/rerelease` },
+        ...(rereleaseRoot === null ? [] : [{ physical: rereleaseRoot, other: canonical }]),
+      ];
       for (const tree of trees) {
         const entries = await readdir(tree.physical, { withFileTypes: true }).catch(() => []);
         for (const entry of entries) {
@@ -325,7 +425,13 @@ async function discoverSiblingDirectories(roots: readonly { readonly gameRoots: 
           if (["id1", "baseq2", "baseq3", "rerelease", "save"].includes(lower)) continue;
           if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) continue;
           const physical = resolve(tree.physical, entry.name);
-          const isDir = entry.isDirectory() || entry.isSymbolicLink() && await stat(physical).then(info => info.isDirectory(), () => false);
+          const isDir =
+            entry.isDirectory() ||
+            (entry.isSymbolicLink() &&
+              (await stat(physical).then(
+                info => info.isDirectory(),
+                () => false,
+              )));
           if (!isDir) continue;
           const contentDirectory = `${tree.other}/${entry.name}`;
           if (!found.has(contentDirectory.toLowerCase()))
@@ -337,10 +443,16 @@ async function discoverSiblingDirectories(roots: readonly { readonly gameRoots: 
   return found;
 }
 
-async function discoverAddonMods(addons: ReadonlyMap<string, AddonDirectory>, products: readonly ProductExpectation[], inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>): Promise<readonly ProductExpectation[]> {
+async function discoverAddonMods(
+  addons: ReadonlyMap<string, AddonDirectory>,
+  products: readonly ProductExpectation[],
+  inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>,
+): Promise<readonly ProductExpectation[]> {
   const found: ProductExpectation[] = [];
   for (const addon of addons.values()) {
-    const base = products.find(product => product.baseProduct === null && product.family === addon.family && dirname(product.contentDirectory) === dirname(addon.contentDirectory));
+    const base = products.find(
+      product => product.baseProduct === null && product.family === addon.family && dirname(product.contentDirectory) === dirname(addon.contentDirectory),
+    );
     if (base === undefined) continue;
     const known = products.filter(product => product.contentDirectory.toLowerCase() === addon.contentDirectory.toLowerCase());
     if (known.length !== 0 && (addon.family !== "q1" || known.some(product => product.edition === "quakeworld"))) continue;
@@ -370,7 +482,14 @@ export class InstalledCatalog {
   readonly #byId = new Map<string, CatalogProduct>();
   readonly #digests = new Map<string, Promise<ContentDigest>>();
 
-  constructor(readonly corpusRoot: string, readonly products: readonly CatalogProduct[], readonly rootArchives: readonly CatalogArchive[], readonly generation: number, readonly userContentRoot: string | null = null, readonly addonContentRoots: readonly NightdiveAddonRoot[] = []) {
+  constructor(
+    readonly corpusRoot: string,
+    readonly products: readonly CatalogProduct[],
+    readonly rootArchives: readonly CatalogArchive[],
+    readonly generation: number,
+    readonly userContentRoot: string | null = null,
+    readonly addonContentRoots: readonly NightdiveAddonRoot[] = [],
+  ) {
     for (const product of products) {
       if (this.#byId.has(product.id) || this.#byId.has(product.expectation.id)) throw new RangeError(`Duplicate catalog identity: ${product.id}`);
       this.#byId.set(product.id, product);
@@ -398,7 +517,9 @@ export class InstalledCatalog {
     const visit = (product: CatalogProduct): void => {
       if (visited.has(product.id)) throw new Error(`Cyclic base content dependency: ${product.id}`);
       visited.add(product.id);
-      const add = (map: ContentMap): void => { if (!winners.has(map.path.toLowerCase())) winners.set(map.path.toLowerCase(), map); };
+      const add = (map: ContentMap): void => {
+        if (!winners.has(map.path.toLowerCase())) winners.set(map.path.toLowerCase(), map);
+      };
       for (const directory of productDirectories(product)) {
         for (const archive of orderGameArchives(product.expectation, directory.archives)) {
           const maps = product.maps.filter(map => map.source === archive.path);
@@ -428,8 +549,13 @@ export class InstalledCatalog {
       if (paths.has(archive.path)) return;
       paths.add(archive.path);
       const name = Buffer.from(relative(this.corpusRoot, archive.path)).toString("hex");
-      mounts.push({ kind: "archive", identity: createMountIdentity(createMountId(product.expectation.id, name), product.id, this.generation),
-        archivePath: archive.path, archiveDigest: await this.#digest(archive.path), format: archive.format });
+      mounts.push({
+        kind: "archive",
+        identity: createMountIdentity(createMountId(product.expectation.id, name), product.id, this.generation),
+        archivePath: archive.path,
+        archiveDigest: await this.#digest(archive.path),
+        format: archive.format,
+      });
     };
     const visit = async (content: ContentId): Promise<void> => {
       const product = this.require(content);
@@ -440,7 +566,11 @@ export class InstalledCatalog {
         if (directory.root !== null && !paths.has(directory.root)) {
           paths.add(directory.root);
           const name = Buffer.from(relative(this.corpusRoot, directory.root)).toString("hex");
-          mounts.push({ kind: "loose", identity: createMountIdentity(createMountId(product.expectation.id, `loose-${name}`), product.id, this.generation), rootPath: directory.root });
+          mounts.push({
+            kind: "loose",
+            identity: createMountIdentity(createMountId(product.expectation.id, `loose-${name}`), product.id, this.generation),
+            rootPath: directory.root,
+          });
         }
       }
       if (product.expectation.baseProduct !== null) await visit(this.product(product.expectation.baseProduct).id);
@@ -448,8 +578,10 @@ export class InstalledCatalog {
       // product's files live in, not to the edition selected to play them:
       // classic products pointing into a rerelease tree still need its HUD
       // and shared assets.
-      if (product.expectation.baseProduct === null && product.expectation.edition === "rerelease"
-        || product.expectation.contentDirectory.split("/")[1] === "rerelease") {
+      if (
+        (product.expectation.baseProduct === null && product.expectation.edition === "rerelease") ||
+        product.expectation.contentDirectory.split("/")[1] === "rerelease"
+      ) {
         const root = dirname(product.looseRoot ?? resolve(this.corpusRoot, product.expectation.contentDirectory));
         let editionArchives = this.rootArchives.filter(candidate => dirname(candidate.path) === root);
         // A rerelease-tree product supplied only by a Steam add-on copy has no
@@ -480,10 +612,10 @@ export class InstalledCatalog {
     const assetMounts = await this.mountsFor(assets.id);
     const geometryMounts = await this.mountsFor(geometry.id);
     const additional: ContentMount[] = [];
-    if (requiredRulesAssets !== null) additional.push(...await this.mountsFor(requiredRulesAssets));
-    for (const id of selection.additional ?? []) additional.push(...await this.mountsFor(id));
+    if (requiredRulesAssets !== null) additional.push(...(await this.mountsFor(requiredRulesAssets)));
+    for (const id of selection.additional ?? []) additional.push(...(await this.mountsFor(id)));
     const mounts = new Map<string, ContentMount>();
-    const physicalKey = (mount: ContentMount): string => mount.kind === "archive" ? mount.archivePath : mount.rootPath;
+    const physicalKey = (mount: ContentMount): string => (mount.kind === "archive" ? mount.archivePath : mount.rootPath);
     for (const mount of [...assetMounts, ...geometryMounts, ...additional]) if (!mounts.has(physicalKey(mount))) mounts.set(physicalKey(mount), mount);
     const unique = [...mounts.values()];
     const order = (first: readonly ContentMount[]): readonly ContentMount["identity"]["id"][] => {
@@ -494,13 +626,22 @@ export class InstalledCatalog {
       }
       return [...ids];
     };
-    return { id: selection.id, mounts: unique, defaultOrder: order(assetMounts),
-      prefixOrders: assets.id === geometry.id ? [] : [{ prefix: "maps/", mounts: order(geometryMounts) }] };
+    return {
+      id: selection.id,
+      mounts: unique,
+      defaultOrder: order(assetMounts),
+      prefixOrders: assets.id === geometry.id ? [] : [{ prefix: "maps/", mounts: order(geometryMounts) }],
+    };
   }
 
   async read(content: ContentId, path: string): Promise<Uint8Array> {
     const mounts = await this.mountsFor(content);
-    const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
+    const plan: ResolvedMountPlan = {
+      id: `mount-plan:catalog:${this.generation}`,
+      mounts,
+      defaultOrder: mounts.map(mount => mount.identity.id),
+      prefixOrders: [],
+    };
     using opened = await openMountPlan(plan);
     return await opened.read(path);
   }
@@ -509,7 +650,12 @@ export class InstalledCatalog {
     const product = this.require(id);
     if (product.expectation.family !== "q2" || product.expectation.edition !== "rerelease") return null;
     const mounts = await this.mountsFor(product.id);
-    const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
+    const plan: ResolvedMountPlan = {
+      id: `mount-plan:catalog:${this.generation}`,
+      mounts,
+      defaultOrder: mounts.map(mount => mount.identity.id),
+      prefixOrders: [],
+    };
     using opened = await openPlan(plan);
     const resource = await opened.open("mapdb.json");
     if (resource === null) return null;
@@ -535,8 +681,17 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     if (existing !== undefined) return existing;
     const pending = (async (): Promise<CatalogArchive> => {
       const archive = await openArchive(path, format);
-      try { return { path, format, entries: archive.entries.filter(entry => !entry.isDirectory).map(entry => ({ path: entry.path, ordinal: entry.ordinal, byteLength: entry.byteLength })) }; }
-      finally { archive.close(); }
+      try {
+        return {
+          path,
+          format,
+          entries: archive.entries
+            .filter(entry => !entry.isDirectory)
+            .map(entry => ({ path: entry.path, ordinal: entry.ordinal, byteLength: entry.byteLength })),
+        };
+      } finally {
+        archive.close();
+      }
     })();
     archives.set(path, pending);
     return pending;
@@ -544,11 +699,13 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const corpusGameRoots = resolveGameRoots(corpusRoot);
   const userGameRoots = userContentRoot === null ? corpusGameRoots : resolveGameRoots(userContentRoot);
   const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected, inspect, corpusGameRoots);
-  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods], inspect, userGameRoots);
+  const userMods =
+    options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods], inspect, userGameRoots);
   // Fallback copies of a game directory, highest priority first: the sibling
   // edition tree in local roots, then Nightdive/Steam add-on downloads.
-  const siblingDirectories = await discoverSiblingDirectories(userContentRoot === null ? [{ gameRoots: corpusGameRoots }]
-    : [{ gameRoots: userGameRoots }, { gameRoots: corpusGameRoots }]);
+  const siblingDirectories = await discoverSiblingDirectories(
+    userContentRoot === null ? [{ gameRoots: corpusGameRoots }] : [{ gameRoots: userGameRoots }, { gameRoots: corpusGameRoots }],
+  );
   const steamDirectories = await discoverAddonDirectories(options.addonContentRoots ?? []);
   const addonDirectories = new Map([...siblingDirectories, ...[...steamDirectories].filter(([key]) => !siblingDirectories.has(key))]);
   for (const [key, steam] of steamDirectories) {
@@ -564,10 +721,18 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     return null;
   };
   const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
-  const descriptionRoots = userContentRoot === null ? [{ root: corpusRoot, gameRoots: corpusGameRoots }]
-    : [{ root: userContentRoot, gameRoots: userGameRoots }, { root: corpusRoot, gameRoots: corpusGameRoots }];
-  const expectations = await Promise.all([...expected, ...corpusMods, ...userMods, ...addonMods].map(product =>
-    stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots)));
+  const descriptionRoots =
+    userContentRoot === null
+      ? [{ root: corpusRoot, gameRoots: corpusGameRoots }]
+      : [
+          { root: userContentRoot, gameRoots: userGameRoots },
+          { root: corpusRoot, gameRoots: corpusGameRoots },
+        ];
+  const expectations = await Promise.all(
+    [...expected, ...corpusMods, ...userMods, ...addonMods].map(product =>
+      stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots),
+    ),
+  );
   const products: CatalogProduct[] = [];
   const rootArchives = new Map<string, CatalogArchive>();
   for (const expectation of expectations) {
@@ -581,20 +746,29 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       for (const entry of await readdir(looseRoot, { withFileTypes: true })) {
         const format = archiveFormat(entry.name);
         if (!entry.isFile() || format === null) continue;
-        try { found.push(await inspect(resolve(looseRoot, entry.name), format)); }
-        catch (error) { diagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`); }
+        try {
+          found.push(await inspect(resolve(looseRoot, entry.name), format));
+        } catch (error) {
+          diagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       if (expectation.edition === "rerelease") {
         const kpf = expectation.family === "q1" ? "QuakeEX.kpf" : "Q2Game.kpf";
         const path = await findContentPath(dirname(looseRoot), kpf);
         if (path !== null && !rootArchives.has(path)) {
-          try { rootArchives.set(path, await inspect(path, "kpf")); }
-          catch (error) { diagnostics.push(`${kpf}: ${error instanceof Error ? error.message : String(error)}`); }
+          try {
+            rootArchives.set(path, await inspect(path, "kpf"));
+          } catch (error) {
+            diagnostics.push(`${kpf}: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
       }
     }
-    const userRoot = userContentRoot === null || userContentRoot === corpusRoot ? null
-      : await anchoredPath(userGameRoots, userContentRoot, expectation.family, expectation.contentDirectory) ?? userProductDirectory(userContentRoot, expectation.contentDirectory);
+    const userRoot =
+      userContentRoot === null || userContentRoot === corpusRoot
+        ? null
+        : ((await anchoredPath(userGameRoots, userContentRoot, expectation.family, expectation.contentDirectory)) ??
+          userProductDirectory(userContentRoot, expectation.contentDirectory));
     const userArchives: CatalogArchive[] = [];
     const userDiagnostics: string[] = [];
     if (userRoot !== null) {
@@ -605,8 +779,11 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       for (const entry of entries) {
         const format = archiveFormat(entry.name);
         if (!entry.isFile() || format === null) continue;
-        try { userArchives.push(await inspect(resolve(userRoot, entry.name), format)); }
-        catch (error: unknown) { userDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`); }
+        try {
+          userArchives.push(await inspect(resolve(userRoot, entry.name), format));
+        } catch (error: unknown) {
+          userDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
     // Sibling-tree and Steam copies are fallbacks, not overlays: an
@@ -619,27 +796,61 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       for (const entry of entries) {
         const format = archiveFormat(entry.name);
         if (!entry.isFile() || format === null) continue;
-        try { addonArchives.push(await inspect(resolve(addon.physical, entry.name), format)); }
-        catch (error: unknown) { addonDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`); }
+        try {
+          addonArchives.push(await inspect(resolve(addon.physical, entry.name), format));
+        } catch (error: unknown) {
+          addonDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
-    const archiveMaps = (list: readonly CatalogArchive[]): ContentMap[] => list.flatMap(archive => archive.entries.filter(entry => /^maps\/.*\.bsp$/i.test(entry.path)).map(entry => ({ path: entry.path, source: archive.path, memberIndex: entry.ordinal })));
-    const corpusMaps: ContentMap[] = [...archiveMaps(found), ...looseRoot === null ? [] : await looseMaps(looseRoot)];
-    const addonMaps: ContentMap[] = [...archiveMaps(addonArchives), ...addon === undefined ? [] : await looseMaps(addon.physical)];
-    const allMaps: ContentMap[] = [...archiveMaps(userArchives), ...userRoot === null ? [] : await looseMaps(userRoot), ...corpusMaps, ...addonMaps];
-    const requirements: string[] = [...diagnostics, ...userModIds.has(expectation.id) ? userDiagnostics : [], ...addonModIds.has(expectation.id) ? addonDiagnostics : []];
+    const archiveMaps = (list: readonly CatalogArchive[]): ContentMap[] =>
+      list.flatMap(archive =>
+        archive.entries
+          .filter(entry => /^maps\/.*\.bsp$/i.test(entry.path))
+          .map(entry => ({ path: entry.path, source: archive.path, memberIndex: entry.ordinal })),
+      );
+    const corpusMaps: ContentMap[] = [...archiveMaps(found), ...(looseRoot === null ? [] : await looseMaps(looseRoot))];
+    const addonMaps: ContentMap[] = [...archiveMaps(addonArchives), ...(addon === undefined ? [] : await looseMaps(addon.physical))];
+    const allMaps: ContentMap[] = [...archiveMaps(userArchives), ...(userRoot === null ? [] : await looseMaps(userRoot)), ...corpusMaps, ...addonMaps];
+    const requirements: string[] = [
+      ...diagnostics,
+      ...(userModIds.has(expectation.id) ? userDiagnostics : []),
+      ...(addonModIds.has(expectation.id) ? addonDiagnostics : []),
+    ];
     for (const archive of remoteOverlays.has(expectation.id) ? [] : expectation.requiredContentArchives) {
       const archiveFamily = gameFamilyForDirectory(archive.split("/")[0] ?? "") ?? expectation.family;
-      const path = await anchoredPath(corpusGameRoots, corpusRoot, archiveFamily, archive)
-        ?? (userModIds.has(expectation.id) && userContentRoot !== null ? await anchoredPath(userGameRoots, userContentRoot, archiveFamily, archive) : null)
-        ?? (addon !== undefined || addonModIds.has(expectation.id) ? await addonPath(archive) : null);
+      const path =
+        (await anchoredPath(corpusGameRoots, corpusRoot, archiveFamily, archive)) ??
+        (userModIds.has(expectation.id) && userContentRoot !== null ? await anchoredPath(userGameRoots, userContentRoot, archiveFamily, archive) : null) ??
+        (addon !== undefined || addonModIds.has(expectation.id) ? await addonPath(archive) : null);
       if (path === null || !(await stat(path)).isFile()) requirements.push(archive);
     }
     if (looseRoot === null && !userModIds.has(expectation.id) && addon === undefined) requirements.push(expectation.contentDirectory);
-    if (!remoteOverlays.has(expectation.id) && expectation.mapWitness !== null && !(userModIds.has(expectation.id) || addon !== undefined ? allMaps : corpusMaps).some(map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase())) requirements.push(expectation.mapWitness);
-    const availability: ProductAvailability = expectation.unresolvedReason !== null ? { kind: "unresolved", reason: expectation.unresolvedReason }
-      : requirements.length > 0 ? { kind: "missing", requirements } : { kind: "installed" };
-    products.push({ id, expectation, availability, archives: [...userArchives, ...found, ...addonArchives], looseRoot, userContent: userRoot === null ? null : { root: userRoot, archives: userArchives }, addonContent: addon === undefined ? null : { root: addon.physical, archives: addonArchives }, maps: allMaps, diagnostics: [...diagnostics, ...userDiagnostics, ...addonDiagnostics] });
+    if (
+      !remoteOverlays.has(expectation.id) &&
+      expectation.mapWitness !== null &&
+      !(userModIds.has(expectation.id) || addon !== undefined ? allMaps : corpusMaps).some(
+        map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase(),
+      )
+    )
+      requirements.push(expectation.mapWitness);
+    const availability: ProductAvailability =
+      expectation.unresolvedReason !== null
+        ? { kind: "unresolved", reason: expectation.unresolvedReason }
+        : requirements.length > 0
+          ? { kind: "missing", requirements }
+          : { kind: "installed" };
+    products.push({
+      id,
+      expectation,
+      availability,
+      archives: [...userArchives, ...found, ...addonArchives],
+      looseRoot,
+      userContent: userRoot === null ? null : { root: userRoot, archives: userArchives },
+      addonContent: addon === undefined ? null : { root: addon.physical, archives: addonArchives },
+      maps: allMaps,
+      diagnostics: [...diagnostics, ...userDiagnostics, ...addonDiagnostics],
+    });
   }
   // An unreadable base remains a requirement even when its filenames are present.
   const byProduct = new Map(products.map(product => [product.expectation.id, product]));
@@ -668,25 +879,39 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   };
   const hasProgram = async (product: CatalogProduct, program: string): Promise<boolean> => {
     let names = archivePrograms.get(product);
-    if (names === undefined) { names = new Set(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase()))); archivePrograms.set(product, names); }
-    return names.has(program.toLowerCase()) || product.looseRoot !== null && await looseHas(product.looseRoot, program);
+    if (names === undefined) {
+      names = new Set(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())));
+      archivePrograms.set(product, names);
+    }
+    return names.has(program.toLowerCase()) || (product.looseRoot !== null && (await looseHas(product.looseRoot, program)));
   };
   // A program is found in the product's own directory or archives, or anywhere along its base chain.
   const missingPrograms = async (product: CatalogProduct): Promise<string[]> => {
     const chain: CatalogProduct[] = [];
-    for (let link: CatalogProduct | undefined = product; link !== undefined && !chain.includes(link);
-      link = link.expectation.baseProduct === null ? undefined : byProduct.get(link.expectation.baseProduct)) chain.push(link);
+    for (
+      let link: CatalogProduct | undefined = product;
+      link !== undefined && !chain.includes(link);
+      link = link.expectation.baseProduct === null ? undefined : byProduct.get(link.expectation.baseProduct)
+    )
+      chain.push(link);
     const missing: string[] = [];
     for (const program of product.expectation.requiredPrograms) {
       let found = false;
-      for (const link of chain) if (await hasProgram(link, program)) { found = true; break; }
+      for (const link of chain)
+        if (await hasProgram(link, program)) {
+          found = true;
+          break;
+        }
       if (!found) missing.push(program);
     }
     return missing;
   };
   const checked: CatalogProduct[] = [];
   for (const product of products) {
-    if (product.availability.kind !== "installed") { checked.push(product); continue; }
+    if (product.availability.kind !== "installed") {
+      checked.push(product);
+      continue;
+    }
     if (product.expectation.baseProduct !== null) {
       const base = byProduct.get(product.expectation.baseProduct);
       if (base === undefined || base.availability.kind !== "installed") {

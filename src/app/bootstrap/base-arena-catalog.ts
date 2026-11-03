@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 
@@ -11,16 +12,23 @@ export interface BaseArena {
   readonly fragLimit: number;
   readonly timeLimit: number;
 }
-export interface BaseArenaCatalog { readonly arenas: readonly BaseArena[]; readonly regularCount: number; readonly tierCount: number; }
+export interface BaseArenaCatalog {
+  readonly arenas: readonly BaseArena[];
+  readonly regularCount: number;
+  readonly tierCount: number;
+}
 function arenaInfosFromText(text: string): ReadonlyMap<string, string>[] {
   const infos: ReadonlyMap<string, string>[] = [];
-  const parser = new CommonParseState(), cursor = new CommonParseCursor(text);
+  const parser = new CommonParseState(),
+    cursor = new CommonParseCursor(text);
   for (;;) {
-    const token = parser.parse(cursor); if (token === "") break;
+    const token = parser.parse(cursor);
+    if (token === "") break;
     if (token !== "{") throw new Error("Malformed base arena definition");
     const fields = new Map<string, string>();
     for (;;) {
-      const key = parser.parse(cursor); if (key === "}") break;
+      const key = parser.parse(cursor);
+      if (key === "}") break;
       if (key === "") throw new Error("Unterminated base arena definition");
       fields.set(key, parser.parse(cursor, false) || "<NULL>");
     }
@@ -36,17 +44,31 @@ export function parseBaseArenaCatalog(texts: readonly string[]): BaseArenaCatalo
 
 function catalogFromInfos(infos: readonly ReadonlyMap<string, string>[]): BaseArenaCatalog {
   // Arenas without a usable map name are skipped, as in UI_LoadArenas.
-  const singles = infos.filter(row => row.get("type")?.includes("single"))
-    .filter(row => { const name = row.get("map"); return name !== undefined && /^[a-z0-9_/-]+$/i.test(name); });
+  const singles = infos
+    .filter(row => row.get("type")?.includes("single"))
+    .filter(row => {
+      const name = row.get("map");
+      return name !== undefined && /^[a-z0-9_/-]+$/i.test(name);
+    });
   const regularCount = Math.floor(singles.filter(row => !row.get("special")).length / 4) * 4;
-  let single = 0, specialNumber = regularCount;
+  let single = 0,
+    specialNumber = regularCount;
   const arenas = singles.map(row => {
-    const special = row.get("special") ?? "", number = special ? specialNumber++ : single++;
+    const special = row.get("special") ?? "",
+      number = special ? specialNumber++ : single++;
     const name = row.get("map") ?? "";
-    const frag = Number.parseInt(row.get("fraglimit") ?? "0", 10) || 0, time = Number.parseInt(row.get("timelimit") ?? "0", 10) || 0;
-    return { number, map: `maps/${name}.bsp`, title: row.get("longname") ?? name, special,
+    const frag = Number.parseInt(row.get("fraglimit") ?? "0", 10) || 0,
+      time = Number.parseInt(row.get("timelimit") ?? "0", 10) || 0;
+    return {
+      number,
+      map: `maps/${name}.bsp`,
+      title: row.get("longname") ?? name,
+      special,
       selection: special.toLowerCase() === "training" ? -4 : special.toLowerCase() === "final" ? regularCount : number,
-      bots: (row.get("bots") ?? "").split(/\s+/).filter(Boolean), fragLimit: frag === 0 && time === 0 ? 10 : frag, timeLimit: time };
+      bots: (row.get("bots") ?? "").split(/\s+/).filter(Boolean),
+      fragLimit: frag === 0 && time === 0 ? 10 : frag,
+      timeLimit: time,
+    };
   });
   return { arenas, regularCount, tierCount: regularCount / 4 };
 }
@@ -58,12 +80,19 @@ export async function readBaseArenaCatalog(mounts: Pick<MountedContent, "listFil
     if (resource === null) continue;
     // A malformed arena file is skipped with the rest intact, as in
     // UI_LoadArenasFromFile -- never a failed launch.
-    try { infos.push(...arenaInfosFromText(Buffer.from(resource.bytes).toString("latin1"))); } catch { continue; }
+    try {
+      infos.push(...arenaInfosFromText(Buffer.from(resource.bytes).toString("latin1")));
+    } catch {
+      continue;
+    }
   }
   return catalogFromInfos(infos);
 }
 export function baseArenaForMap(catalog: BaseArenaCatalog, map: string): BaseArena {
-  const path = map.toLowerCase().replace(/^maps\//, "").replace(/\.bsp$/, "");
+  const path = map
+    .toLowerCase()
+    .replace(/^maps\//, "")
+    .replace(/\.bsp$/, "");
   const arena = catalog.arenas.find(row => row.map.toLowerCase() === `maps/${path}.bsp`);
   if (arena === undefined) throw new Error(`No authored single-player arena for ${map}`);
   return arena;

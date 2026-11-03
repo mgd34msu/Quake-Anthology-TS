@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type {
-  GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestMemory,
-  GuestValueLayout, ModuleIdentity, NativeAbi, NativeCallAbi,
+  GuestAddress,
+  GuestCallContext,
+  GuestCallResult,
+  GuestCallValue,
+  GuestMemory,
+  GuestValueLayout,
+  ModuleIdentity,
+  NativeAbi,
+  NativeCallAbi,
 } from "../../contracts/execution.ts";
 import type { CallbackId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 
 /** Committed bytes relative to the observer's requested start, including alias writes. */
-export interface GuestWrittenRange { readonly byteOffset: number; readonly byteLength: number; }
+export interface GuestWrittenRange {
+  readonly byteOffset: number;
+  readonly byteLength: number;
+}
 export type GuestPointerBytes = 4 | 8;
 export type GuestAccess = "read" | "write" | "execute";
 export type GuestPermissions = "none" | "read" | "read-write" | "read-execute" | "read-write-execute" | "execute";
@@ -85,8 +95,7 @@ export interface MappedGuestMemory extends GuestMemory {
   checkpoint(): GuestMemorySnapshot;
 }
 
-export type GuestRegister = "rax" | "rcx" | "rdx" | "rbx" | "rsp" | "rbp" | "rsi" | "rdi"
-  | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15";
+export type GuestRegister = "rax" | "rcx" | "rdx" | "rbx" | "rsp" | "rbp" | "rsi" | "rdi" | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15";
 export type GuestIntegerWidth = 8 | 16 | 32 | 64;
 export type GuestArchitecture = "i386" | "x86-64";
 export interface GuestIntegerRegisters {
@@ -97,9 +106,22 @@ export interface GuestIntegerRegisters {
   checkpoint(destination?: Uint8Array): Uint8Array;
   restore(bytes: Uint8Array): undefined;
 }
-export type GuestFlag = "carry" | "parity" | "auxiliary-carry" | "zero" | "sign" | "trap" | "interrupt"
-  | "direction" | "overflow" | "resume" | "virtual-8086" | "alignment-check" | "virtual-interrupt"
-  | "virtual-interrupt-pending" | "identification";
+export type GuestFlag =
+  | "carry"
+  | "parity"
+  | "auxiliary-carry"
+  | "zero"
+  | "sign"
+  | "trap"
+  | "interrupt"
+  | "direction"
+  | "overflow"
+  | "resume"
+  | "virtual-8086"
+  | "alignment-check"
+  | "virtual-interrupt"
+  | "virtual-interrupt-pending"
+  | "identification";
 export interface GuestFlags {
   value: bigint;
   get(flag: GuestFlag): boolean;
@@ -161,7 +183,13 @@ export type GuestException =
   | { readonly kind: "processor"; readonly vector: number; readonly errorCode: bigint | null; readonly instruction: GuestAddress; readonly detail: string }
   | { readonly kind: "memory"; readonly access: GuestAccess; readonly address: GuestAddress; readonly byteLength: number; readonly detail: string }
   | { readonly kind: "windows"; readonly code: number; readonly flags: number; readonly address: GuestAddress; readonly arguments: readonly bigint[] }
-  | { readonly kind: "cxx"; readonly object: GuestAddress; readonly typeInfo: GuestAddress | null; readonly destructor: GuestAddress | null; readonly abi: NativeAbi };
+  | {
+      readonly kind: "cxx";
+      readonly object: GuestAddress;
+      readonly typeInfo: GuestAddress | null;
+      readonly destructor: GuestAddress | null;
+      readonly abi: NativeAbi;
+    };
 export type GuestExecutionStop =
   | { readonly kind: "budget"; readonly instructions: number }
   | { readonly kind: "return"; readonly instructions: number; readonly address: GuestAddress }
@@ -193,7 +221,8 @@ export interface GuestAbiAdapter {
   returnValue(cpu: GuestCpu, signature: GuestCallSignature): GuestCallResult;
   leave(cpu: GuestCpu, signature: GuestCallSignature, result: GuestCallResult): undefined;
 }
-export type GuestSymbolName = { readonly kind: "name"; readonly name: string; readonly version: string | null }
+export type GuestSymbolName =
+  | { readonly kind: "name"; readonly name: string; readonly version: string | null }
   | { readonly kind: "ordinal"; readonly ordinal: number };
 export interface GuestImport {
   readonly library: string;
@@ -210,7 +239,8 @@ export interface GuestImportResolver {
 }
 export interface GuestExport {
   readonly symbol: GuestSymbolName;
-  readonly target: { readonly kind: "address"; readonly address: GuestAddress }
+  readonly target:
+    | { readonly kind: "address"; readonly address: GuestAddress }
     | { readonly kind: "forward"; readonly library: string; readonly symbol: GuestSymbolName };
 }
 export interface GuestTlsTemplate {

@@ -1,5 +1,6 @@
-import { EventRing, type EventCursor } from '../../foundation/event-ring.ts';
-import type { RemoteSeatSource } from './remote-seat-source.ts';
+// SPDX-License-Identifier: GPL-2.0-or-later
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
+import type { RemoteSeatSource } from "./remote-seat-source.ts";
 
 interface Publication {
   ready(): boolean;
@@ -14,30 +15,44 @@ export class RemoteSeatPump {
   private failure: { readonly error: unknown } | null = null;
   private readonly publications = new EventRing<Publication>(4096);
   private readonly publicationCursor: EventCursor = this.publications.openCursor();
-  readonly retirementError = new Error('Remote seat publication was retired');
+  readonly retirementError = new Error("Remote seat publication was retired");
   private closing: Promise<void> | null = null;
   private closed = false;
 
-  constructor(private readonly source: { readonly network: Pick<RemoteSeatSource['network'], 'poll'>; readonly close: RemoteSeatSource['close'] }) {}
+  constructor(private readonly source: { readonly network: Pick<RemoteSeatSource["network"], "poll">; readonly close: RemoteSeatSource["close"] }) {}
 
   poll(nowMilliseconds: number): void {
     if (this.closed || this.pendingPoll !== null || this.failure !== null) return;
     this.pendingPoll = Promise.resolve().then(async () => {
-      try { if (!this.closed) await this.source.network.poll(nowMilliseconds); }
-      catch (error) { if (error !== this.retirementError) this.failure = { error }; }
-      finally { this.pendingPoll = null; }
+      try {
+        if (!this.closed) await this.source.network.poll(nowMilliseconds);
+      } catch (error) {
+        if (error !== this.retirementError) this.failure = { error };
+      } finally {
+        this.pendingPoll = null;
+      }
     });
   }
 
-  throwFailure(): void { if (this.failure !== null) throw this.failure.error; }
+  throwFailure(): void {
+    if (this.failure !== null) throw this.failure.error;
+  }
 
   enqueue<T>(operation: () => T | Promise<T>, ready: () => boolean = () => true): Promise<T> {
     if (this.closed) return Promise.reject(this.retirementError);
     return new Promise<T>((resolve, reject) => {
-      this.publications.admit({ ready, reject, execute: async () => {
-        try { resolve(await operation()); }
-        catch (error) { reject(error); throw error; }
-      } });
+      this.publications.admit({
+        ready,
+        reject,
+        execute: async () => {
+          try {
+            resolve(await operation());
+          } catch (error) {
+            reject(error);
+            throw error;
+          }
+        },
+      });
     });
   }
 
@@ -53,7 +68,9 @@ export class RemoteSeatPump {
           this.publications.retire();
           await next.execute();
         }
-      } finally { this.pendingDrain = null; }
+      } finally {
+        this.pendingDrain = null;
+      }
     });
     return this.pendingDrain;
   }
@@ -64,9 +81,15 @@ export class RemoteSeatPump {
     for (const publication of this.publications.drainAll()) publication.reject(this.retirementError);
     this.closing = (async () => {
       try {
-        try { await this.pendingDrain; } catch (error) { if (error !== this.retirementError) this.failure ??= { error }; }
+        try {
+          await this.pendingDrain;
+        } catch (error) {
+          if (error !== this.retirementError) this.failure ??= { error };
+        }
         await this.pendingPoll;
-      } finally { await this.source.close(); }
+      } finally {
+        await this.source.close();
+      }
       this.throwFailure();
     })();
     return this.closing;

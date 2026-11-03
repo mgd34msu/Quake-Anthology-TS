@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { id1ProgramBinding, id1DamageMultiplier, type Id1ProgramBinding } from "./id1-program.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -16,7 +17,10 @@ export interface Id1SynchronousAttack {
   readonly point: Vec3;
   readonly normal: Vec3;
 }
-interface Trace { readonly point: Vec3; readonly normal: Vec3; }
+interface Trace {
+  readonly point: Vec3;
+  readonly normal: Vec3;
+}
 interface Attack {
   readonly actor: ActorId;
   readonly reference: number;
@@ -29,15 +33,20 @@ interface Attack {
 export class Id1SynchronousAttacks {
   private readonly active: Attack[] = [];
   private readonly binding: Id1ProgramBinding;
-  constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots"> & Partial<Pick<QcWorldHostOptions, "foreignActor" | "foreignReference">>,
-    private readonly machine: () => QcMachine) {
+  constructor(
+    private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots"> &
+      Partial<Pick<QcWorldHostOptions, "foreignActor" | "foreignReference">>,
+    private readonly machine: () => QcMachine,
+  ) {
     this.binding = id1ProgramBinding(source.program);
   }
   private foreignReference(actor: ActorId): number {
     if (this.source.foreignReference === undefined) throw new QcProgramError("id1 damage references an actor without a source projection");
     return this.source.foreignReference(actor);
   }
-  assertIdle(): void { if (this.active.length !== 0) throw new QcProgramError("Cannot save during a synchronous attack"); }
+  assertIdle(): void {
+    if (this.active.length !== 0) throw new QcProgramError("Cannot save during a synchronous attack");
+  }
   private vm(): QcMachine {
     const vm = this.machine();
     if (vm.program !== this.source.program || vm.entities !== this.source.entities) throw new QcProgramError("id1 attacks belong to another machine");
@@ -54,26 +63,35 @@ export class Id1SynchronousAttacks {
   compose(damage: QcFunctionBoundary): QcFunctionBoundary {
     const layout = this.binding.attacks;
     if (layout === null) return damage;
-    return { functions: new Set([...damage.functions, layout.axe, layout.shotgun, layout.superShotgun, layout.addMulti]), run: (call, execute) => {
-      if (damage.functions.has(call.functionIndex)) return damage.run(call, execute);
-      const vm = this.vm();
-      if (call.functionIndex === layout.addMulti) {
-        const attack = this.active.at(-1);
-        if (attack !== undefined && call.caller === layout.traceAttack) {
-          const slot = this.source.entities.slot(vm.argInt(0)), target = this.source.slots.at(slot) ?? this.source.foreignActor?.(slot) ?? null;
-          if (target !== null) attack.traces.set(target.id, this.trace(vm));
+    return {
+      functions: new Set([...damage.functions, layout.axe, layout.shotgun, layout.superShotgun, layout.addMulti]),
+      run: (call, execute) => {
+        if (damage.functions.has(call.functionIndex)) return damage.run(call, execute);
+        const vm = this.vm();
+        if (call.functionIndex === layout.addMulti) {
+          const attack = this.active.at(-1);
+          if (attack !== undefined && call.caller === layout.traceAttack) {
+            const slot = this.source.entities.slot(vm.argInt(0)),
+              target = this.source.slots.at(slot) ?? this.source.foreignActor?.(slot) ?? null;
+            if (target !== null) attack.traces.set(target.id, this.trace(vm));
+          }
+          return execute();
         }
-        return execute();
-      }
-      const reference = vm.globals.int(vm.globalOffset("self"));
-      const actor = this.source.slots.at(this.source.entities.slot(reference));
-      if (actor === null || !this.source.actors.isLive(actor.id)) throw new QcProgramError("id1 attack has no live source actor");
-      const words = this.source.entities.fromReference(reference);
-      if (vm.strings.get(words.int(this.field("classname"))) !== "player") throw new QcProgramError("id1 player attack requires a source player");
-      const weapon = call.functionIndex === layout.axe ? "q1:weapon/axe" : call.functionIndex === layout.shotgun ? "q1:weapon/shotgun" : "q1:weapon/supershotgun";
-      this.active.push({ actor: actor.id, reference, weapon, time: vm.globals.float(vm.globalOffset("time")), traces: new Map<ActorId, Trace>() });
-      try { return execute(); } finally { this.active.pop(); }
-    } };
+        const reference = vm.globals.int(vm.globalOffset("self"));
+        const actor = this.source.slots.at(this.source.entities.slot(reference));
+        if (actor === null || !this.source.actors.isLive(actor.id)) throw new QcProgramError("id1 attack has no live source actor");
+        const words = this.source.entities.fromReference(reference);
+        if (vm.strings.get(words.int(this.field("classname"))) !== "player") throw new QcProgramError("id1 player attack requires a source player");
+        const weapon =
+          call.functionIndex === layout.axe ? "q1:weapon/axe" : call.functionIndex === layout.shotgun ? "q1:weapon/shotgun" : "q1:weapon/supershotgun";
+        this.active.push({ actor: actor.id, reference, weapon, time: vm.globals.float(vm.globalOffset("time")), traces: new Map<ActorId, Trace>() });
+        try {
+          return execute();
+        } finally {
+          this.active.pop();
+        }
+      },
+    };
   }
   resolve(call: Id1DamageCall): Id1SynchronousAttack | null {
     const layout = this.binding.attacks;
@@ -81,22 +99,45 @@ export class Id1SynchronousAttacks {
     const axe = call.call.caller === layout.axe && layout.axeDamage.includes(call.call.statement);
     const shotgun = call.call.caller === layout.applyMultiDamage[0] && call.call.statement === layout.applyMultiDamage[1];
     if (!axe && !shotgun) return null;
-    const attack = this.active.at(-1), vm = this.vm();
-    if (attack === undefined || !this.source.actors.isLive(attack.actor) || !attack.actor.equals(call.attacker) || !attack.actor.equals(call.inflictor)
-      || vm.globals.int(vm.globalOffset("self")) !== attack.reference || vm.globals.int(this.binding.damage.global) !== this.binding.damage.index
-      || axe !== (attack.weapon === "q1:weapon/axe")) throw new QcProgramError("Unmatched id1 synchronous damage scope");
+    const attack = this.active.at(-1),
+      vm = this.vm();
+    if (
+      attack === undefined ||
+      !this.source.actors.isLive(attack.actor) ||
+      !attack.actor.equals(call.attacker) ||
+      !attack.actor.equals(call.inflictor) ||
+      vm.globals.int(vm.globalOffset("self")) !== attack.reference ||
+      vm.globals.int(this.binding.damage.global) !== this.binding.damage.index ||
+      axe !== (attack.weapon === "q1:weapon/axe")
+    )
+      throw new QcProgramError("Unmatched id1 synchronous damage scope");
     const owned = this.source.actors.sourceOf(call.target);
     // Foreign targets are visible to QC only through their borrowed rows
-    const targetReference = owned !== null && owned.provider === this.source.slots.options.provider ? this.source.entities.reference(owned.slot) : this.foreignReference(call.target);
+    const targetReference =
+      owned !== null && owned.provider === this.source.slots.options.provider ? this.source.entities.reference(owned.slot) : this.foreignReference(call.target);
     const trace = axe ? this.trace(vm) : attack.traces.get(call.target);
     if (trace === undefined) throw new QcProgramError("id1 shotgun damage has no captured target trace");
-    const n = vm.numeric, owner = this.source.entities.fromReference(attack.reference), victim = this.source.entities.fromReference(targetReference);
-    const min = owner.vector(this.field("absmin")), max = owner.vector(this.field("absmax")), origin = victim.vector(this.field("origin"));
-    const delta = { x: n.subtract(origin.x, n.multiply(n.add(min.x, max.x), 0.5)), y: n.subtract(origin.y, n.multiply(n.add(min.y, max.y), 0.5)), z: n.subtract(origin.z, n.multiply(n.add(min.z, max.z), 0.5)) };
+    const n = vm.numeric,
+      owner = this.source.entities.fromReference(attack.reference),
+      victim = this.source.entities.fromReference(targetReference);
+    const min = owner.vector(this.field("absmin")),
+      max = owner.vector(this.field("absmax")),
+      origin = victim.vector(this.field("origin"));
+    const delta = {
+      x: n.subtract(origin.x, n.multiply(n.add(min.x, max.x), 0.5)),
+      y: n.subtract(origin.y, n.multiply(n.add(min.y, max.y), 0.5)),
+      z: n.subtract(origin.z, n.multiply(n.add(min.z, max.z), 0.5)),
+    };
     const magnitude = n.squareRoot(n.add(n.add(n.multiply(delta.x, delta.x), n.multiply(delta.y, delta.y)), n.multiply(delta.z, delta.z)));
     const inverse = magnitude === 0 ? 0 : n.divide(1, magnitude);
-    return { actor: attack.actor, weapon: attack.weapon, time: attack.time,
+    return {
+      actor: attack.actor,
+      weapon: attack.weapon,
+      time: attack.time,
       knockback: n.multiply(call.amount, id1DamageMultiplier(vm, attack.reference, attack.reference)),
-      direction: { x: n.multiply(delta.x, inverse), y: n.multiply(delta.y, inverse), z: n.multiply(delta.z, inverse) }, point: { ...trace.point }, normal: { ...trace.normal } };
+      direction: { x: n.multiply(delta.x, inverse), y: n.multiply(delta.y, inverse), z: n.multiply(delta.z, inverse) },
+      point: { ...trace.point },
+      normal: { ...trace.normal },
+    };
   }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ClockProfile, FrameContext, FrameOrdering } from "../../src/contracts/time.ts";
@@ -6,8 +7,12 @@ import { FrameScheduler, compareInvocationOrder, thinkCallbackTime } from "../..
 import { SessionActorRegistry } from "../../src/world/actors/index.ts";
 
 /** Mirrors production dispatch: each actor is run at its own physics site, in source-slot order. */
-function traverse(scheduler: FrameScheduler, actors: readonly OwnedActor[], sourceSlot: (actor: OwnedActor) => number,
-  frames: readonly { readonly provider: ProviderId; readonly frame: FrameContext }[]): void {
+function traverse(
+  scheduler: FrameScheduler,
+  actors: readonly OwnedActor[],
+  sourceSlot: (actor: OwnedActor) => number,
+  frames: readonly { readonly provider: ProviderId; readonly frame: FrameContext }[],
+): void {
   for (const actor of [...actors].sort((left, right) => sourceSlot(left) - sourceSlot(right))) {
     const provider = scheduler.pending(actor.id)?.timing.executionProvider ?? actor.owner;
     const frame = frames.find(entry => entry.provider === provider)?.frame;
@@ -21,29 +26,48 @@ test("map-owned actors require their registered execution clock without changing
   const creature = actors.allocateAtSource("q1:game", 2, "q1:encounter");
   const later = actors.allocateAtSource("q1:game", 9, "q1:door");
   const calls: string[] = [];
-  const scheduler = new FrameScheduler({ actors,
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } },
+  const scheduler = new FrameScheduler({
+    actors,
+    ordering: {
+      kind: "native",
+      traversal: "source-slot-order",
+      clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null },
+    },
     clocks: [{ provider: "q2:monsters/rerelease/baseq2", profile: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" } }],
     sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
-    executionProvider: actor => actor.equals(creature.id) ? "q2:monsters/rerelease/baseq2" : null,
-    resolve: provider => (actor, frame) => { calls.push(`${provider}/${actors.sourceOf(actor.id)?.slot}/${frame.time.kind}`); return undefined; },
+    executionProvider: actor => (actor.equals(creature.id) ? "q2:monsters/rerelease/baseq2" : null),
+    resolve: provider => (actor, frame) => {
+      calls.push(`${provider}/${actors.sourceOf(actor.id)?.slot}/${frame.time.kind}`);
+      return undefined;
+    },
   });
-  const timing = { due: { kind: "milliseconds", value: 1000 }, boundary: "during-physics", order: { actor: creature.id, provider: creature.owner, sequence: 0 } } satisfies Parameters<typeof scheduler.schedule>[2];
+  const timing = {
+    due: { kind: "milliseconds", value: 1000 },
+    boundary: "during-physics",
+    order: { actor: creature.id, provider: creature.owner, sequence: 0 },
+  } satisfies Parameters<typeof scheduler.schedule>[2];
   expect(() => scheduler.schedule(creature, "world:think", timing)).toThrow("registered continuation");
   scheduler.schedule(creature, "world:think", { ...timing, executionProvider: "q2:monsters/rerelease/baseq2" });
-  scheduler.schedule(later, "world:think", { due: { kind: "seconds", value: 1 }, boundary: "during-physics", order: { actor: later.id, provider: later.owner, sequence: 0 } });
+  scheduler.schedule(later, "world:think", {
+    due: { kind: "seconds", value: 1 },
+    boundary: "during-physics",
+    order: { actor: later.id, provider: later.owner, sequence: 0 },
+  });
   traverse(scheduler, [later, creature], actor => actors.sourceOf(actor.id)?.slot ?? -1, [
     { provider: "q1:game", frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.025 } } },
-    { provider: "q2:monsters/rerelease/baseq2", frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1000 }, elapsed: { kind: "milliseconds", value: 25 } } },
+    {
+      provider: "q2:monsters/rerelease/baseq2",
+      frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1000 }, elapsed: { kind: "milliseconds", value: 25 } },
+    },
   ]);
   expect(calls).toEqual(["q2:monsters/rerelease/baseq2/2/milliseconds", "q1:game/9/seconds"]);
   expect(actors.sourceOf(creature.id)).toEqual({ provider: "q1:game", slot: 2 });
-  scheduler.close(); actors.close();
+  scheduler.close();
+  actors.close();
 });
 
 test("think deadlines retain NetQuake, classic Q2 and rerelease timing", () => {
-  const frame: FrameContext = { frame: 10, phase: "entity-physics",
-    time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } };
+  const frame: FrameContext = { frame: 10, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } };
   const nq: ClockProfile = { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null };
   expect(thinkCallbackTime(nq, { kind: "seconds", value: 1.04 }, frame)).toEqual({ kind: "seconds", value: 1.04 });
   expect(thinkCallbackTime(nq, { kind: "seconds", value: 0.5 }, frame)).toEqual(frame.time);
@@ -62,8 +86,11 @@ test("native traversal uses source slots and mixed ties use explicit provider or
   const highSlot = { actor: owner.actor(9, 0), provider: "q1:game", sequence: 1 } satisfies Parameters<typeof compareInvocationOrder>[1];
   const mixed: FrameOrdering = { kind: "mixed", providers: ["q1:game", "q3:game"], entityOrder: "source-slot-order", ties: "provider-entity-invocation" };
   expect(compareInvocationOrder(mixed, highSlot, lowSlot)).toBeLessThan(0);
-  const native: FrameOrdering = { kind: "native", traversal: "source-slot-order",
-    clock: { kind: "q3", serverFrameMilliseconds: 50, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 } };
+  const native: FrameOrdering = {
+    kind: "native",
+    traversal: "source-slot-order",
+    clock: { kind: "q3", serverFrameMilliseconds: 50, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 },
+  };
   expect(compareInvocationOrder(native, lowSlot, highSlot)).toBeLessThan(0);
   expect(compareInvocationOrder(mixed, lowSlot, { ...lowSlot, sequence: 5 })).toBeLessThan(0);
 });
@@ -74,18 +101,31 @@ test("real source bindings order thinks and release/reentry cannot run stale cal
   const first = actors.allocateAtSource("q1:game", 2, "q1:first");
   const calls: number[] = [];
   const frame: FrameContext = { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } };
-  const scheduler = new FrameScheduler({ actors, ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } }, clocks: [],
+  const scheduler = new FrameScheduler({
+    actors,
+    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } },
+    clocks: [],
     sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
     resolve: () => (actor, callbackFrame) => {
       calls.push(actors.sourceOf(actor.id)?.slot ?? -1);
       expect(scheduler.pending(actor.id)).toBeNull();
       if (actor === first && calls.length === 1) {
-        scheduler.schedule(first, "q1:think", { due: callbackFrame.time, boundary: "during-physics", order: { provider: first.owner, actor: first.id, sequence: 2 } });
+        scheduler.schedule(first, "q1:think", {
+          due: callbackFrame.time,
+          boundary: "during-physics",
+          order: { provider: first.owner, actor: first.id, sequence: 2 },
+        });
       } else if (actor === first) actors.release(later);
       return undefined;
-    } });
+    },
+  });
   actors.onRelease(actor => scheduler.cancel(actor));
-  for (const actor of [later, first]) scheduler.schedule(actor, "q1:think", { due: { kind: "seconds", value: 1.01 }, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 1 } });
+  for (const actor of [later, first])
+    scheduler.schedule(actor, "q1:think", {
+      due: { kind: "seconds", value: 1.01 },
+      boundary: "during-physics",
+      order: { provider: actor.owner, actor: actor.id, sequence: 1 },
+    });
   traverse(scheduler, [later, first], actor => actors.sourceOf(actor.id)?.slot ?? -1, [{ provider: "q1:game", frame }]);
   expect(calls).toEqual([2, 2]);
   expect(scheduler.pending(later.id)).toBeNull();
@@ -98,22 +138,39 @@ test("native source slots retain order while explicit equipment clocks retain th
   const grenade = actors.allocateAtSource("q2:equipment/hand-grenades", 9, "q2:grenade");
   const native = actors.allocateAtSource("q1:game", 2, "q1:first");
   const calls: { readonly slot: number; readonly time: number; readonly unit: string }[] = [];
-  const scheduler = new FrameScheduler({ actors,
+  const scheduler = new FrameScheduler({
+    actors,
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } },
     clocks: [{ provider: grenade.owner, profile: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" } }],
     sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
     resolve: () => (actor, frame) => {
       calls.push({ slot: actors.sourceOf(actor.id)?.slot ?? -1, time: frame.time.value, unit: frame.time.kind });
-      if (actor === grenade) scheduler.schedule(actor, "q2:think", { due: frame.time, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 2 } });
+      if (actor === grenade)
+        scheduler.schedule(actor, "q2:think", { due: frame.time, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 2 } });
       return undefined;
-    } });
-  scheduler.schedule(grenade, "q2:think", { due: { kind: "milliseconds", value: 1050 }, boundary: "during-physics", order: { provider: grenade.owner, actor: grenade.id, sequence: 0 } });
-  scheduler.schedule(native, "q1:think", { due: { kind: "seconds", value: 1.04 }, boundary: "during-physics", order: { provider: native.owner, actor: native.id, sequence: 0 } });
+    },
+  });
+  scheduler.schedule(grenade, "q2:think", {
+    due: { kind: "milliseconds", value: 1050 },
+    boundary: "during-physics",
+    order: { provider: grenade.owner, actor: grenade.id, sequence: 0 },
+  });
+  scheduler.schedule(native, "q1:think", {
+    due: { kind: "seconds", value: 1.04 },
+    boundary: "during-physics",
+    order: { provider: native.owner, actor: native.id, sequence: 0 },
+  });
   traverse(scheduler, [grenade, native], actor => actors.sourceOf(actor.id)?.slot ?? -1, [
-    { provider: grenade.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1050 }, elapsed: { kind: "milliseconds", value: 50 } } },
+    {
+      provider: grenade.owner,
+      frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1050 }, elapsed: { kind: "milliseconds", value: 50 } },
+    },
     { provider: native.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } } },
   ]);
-  expect(calls).toEqual([{ slot: 2, time: 1.04, unit: "seconds" }, { slot: 9, time: 1050, unit: "milliseconds" }]);
+  expect(calls).toEqual([
+    { slot: 2, time: 1.04, unit: "seconds" },
+    { slot: 9, time: 1050, unit: "milliseconds" },
+  ]);
   expect(scheduler.pending(grenade.id)?.timing.due).toEqual({ kind: "milliseconds", value: 1050 });
   scheduler.close();
   actors.close();

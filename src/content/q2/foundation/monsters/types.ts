@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
@@ -115,7 +116,10 @@ export interface MonsterState extends Q2AlternateFlyState {
   fliesTime: number | null;
 }
 
-export type MonsterWeapons = Pick<Q2Ballistics, "fireBullet" | "fireShotgun" | "fireBlaster" | "fireHit" | "fireRocket" | "fireGrenade" | "fireRail" | "fireBfg">;
+export type MonsterWeapons = Pick<
+  Q2Ballistics,
+  "fireBullet" | "fireShotgun" | "fireBlaster" | "fireHit" | "fireRocket" | "fireGrenade" | "fireRail" | "fireBfg"
+>;
 
 export interface MonsterContext {
   readonly entity: Q2Entity;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Retail cgame state from id Software's code/game/bg_public.h and q_shared.h,
 // consumed by code/cgame/cg_snapshot.c. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
@@ -56,8 +57,16 @@ export function retailSnapshot(source: Snapshot): RetailSnapshot {
     for (let index = 0; index < source.length; index++) result.set(index, source.get(index));
     return result;
   };
-  playerState.copyFrom({ ...input, product: input.product, events: slots(input.events), eventParms: slots(input.eventParms), stats: slots(input.stats),
-    persistant: slots(input.persistant), powerups: slots(input.powerups), ammo: slots(input.ammo) });
+  playerState.copyFrom({
+    ...input,
+    product: input.product,
+    events: slots(input.events),
+    eventParms: slots(input.eventParms),
+    stats: slots(input.stats),
+    persistant: slots(input.persistant),
+    powerups: slots(input.powerups),
+    ammo: slots(input.ammo),
+  });
   return {
     messageNumber: source.messageNumber,
     serverTime: source.serverTime,

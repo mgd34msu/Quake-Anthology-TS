@@ -1,10 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor } from "./identity.ts";
 import type { PickupCargoEntry } from "./original-pickups.ts";
 
-export interface PickupAmmoGrant { readonly item: ItemId; readonly amount: number; }
+export interface PickupAmmoGrant {
+  readonly item: ItemId;
+  readonly amount: number;
+}
 export type PickupSelection = "never" | "always" | "better";
-export interface AmmoWeaponSelection { readonly mode: PickupSelection; readonly when: "always" | "empty-ammo"; }
+export interface AmmoWeaponSelection {
+  readonly mode: PickupSelection;
+  readonly when: "always" | "empty-ammo";
+}
 
 export type PickupSupplyOffer =
   | { readonly kind: "ammo"; readonly offer: PickupAmmoGrant }
@@ -57,4 +64,7 @@ export interface PickupAmmoReceipt {
 }
 
 /** The original pickup function owns both the signed counter change and acceptance. */
-export interface SourcePickupQuantity { readonly amount: number; readonly accepted: boolean; }
+export interface SourcePickupQuantity {
+  readonly amount: number;
+  readonly accepted: boolean;
+}

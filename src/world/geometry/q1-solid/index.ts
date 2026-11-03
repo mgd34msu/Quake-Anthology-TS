@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Solid BSP leaf cells are derived collision geometry, not recovered authored
  * brushes. Native clipnodes remain a separate source authority. GPL-2.0-or-later. */
 import type { Bounds } from "../../../contracts/math.ts";
@@ -6,7 +7,11 @@ import { boxCell, splitCell } from "./polyhedron.ts";
 import type { ConvexCell } from "./polyhedron.ts";
 export type { ConvexCell, CellFace } from "./polyhedron.ts";
 
-export interface Q1SolidCell { readonly cell: ConvexCell; readonly leaf: number; readonly contents: number; }
+export interface Q1SolidCell {
+  readonly cell: ConvexCell;
+  readonly leaf: number;
+  readonly contents: number;
+}
 export class Q1SolidSpace {
   readonly representation = "bsp-leaf-cells";
   constructor(readonly geometry: Q1WorldGeometry) {}

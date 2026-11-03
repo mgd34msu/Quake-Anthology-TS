@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { writeCapture } from "../../support/capture.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
@@ -32,28 +33,67 @@ test("remote image console refresh preserves the active Q3 cgame and connection"
   const common = ["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"];
   const selected = parseApplicationCommand([...common, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
   if (selected.kind !== "run") throw new Error("Missing server options");
-  const prints: string[] = [], host = { print: (text: string): undefined => { prints.push(text); return undefined; } };
-  let server: Application | null = null, client: RemoteApplication | null = null;
-  const init = spyOn(QvmCgame.prototype, "init"), shutdown = spyOn(QvmCgame.prototype, "shutdown"), pure = spyOn(Q3ServerConnection.prototype, "verifyPure");
+  const prints: string[] = [],
+    host = {
+      print: (text: string): undefined => {
+        prints.push(text);
+        return undefined;
+      },
+    };
+  let server: Application | null = null,
+    client: RemoteApplication | null = null;
+  const init = spyOn(QvmCgame.prototype, "init"),
+    shutdown = spyOn(QvmCgame.prototype, "shutdown"),
+    pure = spyOn(Q3ServerConnection.prototype, "verifyPure");
   const consolePrint = spyOn(SeatConsole.prototype, "print");
   try {
     server = await Application.open({ ...selected.options, userContentRoot: users }, host);
     server.simulation.q3Source()?.host.cvars.set("sv_pure", "0", true);
-    const address = server.networkAddress; if (address === null) throw new Error("Missing server address");
-    const parsed = parseApplicationCommand([...common, "--connect-q3", `127.0.0.1:${address.port}`, "--renderer", "cpu", "--width", "320", "--height", "240", "--hidden"]);
+    const address = server.networkAddress;
+    if (address === null) throw new Error("Missing server address");
+    const parsed = parseApplicationCommand([
+      ...common,
+      "--connect-q3",
+      `127.0.0.1:${address.port}`,
+      "--renderer",
+      "cpu",
+      "--width",
+      "320",
+      "--height",
+      "240",
+      "--hidden",
+    ]);
     if (parsed.kind !== "run") throw new Error("Missing client options");
     client = await RemoteApplication.open({ ...parsed.options, userContentRoot: users }, host);
-    const remote = client, authoritative = server;
-    const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await authoritative.step(50); await Bun.sleep(1); await remote.step(50); };
+    const remote = client,
+      authoritative = server;
+    const exchange = async (): Promise<void> => {
+      await remote.step(50);
+      await Bun.sleep(1);
+      await authoritative.step(50);
+      await Bun.sleep(1);
+      await remote.step(50);
+    };
     for (let index = 0; index < 100 && remote.networkPhase !== "active"; index++) await exchange();
     expect(remote.networkPhase).toBe("active");
-    const local = remote.localPlayers[0], peer = authoritative.networkClients[0];
-    if (local === undefined || peer === undefined || !(remote.remote instanceof Q3RemotePresentation)) throw new Error(`Missing active player: ${prints.join("")}`);
-    const source = remote.remote.cgameSource, seat = local.seat, actor = local.actor, window = remote.window;
-    const key = (code: number): void => { for (const down of [true, false]) remote.input({ seat: seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
+    const local = remote.localPlayers[0],
+      peer = authoritative.networkClients[0];
+    if (local === undefined || peer === undefined || !(remote.remote instanceof Q3RemotePresentation))
+      throw new Error(`Missing active player: ${prints.join("")}`);
+    const source = remote.remote.cgameSource,
+      seat = local.seat,
+      actor = local.actor,
+      window = remote.window;
+    const key = (code: number): void => {
+      for (const down of [true, false]) remote.input({ seat: seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() });
+    };
     key(96);
     for (let index = 0; index < 4; index++) await exchange();
-    const before = pinkPixels(remote.readPixels()), initializations = init.mock.calls.length, shutdowns = shutdown.mock.calls.length, pureChecks = pure.mock.calls.length, elapsed = remote.timeMilliseconds;
+    const before = pinkPixels(remote.readPixels()),
+      initializations = init.mock.calls.length,
+      shutdowns = shutdown.mock.calls.length,
+      pureChecks = pure.mock.calls.length,
+      elapsed = remote.timeMilliseconds;
     remote.input({ seat: seat.id, kind: "text", text: '/r_override_textures 2;r_texture_formats "png tga jpg"', timeMilliseconds: performance.now() });
     key(13);
     for (let index = 0; index < 4; index++) await exchange();
@@ -89,6 +129,12 @@ test("remote image console refresh preserves the active Q3 cgame and connection"
     expect(pure.mock.calls.length).toBe(pureChecks);
     expect(await Bun.file(join(users, "settings/images.cfg")).text()).toContain('"source"');
   } finally {
-    await client?.close(); await server?.close(); init.mockRestore(); shutdown.mockRestore(); pure.mockRestore(); consolePrint.mockRestore(); await rm(users, { recursive: true, force: true });
+    await client?.close();
+    await server?.close();
+    init.mockRestore();
+    shutdown.mockRestore();
+    pure.mockRestore();
+    consolePrint.mockRestore();
+    await rm(users, { recursive: true, force: true });
   }
 }, 60000);

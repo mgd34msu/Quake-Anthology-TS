@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ProductExpectation } from "./products.ts";
 import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../q2/missionpacks/weapons/definitions.ts";
 import { missionWeapons } from "../q1/missionpacks/types.ts";
@@ -28,8 +29,9 @@ export const Q2_WEAPON_PROVIDERS = {
 export function supportsSelectedWeaponProduct(product: ProductExpectation): boolean {
   if (product.family === "q3") return product.campaign === "baseq3" || product.campaign === "missionpack";
   if (product.edition !== "classic" && product.edition !== "rerelease") return false;
-  return product.family === "q1" ? ["id1", "hipnotic", "rogue"].includes(product.campaign) || product.edition === "rerelease" && ["dopa", "mg1", "mg3"].includes(product.campaign)
-    : product.family === "q2" && (["baseq2", "xatrix", "rogue"].includes(product.campaign) || product.edition === "rerelease" && product.campaign === "mg2");
+  return product.family === "q1"
+    ? ["id1", "hipnotic", "rogue"].includes(product.campaign) || (product.edition === "rerelease" && ["dopa", "mg1", "mg3"].includes(product.campaign))
+    : product.family === "q2" && (["baseq2", "xatrix", "rogue"].includes(product.campaign) || (product.edition === "rerelease" && product.campaign === "mg2"));
 }
 
 export function canonicalWeaponSource(map: ProviderReference, weapon: ProviderReference, catalog: InstalledCatalog): ProviderReference {
@@ -77,42 +79,140 @@ const q1BaseWeaponPaths: readonly string[] = (() => {
 // Hipnotic weapon definitions and hipnotic-weapons.ts projectile/sound callers.
 const q1HipnoticWeaponPaths: readonly string[] = [
   ...missionWeapons.filter(weapon => weapon.id.startsWith("hipnotic:")).flatMap(weapon => [weapon.model, weapon.worldModel]),
-  "progs/lasrspik.mdl", "progs/proxbomb.mdl",
-  ...["hipweap/laserg.wav", "hipweap/laserric.wav", "enforcer/enfstop.wav", "hipweap/proxbomb.wav", "hipweap/proxwarn.wav",
-    "hipweap/mjoltink.wav", "knight/sword1.wav", "hipweap/mjolslap.wav", "hipweap/mjolhit.wav"].map(path => `sound/${path}`),
+  "progs/lasrspik.mdl",
+  "progs/proxbomb.mdl",
+  ...[
+    "hipweap/laserg.wav",
+    "hipweap/laserric.wav",
+    "enforcer/enfstop.wav",
+    "hipweap/proxbomb.wav",
+    "hipweap/proxwarn.wav",
+    "hipweap/mjoltink.wav",
+    "knight/sword1.wav",
+    "hipweap/mjolslap.wav",
+    "hipweap/mjolhit.wav",
+  ].map(path => `sound/${path}`),
 ];
 
 const q1RogueWeaponPaths: readonly string[] = [
   ...missionWeapons.filter(weapon => weapon.id.startsWith("rogue:")).flatMap(weapon => [weapon.model, weapon.worldModel]),
-  "progs/hook.mdl", "progs/v_grpple.mdl", "sound/weapons/chain1.wav", "sound/pendulum/hit.wav", "progs/lspike.mdl", "progs/mervup.mdl", "progs/rockup.mdl", "progs/rockup_d.mdl", "progs/plasma.mdl",
-  "sound/plasma/flight.wav", "sound/plasma/fire.wav", "sound/plasma/explode.wav", "sound/weapons/spike2.wav", "sound/weapons/lhit.wav",
+  "progs/hook.mdl",
+  "progs/v_grpple.mdl",
+  "sound/weapons/chain1.wav",
+  "sound/pendulum/hit.wav",
+  "progs/lspike.mdl",
+  "progs/mervup.mdl",
+  "progs/rockup.mdl",
+  "progs/rockup_d.mdl",
+  "progs/plasma.mdl",
+  "sound/plasma/flight.wav",
+  "sound/plasma/fire.wav",
+  "sound/plasma/explode.wav",
+  "sound/weapons/spike2.wav",
+  "sound/weapons/lhit.wav",
 ];
-const q1Mg3WeaponPaths: readonly string[] = ["progs/lasrspik.mdl", "progs/v_laserg.mdl", "progs/v_hammer.mdl", "progs/v_hammer_glow.mdl",
-  "progs/v_bloodshot.mdl", "progs/v_bloodshot2.mdl", ...q1HipnoticWeaponPaths.filter(path => path.startsWith("sound/") && !path.includes("prox"))];
+const q1Mg3WeaponPaths: readonly string[] = [
+  "progs/lasrspik.mdl",
+  "progs/v_laserg.mdl",
+  "progs/v_hammer.mdl",
+  "progs/v_hammer_glow.mdl",
+  "progs/v_bloodshot.mdl",
+  "progs/v_bloodshot2.mdl",
+  ...q1HipnoticWeaponPaths.filter(path => path.startsWith("sound/") && !path.includes("prox")),
+];
 
 // Base g_items precaches plus the shared base weapon/projectile effect paths.
 function q2BaseWeaponPaths(rerelease: boolean): readonly string[] {
-  const models = [...Object.values(Q2_BASE_WEAPONS).flatMap(weapon => [weapon.viewModel, weapon.worldModel]).filter(path => path !== ""),
-    ...["laser", "rocket", "debris2", "smoke", "explode", "r_explode", rerelease ? "grenade4" : "grenade", rerelease ? "grenade3" : "grenade2"].map(name => `models/objects/${name}/tris.md2`)];
-  const sounds = ["blastf1a", "shotgf1b", "shotgr1b", "sshotf1b", "machgf1b", "machgf2b", "machgf3b", "machgf4b", "machgf5b",
-    "chngnu1a", "chngnl1a", "chngnd1a", "hgrent1a", "hgrena1b", "hgrenc1b", "hgrenb1a", "hgrenb2a", "grenlf1a", "grenlr1b", "grenlb1b",
-    "rockfly", "rocklf1a", "rocklr1b", "hyprbu1a", "hyprbl1a", "hyprbf1a", "hyprbd1a", "rg_hum", "railgf1a", "bfg__f1y", "bfg__l1a", "bfg__x1b", "bfg_hum", "noammo"];
-  return [...models.flatMap(path => [path, ...(path === "models/objects/r_explode/tris.md2"
-      ? Array.from({ length: 7 }, (_, index) => `models/objects/r_explode/skin${index + 1}.pcx`) : [path.replace("tris.md2", "skin.pcx")])]),
-    ...(rerelease ? ["models/objects/explode/rskin.pcx", "models/objects/explode/skin2.pcx", "models/objects/laser/skinb.pcx", "models/objects/laser/sking.pcx"] : []),
-    "pics/colormap.pcx", "sound/misc/lasfly.wav", ...sounds.map(name => `sound/weapons/${name}.wav`),
-    ...[2, 4, 6].flatMap((count, index) => [`sprites/s_bfg${index + 1}.sp2`, ...Array.from({ length: count }, (_, frame) => `sprites/s_bfg${index + 1}_${frame}.pcx`)]),
-    ...(rerelease ? ["sound/weapons/change.wav", "sound/weapons/lowammo.wav"] : [])];
+  const models = [
+    ...Object.values(Q2_BASE_WEAPONS)
+      .flatMap(weapon => [weapon.viewModel, weapon.worldModel])
+      .filter(path => path !== ""),
+    ...["laser", "rocket", "debris2", "smoke", "explode", "r_explode", rerelease ? "grenade4" : "grenade", rerelease ? "grenade3" : "grenade2"].map(
+      name => `models/objects/${name}/tris.md2`,
+    ),
+  ];
+  const sounds = [
+    "blastf1a",
+    "shotgf1b",
+    "shotgr1b",
+    "sshotf1b",
+    "machgf1b",
+    "machgf2b",
+    "machgf3b",
+    "machgf4b",
+    "machgf5b",
+    "chngnu1a",
+    "chngnl1a",
+    "chngnd1a",
+    "hgrent1a",
+    "hgrena1b",
+    "hgrenc1b",
+    "hgrenb1a",
+    "hgrenb2a",
+    "grenlf1a",
+    "grenlr1b",
+    "grenlb1b",
+    "rockfly",
+    "rocklf1a",
+    "rocklr1b",
+    "hyprbu1a",
+    "hyprbl1a",
+    "hyprbf1a",
+    "hyprbd1a",
+    "rg_hum",
+    "railgf1a",
+    "bfg__f1y",
+    "bfg__l1a",
+    "bfg__x1b",
+    "bfg_hum",
+    "noammo",
+  ];
+  return [
+    ...models.flatMap(path => [
+      path,
+      ...(path === "models/objects/r_explode/tris.md2"
+        ? Array.from({ length: 7 }, (_, index) => `models/objects/r_explode/skin${index + 1}.pcx`)
+        : [path.replace("tris.md2", "skin.pcx")]),
+    ]),
+    ...(rerelease
+      ? ["models/objects/explode/rskin.pcx", "models/objects/explode/skin2.pcx", "models/objects/laser/skinb.pcx", "models/objects/laser/sking.pcx"]
+      : []),
+    "pics/colormap.pcx",
+    "sound/misc/lasfly.wav",
+    ...sounds.map(name => `sound/weapons/${name}.wav`),
+    ...[2, 4, 6].flatMap((count, index) => [
+      `sprites/s_bfg${index + 1}.sp2`,
+      ...Array.from({ length: count }, (_, frame) => `sprites/s_bfg${index + 1}_${frame}.pcx`),
+    ]),
+    ...(rerelease ? ["sound/weapons/change.wav", "sound/weapons/lowammo.wav"] : []),
+  ];
 }
 
 /** Expansion g_items precaches plus projectile dependencies used by their source callbacks. */
 const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
-  trap: ["models/weapons/z_trap/tris.md2", "models/objects/trapfx/tris.md2", "models/objects/gibs/chest/tris.md2", "models/objects/gibs/sm_meat/tris.md2",
-    "sound/misc/fhit3.wav", "sound/weapons/trapcock.wav", "sound/weapons/traploop.wav", "sound/weapons/trapsuck.wav", "sound/weapons/trapdown.wav", "sound/items/s_health.wav"],
+  trap: [
+    "models/weapons/z_trap/tris.md2",
+    "models/objects/trapfx/tris.md2",
+    "models/objects/gibs/chest/tris.md2",
+    "models/objects/gibs/sm_meat/tris.md2",
+    "sound/misc/fhit3.wav",
+    "sound/weapons/trapcock.wav",
+    "sound/weapons/traploop.wav",
+    "sound/weapons/trapsuck.wav",
+    "sound/weapons/trapdown.wav",
+    "sound/items/s_health.wav",
+  ],
   ionripper: ["models/objects/boomrang/tris.md2", "sound/weapons/rg_hum.wav", "sound/weapons/rippfire.wav", "sound/misc/lasfly.wav"],
   phalanx: ["sprites/s_photon.sp2", "sound/weapons/plasshot.wav", "sound/weapons/rockfly.wav"],
   tesla: ["models/weapons/g_tesla/tris.md2", "sound/weapons/teslaopen.wav", "sound/weapons/hgrenb1a.wav", "sound/weapons/hgrenb2a.wav"],
-  proxlauncher: ["models/weapons/g_prox/tris.md2", "sound/weapons/grenlf1a.wav", "sound/weapons/grenlr1b.wav", "sound/weapons/grenlb1b.wav", "sound/weapons/proxwarn.wav", "sound/weapons/proxopen.wav"],
+  proxlauncher: [
+    "models/weapons/g_prox/tris.md2",
+    "sound/weapons/grenlf1a.wav",
+    "sound/weapons/grenlr1b.wav",
+    "sound/weapons/grenlb1b.wav",
+    "sound/weapons/proxwarn.wav",
+    "sound/weapons/proxopen.wav",
+  ],
   chainfist: ["sound/weapons/sawidle.wav", "sound/weapons/sawhit.wav", "sound/weapons/sawslice.wav"],
   disintegrator: ["models/proj/disintegrator/tris.md2", "sound/weapons/disrupt.wav", "sound/weapons/disint2.wav", "sound/weapons/disrupthit.wav"],
   etf_rifle: ["models/proj/flechette/tris.md2", "sound/weapons/nail1.wav"],
@@ -120,12 +220,24 @@ const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
 };
 
 export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
-  return [...new Set([...q2BaseWeaponPaths(rerelease),
-    ...(!rerelease && weapons.registeredDefinitions().some(weapon => weapon.name === "proxlauncher") ? ["models/weapons/v_plaunch/proxskin.pcx"] : []),
-    ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
-    ...(q2ExpansionWeaponPaths[weapon.name] ?? []).filter(path => rerelease || path !== "sound/weapons/sawslice.wav"), ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
-    ...weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []]),
-    ...(rerelease ? ["sound/weapons/railgr1b.wav"] : [])].filter(path => path !== ""))];
+  return [
+    ...new Set(
+      [
+        ...q2BaseWeaponPaths(rerelease),
+        ...(!rerelease && weapons.registeredDefinitions().some(weapon => weapon.name === "proxlauncher") ? ["models/weapons/v_plaunch/proxskin.pcx"] : []),
+        ...weapons
+          .registeredDefinitions()
+          .flatMap(weapon => [
+            weapon.viewModel,
+            weapon.worldModel,
+            ...(q2ExpansionWeaponPaths[weapon.name] ?? []).filter(path => rerelease || path !== "sound/weapons/sawslice.wav"),
+            ...(weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : []),
+            ...(weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []),
+          ]),
+        ...(rerelease ? ["sound/weapons/railgr1b.wav"] : []),
+      ].filter(path => path !== ""),
+    ),
+  ];
 }
 
 export function selectedWeaponResources(map: ProviderReference, weapons: readonly ProviderReference[], catalog: InstalledCatalog): readonly ResourceRequest[] {
@@ -137,16 +249,46 @@ export function weaponResources(map: ProviderReference, weapons: readonly Provid
     const weapon = canonicalWeaponSource(map, reference, catalog);
     if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return [];
     const product = catalog.require(weapon.content).expectation;
-    if (weapon.provider.startsWith("q2:") && product.family === "q2" && ["baseq2", "xatrix", "rogue", "mg2"].includes(product.campaign) &&
-      (product.edition === "classic" || product.edition === "rerelease"))
-      return [...q2RegisteredWeaponResources({ registeredDefinitions: () => [...Q2_BASE_WEAPONS,
-        ...(product.edition === "rerelease" || product.campaign === "xatrix" ? xatrixWeaponDefinitions : []),
-        ...(product.edition === "rerelease" || product.campaign === "rogue" ? rogueWeaponDefinitions : [])] }, product.edition === "rerelease")
-        .map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
+    if (
+      weapon.provider.startsWith("q2:") &&
+      product.family === "q2" &&
+      ["baseq2", "xatrix", "rogue", "mg2"].includes(product.campaign) &&
+      (product.edition === "classic" || product.edition === "rerelease")
+    )
+      return [
+        ...q2RegisteredWeaponResources(
+          {
+            registeredDefinitions: () => [
+              ...Q2_BASE_WEAPONS,
+              ...(product.edition === "rerelease" || product.campaign === "xatrix" ? xatrixWeaponDefinitions : []),
+              ...(product.edition === "rerelease" || product.campaign === "rogue" ? rogueWeaponDefinitions : []),
+            ],
+          },
+          product.edition === "rerelease",
+        ).map(path => ({ content: weapon.content, path })),
+        ...weaponHudResources(weapon, product),
+      ];
     if (weapon.provider.startsWith("q3:") && product.family === "q3") return weaponHudResources(weapon, product);
-    if (!weapon.provider.startsWith("q1:") || product.family !== "q1" || !["id1", "hipnotic", "rogue", "dopa", "mg1", "mg3"].includes(product.campaign) ||
-      product.edition !== "classic" && product.edition !== "rerelease") return [];
-    return [...[...q1BaseWeaponPaths, ...(product.campaign === "hipnotic" ? q1HipnoticWeaponPaths : product.campaign === "rogue" ? q1RogueWeaponPaths : product.campaign === "mg3" ? q1Mg3WeaponPaths : [])].map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
+    if (
+      !weapon.provider.startsWith("q1:") ||
+      product.family !== "q1" ||
+      !["id1", "hipnotic", "rogue", "dopa", "mg1", "mg3"].includes(product.campaign) ||
+      (product.edition !== "classic" && product.edition !== "rerelease")
+    )
+      return [];
+    return [
+      ...[
+        ...q1BaseWeaponPaths,
+        ...(product.campaign === "hipnotic"
+          ? q1HipnoticWeaponPaths
+          : product.campaign === "rogue"
+            ? q1RogueWeaponPaths
+            : product.campaign === "mg3"
+              ? q1Mg3WeaponPaths
+              : []),
+      ].map(path => ({ content: weapon.content, path })),
+      ...weaponHudResources(weapon, product),
+    ];
   });
 }
 
@@ -161,9 +303,9 @@ export function selectedWeaponTiming(map: ProviderReference, weapons: readonly P
     const supported = supportsSelectedWeaponProduct(product) && weapon.provider.startsWith(`${product.family}:`);
     if (!supported) return [];
     const prior = providers.get(weapon.provider);
-    if (weapon.provider === map.provider || prior !== undefined && prior !== weapon.content)
+    if (weapon.provider === map.provider || (prior !== undefined && prior !== weapon.content))
       throw new Error(`Selected weapon provider ${weapon.provider} has conflicting content`);
-    if (mapFamily === product.family && !weapon.provider.startsWith(`${product.family}:weapons/`) || prior !== undefined) return [];
+    if ((mapFamily === product.family && !weapon.provider.startsWith(`${product.family}:weapons/`)) || prior !== undefined) return [];
     providers.set(weapon.provider, weapon.content);
     return [nativeProviderTiming(weapon, product.family, product.edition === "rerelease")];
   });
@@ -171,17 +313,35 @@ export function selectedWeaponTiming(map: ProviderReference, weapons: readonly P
 
 export function admitWeaponTiming(timing: ProviderTiming[], weapon: ProviderTiming): void {
   const existing = timing.find(entry => entry.provider === weapon.provider);
-  if (existing === undefined) { timing.push(weapon); return; }
-  const actual = existing.numeric, expected = weapon.numeric;
-  const numericMatches = actual.id === expected.id && actual.arithmetic.kind === "binary32" && expected.arithmetic.kind === "binary32" &&
-    actual.arithmetic.round === expected.arithmetic.round && actual.scalarStorage === expected.scalarStorage &&
-    actual.floatToInt === expected.floatToInt && actual.integerOverflow === expected.integerOverflow;
-  const clock = existing.clock, wanted = weapon.clock;
-  const clockMatches = wanted.kind === "q1-netquake" && clock.kind === "q1-netquake"
-    ? clock.minimumFrameSeconds === wanted.minimumFrameSeconds && clock.maximumFrameSeconds === wanted.maximumFrameSeconds && clock.fixedFrameSeconds === wanted.fixedFrameSeconds
-    : wanted.kind === "q2-classic" && clock.kind === "q2-classic" ? clock.frameMilliseconds === wanted.frameMilliseconds
-    : wanted.kind === "q2-rerelease" && clock.kind === "q2-rerelease" ? clock.frameMilliseconds === wanted.frameMilliseconds && clock.preparation === wanted.preparation
-    : wanted.kind === "q3" && clock.kind === "q3" && clock.serverFrameMilliseconds === wanted.serverFrameMilliseconds &&
-      clock.fixedMovementMilliseconds === wanted.fixedMovementMilliseconds && clock.maximumCommandMilliseconds === wanted.maximumCommandMilliseconds;
+  if (existing === undefined) {
+    timing.push(weapon);
+    return;
+  }
+  const actual = existing.numeric,
+    expected = weapon.numeric;
+  const numericMatches =
+    actual.id === expected.id &&
+    actual.arithmetic.kind === "binary32" &&
+    expected.arithmetic.kind === "binary32" &&
+    actual.arithmetic.round === expected.arithmetic.round &&
+    actual.scalarStorage === expected.scalarStorage &&
+    actual.floatToInt === expected.floatToInt &&
+    actual.integerOverflow === expected.integerOverflow;
+  const clock = existing.clock,
+    wanted = weapon.clock;
+  const clockMatches =
+    wanted.kind === "q1-netquake" && clock.kind === "q1-netquake"
+      ? clock.minimumFrameSeconds === wanted.minimumFrameSeconds &&
+        clock.maximumFrameSeconds === wanted.maximumFrameSeconds &&
+        clock.fixedFrameSeconds === wanted.fixedFrameSeconds
+      : wanted.kind === "q2-classic" && clock.kind === "q2-classic"
+        ? clock.frameMilliseconds === wanted.frameMilliseconds
+        : wanted.kind === "q2-rerelease" && clock.kind === "q2-rerelease"
+          ? clock.frameMilliseconds === wanted.frameMilliseconds && clock.preparation === wanted.preparation
+          : wanted.kind === "q3" &&
+            clock.kind === "q3" &&
+            clock.serverFrameMilliseconds === wanted.serverFrameMilliseconds &&
+            clock.fixedMovementMilliseconds === wanted.fixedMovementMilliseconds &&
+            clock.maximumCommandMilliseconds === wanted.maximumCommandMilliseconds;
   if (!numericMatches || !clockMatches) throw new Error(`Selected weapon provider ${weapon.provider} has conflicting timing`);
 }

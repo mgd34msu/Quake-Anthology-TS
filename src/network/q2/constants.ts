@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 export const PROTOCOL_VERSION = 34;
 export const PROTOCOL_VERSION_RERELEASE = 1038;
@@ -24,38 +25,38 @@ export const PORT_SERVER = 27910;
 export const UPDATE_BACKUP = 16;
 export const UPDATE_MASK = UPDATE_BACKUP - 1;
 export enum SvcOpsT {
-    svc_bad,
-    svc_muzzleflash,
-    svc_muzzleflash2,
-    svc_temp_entity,
-    svc_layout,
-    svc_inventory,
-    svc_nop,
-    svc_disconnect,
-    svc_reconnect,
-    svc_sound,
-    svc_print,
-    svc_stufftext,
-    svc_serverdata,
-    svc_configstring,
-    svc_spawnbaseline,
-    svc_centerprint,
-    svc_download,
-    svc_playerinfo,
-    svc_packetentities,
-    svc_deltapacketentities,
-    svc_frame
+  svc_bad,
+  svc_muzzleflash,
+  svc_muzzleflash2,
+  svc_temp_entity,
+  svc_layout,
+  svc_inventory,
+  svc_nop,
+  svc_disconnect,
+  svc_reconnect,
+  svc_sound,
+  svc_print,
+  svc_stufftext,
+  svc_serverdata,
+  svc_configstring,
+  svc_spawnbaseline,
+  svc_centerprint,
+  svc_download,
+  svc_playerinfo,
+  svc_packetentities,
+  svc_deltapacketentities,
+  svc_frame,
 }
 export enum ClcOpsT {
-    clc_bad,
-    clc_nop,
-    clc_move,
-    clc_userinfo,
-    clc_stringcmd,
-    clc_r1q2_setting = 5,
-    clc_q2pro_move_nodelta = 10,
-    clc_q2pro_move_batched,
-    clc_q2pro_userinfo_delta
+  clc_bad,
+  clc_nop,
+  clc_move,
+  clc_userinfo,
+  clc_stringcmd,
+  clc_r1q2_setting = 5,
+  clc_q2pro_move_nodelta = 10,
+  clc_q2pro_move_batched,
+  clc_q2pro_userinfo_delta,
 }
 export const CM_ANGLE1 = 1 << 0;
 export const CM_ANGLE2 = 1 << 1;
@@ -115,10 +116,10 @@ export const ERR_FATAL = 0;
 export const ERR_DROP = 1;
 export const ERR_QUIT = 2;
 export class ComError extends Error {
-    code: number;
-    constructor(code: number, message: string) {
-        super(message);
-        this.code = code;
-        this.name = "ComError";
-    }
+  code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "ComError";
+  }
 }

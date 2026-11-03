@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RenderImage } from "../../contracts/render.ts";
 import { applyImageGamma, expandIndexedImage } from "../../formats/images/palette.ts";
 import { generateMipChain } from "../../formats/images/index.ts";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Shared G_RunMissile, G_MissileImpact, G_BounceMissile and G_ExplodeMissile.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
@@ -55,7 +56,9 @@ export interface Q3ProjectileHost {
   accuracy(): void;
   think(): void;
   moved(): void;
-  readonly reflection: null | { impact(target: ActorId, direction: Vec3, point: Vec3): { readonly kind: "miss" } | { readonly kind: "hit"; readonly bounceDirection: Vec3 } };
+  readonly reflection: null | {
+    impact(target: ActorId, direction: Vec3, point: Vec3): { readonly kind: "miss" } | { readonly kind: "hit"; readonly bounceDirection: Vec3 };
+  };
   readonly special: null | {
     impact(trace: ActorTraceResult, target: ActorId): boolean;
     afterMove(): void;
@@ -63,19 +66,33 @@ export interface Q3ProjectileHost {
   };
 }
 export function q3LaunchProjectile(start: Vec3, direction: Vec3, speed: number, gravity: boolean, duration: number, time: number) {
-  return { expires: (time + duration) | 0, trajectory: { type: gravity ? TrajectoryType.TR_GRAVITY : TrajectoryType.TR_LINEAR,
-    time: (time - 50) | 0, duration: 0, base: vec3(start.x, start.y, start.z), delta: snapVector(scale3(direction, speed)) } };
+  return {
+    expires: (time + duration) | 0,
+    trajectory: {
+      type: gravity ? TrajectoryType.TR_GRAVITY : TrajectoryType.TR_LINEAR,
+      time: (time - 50) | 0,
+      duration: 0,
+      base: vec3(start.x, start.y, start.z),
+      delta: snapVector(scale3(direction, speed)),
+    },
+  };
 }
 
 const zero = vec3(0, 0, 0);
-function normal(trace: ActorTraceResult): Vec3 { return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero; }
+function normal(trace: ActorTraceResult): Vec3 {
+  return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero;
+}
 
 export function q3BounceProjectile(projectile: Q3Projectile, host: Q3ProjectileHost, trace: ActorTraceResult): void {
   const hitTime = q3MissileHitTime(host.previousTime, host.time, trace.fraction);
-  const plane = normal(trace), half = (projectile.flags & 0x20) !== 0;
+  const plane = normal(trace),
+    half = (projectile.flags & 0x20) !== 0;
   const delta = q3BounceVelocity(evaluateTrajectoryDelta(projectile.trajectory, hitTime), plane, half);
   projectile.trajectory = { ...projectile.trajectory, delta };
-  if (half && plane.z > Math.fround(0.2) && length3(delta) < 40) { host.setOrigin(trace.end); return; }
+  if (half && plane.z > Math.fround(0.2) && length3(delta) < 40) {
+    host.setOrigin(trace.end);
+    return;
+  }
   const origin = add3(host.origin(), plane);
   host.move(origin, delta);
   projectile.trajectory = { ...projectile.trajectory, base: origin, time: host.time };
@@ -92,24 +109,32 @@ export function q3ExplodeProjectile(projectile: Q3Projectile, host: Q3Projectile
 }
 
 export function q3ImpactProjectile(projectile: Q3Projectile, host: Q3ProjectileHost, trace: ActorTraceResult): void {
-  const actor = trace.hit.kind === "actor" ? trace.hit.actor : host.worldActor(), plane = normal(trace);
+  const actor = trace.hit.kind === "actor" ? trace.hit.actor : host.worldActor(),
+    plane = normal(trace);
   const target = host.target(actor);
   if (target?.damageable !== true && (projectile.flags & 0x30) !== 0) {
-    q3BounceProjectile(projectile, host, trace); host.emit({ kind: "bounce", normal: plane }); return;
+    q3BounceProjectile(projectile, host, trace);
+    host.emit({ kind: "bounce", normal: plane });
+    return;
   }
   if (host.reflection !== null && target?.damageable === true && target.invulnerable && projectile.weapon !== 12) {
     const effect = host.reflection.impact(actor, normalize3(projectile.trajectory.delta), projectile.trajectory.base);
     if (!host.live()) return;
     if (effect.kind === "hit") {
-      const half = projectile.flags & 0x20; projectile.flags &= ~0x20;
+      const half = projectile.flags & 0x20;
+      projectile.flags &= ~0x20;
       q3BounceProjectile(projectile, host, { ...trace, contact: { kind: "plane", plane: { normal: effect.bounceDirection, distance: 0 } } });
       projectile.flags |= half;
     }
-    projectile.pass = actor; return;
+    projectile.pass = actor;
+    return;
   }
   let hitClient = false;
   if (target?.damageable === true && projectile.direct !== 0) {
-    if (target.accuracyEligible) { host.accuracy(); hitClient = true; }
+    if (target.accuracyEligible) {
+      host.accuracy();
+      hitClient = true;
+    }
     let velocity = evaluateTrajectoryDelta(projectile.trajectory, host.time);
     if (length3(velocity) === 0) velocity = vec3(velocity.x, velocity.y, 1);
     host.damage(actor, velocity, projectile.damagePoint);
@@ -120,23 +145,35 @@ export function q3ImpactProjectile(projectile: Q3Projectile, host: Q3ProjectileH
   host.emit({ kind: "impact", normal: plane, target: actor, flesh: current?.damageable === true && current.player, surfaceFlags: trace.surfaceFlags });
   if (!host.live()) return;
   host.retain();
-  const origin = snapVectorTowards(trace.end, projectile.trajectory.base); host.setOrigin(origin);
+  const origin = snapVectorTowards(trace.end, projectile.trajectory.base);
+  host.setOrigin(origin);
   if (projectile.splash !== 0 && host.radius(origin, actor) && !hitClient) host.accuracy();
   if (host.live()) host.link();
 }
 
 export function q3StepProjectile(projectile: Q3Projectile, host: Q3ProjectileHost): void {
   if (!host.live()) return;
-  if (host.phase() === "event") { if (((host.time - host.eventTime()) | 0) > EVENT_VALID_MSEC) host.release(); return; }
+  if (host.phase() === "event") {
+    if (((host.time - host.eventTime()) | 0) > EVENT_VALID_MSEC) host.release();
+    return;
+  }
   if (((host.time - host.eventTime()) | 0) > EVENT_VALID_MSEC) host.clearEvent?.();
-  if (host.phase() === "attached") { host.think(); return; }
-  const origin = host.origin(), destination = evaluateTrajectory(projectile.trajectory, host.time);
+  if (host.phase() === "attached") {
+    host.think();
+    return;
+  }
+  const origin = host.origin(),
+    destination = evaluateTrajectory(projectile.trajectory, host.time);
   let trace = host.trace(origin, destination, projectile.pass);
   if (trace.solidity !== "clear") trace = { ...host.trace(origin, origin, projectile.pass), fraction: 0 };
   else host.move(trace.end, evaluateTrajectoryDelta(projectile.trajectory, host.time));
   host.link();
   if (trace.fraction !== 1) {
-    if ((trace.surfaceFlags & 16) !== 0) { host.special?.noImpact(); if (host.live()) host.release(); return; }
+    if ((trace.surfaceFlags & 16) !== 0) {
+      host.special?.noImpact();
+      if (host.live()) host.release();
+      return;
+    }
     q3ImpactProjectile(projectile, host, trace);
     if (!host.live() || host.phase() !== "flight") return;
   }

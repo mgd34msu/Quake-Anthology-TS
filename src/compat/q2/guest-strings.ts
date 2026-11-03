@@ -20,7 +20,10 @@ export class ReusableGuestString {
   #address: GuestAddress | null = null;
   #capacity = 0;
   #text: string | null = null;
-  constructor(readonly memory: MappedGuestMemory, readonly label: string) {}
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly label: string,
+  ) {}
   setText(text: string, encode: (text: string) => Uint8Array): GuestAddress {
     if (this.#address !== null && this.#text === text) return this.#address;
     const address = this.set(encode(text));
@@ -47,15 +50,22 @@ export class CommandGuestStrings {
   #key: string | null = null;
   readonly #strings = new Map<string, GuestAddress>();
   readonly #blocks: { readonly address: GuestAddress; readonly bytes: number }[] = [];
-  constructor(readonly memory: MappedGuestMemory, readonly label: string, readonly encode: (text: string) => Uint8Array) {}
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly label: string,
+    readonly encode: (text: string) => Uint8Array,
+  ) {}
   get(command: string, text: string): GuestAddress {
     if (command !== this.#key) {
       for (const block of this.#blocks) this.memory.unmap(block.address, block.bytes);
-      this.#blocks.length = 0; this.#strings.clear(); this.#key = command;
+      this.#blocks.length = 0;
+      this.#strings.clear();
+      this.#key = command;
     }
     const previous = this.#strings.get(text);
     if (previous !== undefined) return previous;
-    const bytes = this.encode(text), address = allocateNativeMemory(this.memory, bytes.length + 1, this.label, true);
+    const bytes = this.encode(text),
+      address = allocateNativeMemory(this.memory, bytes.length + 1, this.label, true);
     this.memory.write(address, terminated(bytes));
     this.#blocks.push({ address, bytes: nativeAllocationBytes(bytes.length + 1) });
     this.#strings.set(text, address);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { CpuImages } from "../../../src/render/cpu/textures.ts";
@@ -14,7 +15,8 @@ function fixture() {
 
 test("retained menu and successive world scopes share ordinals and retire only their own images", () => {
   const { root, cpu } = fixture();
-  const menu = root.register("menu", content, sampling), first = root.fork();
+  const menu = root.register("menu", content, sampling),
+    first = root.fork();
   const world = first.register("world", content, sampling);
   for (const operation of first.drainOperations()) cpu.apply(operation);
   expect(menu.ordinal).not.toBe(world.ordinal);
@@ -22,7 +24,8 @@ test("retained menu and successive world scopes share ordinals and retire only t
   cpu.bind(1, { kind: "bind-image", image: world });
   expect(() => root.release(world)).toThrow("Scene image belongs to another resource owner or has been released");
   first.close();
-  const next = root.fork(), replacement = next.register("world", content, sampling);
+  const next = root.fork(),
+    replacement = next.register("world", content, sampling);
   const operations = next.drainOperations();
   expect(operations.map(operation => operation.kind)).toEqual(["release-image", "create-image"]);
   for (const operation of operations) cpu.apply(operation);
@@ -41,7 +44,8 @@ test("retained menu and successive world scopes share ordinals and retire only t
 });
 
 test("already drained frame uploads precede later queued retirement, including failed preparations", () => {
-  const { root, cpu } = fixture(), scene = root.fork();
+  const { root, cpu } = fixture(),
+    scene = root.fork();
   const image = scene.register("prepared", content, sampling);
   const frameOperations = scene.drainOperations();
   scene.close();
@@ -58,11 +62,14 @@ test("already drained frame uploads precede later queued retirement, including f
 });
 
 test("execution-owned uploads retain scope identity, and independent renderers remain separate", () => {
-  const { root, cpu } = fixture(), first = root.fork(), second = root.fork();
+  const { root, cpu } = fixture(),
+    first = root.fork(),
+    second = root.fork();
   const image = first.allocate(1, 1, { kind: "generated", name: "dynamic" });
   const operation = { kind: "create-image", image, content, sampling } satisfies Parameters<SceneImageRegistry["commit"]>[0];
   expect(() => second.commit(operation)).toThrow("Image allocation is already resident or belongs to another owner");
-  cpu.apply(operation); first.commit(operation);
+  cpu.apply(operation);
+  first.commit(operation);
   expect(() => first.commit(operation)).toThrow("Image allocation is already resident or belongs to another owner");
   expect(() => cpu.apply(operation)).toThrow("CPU image is already uploaded");
   expect(() => second.update(image, 0, level)).toThrow("Scene image belongs to another resource owner or has been released");
@@ -77,15 +84,30 @@ test("execution-owned uploads retain scope identity, and independent renderers r
 });
 
 test("scope media clocks remain independent and final root shutdown stops remaining animations once", () => {
-  const { root } = fixture(), seen: number[] = [], stopped: string[] = [];
-  const menu = root.register("menu", content, sampling), world = root.fork({ sample: () => 42 });
+  const { root } = fixture(),
+    seen: number[] = [],
+    stopped: string[] = [];
+  const menu = root.register("menu", content, sampling),
+    world = root.fork({ sample: () => 42 });
   const image = world.register("movie", content, sampling);
-  root.trackAnimation(menu, () => { throw Error("Menu clock must not be sampled by world drain"); }, () => stopped.push("menu"));
-  world.trackAnimation(image, time => seen.push(time), () => stopped.push("world"));
+  root.trackAnimation(
+    menu,
+    () => {
+      throw Error("Menu clock must not be sampled by world drain");
+    },
+    () => stopped.push("menu"),
+  );
+  world.trackAnimation(
+    image,
+    time => seen.push(time),
+    () => stopped.push("world"),
+  );
   world.drainOperations();
   expect(seen).toEqual([42]);
-  world.close(); root.drainPendingOperations();
+  world.close();
+  root.drainPendingOperations();
   expect(stopped).toEqual(["world"]);
-  root.close(); root.close();
+  root.close();
+  root.close();
   expect(stopped).toEqual(["world", "menu"]);
 });

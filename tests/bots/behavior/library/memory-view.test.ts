@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { allocationView, BotMemory } from "../../../../src/bots/behavior/library/memory.ts";
 
 test("a manager allocation hands out one DataView over its payload until it is freed", () => {
-  const memory = new BotMemory(), allocation = memory.allocate(16, "heap", true);
+  const memory = new BotMemory(),
+    allocation = memory.allocate(16, "heap", true);
   const view = allocationView(allocation);
   expect(allocationView(allocation)).toBe(view);
   view.setInt32(4, 0x1234, true);

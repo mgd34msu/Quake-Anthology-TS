@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q2 CL_RegisterTEntModels resources consumed by the common effect renderer.
 export const Q2_TRANSIENT_MODELS = Object.freeze({
   cable: "models/ctf/segment/tris.md2",
@@ -12,10 +13,20 @@ export const Q2_TRANSIENT_MODELS = Object.freeze({
 
 // CL_RegisterTEntSounds, shared by native and selected Q2 effect producers.
 export const Q2_TRANSIENT_SOUNDS: readonly string[] = [
-  "world/ric1.wav", "world/ric2.wav", "world/ric3.wav", "weapons/lashit.wav",
-  "world/spark5.wav", "world/spark6.wav", "world/spark7.wav", "weapons/railgf1a.wav",
-  "weapons/rocklx1a.wav", "weapons/grenlx1a.wav", "weapons/xpld_wat.wav",
-  "player/land1.wav", "player/fall2.wav", "player/fall1.wav",
+  "world/ric1.wav",
+  "world/ric2.wav",
+  "world/ric3.wav",
+  "weapons/lashit.wav",
+  "world/spark5.wav",
+  "world/spark6.wav",
+  "world/spark7.wav",
+  "weapons/railgf1a.wav",
+  "weapons/rocklx1a.wav",
+  "weapons/grenlx1a.wav",
+  "weapons/xpld_wat.wav",
+  "player/land1.wav",
+  "player/fall2.wav",
+  "player/fall1.wav",
 ];
 
 export const Q2_ROGUE_TRANSIENT_SOUNDS: readonly string[] = ["weapons/tesla.wav", "weapons/disrupthit.wav"];

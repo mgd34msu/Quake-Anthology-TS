@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MD3 v15 loading and interpolation translated from Quake III Arena's
  * qfiles.h, tr_model.c and tr_surface.c.
@@ -299,12 +300,7 @@ function frameAt(surface: Md3Surface, index: number, name: string): readonly Md3
 }
 
 /** Interpolate a surface using the renderer's old-frame backlerp convention. */
-export function interpolateSurface(
-  surface: Md3Surface,
-  frame: number,
-  oldFrame: number,
-  backLerp: number,
-): readonly Md3Vertex[] {
+export function interpolateSurface(surface: Md3Surface, frame: number, oldFrame: number, backLerp: number): readonly Md3Vertex[] {
   if (!Number.isFinite(backLerp)) throw new RangeError("MD3 backlerp must be finite");
   const current = frameAt(surface, frame, "current");
   const oldNormalScale = Math.fround(backLerp);
@@ -325,9 +321,7 @@ export function interpolateMd3Frames(current: readonly Md3Vertex[], previous: re
     return Math.fround(Math.fround(oldXyz * oldXyzScale) + Math.fround(newXyz * newXyzScale));
   }
   function normalComponent(oldValue: number, newValue: number): number {
-    return Math.fround(
-      Math.fround(oldValue * oldNormalScale) + Math.fround(newValue * newNormalScale),
-    );
+    return Math.fround(Math.fround(oldValue * oldNormalScale) + Math.fround(newValue * newNormalScale));
   }
   const result: Md3Vertex[] = [];
   for (let index = 0; index < current.length; index++) {
@@ -361,13 +355,7 @@ function tagAt(model: Md3Model, frame: number, name: string): Md3Tag | undefined
 }
 
 /** Interpolate a named tag. Oversized frame numbers clamp as R_GetTag does. */
-export function lerpTag(
-  model: Md3Model,
-  name: string,
-  startFrame: number,
-  endFrame: number,
-  fraction: number,
-): Md3Tag | null {
+export function lerpTag(model: Md3Model, name: string, startFrame: number, endFrame: number, fraction: number): Md3Tag | null {
   const start = tagAt(model, startFrame, name);
   const end = tagAt(model, endFrame, name);
   if (start === undefined || end === undefined) return null;
@@ -436,15 +424,15 @@ class SkinTokenizer {
     const first = this.text[this.offset];
     if (first === undefined) return undefined;
     let result = "";
-    if (first === "\"") {
+    if (first === '"') {
       this.offset++;
       while (this.offset < this.text.length) {
         const character = this.text[this.offset];
-        if (character === undefined || character === "\"") break;
+        if (character === undefined || character === '"') break;
         result += character;
         this.offset++;
       }
-      if (this.text[this.offset] === "\"") this.offset++;
+      if (this.text[this.offset] === '"') this.offset++;
       if (result.length >= 1024) throw new RangeError("CommaParse quoted token exceeds its source allocation");
       return result;
     }

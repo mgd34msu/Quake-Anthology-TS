@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* CL_ParseMuzzleFlash2 color/particle admissions from Q2 cl_fx.c.
  * Copyright (C) Id Software, Inc. GPL-2.0-or-later.
  * Values retain the classic source MZ2 indices. */
 import type { Vec3 } from "../../../contracts/math.ts";
-export interface MonsterMuzzle { readonly color: Vec3; readonly particles: boolean; readonly smoke: boolean; readonly radius: number; readonly mask: number; }
+export interface MonsterMuzzle {
+  readonly color: Vec3;
+  readonly particles: boolean;
+  readonly smoke: boolean;
+  readonly radius: number;
+  readonly mask: number;
+}
 export const q2MonsterMuzzles: ReadonlyMap<number, MonsterMuzzle> = new Map([
   [26, { color: { x: 1, y: 1, z: 0 }, particles: true, smoke: true, radius: 200, mask: 31 }], // MZ2_INFANTRY_MACHINEGUN_1
   [27, { color: { x: 1, y: 1, z: 0 }, particles: true, smoke: true, radius: 200, mask: 31 }], // MZ2_INFANTRY_MACHINEGUN_2
@@ -211,10 +218,26 @@ export const q2MonsterMuzzles: ReadonlyMap<number, MonsterMuzzle> = new Map([
 
 // q2repro effects.c groups these rerelease flashes with the corresponding classic effect.
 const rereleaseMuzzles: ReadonlyMap<number, number> = new Map([
-  [232, 26], [233, 26], [234, 26], [235, 26], [236, 26], [237, 26], [238, 26], [239, 26], [260, 26],
-  [251, 39], [252, 41], [253, 43], [256, 53], [257, 53], [258, 53], [259, 53], [263, 62],
-  [74, 58], [134, 58],
+  [232, 26],
+  [233, 26],
+  [234, 26],
+  [235, 26],
+  [236, 26],
+  [237, 26],
+  [238, 26],
+  [239, 26],
+  [260, 26],
+  [251, 39],
+  [252, 41],
+  [253, 43],
+  [256, 53],
+  [257, 53],
+  [258, 53],
+  [259, 53],
+  [263, 62],
+  [74, 58],
+  [134, 58],
 ]);
 export function q2MonsterMuzzle(flash: number, rerelease: boolean): MonsterMuzzle | undefined {
-  return q2MonsterMuzzles.get(rerelease ? rereleaseMuzzles.get(flash) ?? flash : flash);
+  return q2MonsterMuzzles.get(rerelease ? (rereleaseMuzzles.get(flash) ?? flash) : flash);
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's CL_AddReliableCommand, SV_AddServerCommand and ack handling.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -9,7 +10,10 @@ export interface ReliableCommand {
 }
 
 export class ReliableOverflowError extends Error {
-  constructor(readonly sequence: number, readonly acknowledge: number) {
+  constructor(
+    readonly sequence: number,
+    readonly acknowledge: number,
+  ) {
     super("Client command overflow");
     this.name = "ReliableOverflowError";
   }
@@ -40,7 +44,8 @@ function storedText(text: string): string {
 function configStringNumber(text: string): number {
   const match = /^cs[\t\n\v\f\r ]*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)/.exec(text);
   if (match === null) throw new RangeError("SV_ReplacePendingServerCommands: indeterminate sscanf configstring index");
-  const sign = match[1], digits = match[2];
+  const sign = match[1],
+    digits = match[2];
   if (sign === undefined || digits === undefined) throw new Error("Missing configstring number capture");
   const radix = /^0[xX]/.test(digits) ? 16 : digits.startsWith("0") ? 8 : 10;
   const magnitude = Number.parseInt(digits, radix);
@@ -56,9 +61,15 @@ class ReliableRing {
   protected acknowledgedSequence = 0;
   private readonly slots: string[] = Array.from({ length: MAX_RELIABLE_COMMANDS }, () => "");
 
-  get sequence(): number { return this.currentSequence; }
-  get acknowledge(): number { return this.acknowledgedSequence; }
-  get outstanding(): number { return this.currentSequence - this.acknowledgedSequence; }
+  get sequence(): number {
+    return this.currentSequence;
+  }
+  get acknowledge(): number {
+    return this.acknowledgedSequence;
+  }
+  get outstanding(): number {
+    return this.currentSequence - this.acknowledgedSequence;
+  }
 
   /** Direct source ring indexing; overwritten commands deliberately read their replacement slot. */
   lookup(sequence: number): string {
@@ -84,7 +95,8 @@ class ReliableRing {
   /** Source caller must reject stale raw acknowledgements before enumerating this range. */
   pending(): ReliableCommand[] {
     const commands: ReliableCommand[] = [];
-    for (let sequence = this.acknowledgedSequence + 1; sequence <= this.currentSequence; sequence++) commands.push({ sequence, text: this.lookupMasked(sequence) });
+    for (let sequence = this.acknowledgedSequence + 1; sequence <= this.currentSequence; sequence++)
+      commands.push({ sequence, text: this.lookupMasked(sequence) });
     return commands;
   }
 
@@ -139,7 +151,8 @@ export class ServerReliableCommands extends ReliableRing {
   /** Active SV_ReplacePendingServerCommands helper; SV_AddServerCommand's call remains disabled. */
   replacePending(sent: number, text: string): boolean {
     checkSignedSequence(sent);
-    const nul = text.indexOf("\0"), command = nul < 0 ? text : text.slice(0, nul);
+    const nul = text.indexOf("\0"),
+      command = nul < 0 ? text : text.slice(0, nul);
     for (let sequence = sent + 1; sequence <= this.sequence; sequence++) {
       const pending = this.lookupMasked(sequence);
       if (command.slice(0, 2) !== pending.slice(0, 2)) continue;

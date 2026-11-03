@@ -16,7 +16,11 @@ test("MG3 creatures request their own and QuakeC-reachable resources, not every 
 
 test("Rogue and Hipnotic selection manifests offer the dragon, morph and spike mine", async () => {
   const { q1ExpansionMonsterSources } = await import("../../src/content/monsters/expansions.ts");
-  for (const [program, classname] of [["rogue", "monster_dragon"], ["rogue", "monster_morph"], ["hipnotic", "monster_spikemine"]] as const) {
+  for (const [program, classname] of [
+    ["rogue", "monster_dragon"],
+    ["rogue", "monster_morph"],
+    ["hipnotic", "monster_spikemine"],
+  ] as const) {
     for (const source of q1ExpansionMonsterSources.filter(entry => entry.program === program)) {
       expect(source.creatures[classname]?.resources.length ?? 0).toBeGreaterThan(5);
     }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { AttackProvenance } from "./gameplay.ts";
 import type { ActorId, CallbackId, OwnedActor, ProviderId, SessionId } from "./identity.ts";
 import type { Bounds, Plane, Vec3 } from "./math.ts";

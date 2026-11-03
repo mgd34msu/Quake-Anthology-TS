@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { aimQ1 } from "../../../world/gameplay/q1-aim.ts";
 import type { Q1CharacterAttack } from "./types.ts";
 /* weapons.qc/player.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
@@ -15,109 +16,185 @@ import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon, yawFor, len
 export function weaponModel(weapon: Q1Weapon): string {
   if (!isQ1BaseWeapon(weapon)) throw new Error(`Use registered Q1 weapon model for ${weapon}`);
   switch (weapon) {
-    case "axe": return "progs/v_axe.mdl";
-    case "shotgun": return "progs/v_shot.mdl";
-    case "supershotgun": return "progs/v_shot2.mdl";
-    case "nailgun": return "progs/v_nail.mdl";
-    case "supernailgun": return "progs/v_nail2.mdl";
-    case "grenadelauncher": return "progs/v_rock.mdl";
-    case "rocketlauncher": return "progs/v_rock2.mdl";
-    case "lightning": return "progs/v_light.mdl";
+    case "axe":
+      return "progs/v_axe.mdl";
+    case "shotgun":
+      return "progs/v_shot.mdl";
+    case "supershotgun":
+      return "progs/v_shot2.mdl";
+    case "nailgun":
+      return "progs/v_nail.mdl";
+    case "supernailgun":
+      return "progs/v_nail2.mdl";
+    case "grenadelauncher":
+      return "progs/v_rock.mdl";
+    case "rocketlauncher":
+      return "progs/v_rock2.mdl";
+    case "lightning":
+      return "progs/v_light.mdl";
   }
 }
 export function bestWeapon(game: Q1EntityServices, actor: OwnedActor, ammoCount?: (item: ItemId) => number): Q1Weapon {
   const order = game.weaponOrder ?? ["lightning", "supernailgun", "supershotgun", "nailgun", "shotgun", "axe"];
-  const player = game.player(actor.id); if (player === null) return "axe";
+  const player = game.player(actor.id);
+  if (player === null) return "axe";
   for (const weapon of order) if (game.weaponAvailable(player, weapon, "best", ammoCount)) return weapon;
   return "axe";
 }
 
 /** PF_aim preserves horizontal aim and corrects height toward a visible DAMAGE_AIM target. */
 export function aim(game: Q1EntityServices, actor: OwnedActor, forward: Vec3): Vec3 {
-  const body = game.host.bodies.read(actor.id); if (body === null) return forward;
+  const body = game.host.bodies.read(actor.id);
+  if (body === null) return forward;
   const team = game.host.combat.read(actor.id)?.team ?? null;
   return aimQ1(body.origin, forward, game.options.aimThreshold ?? 0.93, {
     targets: game.host.actors.observations().map(value => value.id),
     body: target => game.host.bodies.read(target),
     eligible: target => {
-      const traits = game.sourceTarget(target), state = game.host.combat.read(target);
-      return !sameActor(target, actor.id) && (traits.aimedDamage || traits.player) && state !== null && state.canTakeDamage
-        && !((game.options.teamplay ?? 0) !== 0 && team !== null && team === state.team);
+      const traits = game.sourceTarget(target),
+        state = game.host.combat.read(target);
+      return (
+        !sameActor(target, actor.id) &&
+        (traits.aimedDamage || traits.player) &&
+        state !== null &&
+        state.canTakeDamage &&
+        !((game.options.teamplay ?? 0) !== 0 && team !== null && team === state.team)
+      );
     },
     trace: (start, end) => game.host.trace({ start, end, bounds: POINT, ignore: actor.id, monsters: true }).actor,
   });
 }
 
 /** MultiDamage flushes when the next pellet changes target, preserving intervening reactions. */
-export function fireBullets(game: Q1EntityServices, shooter: OwnedActor, direction: Vec3, viewAngles: Vec3, count: number, spreadX: number, spreadY: number, weapon: Q1Weapon | null): undefined {
-  const body = game.host.bodies.read(shooter.id); if (body === null) return undefined;
-  const basis = game.makeVectors(viewAngles); let source = vadd(body.origin, vscale(basis.forward, 10));
+export function fireBullets(
+  game: Q1EntityServices,
+  shooter: OwnedActor,
+  direction: Vec3,
+  viewAngles: Vec3,
+  count: number,
+  spreadX: number,
+  spreadY: number,
+  weapon: Q1Weapon | null,
+): undefined {
+  const body = game.host.bodies.read(shooter.id);
+  if (body === null) return undefined;
+  const basis = game.makeVectors(viewAngles);
+  let source = vadd(body.origin, vscale(basis.forward, 10));
   // absmin carries SV_LinkEdict's one unit of padding.
   source = { ...source, z: Math.fround(body.origin.z + body.bounds.min.z - 1 + (body.bounds.max.z - body.bounds.min.z) * 0.7) };
-  let pending: ActorId | null = null, total = 0, holed = false;
-  const flush = (): undefined => { if (pending !== null && game.host.actors.isLive(pending)) game.damage(pending, shooter.id, shooter.id, total, weapon); total = 0; return undefined; };
+  let pending: ActorId | null = null,
+    total = 0,
+    holed = false;
+  const flush = (): undefined => {
+    if (pending !== null && game.host.actors.isLive(pending)) game.damage(pending, shooter.id, shooter.id, total, weapon);
+    total = 0;
+    return undefined;
+  };
   for (let shot = 0; shot < count; shot++) {
-    const ray = vadd(vadd(direction, vscale(game.basis.right, (game.host.random() * 2 - 1) * spreadX)), vscale(game.basis.up, (game.host.random() * 2 - 1) * spreadY));
+    const ray = vadd(
+      vadd(direction, vscale(game.basis.right, (game.host.random() * 2 - 1) * spreadX)),
+      vscale(game.basis.up, (game.host.random() * 2 - 1) * spreadY),
+    );
     const trace = game.host.trace({ start: source, end: vadd(source, vscale(ray, 2048)), bounds: POINT, ignore: shooter.id, monsters: true });
     if (trace.fraction === 1) continue;
     if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(shooter.id, trace.end);
     if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) {
       game.effect("blood", vsub(trace.end, vscale(ray, 4)), trace.actor, 4);
-      if (pending === null || !sameActor(pending, trace.actor)) { flush(); pending = trace.actor; }
+      if (pending === null || !sameActor(pending, trace.actor)) {
+        flush();
+        pending = trace.actor;
+      }
       total += 4;
     } else game.effect("gunshot", vsub(trace.end, vscale(ray, 4)), trace.actor);
-    if (!holed && game.sourceBulletHole !== null && (trace.actor === null || game.world !== null && sameActor(trace.actor, game.world.actor.id))) { holed = true; game.sourceBulletHole(shooter, trace.end, trace.normal); }
+    if (!holed && game.sourceBulletHole !== null && (trace.actor === null || (game.world !== null && sameActor(trace.actor, game.world.actor.id)))) {
+      holed = true;
+      game.sourceBulletHole(shooter, trace.end, trace.normal);
+    }
   }
   return flush();
 }
 
 function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket" | "grenade" | "spike" | "superspike", velocity: Vec3, origin: Vec3): Q1Actor {
   const entity = game.create(kind === "rocket" ? "missile" : kind);
-  entity.projectile = kind; entity.projectileWeapon = player.weapon; entity.owner = player.actor.id;
-  entity.movement = kind === "grenade" ? "bounce" : "flymissile"; entity.solid = "bbox";
-  entity.model = kind === "rocket" ? "progs/missile.mdl" : kind === "grenade" ? "progs/grenade.mdl" : kind === "superspike" ? "progs/s_spike.mdl" : "progs/spike.mdl";
+  entity.projectile = kind;
+  entity.projectileWeapon = player.weapon;
+  entity.owner = player.actor.id;
+  entity.movement = kind === "grenade" ? "bounce" : "flymissile";
+  entity.solid = "bbox";
+  entity.model =
+    kind === "rocket" ? "progs/missile.mdl" : kind === "grenade" ? "progs/grenade.mdl" : kind === "superspike" ? "progs/s_spike.mdl" : "progs/spike.mdl";
   if (kind === "grenade") entity.angularVelocity = { x: 300, y: 300, z: 300 };
   // weapons.qc orients rockets and spikes along their velocity (vectoangles);
   // unified body angles use view convention (pitch negative looking up).
-  const angles = { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 };
-  game.setBody(entity, { origin, velocity, angles }); game.link(entity);
+  const angles = { x: (-Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180) / Math.PI, y: yawFor(velocity), z: 0 };
+  game.setBody(entity, { origin, velocity, angles });
+  game.link(entity);
   entity.touch = game.named.touch(entity, "projectile_touch");
   if (kind === "grenade" && game.sourceGrenadeFix) game.schedule(entity, 0.05, game.named.action(entity, "GrenadeThink"));
-  else game.schedule(entity, kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6, game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
+  else
+    game.schedule(
+      entity,
+      kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6,
+      game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"),
+    );
   game.launchProjectileBehavior(entity, player.actor.id, player.weapon, kind === "rocket" ? "rocket" : kind === "grenade" ? "grenade" : "nail");
   return entity;
 }
 export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, _normal: Vec3, surface?: TouchContact["surface"]): undefined {
   if (other !== null && entity.owner !== null && sameActor(other, entity.owner)) return undefined;
   if (other !== null && game.entity(other)?.solid === "trigger") return undefined;
-  if (entity.projectile !== "grenade" && ((surface !== undefined && surface !== null && (surface.nativeFlags & 4) !== 0) || game.host.contents(game.body(entity).origin) === "sky")) return game.remove(entity);
+  if (
+    entity.projectile !== "grenade" &&
+    ((surface !== undefined && surface !== null && (surface.nativeFlags & 4) !== 0) || game.host.contents(game.body(entity).origin) === "sky")
+  )
+    return game.remove(entity);
   switch (entity.projectile) {
-    case "rocket": return explode(game, entity, other, true);
+    case "rocket":
+      return explode(game, entity, other, true);
     case "grenade":
-      if (other !== null && game.sourceGrenadeFix && game.sourceTarget(other).aimedDamage && ["monster_boss", "monster_oldone_new"].includes(game.host.classname(other))) {
-        game.damage(other, entity.actor.id, entity.owner, 120, entity.projectileWeapon); return explode(game, entity, other, false);
+      if (
+        other !== null &&
+        game.sourceGrenadeFix &&
+        game.sourceTarget(other).aimedDamage &&
+        ["monster_boss", "monster_oldone_new"].includes(game.host.classname(other))
+      ) {
+        game.damage(other, entity.actor.id, entity.owner, 120, entity.projectileWeapon);
+        return explode(game, entity, other, false);
       }
       if (other !== null && (game.sourceTarget(other).aimedDamage || game.sourceTarget(other).player)) return explode(game, entity, null, false);
-      if (game.sourceGrenadeFix) { if (entity.attackFinished >= game.time) return undefined; entity.attackFinished = game.time + 0.1; }
+      if (game.sourceGrenadeFix) {
+        if (entity.attackFinished >= game.time) return undefined;
+        entity.attackFinished = game.time + 0.1;
+      }
       return game.sound(entity, "weapons/bounce.wav", "weapon");
-    case "spike": case "superspike": {
-      const owner = entity.owner, origin = game.body(entity).origin;
+    case "spike":
+    case "superspike": {
+      const owner = entity.owner,
+        origin = game.body(entity).origin;
       if (owner !== null) game.host.weaponImpact?.(owner, origin);
       const amount = entity.projectile === "spike" ? 9 : 18;
       if (other !== null && game.host.combat.read(other)?.canTakeDamage) {
-        game.effect("blood", game.body(entity).origin, other, amount); game.damage(other, entity.actor.id, entity.owner, amount, entity.projectileWeapon);
-      } else game.effect(entity.classname === "wizard_spike" ? "wizard-spike" : entity.classname === "knight_spike" ? "knight-spike" : entity.projectile, game.body(entity).origin);
+        game.effect("blood", game.body(entity).origin, other, amount);
+        game.damage(other, entity.actor.id, entity.owner, amount, entity.projectileWeapon);
+      } else
+        game.effect(
+          entity.classname === "wizard_spike" ? "wizard-spike" : entity.classname === "knight_spike" ? "knight-spike" : entity.projectile,
+          game.body(entity).origin,
+        );
       return game.remove(entity);
     }
-    case null: return undefined;
+    case null:
+      return undefined;
   }
 }
 function explode(game: Q1EntityServices, entity: Q1Actor, direct: ActorId | null, rocket: boolean): undefined {
-  const owner = entity.owner, impactOrigin = game.body(entity).origin;
+  const owner = entity.owner,
+    impactOrigin = game.body(entity).origin;
   if (owner !== null) game.host.weaponImpact?.(owner, impactOrigin);
   if (rocket && direct !== null && game.health(direct) !== 0) {
     let amount = Math.fround(100 + game.host.random() * 20);
-    if (game.host.classname(direct) === "monster_shambler" || game.sourceBloodyNightmare !== null && game.host.classname(direct) === "monster_super_shambler") amount *= 0.5;
+    if (game.host.classname(direct) === "monster_shambler" || (game.sourceBloodyNightmare !== null && game.host.classname(direct) === "monster_super_shambler"))
+      amount *= 0.5;
     game.damage(direct, entity.actor.id, entity.owner, amount, entity.projectileWeapon);
   }
   game.radiusDamage(entity.actor.id, entity.owner, 120, direct, entity.projectileWeapon);
@@ -127,27 +204,33 @@ function explode(game: Q1EntityServices, entity: Q1Actor, direct: ActorId | null
   return game.remove(entity);
 }
 function lightning(game: Q1EntityServices, player: Q1PlayerState): undefined {
-  const body = game.host.bodies.read(player.actor.id); if (body === null) return undefined;
+  const body = game.host.bodies.read(player.actor.id);
+  if (body === null) return undefined;
   const cells = game.host.inventory.count(player.actor.id, "q1:ammo/cells");
   if (player.waterLevel > 1) {
     game.host.weaponImpact?.(player.actor.id, body.origin);
-    game.consumeWeaponAmmo(player, "q1:ammo/cells", cells); return game.radiusDamage(player.actor.id, player.actor.id, 35 * cells, null, "lightning", "discharge");
+    game.consumeWeaponAmmo(player, "q1:ammo/cells", cells);
+    return game.radiusDamage(player.actor.id, player.actor.id, 35 * cells, null, "lightning", "discharge");
   }
   game.consumeWeaponAmmo(player, "q1:ammo/cells", 1);
-  const forward = game.makeVectors(player.viewAngles).forward, start = vadd(body.origin, { x: 0, y: 0, z: 16 });
+  const forward = game.makeVectors(player.viewAngles).forward,
+    start = vadd(body.origin, { x: 0, y: 0, z: 16 });
   const wall = game.host.trace({ start, end: vadd(start, vscale(forward, 600)), bounds: POINT, ignore: player.actor.id, monsters: false });
   if (wall.fraction < 1 && !wall.sky) game.host.weaponImpact?.(player.actor.id, wall.end);
   game.host.emit({ kind: "beam", style: "lightning2", actor: player.actor.id, start, end: wall.end });
   const end = vadd(wall.end, vscale(forward, 4));
   // Preserve the source's discarded normalize return and sequential x/y assignments.
-  const delta = vsub(end, body.origin), side = { x: -delta.y * 16, y: -delta.y * 16, z: 0 };
+  const delta = vsub(end, body.origin),
+    side = { x: -delta.y * 16, y: -delta.y * 16, z: 0 };
   const hit: ActorId[] = [];
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(body.origin, offset), end: vadd(end, offset), bounds: POINT, ignore: player.actor.id, monsters: true });
     const target = trace.actor;
     if (target !== null && !hit.some(actor => sameActor(actor, target)) && game.host.combat.read(target)?.canTakeDamage) {
       if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
-      hit.push(target); game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: game.sourceMg3Pickups ? 246 : 225, count: 120 }); game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
+      hit.push(target);
+      game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: game.sourceMg3Pickups ? 246 : 225, count: 120 });
+      game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
     }
   }
   return undefined;
@@ -164,89 +247,172 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   const repeating = player.continuousFiring;
   if (game.health(player.actor.id) <= 0 || game.time < (repeating ? player.nextWeaponFrame : player.attackFinished)) return false;
   const ammo = ammoItem(player.weapon);
-  if (ammo !== null && game.host.inventory.count(player.actor.id, ammo) < 1) { game.selectWeapon(player.actor, bestWeapon(game, player.actor)); return false; }
-  const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
+  if (ammo !== null && game.host.inventory.count(player.actor.id, ammo) < 1) {
+    game.selectWeapon(player.actor, bestWeapon(game, player.actor));
+    return false;
+  }
+  const body = game.host.bodies.read(player.actor.id);
+  if (body === null) return false;
   const volume = game.host.weaponVolume?.(player.actor.id) ?? 1;
   if (!game.registeredWeapons.has(player.weapon)) game.weaponBeforeFire(player);
-  const basis = game.makeVectors(player.viewAngles); const weapon = player.weapon; let delay = 0.1, punch = -2;
-  let attack: Q1CharacterAttack = { kind: weapon === "shotgun" || weapon === "supershotgun" ? "shotgun" : weapon === "lightning" ? "lightning" : weapon === "nailgun" || weapon === "supernailgun" ? "nail" : "rocket" };
+  const basis = game.makeVectors(player.viewAngles);
+  const weapon = player.weapon;
+  let delay = 0.1,
+    punch = -2;
+  let attack: Q1CharacterAttack = {
+    kind:
+      weapon === "shotgun" || weapon === "supershotgun"
+        ? "shotgun"
+        : weapon === "lightning"
+          ? "lightning"
+          : weapon === "nailgun" || weapon === "supernailgun"
+            ? "nail"
+            : "rocket",
+  };
   player.continuousFiring = weapon === "nailgun" || weapon === "supernailgun" || weapon === "lightning";
   player.nextWeaponFrame = Math.fround(game.time + game.weaponFrameDelay(player, 0.1));
-  if (!player.continuousFiring) { player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; }
+  if (!player.continuousFiring) {
+    player.weaponAnimationAt = game.time;
+    player.weaponAnimationBase = 1;
+  }
   player.hostileUntil = game.time + 1;
   switch (weapon) {
     case "axe": {
-      delay = 0.5; punch = 0; game.sound(player.actor, "weapons/ax1.wav", "weapon", 1, volume);
-      const animation = game.host.random(); attack = { kind: "axe", variant: animation < 0.25 ? 0 : animation < 0.5 ? 1 : animation < 0.75 ? 2 : 3 }; player.weaponAnimationBase = animation >= 0.25 && animation < 0.5 || animation >= 0.75 ? 5 : 1;
+      delay = 0.5;
+      punch = 0;
+      game.sound(player.actor, "weapons/ax1.wav", "weapon", 1, volume);
+      const animation = game.host.random();
+      attack = { kind: "axe", variant: animation < 0.25 ? 0 : animation < 0.5 ? 1 : animation < 0.75 ? 2 : 3 };
+      player.weaponAnimationBase = (animation >= 0.25 && animation < 0.5) || animation >= 0.75 ? 5 : 1;
       // player_axe3 is the hit frame, two 0.1 second animation steps after attack begins.
-      const strike = game.create("axe_strike"); strike.owner = player.actor.id;
-      game.schedule(strike, 0.2, game.named.action(strike, "player_axe3")); break;
+      const strike = game.create("axe_strike");
+      strike.owner = player.actor.id;
+      game.schedule(strike, 0.2, game.named.action(strike, "player_axe3"));
+      break;
     }
-    case "shotgun": case "supershotgun": {
+    case "shotgun":
+    case "supershotgun": {
       const superShot = weapon === "supershotgun" && game.host.inventory.count(player.actor.id, "q1:ammo/shells") > 1;
-      game.consumeWeaponAmmo(player, "q1:ammo/shells", superShot ? 2 : 1); delay = weapon === "supershotgun" ? 0.7 : 0.5; punch = superShot ? -4 : -2;
+      game.consumeWeaponAmmo(player, "q1:ammo/shells", superShot ? 2 : 1);
+      delay = weapon === "supershotgun" ? 0.7 : 0.5;
+      punch = superShot ? -4 : -2;
       game.sound(player.actor, superShot ? "weapons/shotgn2.wav" : "weapons/guncock.wav", "weapon", 1, volume);
-      fireBullets(game, player.actor, aim(game, player.actor, basis.forward), player.viewAngles, superShot ? 14 : 6, superShot ? 0.14 : 0.04, superShot ? 0.08 : 0.04, weapon); break;
+      fireBullets(
+        game,
+        player.actor,
+        aim(game, player.actor, basis.forward),
+        player.viewAngles,
+        superShot ? 14 : 6,
+        superShot ? 0.14 : 0.04,
+        superShot ? 0.08 : 0.04,
+        weapon,
+      );
+      break;
     }
-    case "nailgun": case "supernailgun": {
+    case "nailgun":
+    case "supernailgun": {
       const superNail = weapon === "supernailgun" && game.host.inventory.count(player.actor.id, "q1:ammo/nails") >= 2;
       delay = 0.2;
       game.consumeWeaponAmmo(player, "q1:ammo/nails", superNail ? 2 : 1);
       game.sound(player.actor, superNail ? "weapons/spike2.wav" : "weapons/rocket1i.wav", "weapon", 1, volume);
       const origin = vadd(vadd(body.origin, { x: 0, y: 0, z: 16 }), vscale(basis.right, superNail ? 0 : player.nailSide * 4));
-      projectile(game, player, superNail ? "superspike" : "spike", vscale(aim(game, player.actor, basis.forward), game.nailSpeed(player, 1000)), origin); player.nailSide *= -1; break;
+      projectile(game, player, superNail ? "superspike" : "spike", vscale(aim(game, player.actor, basis.forward), game.nailSpeed(player, 1000)), origin);
+      player.nailSide *= -1;
+      break;
     }
     case "grenadelauncher": {
-      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1); delay = 0.6; game.sound(player.actor, "weapons/grenade.wav", "weapon", 1, volume);
-      const velocity = player.viewAngles.x === 0 ? { ...vscale(aim(game, player.actor, basis.forward), 600), z: 200 } :
-        vadd(vadd(vadd(vscale(basis.forward, 600), vscale(basis.up, 200)), vscale(basis.right, (game.host.random() * 2 - 1) * 10)), vscale(basis.up, (game.host.random() * 2 - 1) * 10));
-      projectile(game, player, "grenade", velocity, body.origin); break;
+      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1);
+      delay = 0.6;
+      game.sound(player.actor, "weapons/grenade.wav", "weapon", 1, volume);
+      const velocity =
+        player.viewAngles.x === 0
+          ? { ...vscale(aim(game, player.actor, basis.forward), 600), z: 200 }
+          : vadd(
+              vadd(vadd(vscale(basis.forward, 600), vscale(basis.up, 200)), vscale(basis.right, (game.host.random() * 2 - 1) * 10)),
+              vscale(basis.up, (game.host.random() * 2 - 1) * 10),
+            );
+      projectile(game, player, "grenade", velocity, body.origin);
+      break;
     }
     case "rocketlauncher": {
-      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1); delay = 0.8; game.sound(player.actor, "weapons/sgun1.wav", "weapon", 1, volume);
-      projectile(game, player, "rocket", vscale(aim(game, player.actor, basis.forward), 1000), vadd(vadd(body.origin, vscale(basis.forward, 8)), { x: 0, y: 0, z: 16 })); break;
+      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1);
+      delay = 0.8;
+      game.sound(player.actor, "weapons/sgun1.wav", "weapon", 1, volume);
+      projectile(
+        game,
+        player,
+        "rocket",
+        vscale(aim(game, player.actor, basis.forward), 1000),
+        vadd(vadd(body.origin, vscale(basis.forward, 8)), { x: 0, y: 0, z: 16 }),
+      );
+      break;
     }
     case "lightning":
       delay = repeating ? 0.2 : 0.1;
-      if (player.lightningSoundAt < game.time) { game.sound(player.actor, "weapons/lhit.wav", "weapon", 1, volume); player.lightningSoundAt = game.time + 0.6; }
-      lightning(game, player); if (!repeating) game.sound(player.actor, "weapons/lstart.wav", "auto", 1, volume); break;
+      if (player.lightningSoundAt < game.time) {
+        game.sound(player.actor, "weapons/lhit.wav", "weapon", 1, volume);
+        player.lightningSoundAt = game.time + 0.6;
+      }
+      lightning(game, player);
+      if (!repeating) game.sound(player.actor, "weapons/lstart.wav", "auto", 1, volume);
+      break;
   }
   // SuperDamageSound, limited by super_sound to once a second.
   if (weapon !== "axe" && game.powerupExpires(player.actor.id, "quad") > game.time && player.cues.quadSoundAt < game.time) {
-    player.cues.quadSoundAt = game.time + 1; game.sound(player.actor, "items/damage3.wav", "body");
+    player.cues.quadSoundAt = game.time + 1;
+    game.sound(player.actor, "items/damage3.wav", "body");
   }
   player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay));
-  player.weaponFrame = player.continuousFiring ? player.weaponFrame % (weapon === "lightning" ? 4 : 8) + 1 : player.weaponAnimationBase;
+  player.weaponFrame = player.continuousFiring ? (player.weaponFrame % (weapon === "lightning" ? 4 : 8)) + 1 : player.weaponAnimationBase;
   game.weaponPunch(player, punch);
   game.host.emit({ kind: "weapon", player: player.actor.id, weapon, viewModel: game.weaponModel(weapon, player), frame: player.weaponFrame, punch, attack });
-  game.effect("muzzleflash", body.origin, player.actor.id); return true;
+  game.effect("muzzleflash", body.origin, player.actor.id);
+  return true;
 }
 
 function axeStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
-        const player = strike.owner === null ? null : game.player(strike.owner); if (player === null) return game.remove(strike);
-        // In QC the hit runs in a player frame that death and intermission replace.
-        if (game.health(player.actor.id) <= 0 || game.intermission !== null) return game.remove(strike);
-        const current = game.host.bodies.read(player.actor.id); if (current === null) return game.remove(strike);
-        const start = vadd(current.origin, { x: 0, y: 0, z: 16 }), forward = game.makeVectors(player.viewAngles).forward;
-        const trace = game.host.trace({ start, end: vadd(start, vscale(forward, 64)), bounds: POINT, ignore: player.actor.id, monsters: true });
-        if (trace.fraction < 1) {
-          if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
-          const org = vsub(trace.end, vscale(forward, 4));
-          if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) { game.effect("blood", org, trace.actor, 20); game.damage(trace.actor, player.actor.id, player.actor.id, 20, "axe"); }
-          else { game.sound(player.actor, "player/axhit2.wav", "weapon"); game.effect("gunshot", org, null, 3); }
-        }
-        return game.remove(strike);
+  const player = strike.owner === null ? null : game.player(strike.owner);
+  if (player === null) return game.remove(strike);
+  // In QC the hit runs in a player frame that death and intermission replace.
+  if (game.health(player.actor.id) <= 0 || game.intermission !== null) return game.remove(strike);
+  const current = game.host.bodies.read(player.actor.id);
+  if (current === null) return game.remove(strike);
+  const start = vadd(current.origin, { x: 0, y: 0, z: 16 }),
+    forward = game.makeVectors(player.viewAngles).forward;
+  const trace = game.host.trace({ start, end: vadd(start, vscale(forward, 64)), bounds: POINT, ignore: player.actor.id, monsters: true });
+  if (trace.fraction < 1) {
+    if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
+    const org = vsub(trace.end, vscale(forward, 4));
+    if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) {
+      game.effect("blood", org, trace.actor, 20);
+      game.damage(trace.actor, player.actor.id, player.actor.id, 20, "axe");
+    } else {
+      game.sound(player.actor, "player/axhit2.wav", "weapon");
+      game.effect("gunshot", org, null, 3);
+    }
+  }
+  return game.remove(strike);
 }
 
 /** MG GrenadeThink: counts 50 ticks to the explosion and reflects a grenade that stopped against a floor it was falling onto. */
 function grenadeThink(game: Q1EntityServices, grenade: Q1Actor): undefined {
-  grenade.count++; if (grenade.count === 50) return explode(game, grenade, null, false);
-  const previous = grenade.vector("oldorigin"), body = game.body(grenade);
+  grenade.count++;
+  if (grenade.count === 50) return explode(game, grenade, null, false);
+  const previous = grenade.vector("oldorigin"),
+    body = game.body(grenade);
   if (length(body.velocity) === 0 && length(previous) > 120 && previous.z < 0) {
-    const trace = game.host.trace({ start: vadd(body.origin, { x: 0, y: 0, z: 4 }), end: vsub(body.origin, { x: 0, y: 0, z: 8 }), bounds: POINT, ignore: grenade.actor.id, monsters: false });
+    const trace = game.host.trace({
+      start: vadd(body.origin, { x: 0, y: 0, z: 4 }),
+      end: vsub(body.origin, { x: 0, y: 0, z: 8 }),
+      bounds: POINT,
+      ignore: grenade.actor.id,
+      monsters: false,
+    });
     if (trace.fraction < 1) {
       const reflected = vsub(previous, vscale(trace.normal, 2 * dot(previous, trace.normal)));
-      game.setBody(grenade, { velocity: vscale(reflected, 0.6), ground: null }); grenade.movementFlags &= ~512; grenade.angularVelocity = { x: 400, y: 400, z: 400 };
+      game.setBody(grenade, { velocity: vscale(reflected, 0.6), ground: null });
+      grenade.movementFlags &= ~512;
+      grenade.angularVelocity = { x: 400, y: 400, z: 400 };
     }
   }
   const velocity = game.body(grenade).velocity;
@@ -255,7 +421,9 @@ function grenadeThink(game: Q1EntityServices, grenade: Q1Actor): undefined {
 }
 
 export function registerWeaponCallbacks(game: Q1EntityServices): undefined {
-  game.named.register("projectile_touch", { touch: (runtime, entity, other, normal, surface) => projectileTouch(runtime, entity, other, normal ?? ZERO, surface) });
+  game.named.register("projectile_touch", {
+    touch: (runtime, entity, other, normal, surface) => projectileTouch(runtime, entity, other, normal ?? ZERO, surface),
+  });
   game.named.register("GrenadeExplode", { action: (runtime, entity) => explode(runtime, entity, null, false) });
   game.named.register("GrenadeThink", { action: grenadeThink });
   game.named.register("player_axe3", { action: axeStrike });

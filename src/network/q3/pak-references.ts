@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/qcommon/files.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -38,7 +39,9 @@ export class ServerPakSet {
   private sums: readonly number[] = [];
   private readonly names: (string | null)[] = [];
 
-  get checksums(): readonly number[] { return this.sums; }
+  get checksums(): readonly number[] {
+    return this.sums;
+  }
 
   setChecksums(text: string): number {
     this.sums = Object.freeze(tokenizeCommand(text, "q3").argv.slice(0, MAX_SEARCH_PATHS).map(nativeAtoi));
@@ -116,22 +119,20 @@ function suffixEquals(path: string, suffix: string): boolean {
 }
 
 function excludesGeneralReference(path: string): boolean {
-  return suffixEquals(path, ".shader")
-    || suffixEquals(path, ".txt")
-    || suffixEquals(path, ".cfg")
-    || suffixEquals(path, ".config")
-    || path.includes("levelshots")
-    || suffixEquals(path, ".bot")
-    || suffixEquals(path, ".arena")
-    || suffixEquals(path, ".menu");
+  return (
+    suffixEquals(path, ".shader") ||
+    suffixEquals(path, ".txt") ||
+    suffixEquals(path, ".cfg") ||
+    suffixEquals(path, ".config") ||
+    path.includes("levelshots") ||
+    suffixEquals(path, ".bot") ||
+    suffixEquals(path, ".arena") ||
+    suffixEquals(path, ".menu")
+  );
 }
 
 export function allowedPureLoosePath(path: string): boolean {
-  return suffixEquals(path, ".cfg")
-    || suffixEquals(path, ".menu")
-    || suffixEquals(path, ".game")
-    || suffixEquals(path, ".dm_68")
-    || suffixEquals(path, ".dat");
+  return suffixEquals(path, ".cfg") || suffixEquals(path, ".menu") || suffixEquals(path, ".game") || suffixEquals(path, ".dm_68") || suffixEquals(path, ".dat");
 }
 
 function checkedReferenceFlags(flags: number): number {
@@ -155,10 +156,7 @@ export function isPakPure(checksum: number, serverChecksums: readonly number[]):
   return matched;
 }
 
-export function reorderPurePaks<T>(
-  searchPaths: readonly PureSearchPath<T>[],
-  serverChecksums: readonly number[],
-): readonly PureSearchPath<T>[] {
+export function reorderPurePaks<T>(searchPaths: readonly PureSearchPath<T>[], serverChecksums: readonly number[]): readonly PureSearchPath<T>[] {
   const reordered = [...searchPaths];
   for (const searchPath of reordered) {
     if (searchPath.kind === "pak") checksumPattern(searchPath.checksum, "Pak checksum");

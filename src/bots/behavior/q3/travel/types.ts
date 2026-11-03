@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source be_ai_move.c decisions borrow shared navigation and selected movement prediction.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
@@ -12,22 +13,34 @@ import type { BotMovementPrediction, BotNavigation } from "../navigation-types.t
 import type { BotMoveResult, BotMoveState, BotMoveStateStore, BotMoveVariable } from "../movement-state.ts";
 
 export interface BotTravelPredictionResult {
-  readonly end: Vec3; readonly velocity: Vec3; readonly frames: number; readonly stopEvent: number;
+  readonly end: Vec3;
+  readonly velocity: Vec3;
+  readonly frames: number;
+  readonly stopEvent: number;
   /** Explicit crossing area wins over classifying an endpoint exactly on a BSP plane. */
   readonly endArea: number | null;
-  readonly trajectory: readonly Vec3[]; readonly seconds: number; readonly grounded: boolean; readonly waterLevel: number;
+  readonly trajectory: readonly Vec3[];
+  readonly seconds: number;
+  readonly grounded: boolean;
+  readonly waterLevel: number;
   /** Last collision query actually executed by the selected movement provider. */
   readonly trace: { readonly query: TraceQuery; readonly result: TraceResult } | null;
   readonly bounds: Bounds | null;
 }
 export interface BotTravelModel {
-  readonly entity: number; readonly origin: Vec3; readonly bounds: Bounds;
+  readonly entity: number;
+  readonly origin: Vec3;
+  readonly bounds: Bounds;
   readonly kind: "elevator" | "bobbing" | "door" | "train" | "static";
 }
 export interface SourceBotTravelHost {
-  readonly actions: BotActionBuffer; readonly moveStates: BotMoveStateStore; readonly random: BotRandom;
-  readonly navigation: Pick<BotNavigation, "area" | "pointArea" | "traceAreas" | "presenceBounds" | "swimming">
-    & { fuzzyPointReachabilityArea(origin: Vec3): number; reachabilityArea(origin: Vec3, client: number): number };
+  readonly actions: BotActionBuffer;
+  readonly moveStates: BotMoveStateStore;
+  readonly random: BotRandom;
+  readonly navigation: Pick<BotNavigation, "area" | "pointArea" | "traceAreas" | "presenceBounds" | "swimming"> & {
+    fuzzyPointReachabilityArea(origin: Vec3): number;
+    reachabilityArea(origin: Vec3, client: number): number;
+  };
   runtime(client: number): NavigationRuntime;
   time(): number;
   pointContents(point: Vec3): number;
@@ -42,10 +55,20 @@ export interface SourceBotTravelHost {
   predict(query: BotMovementPrediction): BotTravelPredictionResult;
 }
 export type TravelReachability = AasAsset["reachability"][number] & { readonly graphEdge: NavigationEdge };
-export type BotMovementVariableName = "svMaxStep" | "svMaxBarrier" | "svGravity" | "rocketLauncherIndex"
-  | "bfgIndex" | "grappleIndex" | "missileEntityType" | "offhandGrapple" | "grappleOnCommand" | "grappleOffCommand";
+export type BotMovementVariableName =
+  | "svMaxStep"
+  | "svMaxBarrier"
+  | "svGravity"
+  | "rocketLauncherIndex"
+  | "bfgIndex"
+  | "grappleIndex"
+  | "missileEntityType"
+  | "offhandGrapple"
+  | "grappleOnCommand"
+  | "grappleOffCommand";
 export interface BotTravelContext {
-  readonly host: SourceBotTravelHost; readonly actions: BotActionBuffer;
+  readonly host: SourceBotTravelHost;
+  readonly actions: BotActionBuffer;
   variable(name: BotMovementVariableName): BotMoveVariable;
   time(): number;
   print(severity: 1 | 3 | 4, text: string): void;

@@ -28,12 +28,22 @@ export class ForeignMatchRules {
     this.#strategies = [this.horde, this.tag, this.flags, this.deathball];
   }
 
-  tick(): void { for (const strategy of this.#strategies) strategy.tick(); }
+  tick(): void {
+    for (const strategy of this.#strategies) strategy.tick();
+  }
 
-  release(actor: ActorId): void { for (const strategy of this.#strategies) strategy.release(actor); }
+  release(actor: ActorId): void {
+    for (const strategy of this.#strategies) strategy.release(actor);
+  }
 
   /** True when a running mode holds state a saved game or source restart cannot carry. */
-  blocksCheckpoint(): boolean { return this.#strategies.some(strategy => strategy.blocksCheckpoint()); }
+  blocksCheckpoint(): boolean {
+    return this.#strategies.some(strategy => strategy.blocksCheckpoint());
+  }
 
-  registerCombat(): void { this.tag.registerCombat(); this.flags.registerCombat(); this.deathball.registerCombat(); }
+  registerCombat(): void {
+    this.tag.registerCombat();
+    this.flags.registerCombat();
+    this.deathball.registerCombat();
+  }
 }

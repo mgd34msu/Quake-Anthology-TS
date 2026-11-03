@@ -1,10 +1,11 @@
-import type { ActorId, ClientId, SeatId, SessionId } from '../../../contracts/identity.ts';
-import type { ResourceId } from '../../../contracts/content.ts';
-import type { SimulationOutput } from '../../../contracts/session.ts';
-import type { Q3CharacterView } from '../../../content/q3/foundation/presentation.ts';
-import type { WorldText } from '../../../text/world.ts';
-import type { PlayerUi, PlayerView, SimulationPresentation } from '../simulation/types.ts';
-import type { UnifiedPredictionProjection } from './unified-prediction.ts';
+// SPDX-License-Identifier: GPL-2.0-or-later
+import type { ActorId, ClientId, SeatId, SessionId } from "../../../contracts/identity.ts";
+import type { ResourceId } from "../../../contracts/content.ts";
+import type { SimulationOutput } from "../../../contracts/session.ts";
+import type { Q3CharacterView } from "../../../content/q3/foundation/presentation.ts";
+import type { WorldText } from "../../../text/world.ts";
+import type { PlayerUi, PlayerView, SimulationPresentation } from "../simulation/types.ts";
+import type { UnifiedPredictionProjection } from "./unified-prediction.ts";
 
 /** The retained client resolves each wire reference through its own identity ledger. */
 export interface UnifiedIdentityDecoder {

@@ -1,31 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { qvmCheckpoint } from "../support/q3-checkpoint.ts";
-import { CvarFlag } from '../../src/core/cvars/index.ts';
+import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { testCorpusRoot } from "../support/corpus.ts";
 
-import { expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { createContentDigest, createMountIdentity } from '../../src/contracts/content.ts';
-import type { ArchiveMount, ResolvedMountPlan } from '../../src/contracts/content.ts';
-import { createIdentityOwner } from '../../src/contracts/identity.ts';
-import { digestFile, openMountPlan } from '../../src/content/mounts/index.ts';
-import { decodeQ3World } from '../../src/formats/q3-map/index.ts';
-import { createSceneQueries } from '../../src/world/collision/index.ts';
-import { ActorCallbackTable, SessionActorRegistry } from '../../src/world/actors/index.ts';
-import { SharedPhysics } from '../../src/app/bootstrap/simulation/physics.ts';
-import { Q3_BINARY32_PROFILE } from '../../src/core/numeric.ts';
-import { BinaryWriter } from '../../src/core/binary/index.ts';
-import { QvmOpcode } from '../../src/compat/qvm/image.ts';
-import { QvmGameExport, QvmGameImport } from '../../src/compat/qvm/abi.ts';
-import { resolveQvmArtifact } from '../../src/compat/qvm/artifacts.ts';
-import { UserFileStore } from '../../src/core/files/writable.ts';
-import { Q3ServerGame } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
-import type { Q3GuestOutput, Q3GuestRuntimeOptions } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
-import { Q3ServerState } from '../../src/app/bootstrap/simulation/q3/server-state.ts';
+import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createContentDigest, createMountIdentity } from "../../src/contracts/content.ts";
+import type { ArchiveMount, ResolvedMountPlan } from "../../src/contracts/content.ts";
+import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import { digestFile, openMountPlan } from "../../src/content/mounts/index.ts";
+import { decodeQ3World } from "../../src/formats/q3-map/index.ts";
+import { createSceneQueries } from "../../src/world/collision/index.ts";
+import { ActorCallbackTable, SessionActorRegistry } from "../../src/world/actors/index.ts";
+import { SharedPhysics } from "../../src/app/bootstrap/simulation/physics.ts";
+import { Q3_BINARY32_PROFILE } from "../../src/core/numeric.ts";
+import { BinaryWriter } from "../../src/core/binary/index.ts";
+import { QvmOpcode } from "../../src/compat/qvm/image.ts";
+import { QvmGameExport, QvmGameImport } from "../../src/compat/qvm/abi.ts";
+import { resolveQvmArtifact } from "../../src/compat/qvm/artifacts.ts";
+import { UserFileStore } from "../../src/core/files/writable.ts";
+import { Q3ServerGame } from "../../src/app/bootstrap/simulation/q3/guest-runtime.ts";
+import type { Q3GuestOutput, Q3GuestRuntimeOptions } from "../../src/app/bootstrap/simulation/q3/guest-runtime.ts";
+import { Q3ServerState } from "../../src/app/bootstrap/simulation/q3/server-state.ts";
 
-const archivePath = resolve(testCorpusRoot(), 'q3a/baseq3/pak0.pk3');
+const archivePath = resolve(testCorpusRoot(), "q3a/baseq3/pak0.pk3");
 type Operation = readonly [QvmOpcode, number?];
 function trap(code: QvmGameImport, args: readonly number[], output?: number): Operation[] {
   const operations: Operation[] = output === undefined ? [] : [[QvmOpcode.OP_CONST, output]];
@@ -37,125 +38,276 @@ function artifact(branches: ReadonlyMap<QvmGameExport, readonly Operation[]>) {
   const operations: Operation[] = [[QvmOpcode.OP_ENTER, 64]];
   let target = 1 + branches.size * 4 + 2;
   for (const [code, branch] of branches) {
-    operations.push([QvmOpcode.OP_LOCAL, 72], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, code], [QvmOpcode.OP_EQ, target]); target += branch.length + 2;
+    operations.push([QvmOpcode.OP_LOCAL, 72], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, code], [QvmOpcode.OP_EQ, target]);
+    target += branch.length + 2;
   }
   operations.push([QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 64]);
   for (const branch of branches.values()) operations.push(...branch, [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 64]);
   const code = new BinaryWriter(operations.length * 5);
-  for (const [opcode, operand] of operations) { code.u8(opcode); if (operand !== undefined) { if (opcode === QvmOpcode.OP_ARG) code.u8(operand); else code.i32(operand); } }
-  const encoded = code.finish(), out = new BinaryWriter(encoded.length + 32);
+  for (const [opcode, operand] of operations) {
+    code.u8(opcode);
+    if (operand !== undefined) {
+      if (opcode === QvmOpcode.OP_ARG) code.u8(operand);
+      else code.i32(operand);
+    }
+  }
+  const encoded = code.finish(),
+    out = new BinaryWriter(encoded.length + 32);
   for (const value of [0x12721444, operations.length, 32, encoded.length, 32 + encoded.length, 0, 0, 65536]) out.i32(value);
-  out.bytes(encoded); const bytes = out.finish();
-  const result = resolveQvmArtifact({ role: 'qagame', bytes, module: { id: 'test:guest-runtime', artifactPath: 'vm/qagame.qvm', revision: 'test',
-    digest: createContentDigest(new Bun.CryptoHasher('sha256').update(bytes).digest('hex')) } });
-  if (result.kind !== 'bytecode') throw new Error('Expected generated bytecode'); return result;
+  out.bytes(encoded);
+  const bytes = out.finish();
+  const result = resolveQvmArtifact({
+    role: "qagame",
+    bytes,
+    module: {
+      id: "test:guest-runtime",
+      artifactPath: "vm/qagame.qvm",
+      revision: "test",
+      digest: createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")),
+    },
+  });
+  if (result.kind !== "bytecode") throw new Error("Expected generated bytecode");
+  return result;
 }
-async function fixture(branches: ReadonlyMap<QvmGameExport, readonly Operation[]>, saved?: { readonly actors: ReturnType<SessionActorRegistry['checkpoint']>; readonly sources: ReturnType<SessionActorRegistry['sourceCheckpoint']> }, observers: Pick<Q3GuestRuntimeOptions, 'beforeDisconnect' | 'clientChanged' | 'botCommand'> = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'q3-guest-test-'));
-  const mount: ArchiveMount = { kind: 'archive', format: 'pk3', archivePath, archiveDigest: await digestFile(archivePath), identity: createMountIdentity('mount:guest-test:base', 'q3:classic:baseq3:installed', 1) };
-  const plan: ResolvedMountPlan = { id: 'mount-plan:guest-test:1', mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] };
-  const mounts = await openMountPlan(plan), map = await mounts.open('maps/q3dm7.bsp');
-  if (map === null) throw new Error('Missing retail map');
-  const scene = createSceneQueries(decodeQ3World(map.bytes)), identities = createIdentityOwner('guest-composition');
-  const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.actors, saved.sources), callbacks = new ActorCallbackTable(actors);
-  const physics = new SharedPhysics({ actors, callbacks, scene, numeric: Q3_BINARY32_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
-    worldActor: () => null, onBlocked: () => { throw new Error('No source traversal'); } });
-  const printed: string[] = [], state = new Q3ServerState({ session: identities.session, settings: { gameType: 4, singlePlayer: false, maxClients: 2, mapName: 'q3dm7' }, now: () => 1000, print: text => { printed.push(text); } });
-  state.cvars.set('bot_enable', '0', true);
-  const game = new Q3ServerGame({ ...observers, module: { kind: 'qvm', artifact: artifact(branches) }, state, mounts, writable: new UserFileStore(root), maxClients: 2, seed: 42, entityText: '{}', now: () => 1000, assertCurrent: () => {},
-    records: { actors, bodies: physics.bodies, scene, provider: 'q3:guest', collision: (actor, collision) => physics.setCollision(actor, collision) },
-    common: { milliseconds: () => 1, realTime: () => 0, commands: { executeNow: () => { throw new Error('No immediate commands'); }, append: () => {}, insert: () => {} } } });
-  const close = async (): Promise<void> => { try { await game.shutdown(); } finally { actors.close(); mounts.close(); await rm(root, { recursive: true, force: true }); } };
+async function fixture(
+  branches: ReadonlyMap<QvmGameExport, readonly Operation[]>,
+  saved?: { readonly actors: ReturnType<SessionActorRegistry["checkpoint"]>; readonly sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]> },
+  observers: Pick<Q3GuestRuntimeOptions, "beforeDisconnect" | "clientChanged" | "botCommand"> = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), "q3-guest-test-"));
+  const mount: ArchiveMount = {
+    kind: "archive",
+    format: "pk3",
+    archivePath,
+    archiveDigest: await digestFile(archivePath),
+    identity: createMountIdentity("mount:guest-test:base", "q3:classic:baseq3:installed", 1),
+  };
+  const plan: ResolvedMountPlan = { id: "mount-plan:guest-test:1", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] };
+  const mounts = await openMountPlan(plan),
+    map = await mounts.open("maps/q3dm7.bsp");
+  if (map === null) throw new Error("Missing retail map");
+  const scene = createSceneQueries(decodeQ3World(map.bytes)),
+    identities = createIdentityOwner("guest-composition");
+  const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.actors, saved.sources),
+    callbacks = new ActorCallbackTable(actors);
+  const physics = new SharedPhysics({
+    actors,
+    callbacks,
+    scene,
+    numeric: Q3_BINARY32_PROFILE,
+    sourceOrder: (a, b) => a.slot - b.slot,
+    worldActor: () => null,
+    onBlocked: () => {
+      throw new Error("No source traversal");
+    },
+  });
+  const printed: string[] = [],
+    state = new Q3ServerState({
+      session: identities.session,
+      settings: { gameType: 4, singlePlayer: false, maxClients: 2, mapName: "q3dm7" },
+      now: () => 1000,
+      print: text => {
+        printed.push(text);
+      },
+    });
+  state.cvars.set("bot_enable", "0", true);
+  const game = new Q3ServerGame({
+    ...observers,
+    module: { kind: "qvm", artifact: artifact(branches) },
+    state,
+    mounts,
+    writable: new UserFileStore(root),
+    maxClients: 2,
+    seed: 42,
+    entityText: "{}",
+    now: () => 1000,
+    assertCurrent: () => {},
+    records: { actors, bodies: physics.bodies, scene, provider: "q3:guest", collision: (actor, collision) => physics.setCollision(actor, collision) },
+    common: {
+      milliseconds: () => 1,
+      realTime: () => 0,
+      commands: {
+        executeNow: () => {
+          throw new Error("No immediate commands");
+        },
+        append: () => {},
+        insert: () => {},
+      },
+    },
+  });
+  const close = async (): Promise<void> => {
+    try {
+      await game.shutdown();
+    } finally {
+      actors.close();
+      mounts.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  };
   return { game, state, printed, identities, actors, physics, close };
 }
 const locate = trap(QvmGameImport.G_LOCATE_GAME_DATA, [4096, 2, 1024, 8192, 512]);
 const silent: Q3GuestOutput = { dropClient: async () => {}, sendServerCommand: () => {}, configstring: () => {} };
 
-test('common server state preserves absent values and exact isolated command copies', () => {
-  const state = new Q3ServerState({ session: createIdentityOwner('server-state').session, settings: { gameType: 4, singlePlayer: true, maxClients: 2, mapName: 'q3dm7' }, now: () => 999, print: () => {} });
-  expect(state.getUserinfo(0)).toBeUndefined(); expect(state.getUserCommand(0)).toBeUndefined();
-  expect(state.cvars.get('g_gametype')).toBeUndefined(); expect(state.cvars.get('ui_singlePlayerActive')).toBeUndefined();
-  expect(state.hasConfigstring(42)).toBe(false); state.configstrings.set(42, ''); expect(state.hasConfigstring(42)).toBe(true);
-  state.setUserinfo(0, ''); expect(state.getUserinfo(0)).toBe('');
+test("common server state preserves absent values and exact isolated command copies", () => {
+  const state = new Q3ServerState({
+    session: createIdentityOwner("server-state").session,
+    settings: { gameType: 4, singlePlayer: true, maxClients: 2, mapName: "q3dm7" },
+    now: () => 999,
+    print: () => {},
+  });
+  expect(state.getUserinfo(0)).toBeUndefined();
+  expect(state.getUserCommand(0)).toBeUndefined();
+  expect(state.cvars.get("g_gametype")).toBeUndefined();
+  expect(state.cvars.get("ui_singlePlayerActive")).toBeUndefined();
+  expect(state.hasConfigstring(42)).toBe(false);
+  state.configstrings.set(42, "");
+  expect(state.hasConfigstring(42)).toBe(true);
+  state.setUserinfo(0, "");
+  expect(state.getUserinfo(0)).toBe("");
   const angles: [number, number, number] = [1, 2, 3];
   state.setUserCommand(0, { serverTime: 123, angles, buttons: 7, weapon: 9, forwardmove: -127, rightmove: 127, upmove: 3 });
-  angles[0] = 99; expect(state.getUserCommand(0)?.angles).toEqual([1, 2, 3]);
-  state.clearClient(0); expect(state.getUserCommand(0)).toBeUndefined(); expect(state.getUserinfo(0)).toBeUndefined();
+  angles[0] = 99;
+  expect(state.getUserCommand(0)?.angles).toEqual([1, 2, 3]);
+  state.clearClient(0);
+  expect(state.getUserCommand(0)).toBeUndefined();
+  expect(state.getUserinfo(0)).toBeUndefined();
 });
 
-test.skipIf(!existsSync(archivePath))('guest composition awaits mounted open and disconnect after awaited reliable output', async () => {
-  const f = await fixture(new Map([
-    [QvmGameExport.GAME_INIT, [...locate, ...trap(QvmGameImport.G_GET_USERCMD, [0, 512]), ...trap(QvmGameImport.G_GET_USERINFO, [0, 544, 32]), ...trap(QvmGameImport.G_FS_FOPEN_FILE, [256, 384, 0], 388)]],
-    [QvmGameExport.GAME_CLIENT_BEGIN, trap(QvmGameImport.G_GET_USERCMD, [0, 512])],
-    [QvmGameExport.GAME_CLIENT_THINK, trap(QvmGameImport.BOTLIB_AAS_INITIALIZED, [], 404)],
-    [QvmGameExport.GAME_CLIENT_COMMAND, [...trap(QvmGameImport.G_SEND_SERVER_COMMAND, [-1, 288]), ...trap(QvmGameImport.G_ARGC, [], 400)]],
-    [QvmGameExport.GAME_CLIENT_DISCONNECT, trap(QvmGameImport.G_PRINT, [320])],
-  ]));
+test.skipIf(!existsSync(archivePath))("guest composition awaits mounted open and disconnect after awaited reliable output", async () => {
+  const f = await fixture(
+    new Map([
+      [
+        QvmGameExport.GAME_INIT,
+        [
+          ...locate,
+          ...trap(QvmGameImport.G_GET_USERCMD, [0, 512]),
+          ...trap(QvmGameImport.G_GET_USERINFO, [0, 544, 32]),
+          ...trap(QvmGameImport.G_FS_FOPEN_FILE, [256, 384, 0], 388),
+        ],
+      ],
+      [QvmGameExport.GAME_CLIENT_BEGIN, trap(QvmGameImport.G_GET_USERCMD, [0, 512])],
+      [QvmGameExport.GAME_CLIENT_THINK, trap(QvmGameImport.BOTLIB_AAS_INITIALIZED, [], 404)],
+      [QvmGameExport.GAME_CLIENT_COMMAND, [...trap(QvmGameImport.G_SEND_SERVER_COMMAND, [-1, 288]), ...trap(QvmGameImport.G_ARGC, [], 400)]],
+      [QvmGameExport.GAME_CLIENT_DISCONNECT, trap(QvmGameImport.G_PRINT, [320])],
+    ]),
+  );
   try {
-    f.game.qvmGame().module.memory.writeString(256, 'default.cfg', 32); f.game.qvmGame().module.memory.writeString(288, 'reliable', 32); f.game.qvmGame().module.memory.writeString(320, 'disconnected', 32);
+    f.game.qvmGame().module.memory.writeString(256, "default.cfg", 32);
+    f.game.qvmGame().module.memory.writeString(288, "reliable", 32);
+    f.game.qvmGame().module.memory.writeString(320, "disconnected", 32);
     f.game.qvmGame().module.memory.bytes.fill(0xcc, 512, 576);
     const gate = Promise.withResolvers<void>();
-    const output: Q3GuestOutput = { ...silent, sendServerCommand: async () => {
-      await gate.promise;
-      const player = f.game.player(f.identities.client(0, 1)); if (player === null) throw new Error('Missing client');
-      await f.game.disconnect(player);
-    } };
-    const init = f.game.initialize(output); expect(f.game.qvmGame().module.interpreter.isActive).toBe(true); await init;
+    const output: Q3GuestOutput = {
+      ...silent,
+      sendServerCommand: async () => {
+        await gate.promise;
+        const player = f.game.player(f.identities.client(0, 1));
+        if (player === null) throw new Error("Missing client");
+        await f.game.disconnect(player);
+      },
+    };
+    const init = f.game.initialize(output);
+    expect(f.game.qvmGame().module.interpreter.isActive).toBe(true);
+    await init;
     expect(f.game.qvmGame().module.memory.view(388, 4).getInt32(0, true)).toBeGreaterThan(0);
     expect(f.game.qvmGame().module.memory.span(512, 24)).toEqual(new Uint8Array(24));
-    expect(f.game.qvmGame().module.memory.readString(544)).toBe('');
-    const admission = await f.game.connect(f.identities.client(0, 1), '\\name\\Guest'); if (admission.kind !== 'accepted') throw new Error(admission.reason);
-    const command = { serverTime: 1456, angles: [1, 32768, -2] satisfies [number, number, number], buttons: 255, weapon: 9, forwardmove: -127, rightmove: 2, upmove: 3 };
-    await f.game.begin(admission.player, command); expect(f.game.qvmGame().module.memory.view(512, 24).getInt32(0, true)).toBe(1456);
+    expect(f.game.qvmGame().module.memory.readString(544)).toBe("");
+    const admission = await f.game.connect(f.identities.client(0, 1), "\\name\\Guest");
+    if (admission.kind !== "accepted") throw new Error(admission.reason);
+    const command = {
+      serverTime: 1456,
+      angles: [1, 32768, -2] satisfies [number, number, number],
+      buttons: 255,
+      weapon: 9,
+      forwardmove: -127,
+      rightmove: 2,
+      upmove: 3,
+    };
+    await f.game.begin(admission.player, command);
+    expect(f.game.qvmGame().module.memory.view(512, 24).getInt32(0, true)).toBe(1456);
     f.game.qvmGame().module.memory.view(404, 4).setInt32(0, 99, true);
-    await f.game.think(admission.player, command); expect(f.game.qvmGame().module.memory.view(404, 4).getInt32(0, true)).toBe(0);
-    const pending = f.game.command(admission.player, ['kick', '0']); expect(() => f.game.checkpoint()).toThrow(/Q3 guest already has an active external operation|QVM checkpoints require a completed source call/); await expect(f.game.runFrame(1500)).rejects.toThrow('active external operation');
-    gate.resolve(); await pending;
-    expect(f.printed).toEqual(['disconnected']); expect(f.game.players()).toEqual([]); expect(f.state.getUserinfo(0)).toBeUndefined();
+    await f.game.think(admission.player, command);
+    expect(f.game.qvmGame().module.memory.view(404, 4).getInt32(0, true)).toBe(0);
+    const pending = f.game.command(admission.player, ["kick", "0"]);
+    expect(() => f.game.checkpoint()).toThrow(/Q3 guest already has an active external operation|QVM checkpoints require a completed source call/);
+    await expect(f.game.runFrame(1500)).rejects.toThrow("active external operation");
+    gate.resolve();
+    await pending;
+    expect(f.printed).toEqual(["disconnected"]);
+    expect(f.game.players()).toEqual([]);
+    expect(f.state.getUserinfo(0)).toBeUndefined();
     expect(f.game.qvmGame().module.memory.view(400, 4).getInt32(0, true)).toBe(2);
-  } finally { await f.close(); }
+  } finally {
+    await f.close();
+  }
 });
 
-test.skipIf(!existsSync(archivePath))('drop during pending connect rejects admission and disconnects before slot reuse', async () => {
-  const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate], [QvmGameExport.GAME_CLIENT_CONNECT, trap(QvmGameImport.G_DROP_CLIENT, [0, 256])],
-    [QvmGameExport.GAME_CLIENT_DISCONNECT, trap(QvmGameImport.G_PRINT, [288])]]));
+test.skipIf(!existsSync(archivePath))("drop during pending connect rejects admission and disconnects before slot reuse", async () => {
+  const f = await fixture(
+    new Map([
+      [QvmGameExport.GAME_INIT, locate],
+      [QvmGameExport.GAME_CLIENT_CONNECT, trap(QvmGameImport.G_DROP_CLIENT, [0, 256])],
+      [QvmGameExport.GAME_CLIENT_DISCONNECT, trap(QvmGameImport.G_PRINT, [288])],
+    ]),
+  );
   try {
-    f.game.qvmGame().module.memory.writeString(256, 'denied during connect', 32); f.game.qvmGame().module.memory.writeString(288, 'disconnect pending', 32);
+    f.game.qvmGame().module.memory.writeString(256, "denied during connect", 32);
+    f.game.qvmGame().module.memory.writeString(288, "disconnect pending", 32);
     await f.game.initialize(silent);
-    expect(await f.game.connect(f.identities.client(0, 1), 'pending')).toEqual({ kind: 'rejected', reason: 'denied during connect' });
-    expect(f.printed).toEqual(['disconnect pending']); expect(f.game.players()).toEqual([]); expect(f.state.getUserinfo(0)).toBeUndefined();
-  } finally { await f.close(); }
+    expect(await f.game.connect(f.identities.client(0, 1), "pending")).toEqual({ kind: "rejected", reason: "denied during connect" });
+    expect(f.printed).toEqual(["disconnect pending"]);
+    expect(f.game.players()).toEqual([]);
+    expect(f.state.getUserinfo(0)).toBeUndefined();
+  } finally {
+    await f.close();
+  }
 });
 
-test.skipIf(!existsSync(archivePath))('guest admission preserves the network-selected nonzero client slot', async () => {
+test.skipIf(!existsSync(archivePath))("guest admission preserves the network-selected nonzero client slot", async () => {
   const connect: Operation[] = [[QvmOpcode.OP_CONST, 512], [QvmOpcode.OP_LOCAL, 76], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4]];
-  const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate], [QvmGameExport.GAME_CLIENT_CONNECT, connect]]));
+  const f = await fixture(
+    new Map([
+      [QvmGameExport.GAME_INIT, locate],
+      [QvmGameExport.GAME_CLIENT_CONNECT, connect],
+    ]),
+  );
   try {
     await f.game.initialize(silent);
-    const admitted = await f.game.connect(f.identities.client(1, 1), 'slot one'); if (admitted.kind !== 'accepted') throw new Error(admitted.reason);
-    expect(admitted.player.sourceEntity).toBe(1); expect(f.game.records.slot(admitted.player.actor)).toBe(1);
+    const admitted = await f.game.connect(f.identities.client(1, 1), "slot one");
+    if (admitted.kind !== "accepted") throw new Error(admitted.reason);
+    expect(admitted.player.sourceEntity).toBe(1);
+    expect(f.game.records.slot(admitted.player.actor)).toBe(1);
     expect(f.game.qvmGame().module.memory.view(512, 4).getInt32(0, true)).toBe(1);
-    expect((await f.game.connect(f.identities.client(1, 2), 'replacement')).kind).toBe('rejected');
-    await expect(f.game.connect(f.identities.client(2, 1), 'out of range')).rejects.toThrow('outside its capacity');
-    await f.game.disconnect(admitted.player); expect(f.state.getUserinfo(1)).toBeUndefined();
-  } finally { await f.close(); }
+    expect((await f.game.connect(f.identities.client(1, 2), "replacement")).kind).toBe("rejected");
+    await expect(f.game.connect(f.identities.client(2, 1), "out of range")).rejects.toThrow("outside its capacity");
+    await f.game.disconnect(admitted.player);
+    expect(f.state.getUserinfo(1)).toBeUndefined();
+  } finally {
+    await f.close();
+  }
 });
 
-test.skipIf(!existsSync(archivePath))('failed guest initialization runs shutdown and retires borrowed records', async () => {
-  const f = await fixture(new Map([[QvmGameExport.GAME_INIT, [...locate, ...trap(QvmGameImport.G_BOT_ALLOCATE_CLIENT, [])]],
-    [QvmGameExport.GAME_SHUTDOWN, trap(QvmGameImport.G_PRINT, [256])]]));
+test.skipIf(!existsSync(archivePath))("failed guest initialization runs shutdown and retires borrowed records", async () => {
+  const f = await fixture(
+    new Map([
+      [QvmGameExport.GAME_INIT, [...locate, ...trap(QvmGameImport.G_BOT_ALLOCATE_CLIENT, [])]],
+      [QvmGameExport.GAME_SHUTDOWN, trap(QvmGameImport.G_PRINT, [256])],
+    ]),
+  );
   try {
-    f.game.qvmGame().module.memory.writeString(256, 'cleanup shutdown', 32);
-    await expect(f.game.initialize(silent)).rejects.toThrow('Unbound qagame QVM syscall');
-    expect(f.printed).toEqual(['cleanup shutdown']);
-    expect(() => f.game.records.actor(0)).toThrow('retired');
-    await expect(f.game.runFrame(1500)).rejects.toThrow('retired');
+    f.game.qvmGame().module.memory.writeString(256, "cleanup shutdown", 32);
+    await expect(f.game.initialize(silent)).rejects.toThrow("Unbound qagame QVM syscall");
+    expect(f.printed).toEqual(["cleanup shutdown"]);
+    expect(() => f.game.records.actor(0)).toThrow("retired");
+    await expect(f.game.runFrame(1500)).rejects.toThrow("retired");
     await f.game.shutdown();
-  } finally { await f.close(); }
+  } finally {
+    await f.close();
+  }
 });
 
-
-test.skipIf(!existsSync(archivePath))('guest host checkpoint restores source clients and borrowed records without game entry replay', async () => {
+test.skipIf(!existsSync(archivePath))("guest host checkpoint restores source clients and borrowed records without game entry replay", async () => {
   const branches = new Map([
     [QvmGameExport.GAME_INIT, [...locate, ...trap(QvmGameImport.G_PRINT, [256]), ...trap(QvmGameImport.G_GET_ENTITY_TOKEN, [600, 32])]],
     [QvmGameExport.GAME_CLIENT_BEGIN, trap(QvmGameImport.G_PRINT, [256])],
@@ -164,104 +316,158 @@ test.skipIf(!existsSync(archivePath))('guest host checkpoint restores source cli
   ]);
   const source = await fixture(branches);
   try {
-    source.game.qvmGame().module.memory.writeString(256, 'entry', 32);
-    expect(() => source.game.checkpoint()).toThrow('not running');
+    source.game.qvmGame().module.memory.writeString(256, "entry", 32);
+    expect(() => source.game.checkpoint()).toThrow("not running");
     await source.game.initialize(silent);
-    const admitted = await source.game.connect(source.identities.client(1, 7), 'source-userinfo');
-    if (admitted.kind !== 'accepted') throw new Error(admitted.reason);
+    const admitted = await source.game.connect(source.identities.client(1, 7), "source-userinfo");
+    if (admitted.kind !== "accepted") throw new Error(admitted.reason);
     await source.game.begin(admitted.player, { serverTime: 1234, angles: [1, 2, 3], buttons: 8, weapon: 4, forwardmove: -7, rightmove: 2, upmove: 0 });
-    source.state.configstrings.set(42, 'saved');
+    source.state.configstrings.set(42, "saved");
     const entity = source.game.records.entity(1);
-    entity.r.currentOrigin = { x: 3, y: 5, z: 7 }; entity.r.linkcount = 73; entity.s.solid = 123;
+    entity.r.currentOrigin = { x: 3, y: 5, z: 7 };
+    entity.r.linkcount = 73;
+    entity.s.solid = 123;
     source.game.spatial.scene.adjustAreaPortalState(0, 0, true);
     source.game.spatial.scene.adjustAreaPortalState(0, 0, true);
-    const before = source.actors.checkpoint(), checkpoint = qvmCheckpoint(source.game.checkpoint());
+    const before = source.actors.checkpoint(),
+      checkpoint = qvmCheckpoint(source.game.checkpoint());
     expect(source.actors.checkpoint()).toEqual(before);
     const restored = await fixture(branches, { actors: before, sources: source.actors.sourceCheckpoint() });
     try {
       restored.game.restoreCheckpoint(checkpoint, saved => restored.identities.client(saved.slot, saved.generation + 10));
       expect(restored.printed).toEqual([]);
-      expect(restored.game.spatial.scene.nativeQ3ClipModels()?.world.capturePortalCheckpoint()).toEqual(source.game.spatial.scene.nativeQ3ClipModels()?.world.capturePortalCheckpoint());
+      expect(restored.game.spatial.scene.nativeQ3ClipModels()?.world.capturePortalCheckpoint()).toEqual(
+        source.game.spatial.scene.nativeQ3ClipModels()?.world.capturePortalCheckpoint(),
+      );
       expect(restored.game.qvmGame().module.memory.bytes).toEqual(source.game.qvmGame().module.memory.bytes);
       expect(restored.state.captureSaveState()).toEqual(source.state.captureSaveState());
       expect(restored.game.players()[0]?.client.generation).toBe(17);
       expect(restored.actors.observations()).toHaveLength(1);
       const actor = restored.game.players()[0]?.actor;
-      if (actor === undefined) throw new Error('missing restored client');
+      if (actor === undefined) throw new Error("missing restored client");
       expect(restored.physics.bodies.read(actor)?.origin).toEqual({ x: 3, y: 5, z: 7 });
       restored.game.records.entity(1).r.currentOrigin = { x: 9, y: 8, z: 7 };
       expect(restored.physics.bodies.read(actor)?.origin.x).toBe(9);
       expect(restored.game.records.entity(1).r.linkcount).toBe(73);
       expect(restored.game.records.entity(1).s.solid).toBe(123);
-      await expect(restored.game.runFrame(2000)).rejects.toThrow('not running');
+      await expect(restored.game.runFrame(2000)).rejects.toThrow("not running");
       restored.game.completeRestore(silent);
-      await restored.game.runFrame(2000); await source.game.runFrame(2000);
+      await restored.game.runFrame(2000);
+      await source.game.runFrame(2000);
       expect(restored.game.qvmGame().module.memory.readString(600)).toBe(source.game.qvmGame().module.memory.readString(600));
-      restored.game.discard(); expect(restored.printed).toEqual([]);
-    } finally { await restored.close(); }
+      restored.game.discard();
+      expect(restored.printed).toEqual([]);
+    } finally {
+      await restored.close();
+    }
     const invalid = await fixture(branches, { actors: before, sources: source.actors.sourceCheckpoint() });
     try {
-      expect(() => invalid.game.restoreCheckpoint({ ...checkpoint, hostState: { ...checkpoint.hostState, format: 'bad:format' } }, saved => invalid.identities.client(saved.slot, saved.generation))).toThrow('format');
-      expect(invalid.game.isRetired).toBe(true); expect(invalid.printed).toEqual([]);
-    } finally { await invalid.close(); }
-  } finally { await source.close(); }
+      expect(() =>
+        invalid.game.restoreCheckpoint({ ...checkpoint, hostState: { ...checkpoint.hostState, format: "bad:format" } }, saved =>
+          invalid.identities.client(saved.slot, saved.generation),
+        ),
+      ).toThrow("format");
+      expect(invalid.game.isRetired).toBe(true);
+      expect(invalid.printed).toEqual([]);
+    } finally {
+      await invalid.close();
+    }
+  } finally {
+    await source.close();
+  }
 });
 
-
-test.skipIf(!existsSync(archivePath))('guest publishes changed canonical server info once after initialization and frames', async () => {
+test.skipIf(!existsSync(archivePath))("guest publishes changed canonical server info once after initialization and frames", async () => {
   const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate]]));
   try {
     const published: { index: number; value: string }[] = [];
-    f.state.cvars.register('sv_hostname', 'first', CvarFlag.ServerInfo);
-    await f.game.initialize({ ...silent, configstring: (index, value) => { published.push({ index, value }); } });
+    f.state.cvars.register("sv_hostname", "first", CvarFlag.ServerInfo);
+    await f.game.initialize({
+      ...silent,
+      configstring: (index, value) => {
+        published.push({ index, value });
+      },
+    });
     expect(published).toEqual([{ index: 0, value: f.state.configstrings.get(0) }]);
-    await f.game.runFrame(1001); expect(published).toHaveLength(1);
-    f.state.cvars.set('sv_hostname', 'second', true);
+    await f.game.runFrame(1001);
+    expect(published).toHaveLength(1);
+    f.state.cvars.set("sv_hostname", "second", true);
     await f.game.runFrame(1002);
     expect(published).toHaveLength(2);
     expect(published[1]).toEqual({ index: 0, value: f.state.configstrings.get(0) });
-    await f.game.runFrame(1003); f.game.checkpoint(); expect(published).toHaveLength(2);
-  } finally { await f.close(); }
+    await f.game.runFrame(1003);
+    f.game.checkpoint();
+    expect(published).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
 });
 
-test.skipIf(!existsSync(archivePath))('engine warmup updates use the guest output owner and source clock', async () => {
+test.skipIf(!existsSync(archivePath))("engine warmup updates use the guest output owner and source clock", async () => {
   const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate]]));
   try {
-    const gate = Promise.withResolvers<void>(), published: string[] = [];
-    await f.game.initialize({ ...silent, configstring: async (index, value) => {
-      if (index === 5) { await gate.promise; published.push(value); }
-    } });
+    const gate = Promise.withResolvers<void>(),
+      published: string[] = [];
+    await f.game.initialize({
+      ...silent,
+      configstring: async (index, value) => {
+        if (index === 5) {
+          await gate.promise;
+          published.push(value);
+        }
+      },
+    });
     expect(f.game.timeMilliseconds).toBe(1000);
     const publication = f.game.setConfigstring(5, String(f.game.timeMilliseconds + 5000));
-    expect(f.state.configstrings.get(5)).toBe('6000'); expect(published).toEqual([]);
-    gate.resolve(); await publication; expect(published).toEqual(['6000']);
-    await f.game.setConfigstring(5, '6000'); expect(published).toEqual(['6000']);
-  } finally { await f.close(); }
+    expect(f.state.configstrings.get(5)).toBe("6000");
+    expect(published).toEqual([]);
+    gate.resolve();
+    await publication;
+    expect(published).toEqual(["6000"]);
+    await f.game.setConfigstring(5, "6000");
+    expect(published).toEqual(["6000"]);
+  } finally {
+    await f.close();
+  }
 });
 
-
-test.skipIf(!existsSync(archivePath))('component disconnect sees the live source identity once before direct or authored drop', async () => {
+test.skipIf(!existsSync(archivePath))("component disconnect sees the live source identity once before direct or authored drop", async () => {
   const events: string[] = [];
   let current: Q3ServerGame | null = null;
-  const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate], [QvmGameExport.GAME_CLIENT_COMMAND, trap(QvmGameImport.G_DROP_CLIENT, [0, 256])]]), undefined, {
-    clientChanged: (kind, actor) => { expect(current?.players().some(player => player.actor.equals(actor))).toBe(true); events.push(kind); },
-    beforeDisconnect: actor => { const player = current?.players().find(player => player.actor.equals(actor));
-      if (player === undefined) throw new Error('Disconnect identity disappeared before source callback');
-      expect(current?.player(player.client)).toBe(player); events.push('disconnecting'); },
-  });
+  const f = await fixture(
+    new Map([
+      [QvmGameExport.GAME_INIT, locate],
+      [QvmGameExport.GAME_CLIENT_COMMAND, trap(QvmGameImport.G_DROP_CLIENT, [0, 256])],
+    ]),
+    undefined,
+    {
+      clientChanged: (kind, actor) => {
+        expect(current?.players().some(player => player.actor.equals(actor))).toBe(true);
+        events.push(kind);
+      },
+      beforeDisconnect: actor => {
+        const player = current?.players().find(player => player.actor.equals(actor));
+        if (player === undefined) throw new Error("Disconnect identity disappeared before source callback");
+        expect(current?.player(player.client)).toBe(player);
+        events.push("disconnecting");
+      },
+    },
+  );
   current = f.game;
   try {
-    f.state.cvars.set('bot_enable', '0', true);
-    f.game.qvmGame().module.memory.writeString(256, 'original drop', 32);
+    f.state.cvars.set("bot_enable", "0", true);
+    f.game.qvmGame().module.memory.writeString(256, "original drop", 32);
     await f.game.initialize(silent);
     for (const generation of [1, 2]) {
-      const admitted = await f.game.connect(f.identities.client(0, generation), '\\name\\Client');
-      if (admitted.kind !== 'accepted') throw new Error(admitted.reason);
+      const admitted = await f.game.connect(f.identities.client(0, generation), "\\name\\Client");
+      if (admitted.kind !== "accepted") throw new Error(admitted.reason);
       await f.game.begin(admitted.player, { serverTime: 1000, angles: [0, 0, 0], buttons: 0, weapon: 1, forwardmove: 0, rightmove: 0, upmove: 0 });
       if (generation === 1) await f.game.disconnect(admitted.player);
-      else await f.game.command(admitted.player, ['drop']);
+      else await f.game.command(admitted.player, ["drop"]);
       expect(f.game.player(admitted.player.client)).toBeNull();
     }
-    expect(events).toEqual(['admitted', 'disconnecting', 'admitted', 'disconnecting']);
-  } finally { await f.close(); }
+    expect(events).toEqual(["admitted", "disconnecting", "admitted", "disconnecting"]);
+  } finally {
+    await f.close();
+  }
 });

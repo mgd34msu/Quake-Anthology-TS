@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarRegistry } from "../../core/cvars/index.ts";
 
 /** A staged world owns fresh storage while retaining source declarations and console-created variables. */

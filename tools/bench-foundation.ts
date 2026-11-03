@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Foundation adoption microbenchmarks: the former allocating data paths
  * (reconstructed here from their surviving allocating forms) against the
@@ -6,17 +7,31 @@
  * Component timings only; they do not establish whole-frame FPS changes.
  * Run: bun run tools/bench-foundation.ts
  */
+import { EventRing, IdIndex, StampSet, StringTable } from "../src/foundation/index.ts";
 import {
-  EventRing, IdIndex, StampSet, StringTable,
-} from "../src/foundation/index.ts";
-import {
-  angleVectors, angleVectorsInto, cross3, cross3Into, dot3,
-  lookAtMat4, mutableVec3, normalize3, normalize3Into, projectPointOnPlane,
-  scale3, sub3, sub3Into, vec3, type Mat4, type Vec3,
+  angleVectors,
+  angleVectorsInto,
+  cross3,
+  cross3Into,
+  dot3,
+  lookAtMat4,
+  mutableVec3,
+  normalize3,
+  normalize3Into,
+  projectPointOnPlane,
+  scale3,
+  sub3,
+  sub3Into,
+  vec3,
+  type Mat4,
+  type Vec3,
 } from "../src/core/math.ts";
 import { float32ToBits } from "../src/core/numeric.ts";
 
-interface Result { readonly nsPerOp: number; readonly checksum: number }
+interface Result {
+  readonly nsPerOp: number;
+  readonly checksum: number;
+}
 
 function bench(iterations: number, run: () => number): Result {
   let checksum = 0;
@@ -65,14 +80,16 @@ function allocatingChain(): number {
   const retained = mutableVec3();
   const retained2 = mutableVec3();
   const retained3 = mutableVec3();
-  report("normalize(cross(sub)) allocating vs Into (retained binary32 scratch)",
+  report(
+    "normalize(cross(sub)) allocating vs Into (retained binary32 scratch)",
     bench(200_000, allocatingChain),
     bench(200_000, () => {
       sub3Into(retained, a, b);
       cross3Into(retained2, retained, a);
       normalize3Into(retained3, retained2);
       return retained3.x + retained3.y + retained3.z;
-    }));
+    }),
+  );
 }
 
 // 3. Angle vectors.
@@ -80,7 +97,8 @@ function allocatingChain(): number {
   const s1 = mutableVec3();
   const s2 = mutableVec3();
   const s3 = mutableVec3();
-  report("angleVectors allocating vs Into (retained binary32 scratch)",
+  report(
+    "angleVectors allocating vs Into (retained binary32 scratch)",
     bench(200_000, () => {
       const value = angleVectors(angles);
       return value.forward.x + value.right.y + value.up.z;
@@ -88,7 +106,8 @@ function allocatingChain(): number {
     bench(200_000, () => {
       angleVectorsInto(s1, s2, s3, angles);
       return s1.x + s2.y + s3.z;
-    }));
+    }),
+  );
 }
 
 // 4. Project-point-on-plane: former object composition vs scalar implementation.
@@ -98,7 +117,8 @@ function formerProject(point: Vec3, normal: Vec3): Vec3 {
   const scaled = scale3(normal, inverse);
   return sub3(point, scale3(scaled, distance));
 }
-report("projectPointOnPlane",
+report(
+  "projectPointOnPlane",
   bench(200_000, () => {
     const value = formerProject(a, b);
     return value.x + value.y + value.z;
@@ -106,7 +126,8 @@ report("projectPointOnPlane",
   bench(200_000, () => {
     const value = projectPointOnPlane(a, b);
     return value.x + value.y + value.z;
-  }));
+  }),
+);
 
 // 5. Look-at: former normalize/cross composition vs scalar implementation, both building Mat4.
 function formerLookAt(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
@@ -114,13 +135,26 @@ function formerLookAt(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
   const right = normalize3(cross3(up, backward));
   const cameraUp = cross3(backward, right);
   return [
-    right.x, cameraUp.x, backward.x, 0,
-    right.y, cameraUp.y, backward.y, 0,
-    right.z, cameraUp.z, backward.z, 0,
-    -dot3(right, eye), -dot3(cameraUp, eye), -dot3(backward, eye), 1,
+    right.x,
+    cameraUp.x,
+    backward.x,
+    0,
+    right.y,
+    cameraUp.y,
+    backward.y,
+    0,
+    right.z,
+    cameraUp.z,
+    backward.z,
+    0,
+    -dot3(right, eye),
+    -dot3(cameraUp, eye),
+    -dot3(backward, eye),
+    1,
   ];
 }
-report("lookAtMat4",
+report(
+  "lookAtMat4",
   bench(100_000, () => {
     const matrix = formerLookAt(a, b, vec3(0, 0, 1));
     return (matrix[0] ?? 0) + (matrix[5] ?? 0) + (matrix[10] ?? 0) + (matrix[12] ?? 0) + (matrix[13] ?? 0) + (matrix[14] ?? 0);
@@ -128,7 +162,8 @@ report("lookAtMat4",
   bench(100_000, () => {
     const matrix = lookAtMat4(a, b, vec3(0, 0, 1));
     return (matrix[0] ?? 0) + (matrix[5] ?? 0) + (matrix[10] ?? 0) + (matrix[12] ?? 0) + (matrix[13] ?? 0) + (matrix[14] ?? 0);
-  }));
+  }),
+);
 
 // 6. Event queue: retained array push/splice drain vs retained ring visitor drain (64 per batch).
 {
@@ -136,7 +171,8 @@ report("lookAtMat4",
   const queue: number[] = [];
   const ring = new EventRing<number>(1024);
   const cursor = ring.openCursor();
-  report("event batch of 64 (retained array splice vs retained ring visitor)",
+  report(
+    "event batch of 64 (retained array splice vs retained ring visitor)",
     bench(20_000, () => {
       for (let i = 0; i < batch; i++) queue.push(i);
       let sum = 0;
@@ -146,28 +182,37 @@ report("lookAtMat4",
     bench(20_000, () => {
       for (let i = 0; i < batch; i++) ring.append(i);
       let sum = 0;
-      ring.drain(cursor, (value) => { sum += value; });
+      ring.drain(cursor, value => {
+        sum += value;
+      });
       ring.retire();
       return sum;
-    }));
+    }),
+  );
 }
 
 // 7. Visit marks: cleared Set vs epoch stamp set (256 marks per query).
 {
   const stamps = new StampSet(4096);
-  report("visit marks x256 (Set clear vs stamp epoch)",
+  report(
+    "visit marks x256 (Set clear vs stamp epoch)",
     bench(20_000, () => {
       const seen = new Set<number>();
       let fresh = 0;
-      for (let i = 0; i < 256; i++) if (!seen.has(i * 7 % 4096)) { seen.add(i * 7 % 4096); fresh++; }
+      for (let i = 0; i < 256; i++)
+        if (!seen.has((i * 7) % 4096)) {
+          seen.add((i * 7) % 4096);
+          fresh++;
+        }
       return fresh;
     }),
     bench(20_000, () => {
       stamps.begin();
       let fresh = 0;
-      for (let i = 0; i < 256; i++) if (stamps.mark(i * 7 % 4096)) fresh++;
+      for (let i = 0; i < 256; i++) if (stamps.mark((i * 7) % 4096)) fresh++;
       return fresh;
-    }));
+    }),
+  );
 }
 
 // 8. Resource lookup: template-string map key vs interned id index.
@@ -206,24 +251,32 @@ report("lookAtMat4",
 
 // 9. Scheduler ordering: indexOf per comparison vs bound integer ranks (sorting 256 thinks).
 {
-  interface ThinkRow { provider: string; rank: number; slot: number; sequence: number }
+  interface ThinkRow {
+    provider: string;
+    rank: number;
+    slot: number;
+    sequence: number;
+  }
   const providers = ["q1:game", "q2:game", "q3:game", "q1:mod", "q2:mod", "q3:mod"];
   const thinks: ThinkRow[] = [];
   for (let i = 0; i < 256; i++) {
     thinks.push({ provider: providers[i % providers.length] ?? "", rank: i % providers.length, slot: (i * 37) % 256, sequence: i });
   }
-  report("think ordering sort x256 (indexOf vs rank)",
+  report(
+    "think ordering sort x256 (indexOf vs rank)",
     bench(5_000, () => {
       const rows = [...thinks];
-      rows.sort((left, right) => providers.indexOf(left.provider) - providers.indexOf(right.provider)
-        || left.slot - right.slot || left.sequence - right.sequence);
+      rows.sort(
+        (left, right) => providers.indexOf(left.provider) - providers.indexOf(right.provider) || left.slot - right.slot || left.sequence - right.sequence,
+      );
       return rows[0]?.sequence ?? 0;
     }),
     bench(5_000, () => {
       const rows = [...thinks];
       rows.sort((left, right) => left.rank - right.rank || left.slot - right.slot || left.sequence - right.sequence);
       return rows[0]?.sequence ?? 0;
-    }));
+    }),
+  );
 }
 
 console.log("Component timings only; no whole-frame claim. Checksums guard against dead-code elimination.");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { FileSource } from "./source.ts";
@@ -20,12 +21,14 @@ export function openLooseEntry(rootPath: string, memberPath: string): LooseEntry
   const within = relative(root, source);
   if (within === ".." || within.startsWith("../") || isAbsolute(within)) throw new RangeError(`Loose entry escapes root: ${memberPath}`);
   const storage = new FileSource(source);
-  return Object.freeze({ path, source, byteLength: storage.byteLength,
-    read: () => storage.read(0, storage.byteLength), close: () => storage.close() });
+  return Object.freeze({ path, source, byteLength: storage.byteLength, read: () => storage.read(0, storage.byteLength), close: () => storage.close() });
 }
 
 export async function readLooseEntry(rootPath: string, memberPath: string): Promise<Uint8Array> {
   const entry = openLooseEntry(rootPath, memberPath);
-  try { return await entry.read(); }
-  finally { entry.close(); }
+  try {
+    return await entry.read();
+  } finally {
+    entry.close();
+  }
 }

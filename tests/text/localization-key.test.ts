@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { LOCALIZATION_KEY_VERSION, decodeLocalizationKey, encodeLocalizationKey, plainLocalizationText } from "../../src/text/localization-key.ts";
 

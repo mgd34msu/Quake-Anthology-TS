@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
 import type { ResolvedExecutionModule } from "../../../contracts/content.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
@@ -27,13 +28,21 @@ export async function prepareQ2Guest(execution: NativeExecution, mounts: Mounted
 
 export function nativeModuleIdentity(prepared: PreparedQ2NativeGuest): ModuleIdentity {
   const execution = prepared.execution;
-  return { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest,
-    revision: prepared.primary === undefined ? execution.artifact.digest : `${execution.artifact.digest}/${prepared.primary.declaration.requestedPath}/${prepared.primary.declaration.digest}` };
+  return {
+    id: execution.owner.provider,
+    artifactPath: execution.artifact.requestedPath,
+    digest: execution.artifact.digest,
+    revision:
+      prepared.primary === undefined
+        ? execution.artifact.digest
+        : `${execution.artifact.digest}/${prepared.primary.declaration.requestedPath}/${prepared.primary.declaration.digest}`,
+  };
 }
 const primaryProfiles = new WeakMap<PreparedQ2NativeGuest, NativePrimaryProfile | null>();
 export function preparedNativePrimary(prepared: PreparedQ2NativeGuest): NativePrimaryProfile | null {
   if (prepared.primary !== undefined) return prepared.primary.profile;
   if (primaryProfiles.has(prepared)) return primaryProfiles.get(prepared) ?? null;
   const profile = builtinNativePrimary(prepared.execution.artifact.digest, prepared.edition);
-  primaryProfiles.set(prepared, profile); return profile;
+  primaryProfiles.set(prepared, profile);
+  return profile;
 }

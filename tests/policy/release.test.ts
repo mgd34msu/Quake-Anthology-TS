@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,10 +7,15 @@ import { buildWorkspace } from "../../tools/build.ts";
 import { parseSemver, releaseWorkspace } from "../../tools/release.ts";
 
 const temporary = await mkdtemp(join(tmpdir(), "quake-unified-release-"));
-afterAll(async () => { await rm(temporary, { recursive: true, force: true }); });
+afterAll(async () => {
+  await rm(temporary, { recursive: true, force: true });
+});
 
 async function git(directory: string, ...args: string[]): Promise<string> {
-  const child = Bun.spawn(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-C", directory, ...args], { stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-C", directory, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [code, output] = await Promise.all([child.exited, new Response(child.stdout).text()]);
   if (code !== 0) throw new Error(`git ${args.join(" ")} failed`);
   return output.trim();
@@ -17,12 +23,16 @@ async function git(directory: string, ...args: string[]): Promise<string> {
 
 test("AUDIT-004/018 release refuses a dirty tree and packs the commit with license, notices and README", async () => {
   const project = join(temporary, "release project");
-  await Bun.write(join(project, "package.json"), JSON.stringify({ name: "fixture", version: "9.8.7", type: "module", scripts: { typecheck: "bun gate.ts", policy: "bun gate.ts" } }));
+  await Bun.write(
+    join(project, "package.json"),
+    JSON.stringify({ name: "fixture", version: "9.8.7", type: "module", scripts: { typecheck: "bun gate.ts", policy: "bun gate.ts" } }),
+  );
   await Bun.write(join(project, "gate.ts"), "export {};\n");
   await Bun.write(join(project, ".gitignore"), "/dist/\n/.artifacts/\n");
   await Bun.write(join(project, "src/version.ts"), 'export const version = "9.8.7";\n');
   await Bun.write(join(project, "src/main.ts"), "process.stdout.write('ok\\n');\n");
-  for (const path of ["src/render/worker-entry.ts", "src/render/cpu/row-worker.ts", "src/llm/auth-worker.ts"]) await Bun.write(join(project, path), "export {};\n");
+  for (const path of ["src/render/worker-entry.ts", "src/render/cpu/row-worker.ts", "src/llm/auth-worker.ts"])
+    await Bun.write(join(project, path), "export {};\n");
   for (const path of ["LICENSE", "THIRD-PARTY-NOTICES.md", "README.md", "src/formats/images/IJG-LICENSE.md"]) await Bun.write(join(project, path), `${path}\n`);
   await git(project, "init", "-q");
   await git(project, "add", "-A");
@@ -42,7 +52,10 @@ test("AUDIT-004/018 release refuses a dirty tree and packs the commit with licen
   expect(release.commit).toBe(commit);
   expect(release.archive).toEndWith("quake-anthology-9.8.7-linux-x64.tar.gz");
   const listing = Bun.spawn(["tar", "tzf", release.archive], { stdout: "pipe" });
-  const entries = (await new Response(listing.stdout).text()).split("\n").filter(line => line !== "").sort();
+  const entries = (await new Response(listing.stdout).text())
+    .split("\n")
+    .filter(line => line !== "")
+    .sort();
   expect(entries).toEqual([
     "quake-anthology-9.8.7-linux-x64/",
     "quake-anthology-9.8.7-linux-x64/LICENSE",
@@ -60,7 +73,10 @@ test("AUDIT-004/018 release refuses a dirty tree and packs the commit with licen
   expect(release.evidence.dirty).toBe(false);
 
   // DOCS-010: a development build reports a SemVer pre-release; it builds, and it cannot be released.
-  await Bun.write(join(project, "package.json"), JSON.stringify({ name: "fixture", version: "9.8.8-dev", type: "module", scripts: { typecheck: "bun gate.ts", policy: "bun gate.ts" } }));
+  await Bun.write(
+    join(project, "package.json"),
+    JSON.stringify({ name: "fixture", version: "9.8.8-dev", type: "module", scripts: { typecheck: "bun gate.ts", policy: "bun gate.ts" } }),
+  );
   await Bun.write(join(project, "src/version.ts"), 'export const version = "9.8.8-dev";\n');
   await git(project, "commit", "-q", "-am", "development version");
   await expect(releaseWorkspace(project, { gates: ["typecheck"] })).rejects.toThrow('"9.8.8-dev" is a pre-release');

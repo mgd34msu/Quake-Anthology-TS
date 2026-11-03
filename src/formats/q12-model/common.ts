@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from Q1 model.c, Q2 gl_model.c and the reference port assets/md3.ts.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
@@ -73,11 +74,19 @@ export function packedPosition(vertex: PackedAliasVertex, scale: Vec3, translate
 export function boundsFromPoints(points: readonly Vec3[]): Bounds {
   const first = points[0];
   if (first === undefined) throw new RangeError("Cannot bound an empty model");
-  let minX = first.x, minY = first.y, minZ = first.z;
-  let maxX = first.x, maxY = first.y, maxZ = first.z;
+  let minX = first.x,
+    minY = first.y,
+    minZ = first.z;
+  let maxX = first.x,
+    maxY = first.y,
+    maxZ = first.z;
   for (const point of points) {
-    minX = Math.min(minX, point.x); minY = Math.min(minY, point.y); minZ = Math.min(minZ, point.z);
-    maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y); maxZ = Math.max(maxZ, point.z);
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    minZ = Math.min(minZ, point.z);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+    maxZ = Math.max(maxZ, point.z);
   }
   return { min: { x: minX, y: minY, z: minZ }, max: { x: maxX, y: maxY, z: maxZ } };
 }

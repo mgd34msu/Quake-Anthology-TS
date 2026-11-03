@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* BSP visibility and source traversal from Q1/Q2 gl_rsurf.c and Q3 tr_world.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec3 } from "../../contracts/math.ts";
@@ -44,12 +45,17 @@ function q2Pvs(map: Extract<DecodedWorld, { readonly kind: "q2-bsp" }>, cluster:
   const visibility = map.visibility;
   if (visibility === null || cluster < 0) return null;
   let cache = q2PvsCache.get(map);
-  if (cache === undefined) { cache = new Map<number, Uint8Array>(); q2PvsCache.set(map, cache); }
+  if (cache === undefined) {
+    cache = new Map<number, Uint8Array>();
+    q2PvsCache.set(map, cache);
+  }
   const hit = cache.get(cluster);
   if (hit !== undefined) return hit;
-  const bytes = visibility.compressed, entry = at(visibility.clusters, cluster);
+  const bytes = visibility.compressed,
+    entry = at(visibility.clusters, cluster);
   const result = new Uint8Array(Math.ceil(visibility.clusters.length / 8));
-  let read = entry.pvsOffset, write = 0;
+  let read = entry.pvsOffset,
+    write = 0;
   if (read < 0) return null;
   while (write < result.length) {
     const value = bytes[read++];
@@ -104,24 +110,39 @@ const ancestorIndexes = new WeakMap<DecodedWorld, AncestorIndex>();
 function ancestorIndex(map: DecodedWorld): AncestorIndex {
   let index = ancestorIndexes.get(map);
   if (index !== undefined) return index;
-  const nodeParents = new Int32Array(map.nodes.length).fill(-1), leafParents = new Int32Array(map.leaves.length).fill(-1);
-  const seenNodes = new Uint8Array(map.nodes.length), seenLeaves = new Uint8Array(map.leaves.length);
+  const nodeParents = new Int32Array(map.nodes.length).fill(-1),
+    leafParents = new Int32Array(map.leaves.length).fill(-1);
+  const seenNodes = new Uint8Array(map.nodes.length),
+    seenLeaves = new Uint8Array(map.leaves.length);
   let unsafe = map.nodes.length === 0;
   if (!unsafe) {
     seenNodes[0] = 1;
     const stack: number[] = [0];
     while (stack.length !== 0 && !unsafe) {
-      const current = stack.pop() ?? 0, node = map.nodes[current];
-      if (node === undefined) { unsafe = true; break; }
+      const current = stack.pop() ?? 0,
+        node = map.nodes[current];
+      if (node === undefined) {
+        unsafe = true;
+        break;
+      }
       for (const child of node.children) {
         if (child.kind === "node") {
-          if (child.index < 0 || child.index >= map.nodes.length || seenNodes[child.index] === 1) { unsafe = true; break; }
-          seenNodes[child.index] = 1; nodeParents[child.index] = current; stack.push(child.index);
+          if (child.index < 0 || child.index >= map.nodes.length || seenNodes[child.index] === 1) {
+            unsafe = true;
+            break;
+          }
+          seenNodes[child.index] = 1;
+          nodeParents[child.index] = current;
+          stack.push(child.index);
         } else {
           // Q1 solid children all share leaf zero, which is never visible and never marks an ancestor.
           const sharedSolid = map.kind === "q1-bsp" && child.index === 0;
-          if (child.index < 0 || child.index >= map.leaves.length || seenLeaves[child.index] === 1 && !sharedSolid) { unsafe = true; break; }
-          seenLeaves[child.index] = 1; leafParents[child.index] = current;
+          if (child.index < 0 || child.index >= map.leaves.length || (seenLeaves[child.index] === 1 && !sharedSolid)) {
+            unsafe = true;
+            break;
+          }
+          seenLeaves[child.index] = 1;
+          leafParents[child.index] = current;
         }
       }
     }
@@ -135,11 +156,17 @@ function remainingFrustumPlanes(bounds: Bounds, planes: readonly Plane[], bits: 
   for (const [index, plane] of planes.entries()) {
     const bit = 1 << index;
     if ((bits & bit) === 0) continue;
-    const front = { x: plane.normal.x < 0 ? bounds.min.x : bounds.max.x,
-      y: plane.normal.y < 0 ? bounds.min.y : bounds.max.y, z: plane.normal.z < 0 ? bounds.min.z : bounds.max.z };
+    const front = {
+      x: plane.normal.x < 0 ? bounds.min.x : bounds.max.x,
+      y: plane.normal.y < 0 ? bounds.min.y : bounds.max.y,
+      z: plane.normal.z < 0 ? bounds.min.z : bounds.max.z,
+    };
     if (Math.fround(dot3(front, plane.normal) - plane.distance) < 0) return null;
-    const back = { x: plane.normal.x < 0 ? bounds.max.x : bounds.min.x,
-      y: plane.normal.y < 0 ? bounds.max.y : bounds.min.y, z: plane.normal.z < 0 ? bounds.max.z : bounds.min.z };
+    const back = {
+      x: plane.normal.x < 0 ? bounds.max.x : bounds.min.x,
+      y: plane.normal.y < 0 ? bounds.max.y : bounds.min.y,
+      z: plane.normal.z < 0 ? bounds.max.z : bounds.min.z,
+    };
     if (Math.fround(dot3(back, plane.normal) - plane.distance) >= 0) bits &= ~bit;
   }
   return bits;
@@ -148,7 +175,10 @@ function remainingFrustumPlanes(bounds: Bounds, planes: readonly Plane[], bits: 
 const q1PvsCache = new WeakMap<DecodedWorld, Map<number, Uint8Array>>();
 function q1Pvs(map: Extract<DecodedWorld, { readonly kind: "q1-bsp" }>, leaf: number): Uint8Array {
   let cache = q1PvsCache.get(map);
-  if (cache === undefined) { cache = new Map<number, Uint8Array>(); q1PvsCache.set(map, cache); }
+  if (cache === undefined) {
+    cache = new Map<number, Uint8Array>();
+    q1PvsCache.set(map, cache);
+  }
   const hit = cache.get(leaf);
   if (hit !== undefined) return hit;
   const result = q1LeafPvs(map, leaf);
@@ -157,55 +187,68 @@ function q1Pvs(map: Extract<DecodedWorld, { readonly kind: "q1-bsp" }>, leaf: nu
 }
 
 export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: WorldVisibilityOptions = {}): VisibleWorld {
-  const origin = options.pvsOrigin ?? camera.origin, eye = worldPointLeaf(map, origin);
+  const origin = options.pvsOrigin ?? camera.origin,
+    eye = worldPointLeaf(map, origin);
   if (eye < 0) return { leaf: eye, leaves: [], surfaces: [], surfaceDlightMasks: new Map<number, number>() };
   let pvs: Uint8Array | null = null;
   let fromCluster = -1;
-  if (options.noVis !== true) switch (map.kind) {
-    case "q1-bsp": pvs = q1Pvs(map, eye); break;
-    case "q2-bsp": {
-      fromCluster = at(map.leaves, eye).cluster;
-      pvs = q2Pvs(map, fromCluster);
-      let second = options.secondaryCluster;
-      if (second === undefined) {
-        const leaf = at(map.leaves, eye);
-        const probe = worldPointLeaf(map, { ...origin, z: origin.z + (leaf.contents === 0 ? -16 : 16) });
-        const other = at(map.leaves, probe);
-        second = (other.contents & 1) === 0 && other.cluster !== fromCluster ? other.cluster : null;
-      }
-      if (second !== null && second >= 0 && pvs !== null) {
-        // One merged buffer per cluster pair keeps the mark cache keyed by a stable identity.
-        let merged = mergedPvs.get(map);
-        if (merged === undefined) { merged = new Map<number, Uint8Array | null>(); mergedPvs.set(map, merged); }
-        const pairKey = fromCluster * 0x100000 + second;
-        let combined = merged.get(pairKey);
-        if (combined === undefined) {
-          const other = q2Pvs(map, second);
-          if (other === null) combined = null;
-          else { combined = Uint8Array.from(pvs); for (let i = 0; i < combined.length; i++) combined[i] = (combined[i] ?? 0) | (other[i] ?? 0); }
-          if (merged.size >= 64) merged.clear();
-          merged.set(pairKey, combined);
+  if (options.noVis !== true)
+    switch (map.kind) {
+      case "q1-bsp":
+        pvs = q1Pvs(map, eye);
+        break;
+      case "q2-bsp": {
+        fromCluster = at(map.leaves, eye).cluster;
+        pvs = q2Pvs(map, fromCluster);
+        let second = options.secondaryCluster;
+        if (second === undefined) {
+          const leaf = at(map.leaves, eye);
+          const probe = worldPointLeaf(map, { ...origin, z: origin.z + (leaf.contents === 0 ? -16 : 16) });
+          const other = at(map.leaves, probe);
+          second = (other.contents & 1) === 0 && other.cluster !== fromCluster ? other.cluster : null;
         }
-        pvs = combined;
+        if (second !== null && second >= 0 && pvs !== null) {
+          // One merged buffer per cluster pair keeps the mark cache keyed by a stable identity.
+          let merged = mergedPvs.get(map);
+          if (merged === undefined) {
+            merged = new Map<number, Uint8Array | null>();
+            mergedPvs.set(map, merged);
+          }
+          const pairKey = fromCluster * 0x100000 + second;
+          let combined = merged.get(pairKey);
+          if (combined === undefined) {
+            const other = q2Pvs(map, second);
+            if (other === null) combined = null;
+            else {
+              combined = Uint8Array.from(pvs);
+              for (let i = 0; i < combined.length; i++) combined[i] = (combined[i] ?? 0) | (other[i] ?? 0);
+            }
+            if (merged.size >= 64) merged.clear();
+            merged.set(pairKey, combined);
+          }
+          pvs = combined;
+        }
+        break;
       }
-      break;
+      case "q3-bsp": {
+        fromCluster = at(map.leaves, eye).cluster;
+        const vis = map.visibility;
+        if (vis !== null && fromCluster >= 0 && fromCluster < vis.clusterCount)
+          pvs = vis.bits.subarray(fromCluster * vis.bytesPerCluster, (fromCluster + 1) * vis.bytesPerCluster);
+        break;
+      }
     }
-    case "q3-bsp": {
-      fromCluster = at(map.leaves, eye).cluster;
-      const vis = map.visibility;
-      if (vis !== null && fromCluster >= 0 && fromCluster < vis.clusterCount)
-        pvs = vis.bits.subarray(fromCluster * vis.bytesPerCluster, (fromCluster + 1) * vis.bytesPerCluster);
-      break;
-    }
-  }
-  const planes = options.noCull === true ? [] : map.kind === "q3-bsp" ? cameraFrustum(camera).slice(0, 4) : cameraFrustum(camera), leaves: number[] = [], surfaces: number[] = [], seen = surfaceStamp(map);
+  const planes = options.noCull === true ? [] : map.kind === "q3-bsp" ? cameraFrustum(camera).slice(0, 4) : cameraFrustum(camera),
+    leaves: number[] = [],
+    surfaces: number[] = [],
+    seen = surfaceStamp(map);
   seen.begin();
   const leafVisible = (index: number): boolean => {
     if (map.kind === "q1-bsp") return index !== 0 && (pvs === null || ((pvs[(index - 1) >> 3] ?? 0) & (1 << ((index - 1) & 7))) !== 0);
     const leaf = at<Exclude<DecodedWorld, { readonly kind: "q1-bsp" }>["leaves"][number]>(map.leaves, index);
     if (options.visibleAreas !== undefined && options.visibleAreas !== null && !options.visibleAreas.has(leaf.area)) return false;
     if (map.kind === "q3-bsp" && fromCluster < 0) return leaf.cluster !== -1;
-    return pvs === null || leaf.cluster >= 0 && ((pvs[leaf.cluster >> 3] ?? 0) & (1 << (leaf.cluster & 7))) !== 0;
+    return pvs === null || (leaf.cluster >= 0 && ((pvs[leaf.cluster >> 3] ?? 0) & (1 << (leaf.cluster & 7))) !== 0);
   };
   // Nodes with no PVS/area-visible descendant leaf can be skipped whole:
   // frustum work on their subtrees is wasted. Marks are cached per map and
@@ -215,28 +258,42 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     const index = ancestorIndex(map);
     if (!index.unsafe) {
       const areas = options.visibleAreas === undefined || options.visibleAreas === null ? null : [...options.visibleAreas];
-      const hitIndex = index.caches.findIndex(cached => cached.fromCluster === fromCluster
-        && cached.pvsBuffer === (pvs?.buffer ?? null) && cached.pvsOffset === (pvs?.byteOffset ?? 0)
-        && cached.pvsLength === (pvs?.byteLength ?? 0)
-        && (cached.areas === null && areas === null || cached.areas !== null && areas !== null
-          && cached.areas.length === areas.length && cached.areas.every((area, position) => area === areas[position])));
+      const hitIndex = index.caches.findIndex(
+        cached =>
+          cached.fromCluster === fromCluster &&
+          cached.pvsBuffer === (pvs?.buffer ?? null) &&
+          cached.pvsOffset === (pvs?.byteOffset ?? 0) &&
+          cached.pvsLength === (pvs?.byteLength ?? 0) &&
+          ((cached.areas === null && areas === null) ||
+            (cached.areas !== null &&
+              areas !== null &&
+              cached.areas.length === areas.length &&
+              cached.areas.every((area, position) => area === areas[position]))),
+      );
       const hit = hitIndex < 0 ? undefined : index.caches[hitIndex];
       if (hit !== undefined) {
         marks = hit.marks;
-        if (hitIndex > 0) { index.caches.splice(hitIndex, 1); index.caches.unshift(hit); }
+        if (hitIndex > 0) {
+          index.caches.splice(hitIndex, 1);
+          index.caches.unshift(hit);
+        }
       } else {
         marks = new Uint8Array(map.nodes.length);
         for (let leafIndex = 0; leafIndex < map.leaves.length; leafIndex++) {
           if (!leafVisible(leafIndex)) continue;
           let parent = index.leafParents[leafIndex] ?? -1;
-          while (parent >= 0 && marks[parent] === 0) { marks[parent] = 1; parent = index.nodeParents[parent] ?? -1; }
+          while (parent >= 0 && marks[parent] === 0) {
+            marks[parent] = 1;
+            parent = index.nodeParents[parent] ?? -1;
+          }
         }
         index.caches.unshift({ pvsBuffer: pvs?.buffer ?? null, pvsOffset: pvs?.byteOffset ?? 0, pvsLength: pvs?.byteLength ?? 0, fromCluster, areas, marks });
         if (index.caches.length > ancestorCacheLimit) index.caches.length = ancestorCacheLimit;
       }
     }
   }
-  const lights = options.q3Lights ?? [], surfaceDlightMasks = new Map<number, number>();
+  const lights = options.q3Lights ?? [],
+    surfaceDlightMasks = new Map<number, number>();
   if (lights.length > 32) throw new RangeError("Q3 world lighting supports the source 32-light mask");
   const initialMask = lights.length === 32 ? -1 : (1 << lights.length) - 1;
   // Flat numeric stack: child encodes node index >= 0, leaf as -1 - index.
@@ -245,15 +302,17 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
   const stackChild: number[] = [map.nodes.length === 0 ? -1 : 0];
   const stackMask: number[] = [initialMask];
   const stackPlanes: number[] = [(1 << planes.length) - 1];
-  const encode = (child: BspChild): number => child.kind === "node" ? child.index : -1 - child.index;
+  const encode = (child: BspChild): number => (child.kind === "node" ? child.index : -1 - child.index);
   while (stackChild.length !== 0) {
-    const encoded = stackChild.pop() ?? 0, mask = stackMask.pop() ?? 0, itemPlanes = stackPlanes.pop() ?? 0;
+    const encoded = stackChild.pop() ?? 0,
+      mask = stackMask.pop() ?? 0,
+      itemPlanes = stackPlanes.pop() ?? 0;
     if (encoded >= 0) {
       if (marks !== null && encoded < marks.length && marks[encoded] === 0) continue;
       const node = map.nodes[encoded];
       if (node === undefined) throw new RangeError(`World visibility index ${encoded} outside ${map.nodes.length}`);
-      const remaining = map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, itemPlanes)
-        : boundsInFrustum(node.bounds, planes) ? itemPlanes : null;
+      const remaining =
+        map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, itemPlanes) : boundsInFrustum(node.bounds, planes) ? itemPlanes : null;
       if (remaining === null) continue;
       const plane = map.planes[node.plane];
       if (plane === undefined) throw new RangeError(`World visibility index ${node.plane} outside ${map.planes.length}`);
@@ -262,8 +321,7 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
         stackChild.push(encode(node.children[1]), encode(node.children[0]));
         stackMask.push(masks[1], masks[0]);
         stackPlanes.push(remaining, remaining);
-      }
-      else {
+      } else {
         const front = dot3(camera.origin, plane.normal) >= plane.distance ? 0 : 1;
         stackChild.push(encode(node.children[front === 0 ? 1 : 0]), encode(node.children[front]));
         stackMask.push(mask, mask);
@@ -282,7 +340,10 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     for (let i = 0; i < range.count; i++) {
       const surface = members[range.first + i];
       if (surface === undefined) throw new RangeError(`World visibility index ${range.first + i} outside ${members.length}`);
-      if (seen.mark(surface)) { surfaces.push(surface); surfaceDlightMasks.set(surface, mask); }
+      if (seen.mark(surface)) {
+        surfaces.push(surface);
+        surfaceDlightMasks.set(surface, mask);
+      }
     }
   }
   return { leaf: eye, leaves, surfaces, surfaceDlightMasks };

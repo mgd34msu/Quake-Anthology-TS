@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q3CharacterPass, Q3CharacterView } from "../../content/q3/foundation/presentation.ts";
 import { cacheEvictingRejection } from "./cached-promise.ts";
 import { Powerup } from "../../movement/q3/constants.ts";
@@ -27,13 +28,19 @@ export class SelectedQ3WeaponPresenter {
   private readonly animations = new Map<ContentId, Promise<PlayerAnimationConfig>>();
   private readonly models = new Map<string, Promise<ModelAsset | null>>();
 
-  constructor(private readonly assets: ApplicationAssets, private readonly characterAnimation: PlayerAnimationConfig | null) {}
+  constructor(
+    private readonly assets: ApplicationAssets,
+    private readonly characterAnimation: PlayerAnimationConfig | null,
+  ) {}
 
   private animation(content: ContentId): Promise<PlayerAnimationConfig> {
     if (this.characterAnimation !== null) return Promise.resolve(this.characterAnimation);
-    const existing = this.animations.get(content); if (existing !== undefined) return existing;
+    const existing = this.animations.get(content);
+    if (existing !== undefined) return existing;
     const pending = (async () => {
-      const provider = await this.assets.provider(content), path = "models/players/sarge/animation.cfg", resource = await provider.mounts.open(path);
+      const provider = await this.assets.provider(content),
+        path = "models/players/sarge/animation.cfg",
+        resource = await provider.mounts.open(path);
       if (resource === null) throw new Error("Selected Q3 weapon animation configuration is missing");
       return parsePlayerAnimationConfig(new TextDecoder().decode(resource.bytes), path);
     })();
@@ -41,27 +48,52 @@ export class SelectedQ3WeaponPresenter {
   }
 
   private model(content: ContentId, path: string): Promise<ModelAsset | null> {
-    const key = `${content}/${path}`, existing = this.models.get(key); if (existing !== undefined) return existing;
-    const pending = (async () => (await (await this.assets.provider(content)).mounts.open(path)) === null ? null : this.assets.model(content, path))();
+    const key = `${content}/${path}`,
+      existing = this.models.get(key);
+    if (existing !== undefined) return existing;
+    const pending = (async () => ((await (await this.assets.provider(content)).mounts.open(path)) === null ? null : this.assets.model(content, path)))();
     return cacheEvictingRejection(this.models, key, pending);
   }
 
-  async world(source: SimulationPresentation, character: Pick<Q3CharacterView, "origin" | "powerups">, personalModel: boolean): Promise<readonly Q3CharacterPass[]> {
+  async world(
+    source: SimulationPresentation,
+    character: Pick<Q3CharacterView, "origin" | "powerups">,
+    personalModel: boolean,
+  ): Promise<readonly Q3CharacterPass[]> {
     const view = source.q3Weapon;
     if (view === undefined || !source.visible || source.path === "") return [];
     const stem = source.path.replace(/\.[^.]+$/, "");
-    const [gunAsset, barrelAsset, flashAsset] = await Promise.all([this.assets.model(source.content, source.path),
-      this.model(source.content, `${stem}_barrel.md3`), this.model(source.content, `${stem}_flash.md3`)]);
-    const part = (asset: ModelAsset, angles = zero): SceneEntity => ({ actor: source.actor, resource: asset.resource, model: asset.model,
-      transform: { origin: zero, axis: qvmAnglesToAxis(angles), scale: unit }, previousOrigin: zero,
-      pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { x: 1, y: 1, z: 1, w: 1 },
-      shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q3", bits: RF_LIGHTING_ORIGIN | (personalModel ? RF_THIRD_PERSON : 0) },
-      lightingOrigin: character.origin, shadowPlane: 0, attachments: [] });
+    const [gunAsset, barrelAsset, flashAsset] = await Promise.all([
+      this.assets.model(source.content, source.path),
+      this.model(source.content, `${stem}_barrel.md3`),
+      this.model(source.content, `${stem}_flash.md3`),
+    ]);
+    const part = (asset: ModelAsset, angles = zero): SceneEntity => ({
+      actor: source.actor,
+      resource: asset.resource,
+      model: asset.model,
+      transform: { origin: zero, axis: qvmAnglesToAxis(angles), scale: unit },
+      previousOrigin: zero,
+      pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 },
+      skin: 0,
+      color: { x: 1, y: 1, z: 1, w: 1 },
+      shaderTime: { kind: "seconds", value: 0 },
+      flags: { kind: "q3", bits: RF_LIGHTING_ORIGIN | (personalModel ? RF_THIRD_PERSON : 0) },
+      lightingOrigin: character.origin,
+      shadowPlane: 0,
+      attachments: [],
+    });
     const spin = this.worldBarrel.step(view.timeMilliseconds, view.firing);
-    const gun: SceneEntity = { ...part(gunAsset), attachments: barrelAsset === null ? [] : [
-      { tag: "tag_barrel", entity: part(barrelAsset, { x: 0, y: 0, z: spin.angle }) }] };
-    const pass = (entity: SceneEntity, shader: string | null): Q3CharacterPass => ({ content: source.content, entity, shader,
-      options: () => shader === null ? {} : { customShader: shader } });
+    const gun: SceneEntity = {
+      ...part(gunAsset),
+      attachments: barrelAsset === null ? [] : [{ tag: "tag_barrel", entity: part(barrelAsset, { x: 0, y: 0, z: spin.angle }) }],
+    };
+    const pass = (entity: SceneEntity, shader: string | null): Q3CharacterPass => ({
+      content: source.content,
+      entity,
+      shader,
+      options: () => (shader === null ? {} : { customShader: shader }),
+    });
     const invisible = (character.powerups & (1 << Powerup.PW_INVIS)) !== 0;
     const passes: Q3CharacterPass[] = [pass(gun, invisible ? "powerups/invisibility" : null)];
     if (!invisible) {
@@ -69,7 +101,7 @@ export class SelectedQ3WeaponPresenter {
       if (character.powerups & (1 << Powerup.PW_QUAD)) passes.push(pass(gun, "powerups/quadWeapon"));
     }
     const continuous = view.firing && (view.weapon === 1 || view.weapon === 6 || view.weapon === 10);
-    if (flashAsset !== null && (continuous || view.lastFireMilliseconds !== null && view.timeMilliseconds - view.lastFireMilliseconds <= 20)) {
+    if (flashAsset !== null && (continuous || (view.lastFireMilliseconds !== null && view.timeMilliseconds - view.lastFireMilliseconds <= 20))) {
       const tag = modelAttachmentTag(gun, "tag_flash");
       if (tag !== null) passes.push(pass(attachSceneEntity(gun, part(flashAsset, { x: 0, y: 0, z: Math.fround(this.random.crandom() * 10) }), tag), null));
     }
@@ -77,37 +109,71 @@ export class SelectedQ3WeaponPresenter {
   }
 
   async frame(source: SimulationPresentation, fieldOfView = 90): Promise<SceneEntity | null> {
-    const view = source.q3Weapon; if (view === undefined) throw new Error("Selected Q3 weapon presentation state is missing");
+    const view = source.q3Weapon;
+    if (view === undefined) throw new Error("Selected Q3 weapon presentation state is missing");
     const stem = source.path.replace(/\.[^.]+$/, "");
     const [gunAsset, ownHand, barrelAsset, flashAsset, animation] = await Promise.all([
-      this.assets.model(source.content, source.path), this.model(source.content, source.modelAnchor?.path ?? `${stem}_hand.md3`),
+      this.assets.model(source.content, source.path),
+      this.model(source.content, source.modelAnchor?.path ?? `${stem}_hand.md3`),
       source.modelAnchor === undefined ? this.model(source.content, `${stem}_barrel.md3`) : null,
       source.modelAnchor === undefined ? this.model(source.content, `${stem}_flash.md3`) : null,
       source.modelAnchor === undefined ? this.animation(source.content) : null,
     ]);
-    const handAsset = ownHand ?? await this.assets.model(source.content, "models/weapons2/shotgun/shotgun_hand.md3");
-    if (animation !== null) runLerpFrame(animation, this.torso, { timeMs: view.timeMilliseconds, newAnimation: view.torsoAnimation, speedScale: 1, noPlayerAnimations: false });
-    const position = q3WeaponViewPose({ origin: source.origin, angles: source.angles, timeMilliseconds: view.timeMilliseconds,
-      horizontalSpeed: view.horizontalSpeed, bobCycle: (view.bobCycle & 128) >> 7,
-      bobFractionSine: Math.abs(Math.sin((view.bobCycle & 127) / 127 * Math.PI)), landTime: 0, landChange: 0 });
-    const part = (asset: ModelAsset, origin = zero, angles = zero): SceneEntity => ({ actor: source.actor, resource: asset.resource, model: asset.model,
-      transform: { origin, axis: qvmAnglesToAxis(angles), scale: unit }, previousOrigin: origin,
-      pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { x: 1, y: 1, z: 1, w: 1 },
-      shaderTime: { kind: "milliseconds", value: 0 }, flags: { kind: "q3", bits: RF_MINLIGHT | RF_FIRST_PERSON | RF_DEPTHHACK }, lightingOrigin: source.origin, shadowPlane: 0, attachments: [] });
-    const axis = qvmAnglesToAxis(source.angles), offset = source.modelAnchor?.offset ?? zero;
-    const fov = source.modelAnchor?.fovOffset, fovOffset = fov === undefined ? 0 : Math.fround(Math.fround(fov.scale) * Math.fround(Math.max(0, fieldOfView - fov.above)));
+    const handAsset = ownHand ?? (await this.assets.model(source.content, "models/weapons2/shotgun/shotgun_hand.md3"));
+    if (animation !== null)
+      runLerpFrame(animation, this.torso, { timeMs: view.timeMilliseconds, newAnimation: view.torsoAnimation, speedScale: 1, noPlayerAnimations: false });
+    const position = q3WeaponViewPose({
+      origin: source.origin,
+      angles: source.angles,
+      timeMilliseconds: view.timeMilliseconds,
+      horizontalSpeed: view.horizontalSpeed,
+      bobCycle: (view.bobCycle & 128) >> 7,
+      bobFractionSine: Math.abs(Math.sin(((view.bobCycle & 127) / 127) * Math.PI)),
+      landTime: 0,
+      landChange: 0,
+    });
+    const part = (asset: ModelAsset, origin = zero, angles = zero): SceneEntity => ({
+      actor: source.actor,
+      resource: asset.resource,
+      model: asset.model,
+      transform: { origin, axis: qvmAnglesToAxis(angles), scale: unit },
+      previousOrigin: origin,
+      pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 },
+      skin: 0,
+      color: { x: 1, y: 1, z: 1, w: 1 },
+      shaderTime: { kind: "milliseconds", value: 0 },
+      flags: { kind: "q3", bits: RF_MINLIGHT | RF_FIRST_PERSON | RF_DEPTHHACK },
+      lightingOrigin: source.origin,
+      shadowPlane: 0,
+      attachments: [],
+    });
+    const axis = qvmAnglesToAxis(source.angles),
+      offset = source.modelAnchor?.offset ?? zero;
+    const fov = source.modelAnchor?.fovOffset,
+      fovOffset = fov === undefined ? 0 : Math.fround(Math.fround(fov.scale) * Math.fround(Math.max(0, fieldOfView - fov.above)));
     const origin = add3(position.origin, add3(add3(scale3(axis[0], offset.x), scale3(axis[1], offset.y)), scale3(axis[2], Math.fround(offset.z + fovOffset))));
-    const hand: SceneEntity = { ...part(handAsset, origin, position.angles), pose: { kind: "frame",
-      frame: animation === null ? source.frame : q3TorsoWeaponFrame(animation, this.torso.frame),
-      previousFrame: animation === null ? source.oldFrame : q3TorsoWeaponFrame(animation, this.torso.oldFrame), backLerp: animation === null ? source.backLerp ?? 0 : this.torso.backLerp } };
-    const tagName = source.modelAnchor?.tag ?? "tag_weapon", tag = modelAttachmentTag(hand, tagName);
-    if (tag === null) { this.assets.warnOnce(`q3-hands-tag:${source.content}/${source.path}`, `Selected Q3 hands model has no ${tagName}; the weapon is not drawn.\n`); return null; }
+    const hand: SceneEntity = {
+      ...part(handAsset, origin, position.angles),
+      pose: {
+        kind: "frame",
+        frame: animation === null ? source.frame : q3TorsoWeaponFrame(animation, this.torso.frame),
+        previousFrame: animation === null ? source.oldFrame : q3TorsoWeaponFrame(animation, this.torso.oldFrame),
+        backLerp: animation === null ? (source.backLerp ?? 0) : this.torso.backLerp,
+      },
+    };
+    const tagName = source.modelAnchor?.tag ?? "tag_weapon",
+      tag = modelAttachmentTag(hand, tagName);
+    if (tag === null) {
+      this.assets.warnOnce(`q3-hands-tag:${source.content}/${source.path}`, `Selected Q3 hands model has no ${tagName}; the weapon is not drawn.\n`);
+      return null;
+    }
     const attachments: SceneEntity["attachments"][number][] = [];
-    for (const attachment of source.modelAttachments ?? []) attachments.push({ tag: attachment.tag, entity: part(await this.assets.model(source.content, attachment.path)) });
+    for (const attachment of source.modelAttachments ?? [])
+      attachments.push({ tag: attachment.tag, entity: part(await this.assets.model(source.content, attachment.path)) });
     const spin = this.barrel.step(view.timeMilliseconds, view.firing);
     if (barrelAsset !== null) attachments.push({ tag: "tag_barrel", entity: part(barrelAsset, zero, { x: 0, y: 0, z: spin.angle }) });
     const continuous = view.firing && (view.weapon === 1 || view.weapon === 6 || view.weapon === 10);
-    if (flashAsset !== null && (continuous || view.lastFireMilliseconds !== null && view.timeMilliseconds - view.lastFireMilliseconds <= 20))
+    if (flashAsset !== null && (continuous || (view.lastFireMilliseconds !== null && view.timeMilliseconds - view.lastFireMilliseconds <= 20)))
       attachments.push({ tag: "tag_flash", entity: part(flashAsset, zero, { x: 0, y: 0, z: Math.fround(this.random.crandom() * 10) }) });
     return attachSceneEntity(hand, { ...part(gunAsset), attachments }, tag);
   }

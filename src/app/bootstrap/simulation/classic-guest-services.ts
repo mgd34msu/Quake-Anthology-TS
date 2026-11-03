@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import type { ClassicPrimaryWorldProfile } from "../../../compat/q2/classic/world-profile.ts";
 import type { NativePickupProfile } from "../../../compat/q2/native-pickups.ts";
@@ -13,21 +14,47 @@ import type { BodyState } from "../../../contracts/world.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
-import { classicNumber, classicPointer, classicRequiredPointer, type ClassicQ2EngineServices, type ClassicQ2GuestHost, type ClassicQ2WorldLink } from "../../../compat/q2/classic/host.ts";
+import {
+  classicNumber,
+  classicPointer,
+  classicRequiredPointer,
+  type ClassicQ2EngineServices,
+  type ClassicQ2GuestHost,
+  type ClassicQ2WorldLink,
+} from "../../../compat/q2/classic/host.ts";
 import { readClassicString, readClassicVector } from "../../../compat/q2/classic/records.ts";
 import { runClassicGuestPmove } from "../../../compat/q2/classic/pmove.ts";
 import { ClassicCombatBindings } from "../../../compat/q2/classic/combat-binding.ts";
 import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
 import { ClassicSourceInventory } from "../../../compat/q2/classic/inventory.ts";
-import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteChar, MSG_WriteByte, MSG_WriteShort, MSG_WriteLong, MSG_WriteFloat, MSG_WriteString, MSG_WritePos, MSG_WriteDir, MSG_WriteAngle } from "../../../network/q2/message.ts";
+import {
+  SizeBuf,
+  SZ_Init,
+  SZ_Clear,
+  MSG_WriteChar,
+  MSG_WriteByte,
+  MSG_WriteShort,
+  MSG_WriteLong,
+  MSG_WriteFloat,
+  MSG_WriteString,
+  MSG_WritePos,
+  MSG_WriteDir,
+  MSG_WriteAngle,
+} from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
 import { ResourceNameIndex } from "../../../core/resource-name-index.ts";
 
 const resourceBases = { model: 32, sound: 288, image: 544 };
 const resourceKinds: readonly (keyof typeof resourceBases)[] = ["model", "sound", "image"];
 
-export type ClassicGuestAudience = { readonly kind: "unicast"; readonly slot: number } | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
-export interface ClassicGuestMessage { readonly audience: ClassicGuestAudience; readonly reliable: boolean; readonly bytes: Uint8Array }
+export type ClassicGuestAudience =
+  | { readonly kind: "unicast"; readonly slot: number }
+  | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
+export interface ClassicGuestMessage {
+  readonly audience: ClassicGuestAudience;
+  readonly reliable: boolean;
+  readonly bytes: Uint8Array;
+}
 export interface ClassicGuestServicesOptions {
   readonly primaryWorld?: ClassicPrimaryWorldProfile | null;
   readonly pickupProfile?: NativePickupProfile;
@@ -47,11 +74,22 @@ export interface ClassicGuestServicesOptions {
   readonly addCommand: ClassicQ2EngineServices["addCommand"];
   readonly debugGraph: ClassicQ2EngineServices["debugGraph"];
 }
-export type ClassicGuestMapServices = Pick<ClassicGuestServicesOptions, "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance" | "pickups">;
+export type ClassicGuestMapServices = Pick<
+  ClassicGuestServicesOptions,
+  "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance" | "pickups"
+>;
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-function vector(view: DataView, offset: number): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
-function storeVector(view: DataView, offset: number, value: Vec3): void { view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true); }
-function tuple(value: Vec3): Float32Array { return new Float32Array([value.x, value.y, value.z]); }
+function vector(view: DataView, offset: number): Vec3 {
+  return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
+}
+function storeVector(view: DataView, offset: number, value: Vec3): void {
+  view.setFloat32(offset, value.x, true);
+  view.setFloat32(offset + 4, value.y, true);
+  view.setFloat32(offset + 8, value.z, true);
+}
+function tuple(value: Vec3): Float32Array {
+  return new Float32Array([value.x, value.y, value.z]);
+}
 
 /** API 3 uses the shared actor/collision tables and retains the DLL's public-prefix authority. */
 export class ClassicGuestServices {
@@ -76,18 +114,27 @@ export class ClassicGuestServices {
   /** Guest slot to shared monster, for routing guest T_Damage on a stand-in to shared combat. */
   readonly #proxyActors: (ActorId | undefined)[] = [];
   withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
-    const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
-    try { return run(); }
-    finally {
-      if (previous === undefined) { this.inputMotion.delete(actor); this.motionBodies.delete(actor); }
-      else this.inputMotion.set(actor, previous);
+    const previous = this.inputMotion.get(actor);
+    this.inputMotion.set(actor, projection);
+    try {
+      return run();
+    } finally {
+      if (previous === undefined) {
+        this.inputMotion.delete(actor);
+        this.motionBodies.delete(actor);
+      } else this.inputMotion.set(actor, previous);
     }
   }
   #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   #loading = true;
   #options: ClassicGuestServicesOptions;
-  get options(): ClassicGuestServicesOptions { return this.#options; }
-  constructor(readonly memory: MappedGuestMemory, options: ClassicGuestServicesOptions) {
+  get options(): ClassicGuestServicesOptions {
+    return this.#options;
+  }
+  constructor(
+    readonly memory: MappedGuestMemory,
+    options: ClassicGuestServicesOptions,
+  ) {
     this.#options = options;
     if (!Number.isInteger(options.maxClients) || options.maxClients < 1 || options.maxClients > 256) throw new RangeError("Invalid API 3 maxclients");
     if (options.scene.geometry.models.length > 255) throw new RangeError("API 3 map exceeds MAX_MODELS");
@@ -97,14 +144,33 @@ export class ClassicGuestServices {
     for (let model = 1; model < options.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
     const owner = this;
     this.services = {
-      dispose: () => { this.#combat?.close(); this.#combat = null; return undefined; },
-      ...(options.pickups === undefined ? {} : { get pickups() { const pickups = owner.options.pickups; if (pickups === undefined) throw new Error("Native pickup authority disappeared during travel"); return pickups; } }),
-      ...(options.damageProvenance === undefined ? {} : { damageProvenance: (attacker, inflictor, target) => {
-        const provenance = this.options.damageProvenance;
-        if (provenance === undefined) throw new Error("Native damage provenance disappeared during travel");
-        return provenance(attacker, inflictor, target);
-      } }),
-      get engine() { return owner.options.engine; }, cvars: options.cvars,
+      dispose: () => {
+        this.#combat?.close();
+        this.#combat = null;
+        return undefined;
+      },
+      ...(options.pickups === undefined
+        ? {}
+        : {
+            get pickups() {
+              const pickups = owner.options.pickups;
+              if (pickups === undefined) throw new Error("Native pickup authority disappeared during travel");
+              return pickups;
+            },
+          }),
+      ...(options.damageProvenance === undefined
+        ? {}
+        : {
+            damageProvenance: (attacker, inflictor, target) => {
+              const provenance = this.options.damageProvenance;
+              if (provenance === undefined) throw new Error("Native damage provenance disappeared during travel");
+              return provenance(attacker, inflictor, target);
+            },
+          }),
+      get engine() {
+        return owner.options.engine;
+      },
+      cvars: options.cvars,
       bindEntity: (record, actor) => this.bindEntity(record, actor),
       linkBody: (record, actor) => this.linkBody(record, actor),
       standInActor: record => this.#proxyActors[record.slot] ?? null,
@@ -116,10 +182,17 @@ export class ClassicGuestServices {
       worldLink: bounds => this.worldLink(bounds),
       boxEdicts: (bounds, kind) => this.options.scene.queryActors(bounds, kind).map(item => item.body.actor),
       message: (operation, values) => this.message(operation, values),
-      command: () => this.options.command(), addCommand: text => this.options.addCommand(text), debugGraph: (value, color) => this.options.debugGraph(value, color),
+      command: () => this.options.command(),
+      addCommand: text => this.options.addCommand(text),
+      debugGraph: (value, color) => this.options.debugGraph(value, color),
       pmove: (address, host) => {
-        const equipment = this.#playerMovement; this.#playerMovement = undefined;
-        return runClassicGuestPmove(address, host, { numeric: options.numeric, airAccelerate: options.cvars.variableValue("sv_airaccelerate"), ...(equipment === undefined ? {} : { equipment }) });
+        const equipment = this.#playerMovement;
+        this.#playerMovement = undefined;
+        return runClassicGuestPmove(address, host, {
+          numeric: options.numeric,
+          airAccelerate: options.cvars.variableValue("sv_airaccelerate"),
+          ...(equipment === undefined ? {} : { equipment }),
+        });
       },
     };
   }
@@ -130,9 +203,14 @@ export class ClassicGuestServices {
     this.validateMap(binding);
     const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups } = binding;
     this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups };
-    this.#loading = true; this.#configstrings.clear(); this.#messages.reset(); SZ_Clear(this.#buffer);
+    this.#loading = true;
+    this.#configstrings.clear();
+    this.#messages.reset();
+    SZ_Clear(this.#buffer);
     // spawnEntities reinitializes every edict, so stale proxies are dropped without calling the DLL's G_FreeEdict
-    this.#monsterProxies.clear(); this.#proxyActors.length = 0; this.#pendingProxies.clear();
+    this.#monsterProxies.clear();
+    this.#proxyActors.length = 0;
+    this.#pendingProxies.clear();
     for (const kind of resourceKinds) this.#resourceNames[kind].clear();
     this.storeConfigstring(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
@@ -144,8 +222,13 @@ export class ClassicGuestServices {
     this.#inventory = imageBase === undefined ? null : ClassicSourceInventory.create(host, imageBase, this.options.primaryWorld);
     if (imageBase !== undefined) host.bindPickups(imageBase, this.options.pickupProfile);
   }
-  get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
-  notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
+  get host(): ClassicQ2GuestHost {
+    if (this.#host === null) throw new Error("API 3 services have no guest host");
+    return this.#host;
+  }
+  notarget(slot: number): boolean | null {
+    return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null;
+  }
   playerGrounded(slot: number, actor: ActorId): boolean {
     const record = this.host.edicts.at(slot);
     if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
@@ -167,7 +250,8 @@ export class ClassicGuestServices {
     return { viewOffset: vector(client, 40), crouched: (client.getUint8(16) & 1) !== 0 };
   }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
-    const profile = this.options.primaryWorld === undefined ? classicCombatProfile(this.memory.module.digest) : this.options.primaryWorld, record = this.host.edicts.at(slot);
+    const profile = this.options.primaryWorld === undefined ? classicCombatProfile(this.memory.module.digest) : this.options.primaryWorld,
+      record = this.host.edicts.at(slot);
     if (profile === null) throw new Error("API3 source view writes require a declared private client layout");
     if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
       throw new Error("API3 source view requires the current client actor");
@@ -175,20 +259,40 @@ export class ClassicGuestServices {
     if (client === null) throw new Error("API3 source view has no client");
     this.memory.writeFloat32(this.memory.offset(client, BigInt(profile.client.viewAngles + 8)), roll);
   }
-  get hasSourceInventory(): boolean { return this.#inventory !== null; }
-  sourceInventory(slot: number) { return this.#inventory?.bind(this.host.edicts.at(slot)) ?? null; }
-  completeSpawn(): void { this.#loading = false; }
+  get hasSourceInventory(): boolean {
+    return this.#inventory !== null;
+  }
+  sourceInventory(slot: number) {
+    return this.#inventory?.bind(this.host.edicts.at(slot)) ?? null;
+  }
+  completeSpawn(): void {
+    this.#loading = false;
+  }
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
-    this.#writePlayerVelocity = write; this.#readPlayerVelocity = read;
+    this.#writePlayerVelocity = write;
+    this.#readPlayerVelocity = read;
   }
   withPlayerMovement<T>(movement: EquipmentMovement | undefined, run: () => T): T {
-    const previous = this.#playerMovement; this.#playerMovement = movement;
-    try { return run(); } finally { this.#playerMovement = previous; }
+    const previous = this.#playerMovement;
+    this.#playerMovement = movement;
+    try {
+      return run();
+    } finally {
+      this.#playerMovement = previous;
+    }
   }
   /** The live table: callers read it in place and copy it only when they retain it across a mutation. */
-  configstrings(): ReadonlyMap<number, string> { return this.#configstrings; }
-  drainMessages(): readonly ClassicGuestMessage[] { const taken = this.#messages.take(this.#messageCursor); this.#messages.retire(); return taken; }
-  resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get(resourceBases[kind] + index) ?? ""; }
+  configstrings(): ReadonlyMap<number, string> {
+    return this.#configstrings;
+  }
+  drainMessages(): readonly ClassicGuestMessage[] {
+    const taken = this.#messages.take(this.#messageCursor);
+    this.#messages.retire();
+    return taken;
+  }
+  resource(kind: "model" | "sound" | "image", index: number): string {
+    return this.#configstrings.get(resourceBases[kind] + index) ?? "";
+  }
   resourceIndex(kind: "model" | "sound" | "image", name: string): number {
     const index = this.#resourceNames[kind].find(name);
     if (index === null) throw new Error(`API 3 ${kind} index overflow`);
@@ -199,7 +303,10 @@ export class ClassicGuestServices {
     this.#configstrings.set(index, value);
     for (const kind of resourceKinds) {
       const slot = index - resourceBases[kind];
-      if (slot > 0 && slot < 256) { this.#resourceNames[kind].set(slot, value); break; }
+      if (slot > 0 && slot < 256) {
+        this.#resourceNames[kind].set(slot, value);
+        break;
+      }
     }
   }
   setConfigstring(index: number, value: string): undefined {
@@ -209,61 +316,109 @@ export class ClassicGuestServices {
     if (index > 32 && index < 288) this.#host?.setModelName(index - 32, text);
     if (index >= 800 && index < 1056) this.options.engine.emit({ kind: "lightstyle", style: index - 800, pattern: text });
     if (index === 1) this.options.engine.emit({ kind: "music", track: text });
-    if (!this.#loading) { SZ_Clear(this.#buffer); MSG_WriteByte(this.#buffer, 13); MSG_WriteShort(this.#buffer, index); MSG_WriteString(this.#buffer, text); this.multicast(zero, 3); }
+    if (!this.#loading) {
+      SZ_Clear(this.#buffer);
+      MSG_WriteByte(this.#buffer, 13);
+      MSG_WriteShort(this.#buffer, index);
+      MSG_WriteString(this.#buffer, text);
+      this.multicast(zero, 3);
+    }
     return undefined;
   }
   private body(record: RawEntityView): BodyState {
-    const cachedActor = record.currentActor(), cached = cachedActor === null ? undefined : this.motionBodies.get(cachedActor);
+    const cachedActor = record.currentActor(),
+      cached = cachedActor === null ? undefined : this.motionBodies.get(cachedActor);
     if (cached !== undefined) return cached;
     const view = record.bytes;
     const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.host.edicts.clientPrefix(record.slot) : null;
-    const actor = record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
+    const actor = record.currentActor(),
+      pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
-    const velocity = motion?.velocity ?? pending ?? (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
+    const velocity =
+      motion?.velocity ??
+      pending ??
+      (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
     // Clients ground on the world while their pmove state says so; the
     // guest's private groundentity is outside the public edict prefix.
     const grounded = client !== null && (client.getUint8(16) & 4) !== 0;
-    return { origin: motion?.origin ?? vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) },
-      ground: grounded ? this.host.edicts.at(0).currentActor() : null };
+    return {
+      origin: motion?.origin ?? vector(view, 4),
+      angles: vector(view, 16),
+      velocity,
+      bounds: { min: vector(view, 188), max: vector(view, 200) },
+      ground: grounded ? this.host.edicts.at(0).currentActor() : null,
+    };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): undefined {
-    this.options.engine.bodies.bind(actor, { read: () => this.body(record), write: state => {
-      const velocity = this.body(record).velocity, motion = this.inputMotion.get(actor.id);
-      if (motion !== undefined) { this.motionBodies.set(actor.id, state); motion.write(state); }
-      else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
-        if (record.slot < 1 || record.slot > this.options.maxClients || this.#writePlayerVelocity === null)
-          throw new Error("API3 velocity writes require a source semantic binding");
-        this.#writePlayerVelocity(actor, state.velocity);
-      }
-      if (motion === undefined) storeVector(record.bytes, 4, state.origin);
-      storeVector(record.bytes, 16, state.angles);
-      storeVector(record.bytes, 188, state.bounds.min); storeVector(record.bytes, 200, state.bounds.max); return undefined;
-    } });
+    this.options.engine.bodies.bind(actor, {
+      read: () => this.body(record),
+      write: state => {
+        const velocity = this.body(record).velocity,
+          motion = this.inputMotion.get(actor.id);
+        if (motion !== undefined) {
+          this.motionBodies.set(actor.id, state);
+          motion.write(state);
+        } else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
+          if (record.slot < 1 || record.slot > this.options.maxClients || this.#writePlayerVelocity === null)
+            throw new Error("API3 velocity writes require a source semantic binding");
+          this.#writePlayerVelocity(actor, state.velocity);
+        }
+        if (motion === undefined) storeVector(record.bytes, 4, state.origin);
+        storeVector(record.bytes, 16, state.angles);
+        storeVector(record.bytes, 188, state.bounds.min);
+        storeVector(record.bytes, 200, state.bounds.max);
+        return undefined;
+      },
+    });
     this.#combat?.bind(record, actor);
     return this.options.admit(record, actor);
   }
   private linkBody(record: RawEntityView, actor: OwnedActor): undefined {
-    const view = record.bytes, solid = view.getInt32(248, true), flags = view.getInt32(184, true);
+    const view = record.bytes,
+      solid = view.getInt32(248, true),
+      flags = view.getInt32(184, true);
     const ownerAddress = this.memory.readPointer(this.memory.offset(record.address, 256n));
-    const owner = ownerAddress === null ? null : this.host.edicts.observe(ownerAddress)?.id ?? null;
+    const owner = ownerAddress === null ? null : (this.host.edicts.observe(ownerAddress)?.id ?? null);
     const modelName = this.resource("model", view.getInt32(40, true));
-    const deadMonster = (flags & 2) !== 0, monster = (flags & 4) !== 0;
-    this.options.collision(actor, { family: "q2", shape: solid === 3 ? { kind: "model", model: Number(modelName.slice(1)) } : { kind: "box" },
-      contents: solid === 3 ? 1 : deadMonster ? 0x4000000 : 0x2000000, owner, role: solid === 1 ? "trigger" : "solid", monster, deadMonster });
-    return this.options.engine.bodies.restoreLinkState(actor, { linkCount: view.getInt32(92, true), linked: { state: this.body(record), absoluteBounds: { min: vector(view, 212), max: vector(view, 224) } } });
+    const deadMonster = (flags & 2) !== 0,
+      monster = (flags & 4) !== 0;
+    this.options.collision(actor, {
+      family: "q2",
+      shape: solid === 3 ? { kind: "model", model: Number(modelName.slice(1)) } : { kind: "box" },
+      contents: solid === 3 ? 1 : deadMonster ? 0x4000000 : 0x2000000,
+      owner,
+      role: solid === 1 ? "trigger" : "solid",
+      monster,
+      deadMonster,
+    });
+    return this.options.engine.bodies.restoreLinkState(actor, {
+      linkCount: view.getInt32(92, true),
+      linked: { state: this.body(record), absoluteBounds: { min: vector(view, 212), max: vector(view, 224) } },
+    });
   }
   worldLink(bounds: Bounds): ClassicQ2WorldLink {
-    const query = this.options.scene.boxLeaves(bounds, 128), clusters: number[] = [];
-    let first = 0, second = 0;
+    const query = this.options.scene.boxLeaves(bounds, 128),
+      clusters: number[] = [];
+    let first = 0,
+      second = 0;
     for (const leaf of query.leaves) {
-      const area = this.options.scene.leafArea(leaf), cluster = this.options.scene.leafCluster(leaf);
-      if (area !== 0) { if (first !== 0 && first !== area) second = area; else first = area; }
+      const area = this.options.scene.leafArea(leaf),
+        cluster = this.options.scene.leafCluster(leaf);
+      if (area !== 0) {
+        if (first !== 0 && first !== area) second = area;
+        else first = area;
+      }
       if (cluster >= 0 && !clusters.includes(cluster)) clusters.push(cluster);
     }
-    return { clusters: query.overflow || query.leaves.length >= 128 || clusters.length > 16 ? null : clusters, headnode: query.topnode ?? 0, areas: [first, second] };
+    return {
+      clusters: query.overflow || query.leaves.length >= 128 || clusters.length > 16 ? null : clusters,
+      headnode: query.topnode ?? 0,
+      areas: [first, second],
+    };
   }
   private enqueue(audience: ClassicGuestAudience, reliable: boolean): void {
-    this.#messages.admit({ audience, reliable, bytes: this.#buffer.data.slice(0, this.#buffer.cursize) }); SZ_Clear(this.#buffer);
+    this.#messages.admit({ audience, reliable, bytes: this.#buffer.data.slice(0, this.#buffer.cursize) });
+    SZ_Clear(this.#buffer);
   }
   private multicast(origin: Vec3, destination: number): void {
     if (!Number.isInteger(destination) || destination < 0 || destination > 5) throw new RangeError("API 3 invalid multicast destination");
@@ -276,82 +431,197 @@ export class ClassicGuestServices {
     this.enqueue({ kind: "unicast", slot: record.slot }, reliable);
   }
   private message(operation: string, values: readonly GuestCallValue[]): undefined {
-    const number = () => classicNumber(values, 0), pointer = () => classicRequiredPointer(values, 0);
+    const number = () => classicNumber(values, 0),
+      pointer = () => classicRequiredPointer(values, 0);
     switch (operation) {
-      case "WriteChar": MSG_WriteChar(this.#buffer, number()); break;
-      case "WriteByte": MSG_WriteByte(this.#buffer, number()); break;
-      case "WriteShort": MSG_WriteShort(this.#buffer, number()); break;
-      case "WriteLong": MSG_WriteLong(this.#buffer, number()); break;
-      case "WriteFloat": MSG_WriteFloat(this.#buffer, number()); break;
-      case "WriteString": { const address = classicPointer(values, 0); MSG_WriteString(this.#buffer, address === null ? "" : readClassicString(this.memory, address)); break; }
-      case "WritePosition": MSG_WritePos(this.#buffer, tuple(readClassicVector(this.memory, pointer()))); break;
-      case "WriteDir": { const address = classicPointer(values, 0); if (address === null) MSG_WriteByte(this.#buffer, 0); else MSG_WriteDir(this.#buffer, tuple(readClassicVector(this.memory, address))); break; }
-      case "WriteAngle": MSG_WriteAngle(this.#buffer, number()); break;
-      case "multicast": this.multicast(readClassicVector(this.memory, pointer()), classicNumber(values, 1)); break;
-      case "unicast": this.unicast(classicPointer(values, 0), classicNumber(values, 1) !== 0); break;
-      default: throw new Error(`Invalid API 3 message operation ${operation}`);
+      case "WriteChar":
+        MSG_WriteChar(this.#buffer, number());
+        break;
+      case "WriteByte":
+        MSG_WriteByte(this.#buffer, number());
+        break;
+      case "WriteShort":
+        MSG_WriteShort(this.#buffer, number());
+        break;
+      case "WriteLong":
+        MSG_WriteLong(this.#buffer, number());
+        break;
+      case "WriteFloat":
+        MSG_WriteFloat(this.#buffer, number());
+        break;
+      case "WriteString": {
+        const address = classicPointer(values, 0);
+        MSG_WriteString(this.#buffer, address === null ? "" : readClassicString(this.memory, address));
+        break;
+      }
+      case "WritePosition":
+        MSG_WritePos(this.#buffer, tuple(readClassicVector(this.memory, pointer())));
+        break;
+      case "WriteDir": {
+        const address = classicPointer(values, 0);
+        if (address === null) MSG_WriteByte(this.#buffer, 0);
+        else MSG_WriteDir(this.#buffer, tuple(readClassicVector(this.memory, address)));
+        break;
+      }
+      case "WriteAngle":
+        MSG_WriteAngle(this.#buffer, number());
+        break;
+      case "multicast":
+        this.multicast(readClassicVector(this.memory, pointer()), classicNumber(values, 1));
+        break;
+      case "unicast":
+        this.unicast(classicPointer(values, 0), classicNumber(values, 1) !== 0);
+        break;
+      default:
+        throw new Error(`Invalid API 3 message operation ${operation}`);
     }
     return undefined;
   }
   private print(destination: "broadcast" | "debug" | "client" | "center", entity: GuestAddress | null, level: number, text: string): undefined {
-    if (destination === "debug" || destination === "client" && entity === null) { this.options.print(text); return undefined; }
+    if (destination === "debug" || (destination === "client" && entity === null)) {
+      this.options.print(text);
+      return undefined;
+    }
     if (destination !== "broadcast" && entity === null) return undefined;
     if (destination !== "broadcast" && entity !== null) {
       const slot = this.host.edicts.fromPointer(entity).slot;
-      if (!(this.options.acceptsClient?.(slot) ?? (slot >= 1 && slot <= this.options.maxClients))) { if (destination === "center") return undefined; throw new Error("API 3 cprintf on non-client edict"); }
+      if (!(this.options.acceptsClient?.(slot) ?? (slot >= 1 && slot <= this.options.maxClients))) {
+        if (destination === "center") return undefined;
+        throw new Error("API 3 cprintf on non-client edict");
+      }
     }
-    const packet = new SizeBuf(); SZ_Init(packet, new Uint8Array(1400), 1400);
+    const packet = new SizeBuf();
+    SZ_Init(packet, new Uint8Array(1400), 1400);
     MSG_WriteByte(packet, destination === "center" ? 15 : 10);
     if (destination !== "center") MSG_WriteByte(packet, level);
     MSG_WriteString(packet, text);
-    const audience: ClassicGuestAudience = destination === "broadcast" ? { kind: "multicast", origin: zero, scope: "all" } : { kind: "unicast", slot: this.host.edicts.fromPointer(entity ?? this.host.edicts.at(0).address).slot };
+    const audience: ClassicGuestAudience =
+      destination === "broadcast"
+        ? { kind: "multicast", origin: zero, scope: "all" }
+        : { kind: "unicast", slot: this.host.edicts.fromPointer(entity ?? this.host.edicts.at(0).address).slot };
     this.#messages.admit({ audience, reliable: true, bytes: packet.data.slice(0, packet.cursize) });
     if (destination === "broadcast") this.options.print(text);
     return undefined;
   }
-  private sound(explicitOrigin: Vec3 | null, entity: GuestAddress | null, channel: number, index: number, volume: number, attenuation: number, offset: number): undefined {
-    if (volume < 0 || volume > 1 || attenuation < 0 || attenuation > 4 || offset < 0 || offset > 0.255) throw new RangeError("API 3 sound parameters outside source ranges");
+  private sound(
+    explicitOrigin: Vec3 | null,
+    entity: GuestAddress | null,
+    channel: number,
+    index: number,
+    volume: number,
+    attenuation: number,
+    offset: number,
+  ): undefined {
+    if (volume < 0 || volume > 1 || attenuation < 0 || attenuation > 4 || offset < 0 || offset > 0.255)
+      throw new RangeError("API 3 sound parameters outside source ranges");
     if (entity === null) throw new Error("API 3 sound requires an entity");
-    const record = this.host.edicts.fromPointer(entity), view = record.bytes;
-    const solid = view.getInt32(248, true), bounds = this.body(record).bounds;
-    const origin = explicitOrigin ?? (solid === 3 ? { x: vector(view, 4).x + (bounds.min.x + bounds.max.x) * 0.5, y: vector(view, 4).y + (bounds.min.y + bounds.max.y) * 0.5, z: vector(view, 4).z + (bounds.min.z + bounds.max.z) * 0.5 } : vector(view, 4));
+    const record = this.host.edicts.fromPointer(entity),
+      view = record.bytes;
+    const solid = view.getInt32(248, true),
+      bounds = this.body(record).bounds;
+    const origin =
+      explicitOrigin ??
+      (solid === 3
+        ? {
+            x: vector(view, 4).x + (bounds.min.x + bounds.max.x) * 0.5,
+            y: vector(view, 4).y + (bounds.min.y + bounds.max.y) * 0.5,
+            z: vector(view, 4).z + (bounds.min.z + bounds.max.z) * 0.5,
+          }
+        : vector(view, 4));
     const positioned = explicitOrigin !== null || (view.getInt32(184, true) & 1) !== 0 || solid === 3;
     const flags = 8 | (volume !== 1 ? 1 : 0) | (attenuation !== 1 ? 2 : 0) | (positioned ? 4 : 0) | (offset !== 0 ? 16 : 0);
-    MSG_WriteByte(this.#buffer, 9); MSG_WriteByte(this.#buffer, flags); MSG_WriteByte(this.#buffer, index);
+    MSG_WriteByte(this.#buffer, 9);
+    MSG_WriteByte(this.#buffer, flags);
+    MSG_WriteByte(this.#buffer, index);
     if ((flags & 1) !== 0) MSG_WriteByte(this.#buffer, volume * 255);
     if ((flags & 2) !== 0) MSG_WriteByte(this.#buffer, attenuation * 64);
     if ((flags & 16) !== 0) MSG_WriteByte(this.#buffer, offset * 1000);
-    MSG_WriteShort(this.#buffer, record.slot << 3 | channel & 7);
+    MSG_WriteShort(this.#buffer, (record.slot << 3) | (channel & 7));
     if (positioned) MSG_WritePos(this.#buffer, tuple(origin));
     this.multicast(origin, ((channel & 8) !== 0 || attenuation === 0 ? 0 : 1) + ((channel & 8) === 0 && (channel & 16) !== 0 ? 3 : 0));
     return undefined;
   }
   entityState(slot: number): Q2EntityState {
     const view = this.host.edicts.at(slot).bytes;
-    return { number: view.getInt32(0, true), origin: vector(view, 4), angles: vector(view, 16), oldOrigin: vector(view, 28),
-      modelIndexes: [view.getInt32(40, true), view.getInt32(44, true), view.getInt32(48, true), view.getInt32(52, true)], frame: view.getInt32(56, true), skin: view.getInt32(60, true),
-      effects: view.getUint32(64, true), renderEffects: view.getInt32(68, true), solid: view.getInt32(72, true), sound: view.getInt32(76, true), event: view.getInt32(80, true) };
+    return {
+      number: view.getInt32(0, true),
+      origin: vector(view, 4),
+      angles: vector(view, 16),
+      oldOrigin: vector(view, 28),
+      modelIndexes: [view.getInt32(40, true), view.getInt32(44, true), view.getInt32(48, true), view.getInt32(52, true)],
+      frame: view.getInt32(56, true),
+      skin: view.getInt32(60, true),
+      effects: view.getUint32(64, true),
+      renderEffects: view.getInt32(68, true),
+      solid: view.getInt32(72, true),
+      sound: view.getInt32(76, true),
+      event: view.getInt32(80, true),
+    };
   }
   playerState(slot: number): Q2PlayerState {
     const view = this.host.edicts.clientPrefix(slot);
     if (view === null) throw new Error("API 3 client slot has no gclient prefix");
-    const shorts = (offset: number): [number, number, number] => [view.getInt16(offset, true), view.getInt16(offset + 2, true), view.getInt16(offset + 4, true)];
-    return { kind: "q2-classic", movement: { kind: "q2-classic", type: view.getInt32(0, true), originEighths: shorts(4), velocityEighths: shorts(10), flags: view.getUint8(16), timeEightMilliseconds: view.getUint8(17), gravity: view.getInt16(18, true), deltaAngleShorts: shorts(20) },
-      viewAngles: vector(view, 28), viewOffset: vector(view, 40), kickAngles: vector(view, 52), gunAngles: vector(view, 64), gunOffset: vector(view, 76), gunIndex: view.getInt32(88, true), gunFrame: view.getInt32(92, true),
-      blend: { x: view.getFloat32(96, true), y: view.getFloat32(100, true), z: view.getFloat32(104, true), w: view.getFloat32(108, true) }, fov: view.getFloat32(112, true), renderFlags: view.getInt32(116, true), stats: Array.from({ length: 32 }, (_, index) => view.getInt16(120 + index * 2, true)) };
+    const shorts = (offset: number): [number, number, number] => [
+      view.getInt16(offset, true),
+      view.getInt16(offset + 2, true),
+      view.getInt16(offset + 4, true),
+    ];
+    return {
+      kind: "q2-classic",
+      movement: {
+        kind: "q2-classic",
+        type: view.getInt32(0, true),
+        originEighths: shorts(4),
+        velocityEighths: shorts(10),
+        flags: view.getUint8(16),
+        timeEightMilliseconds: view.getUint8(17),
+        gravity: view.getInt16(18, true),
+        deltaAngleShorts: shorts(20),
+      },
+      viewAngles: vector(view, 28),
+      viewOffset: vector(view, 40),
+      kickAngles: vector(view, 52),
+      gunAngles: vector(view, 64),
+      gunOffset: vector(view, 76),
+      gunIndex: view.getInt32(88, true),
+      gunFrame: view.getInt32(92, true),
+      blend: { x: view.getFloat32(96, true), y: view.getFloat32(100, true), z: view.getFloat32(104, true), w: view.getFloat32(108, true) },
+      fov: view.getFloat32(112, true),
+      renderFlags: view.getInt32(116, true),
+      stats: Array.from({ length: 32 }, (_, index) => view.getInt16(120 + index * 2, true)),
+    };
   }
-  modelAppearance(slot: number): { readonly path: string; readonly skin: number; readonly skinPath: string | null; readonly attachedModels: readonly string[] } {
+  modelAppearance(slot: number): {
+    readonly path: string;
+    readonly skin: number;
+    readonly skinPath: string | null;
+    readonly attachedModels: readonly string[];
+  } {
     const state = this.entityState(slot);
-    if (state.modelIndexes.every(index => index !== 255)) return { path: this.resource("model", state.modelIndexes[0]), skin: state.skin, skinPath: null, attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)) };
+    if (state.modelIndexes.every(index => index !== 255))
+      return {
+        path: this.resource("model", state.modelIndexes[0]),
+        skin: state.skin,
+        skinPath: null,
+        attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)),
+      };
     const value = this.#configstrings.get(1312 + (state.skin & 255)) ?? "player\\male/grunt";
-    const appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
-    const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1);
+    const appearance = value.slice(value.indexOf("\\") + 1),
+      slash = appearance.indexOf("/");
+    const model = slash < 0 ? "male" : appearance.slice(0, slash),
+      skin = slash < 0 ? "grunt" : appearance.slice(slash + 1);
     const weapons = ["weapon.md2"];
-    for (let index = 1; index < 256; index++) { const name = this.resource("model", index); if (name.startsWith("#") && weapons.length < 20) weapons.push(name.slice(1)); }
+    for (let index = 1; index < 256; index++) {
+      const name = this.resource("model", index);
+      if (name.startsWith("#") && weapons.length < 20) weapons.push(name.slice(1));
+    }
     const weapon = weapons[(state.skin >>> 8) & 255] ?? weapons[0] ?? "weapon.md2";
-    return { path: state.modelIndexes[0] === 255 ? `players/${model}/tris.md2` : this.resource("model", state.modelIndexes[0]),
-      skin: state.modelIndexes[0] === 255 ? 0 : state.skin, skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
-      attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)) };
+    return {
+      path: state.modelIndexes[0] === 255 ? `players/${model}/tris.md2` : this.resource("model", state.modelIndexes[0]),
+      skin: state.modelIndexes[0] === 255 ? 0 : state.skin,
+      skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
+      attachedModels: state.modelIndexes.slice(1).map(index => (index === 255 ? `players/${model}/${weapon}` : this.resource("model", index))),
+    };
   }
   /** Reserve a guest edict for a shared TS monster about to be admitted.
    * Returns the guest slot, or null when no combat profile is declared. */
@@ -371,7 +641,8 @@ export class ClassicGuestServices {
     this.#syncMonsterProxy(actor.id);
   }
   #syncMonsterProxy(actor: ActorId): void {
-    const entry = this.#monsterProxies.get(actor), combat = this.#combat;
+    const entry = this.#monsterProxies.get(actor),
+      combat = this.#combat;
     if (entry === undefined || combat === null) return;
     const body = this.options.engine.bodies.read(actor);
     if (body === null) return;
@@ -379,33 +650,60 @@ export class ClassicGuestServices {
     combat.syncProxyEdict(entry.view, body, state);
     entry.health = state?.health ?? 0;
   }
-  syncMonsterProxies(): void { for (const actor of [...this.#monsterProxies.keys()]) this.#syncMonsterProxy(actor); }
+  syncMonsterProxies(): void {
+    for (const actor of [...this.#monsterProxies.keys()]) this.#syncMonsterProxy(actor);
+  }
   /** After a guest frame, forward guest-inflicted proxy health loss into
    * shared combat so TS pain/death behavior runs; the guest already
    * applied its own damage rules to the proxy fields. */
   forwardMonsterProxyDamage(): void {
-    const combat = this.#combat; if (combat === null) return;
-    const engine = this.options.engine, provenance = this.options.damageProvenance;
+    const combat = this.#combat;
+    if (combat === null) return;
+    const engine = this.options.engine,
+      provenance = this.options.damageProvenance;
     for (const [actor, entry] of [...this.#monsterProxies]) {
       if (!engine.actors.isLive(actor)) {
-        try { combat.freeProxyEdict(entry.view); } finally { this.#monsterProxies.delete(actor); this.#proxyActors[entry.view.slot] = undefined; }
+        try {
+          combat.freeProxyEdict(entry.view);
+        } finally {
+          this.#monsterProxies.delete(actor);
+          this.#proxyActors[entry.view.slot] = undefined;
+        }
         continue;
       }
-      const health = combat.proxyHealth(entry.view), body = engine.bodies.read(actor);
+      const health = combat.proxyHealth(entry.view),
+        body = engine.bodies.read(actor);
       if (body !== null) {
         const guestVelocity = combat.proxyVelocity(entry.view);
         if (guestVelocity.x !== body.velocity.x || guestVelocity.y !== body.velocity.y || guestVelocity.z !== body.velocity.z)
-          engine.bodies.write(this.options.engine.actors.resolveOwned(actor) ?? (() => { throw new Error("Monster proxy actor was released"); })(), { ...body, velocity: guestVelocity });
+          engine.bodies.write(
+            this.options.engine.actors.resolveOwned(actor) ??
+              (() => {
+                throw new Error("Monster proxy actor was released");
+              })(),
+            { ...body, velocity: guestVelocity },
+          );
       }
-      if (health >= entry.health) { entry.health = engine.combat.read(actor)?.health ?? health; continue; }
+      if (health >= entry.health) {
+        entry.health = engine.combat.read(actor)?.health ?? health;
+        continue;
+      }
       const amount = entry.health - health;
       entry.health = health;
       if (provenance === undefined || this.#host === null) continue;
       // T_Damage on a stand-in reaches shared combat with its real attacker (standInActor); this covers
       // health the guest changed without T_Damage, which has no attacker, so the world takes credit.
       const world = engine.actors.atSource(this.#host.options.provider, 0)?.id ?? actor;
-      engine.combat.apply({ target: actor, amount, knockback: 0, direction: { x: 0, y: 0, z: 0 }, point: body?.origin ?? { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 }, delivery: "direct",
-        attack: { ...provenance(world, world, actor), attacker: world, inflictor: world, cause: { kind: "q2", meansOfDeath: 0, damageFlags: 0 } } });
+      engine.combat.apply({
+        target: actor,
+        amount,
+        knockback: 0,
+        direction: { x: 0, y: 0, z: 0 },
+        point: body?.origin ?? { x: 0, y: 0, z: 0 },
+        normal: { x: 0, y: 0, z: 1 },
+        delivery: "direct",
+        attack: { ...provenance(world, world, actor), attacker: world, inflictor: world, cause: { kind: "q2", meansOfDeath: 0, damageFlags: 0 } },
+      });
       entry.health = engine.combat.read(actor)?.health ?? entry.health;
     }
   }
@@ -419,7 +717,19 @@ export class ClassicGuestServices {
       const state = this.entityState(record.slot);
       this.options.engine.emit({ kind: "visibility", actor: actor.id, visible: (record.bytes.getInt32(184, true) & 1) === 0 });
       const appearance = this.modelAppearance(record.slot);
-      this.options.engine.emit({ kind: "model", actor: actor.id, path: appearance.path, attachedModels: appearance.attachedModels, frame: state.frame, oldFrame: state.frame, scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, skin: appearance.skin, effects: state.effects, renderFlags: state.renderEffects });
+      this.options.engine.emit({
+        kind: "model",
+        actor: actor.id,
+        path: appearance.path,
+        attachedModels: appearance.attachedModels,
+        frame: state.frame,
+        oldFrame: state.frame,
+        scale: 1,
+        alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1,
+        skin: appearance.skin,
+        effects: state.effects,
+        renderFlags: state.renderEffects,
+      });
       if (state.event !== 0) this.options.engine.emit({ kind: "entity-event", actor: actor.id, event: state.event });
     }
   }

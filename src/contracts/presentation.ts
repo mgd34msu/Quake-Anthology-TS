@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ProviderId } from "./identity.ts";
 
 /** A component activation, retained with its output across a world checkpoint. */
-export interface PresentationOwner { readonly provider: ProviderId; readonly generation: number; }
+export interface PresentationOwner {
+  readonly provider: ProviderId;
+  readonly generation: number;
+}
 
 export type ComponentPresentationMediaRequest =
   | { readonly kind: "music"; readonly intro: string; readonly loop: string }

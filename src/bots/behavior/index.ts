@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { BotAssetFiles, loadBotAssetFiles, loadMountedBotAssetFiles } from "./assets.ts";
 export type { BotAssetResources, BotSourceFiles } from "./assets.ts";
 export { SourceBotDirector } from "./director.ts";

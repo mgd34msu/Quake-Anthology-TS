@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { ImageResourceOperation, RendererImage, RendererResourceOwner, RenderImage } from "../../src/contracts/render.ts";
 import { RenderImageJournal } from "../../src/render/image-journal.ts";
@@ -15,13 +16,23 @@ test("the journal shares creation content with the frontend and copies update bu
   journal.record({ kind: "update-image", image, level: 0, content: { width: 2, height: 1, pixels } });
   pixels.fill(9);
   const replayed: ImageResourceOperation[] = [];
-  journal.replay({ applyImageResource: operation => { replayed.push(operation); return undefined; } });
+  journal.replay({
+    applyImageResource: operation => {
+      replayed.push(operation);
+      return undefined;
+    },
+  });
   expect(replayed.map(operation => operation.kind)).toEqual(["create-image", "update-image"]);
   const [created, updated] = replayed;
   expect(created?.kind === "create-image" && created.content === content).toBe(true);
   expect(updated?.kind === "update-image" ? [...updated.content.pixels] : []).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   journal.record({ kind: "release-image", image });
   const after: ImageResourceOperation[] = [];
-  journal.replay({ applyImageResource: operation => { after.push(operation); return undefined; } });
+  journal.replay({
+    applyImageResource: operation => {
+      after.push(operation);
+      return undefined;
+    },
+  });
   expect(after).toEqual([]);
 });

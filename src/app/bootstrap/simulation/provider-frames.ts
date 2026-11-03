@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ClockProfile, FrameContext } from "../../../contracts/time.ts";
 
 function startsInterval(profile: ClockProfile): boolean {

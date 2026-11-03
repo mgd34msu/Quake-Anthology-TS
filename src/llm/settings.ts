@@ -1,4 +1,13 @@
-import { apiModel, discoverApiModels, discoverCodexModels, fastestReasoningEffort, parseReasoningEffort, type LlmModel, type LlmModelCatalog } from "./models.ts";
+// SPDX-License-Identifier: GPL-2.0-or-later
+import {
+  apiModel,
+  discoverApiModels,
+  discoverCodexModels,
+  fastestReasoningEffort,
+  parseReasoningEffort,
+  type LlmModel,
+  type LlmModelCatalog,
+} from "./models.ts";
 import { requestChatCompletions, requestOpenAiResponses } from "./api.ts";
 import { requestCodex } from "./codex.ts";
 import { checkRequestAbort, withRequestAbort, type LlmRequestInput, type LlmRequestOptions, type TransportRequest } from "./request.ts";
@@ -6,11 +15,23 @@ import { LlmHttpError, LlmSettingsError } from "./errors.ts";
 import { chmod, mkdir, open, readFile, rm } from "node:fs/promises";
 import { renameSync } from "node:fs";
 import { resolve } from "node:path";
-import { checkAbort, loginSubscription, parseSubscription, record, refreshSubscription, type SubscriptionAuthOptions, type SubscriptionCredential } from "./auth.ts";
+import {
+  checkAbort,
+  loginSubscription,
+  parseSubscription,
+  record,
+  refreshSubscription,
+  type SubscriptionAuthOptions,
+  type SubscriptionCredential,
+} from "./auth.ts";
 import { LlmSession } from "./session.ts";
 
 export type LlmProvider = "chatgpt-subscription" | "chatgpt-api" | "other-api";
-export interface OtherService { readonly baseUrl: string; readonly model: string; readonly transport: "openai-chat-completions" }
+export interface OtherService {
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly transport: "openai-chat-completions";
+}
 export type SubscriptionAuthState = { readonly status: "idle" } | { readonly status: "pending" } | { readonly status: "error"; readonly message: string };
 export interface LlmSettingsSnapshot {
   readonly provider: LlmProvider;
@@ -19,16 +40,34 @@ export interface LlmSettingsSnapshot {
   readonly reasoningEfforts: Readonly<Record<LlmProvider, string | null>>;
   readonly catalogs: Readonly<Record<LlmProvider, LlmModelCatalog>>;
   readonly providers: {
-    readonly "chatgpt-subscription": { readonly configured: boolean; readonly model: string; readonly transport: "openai-codex-responses-sse"; readonly expiresAt: number | null };
+    readonly "chatgpt-subscription": {
+      readonly configured: boolean;
+      readonly model: string;
+      readonly transport: "openai-codex-responses-sse";
+      readonly expiresAt: number | null;
+    };
     readonly "chatgpt-api": { readonly configured: boolean; readonly model: string; readonly transport: "openai-responses-sse" };
     readonly "other-api": OtherService & { readonly configured: boolean };
   };
   readonly subscriptionAuth: SubscriptionAuthState;
   readonly errors: readonly { readonly file: string; readonly message: string }[];
 }
-interface ChatgptCredentials { readonly version: 1; readonly apiKey: string | null; readonly subscription: SubscriptionCredential | null }
-interface Preferences { readonly version: 1; readonly provider: LlmProvider; readonly models: Record<"chatgpt-subscription" | "chatgpt-api", string>; readonly reasoningEfforts: Record<LlmProvider, string | null> }
-export interface LlmSettingsOptions { readonly baseDirectory: string; readonly auth?: SubscriptionAuthOptions; readonly request?: LlmRequestOptions }
+interface ChatgptCredentials {
+  readonly version: 1;
+  readonly apiKey: string | null;
+  readonly subscription: SubscriptionCredential | null;
+}
+interface Preferences {
+  readonly version: 1;
+  readonly provider: LlmProvider;
+  readonly models: Record<"chatgpt-subscription" | "chatgpt-api", string>;
+  readonly reasoningEfforts: Record<LlmProvider, string | null>;
+}
+export interface LlmSettingsOptions {
+  readonly baseDirectory: string;
+  readonly auth?: SubscriptionAuthOptions;
+  readonly request?: LlmRequestOptions;
+}
 
 function provider(value: unknown): LlmProvider {
   if (value === "chatgpt-subscription" || value === "chatgpt-api" || value === "other-api") return value;
@@ -39,35 +78,66 @@ function model(value: unknown): string {
   return value.trim();
 }
 function apiKey(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > 16_384 || /\s/.test(value.trim())) throw new LlmSettingsError("Paste a nonempty API key without whitespace.");
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > 16_384 || /\s/.test(value.trim()))
+    throw new LlmSettingsError("Paste a nonempty API key without whitespace.");
   return value.trim();
 }
 function otherService(value: unknown): OtherService {
   const item = record(value);
-  if (item["transport"] !== "openai-chat-completions" || typeof item["baseUrl"] !== "string") throw new LlmSettingsError("Other API requires an OpenAI Chat Completions compatible service.");
+  if (item["transport"] !== "openai-chat-completions" || typeof item["baseUrl"] !== "string")
+    throw new LlmSettingsError("Other API requires an OpenAI Chat Completions compatible service.");
   let url: URL;
-  try { url = new URL(item["baseUrl"]); } catch { throw new LlmSettingsError("Enter a valid Other API base URL."); }
+  try {
+    url = new URL(item["baseUrl"]);
+  } catch {
+    throw new LlmSettingsError("Enter a valid Other API base URL.");
+  }
   const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback) || url.username || url.password || url.search || url.hash) throw new LlmSettingsError("Use HTTPS or loopback HTTP, without URL credentials, query, or fragment.");
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) || url.username || url.password || url.search || url.hash)
+    throw new LlmSettingsError("Use HTTPS or loopback HTTP, without URL credentials, query, or fragment.");
   return { baseUrl: url.toString().replace(/\/$/, ""), model: model(item["model"]), transport: "openai-chat-completions" };
 }
 function parseJson(text: string): unknown {
-  try { const value: unknown = JSON.parse(text); return value; }
-  catch { throw new LlmSettingsError("Invalid LLM settings file. Check its format before saving."); }
+  try {
+    const value: unknown = JSON.parse(text);
+    return value;
+  } catch {
+    throw new LlmSettingsError("Invalid LLM settings file. Check its format before saving.");
+  }
 }
 function parseChatgpt(text: string | null): ChatgptCredentials {
   if (text === null) return { version: 1, apiKey: null, subscription: null };
   if (!text.trimStart().startsWith("{")) return { version: 1, apiKey: apiKey(text), subscription: null };
   const value = record(parseJson(text));
   if (value["version"] !== 1) throw new LlmSettingsError("Unsupported chatgpt.key format.");
-  return { version: 1, apiKey: value["apiKey"] === null || value["apiKey"] === undefined ? null : apiKey(value["apiKey"]),
-    subscription: value["subscription"] === null || value["subscription"] === undefined ? null : parseSubscription(value["subscription"]) };
+  return {
+    version: 1,
+    apiKey: value["apiKey"] === null || value["apiKey"] === undefined ? null : apiKey(value["apiKey"]),
+    subscription: value["subscription"] === null || value["subscription"] === undefined ? null : parseSubscription(value["subscription"]),
+  };
 }
 function parsePreferences(text: string | null): Preferences {
-  if (text === null) return { version: 1, provider: "chatgpt-subscription", models: { "chatgpt-subscription": "", "chatgpt-api": "" }, reasoningEfforts: { "chatgpt-subscription": null, "chatgpt-api": null, "other-api": null } };
-  const value = record(parseJson(text)), models = record(value["models"]), efforts = record(value["reasoningEfforts"] ?? {});
+  if (text === null)
+    return {
+      version: 1,
+      provider: "chatgpt-subscription",
+      models: { "chatgpt-subscription": "", "chatgpt-api": "" },
+      reasoningEfforts: { "chatgpt-subscription": null, "chatgpt-api": null, "other-api": null },
+    };
+  const value = record(parseJson(text)),
+    models = record(value["models"]),
+    efforts = record(value["reasoningEfforts"] ?? {});
   if (value["version"] !== 1) throw new LlmSettingsError("Unsupported llm.json format.");
-  return { version: 1, provider: provider(value["provider"]), models: { "chatgpt-subscription": model(models["chatgpt-subscription"]), "chatgpt-api": model(models["chatgpt-api"]) }, reasoningEfforts: { "chatgpt-subscription": parseReasoningEffort(efforts["chatgpt-subscription"]), "chatgpt-api": parseReasoningEffort(efforts["chatgpt-api"]), "other-api": parseReasoningEffort(efforts["other-api"]) } };
+  return {
+    version: 1,
+    provider: provider(value["provider"]),
+    models: { "chatgpt-subscription": model(models["chatgpt-subscription"]), "chatgpt-api": model(models["chatgpt-api"]) },
+    reasoningEfforts: {
+      "chatgpt-subscription": parseReasoningEffort(efforts["chatgpt-subscription"]),
+      "chatgpt-api": parseReasoningEffort(efforts["chatgpt-api"]),
+      "other-api": parseReasoningEffort(efforts["other-api"]),
+    },
+  };
 }
 
 export class LlmSettingsService {
@@ -86,46 +156,81 @@ export class LlmSettingsService {
   private closed = false;
   private readonly errors = new Map<string, string>();
   private readonly catalogs: Record<LlmProvider, LlmModelCatalog> = {
-    "chatgpt-subscription": { status: "idle", models: [] }, "chatgpt-api": { status: "idle", models: [] }, "other-api": { status: "idle", models: [] },
+    "chatgpt-subscription": { status: "idle", models: [] },
+    "chatgpt-api": { status: "idle", models: [] },
+    "other-api": { status: "idle", models: [] },
   };
   private readonly catalogGenerations = new Map<LlmProvider, number>();
   /** Created with the service and reused for every game until `close()` at program exit. */
-  private readonly session = new LlmSession(input => this.requestDirect(input), () => this.sessionFingerprint());
+  private readonly session = new LlmSession(
+    input => this.requestDirect(input),
+    () => this.sessionFingerprint(),
+  );
 
-  private constructor(options: LlmSettingsOptions) { this.baseDirectory = resolve(options.baseDirectory); this.auth = options.auth ?? {}; this.requestOptions = options.request ?? {}; }
+  private constructor(options: LlmSettingsOptions) {
+    this.baseDirectory = resolve(options.baseDirectory);
+    this.auth = options.auth ?? {};
+    this.requestOptions = options.request ?? {};
+  }
   static async open(options: LlmSettingsOptions): Promise<LlmSettingsService> {
     const service = new LlmSettingsService(options);
     for (const file of ["llm.json", "chatgpt.key", "other.key", "other.service"]) {
       try {
         const text = await service.load(file);
         switch (file) {
-          case "llm.json": service.preferences = parsePreferences(text); break;
-          case "chatgpt.key": service.chatgpt = parseChatgpt(text); break;
-          case "other.key": service.otherKey = text === null ? null : apiKey(text); break;
-          case "other.service": if (text !== null) service.other = otherService(parseJson(text)); break;
+          case "llm.json":
+            service.preferences = parsePreferences(text);
+            break;
+          case "chatgpt.key":
+            service.chatgpt = parseChatgpt(text);
+            break;
+          case "other.key":
+            service.otherKey = text === null ? null : apiKey(text);
+            break;
+          case "other.service":
+            if (text !== null) service.other = otherService(parseJson(text));
+            break;
         }
-      } catch { service.errors.set(file, `Could not load ${file}. Check its format and permissions.`); }
+      } catch {
+        service.errors.set(file, `Could not load ${file}. Check its format and permissions.`);
+      }
     }
     return service;
   }
   read(): LlmSettingsSnapshot {
     const providers: LlmSettingsSnapshot["providers"] = {
-      "chatgpt-subscription": { configured: this.chatgpt.subscription !== null, model: this.preferences.models["chatgpt-subscription"], transport: "openai-codex-responses-sse", expiresAt: this.chatgpt.subscription?.expiresAt ?? null },
+      "chatgpt-subscription": {
+        configured: this.chatgpt.subscription !== null,
+        model: this.preferences.models["chatgpt-subscription"],
+        transport: "openai-codex-responses-sse",
+        expiresAt: this.chatgpt.subscription?.expiresAt ?? null,
+      },
       "chatgpt-api": { configured: this.chatgpt.apiKey !== null, model: this.preferences.models["chatgpt-api"], transport: "openai-responses-sse" },
       "other-api": { ...this.other, configured: this.otherKey !== null },
     };
-    return { provider: this.preferences.provider, model: providers[this.preferences.provider].model,
-      reasoningEffort: this.preferences.reasoningEfforts[this.preferences.provider], reasoningEfforts: { ...this.preferences.reasoningEfforts },
-      catalogs: { "chatgpt-subscription": this.copyCatalog("chatgpt-subscription"), "chatgpt-api": this.copyCatalog("chatgpt-api"), "other-api": this.copyCatalog("other-api") }, providers, subscriptionAuth: { ...this.authState }, errors: Array.from(this.errors, ([file, message]) => ({ file, message })) };
+    return {
+      provider: this.preferences.provider,
+      model: providers[this.preferences.provider].model,
+      reasoningEffort: this.preferences.reasoningEfforts[this.preferences.provider],
+      reasoningEfforts: { ...this.preferences.reasoningEfforts },
+      catalogs: {
+        "chatgpt-subscription": this.copyCatalog("chatgpt-subscription"),
+        "chatgpt-api": this.copyCatalog("chatgpt-api"),
+        "other-api": this.copyCatalog("other-api"),
+      },
+      providers,
+      subscriptionAuth: { ...this.authState },
+      errors: Array.from(this.errors, ([file, message]) => ({ file, message })),
+    };
   }
   private async load(name: string): Promise<string | null> {
     try {
-      const path = resolve(this.baseDirectory, name), text = await readFile(path, "utf8");
+      const path = resolve(this.baseDirectory, name),
+        text = await readFile(path, "utf8");
       // Credentials copied in by older versions may be group- or world-readable.
       await chmod(path, 0o600).catch(() => undefined);
       return text;
-    }
-    catch (error) {
+    } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
       throw new LlmSettingsError(`Could not read ${name}.`);
     }
@@ -133,29 +238,48 @@ export class LlmSettingsService {
   /** Explicit preference changes and credential removal replace a malformed file with defaults; saving a new credential still refuses to overwrite one. */
   private async editablePreferences(): Promise<Preferences> {
     const text = await this.load("llm.json");
-    try { return parsePreferences(text); } catch { return parsePreferences(null); }
+    try {
+      return parsePreferences(text);
+    } catch {
+      return parsePreferences(null);
+    }
   }
   private async editableCredentials(): Promise<ReturnType<typeof parseChatgpt>> {
     const text = await this.load("chatgpt.key");
-    try { return parseChatgpt(text); } catch { return parseChatgpt(null); }
+    try {
+      return parseChatgpt(text);
+    } catch {
+      return parseChatgpt(null);
+    }
   }
   private async write(name: string, text: string, signal?: AbortSignal): Promise<void> {
-    const target = resolve(this.baseDirectory, name), temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    const target = resolve(this.baseDirectory, name),
+      temporary = `${target}.${crypto.randomUUID()}.tmp`;
     try {
       await mkdir(this.baseDirectory, { recursive: true });
       const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(text); } finally { await file.close(); }
+      try {
+        await file.writeFile(text);
+      } finally {
+        await file.close();
+      }
       if (signal !== undefined) checkAbort(signal);
       // Check cancellation and commit in one turn so late token results cannot save.
       renameSync(temporary, target);
       this.errors.delete(name);
-    } catch { throw new LlmSettingsError(`Could not save ${name}.`); }
-    finally { await rm(temporary, { force: true }).catch(() => {}); }
+    } catch {
+      throw new LlmSettingsError(`Could not save ${name}.`);
+    } finally {
+      await rm(temporary, { force: true }).catch(() => {});
+    }
   }
   private mutate<T>(action: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new LlmSettingsError("LLM settings are closed."));
     const result = this.queue.then(action);
-    this.queue = result.then(() => {}, () => {});
+    this.queue = result.then(
+      () => {},
+      () => {},
+    );
     return result;
   }
   selectProvider(selected: LlmProvider): Promise<void> {
@@ -163,7 +287,8 @@ export class LlmSettingsService {
     return this.mutate(async () => {
       const current = await this.editablePreferences();
       const next = { ...current, provider: provider(selected) };
-      await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      await this.write("llm.json", JSON.stringify(next) + "\n");
+      this.preferences = next;
       if (current.provider !== next.provider) this.session.invalidate();
     });
   }
@@ -180,45 +305,66 @@ export class LlmSettingsService {
   }
   setModel(selected: LlmProvider, value: string): Promise<void> {
     return this.mutate(async () => {
-      const name = model(value), current = await this.editablePreferences();
-      if (this.catalogs[selected].status === "ready" && !this.catalogs[selected].models.some(item => item.id === name)) throw new LlmSettingsError("Choose a model from the loaded provider list.");
-      const metadata = this.modelMetadata(selected, name), effort = current.reasoningEfforts[selected];
+      const name = model(value),
+        current = await this.editablePreferences();
+      if (this.catalogs[selected].status === "ready" && !this.catalogs[selected].models.some(item => item.id === name))
+        throw new LlmSettingsError("Choose a model from the loaded provider list.");
+      const metadata = this.modelMetadata(selected, name),
+        effort = current.reasoningEfforts[selected];
       // Only an explicit user choice is stored; never persist the provider's default as if chosen.
       const nextEffort = effort !== null && metadata?.reasoningEfforts.includes(effort) ? effort : null;
-      const next: Preferences = { ...current, models: selected === "other-api" ? current.models : { ...current.models, [selected]: name },
-        reasoningEfforts: { ...current.reasoningEfforts, [selected]: nextEffort } };
+      const next: Preferences = {
+        ...current,
+        models: selected === "other-api" ? current.models : { ...current.models, [selected]: name },
+        reasoningEfforts: { ...current.reasoningEfforts, [selected]: nextEffort },
+      };
       if (selected === "other-api") {
         const text = await this.load("other.service");
         const other = otherService({ ...(text === null ? this.other : otherService(parseJson(text))), model: name });
-        await this.write("other.service", JSON.stringify(other) + "\n"); this.other = other;
+        await this.write("other.service", JSON.stringify(other) + "\n");
+        this.other = other;
       }
-      await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      await this.write("llm.json", JSON.stringify(next) + "\n");
+      this.preferences = next;
       if (selected === next.provider) this.session.invalidate();
     });
   }
   setReasoningEffort(selected: LlmProvider, value: string | null): Promise<void> {
     return this.mutate(async () => {
-      const effort = parseReasoningEffort(value), current = await this.editablePreferences();
+      const effort = parseReasoningEffort(value),
+        current = await this.editablePreferences();
       const name = selected === "other-api" ? this.other.model : current.models[selected];
-      if (effort !== null && !this.modelMetadata(selected, name)?.reasoningEfforts.includes(effort)) throw new LlmSettingsError("Choose a reasoning effort supported by the selected model.");
+      if (effort !== null && !this.modelMetadata(selected, name)?.reasoningEfforts.includes(effort))
+        throw new LlmSettingsError("Choose a reasoning effort supported by the selected model.");
       const next = { ...current, reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort } };
-      await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      await this.write("llm.json", JSON.stringify(next) + "\n");
+      this.preferences = next;
       if (selected === next.provider && current.reasoningEfforts[selected] !== effort) this.session.invalidate();
     });
   }
   saveOtherService(value: OtherService): Promise<void> {
     return this.mutate(async () => {
-      const next = otherService(value), connectionChanged = next.baseUrl !== this.other.baseUrl, modelChanged = next.model !== this.other.model;
-      if (!connectionChanged && modelChanged && this.catalogs["other-api"].status === "ready"
-        && !this.catalogs["other-api"].models.some(item => item.id === next.model)) throw new LlmSettingsError("Choose a model from the loaded provider list.");
-      await this.write("other.service", JSON.stringify(next) + "\n"); this.other = next;
+      const next = otherService(value),
+        connectionChanged = next.baseUrl !== this.other.baseUrl,
+        modelChanged = next.model !== this.other.model;
+      if (
+        !connectionChanged &&
+        modelChanged &&
+        this.catalogs["other-api"].status === "ready" &&
+        !this.catalogs["other-api"].models.some(item => item.id === next.model)
+      )
+        throw new LlmSettingsError("Choose a model from the loaded provider list.");
+      await this.write("other.service", JSON.stringify(next) + "\n");
+      this.other = next;
       if (connectionChanged) this.invalidateCatalog("other-api");
       if (connectionChanged || modelChanged) {
         const current = await this.editablePreferences();
-        const metadata = this.modelMetadata("other-api", next.model), previousEffort = current.reasoningEfforts["other-api"];
+        const metadata = this.modelMetadata("other-api", next.model),
+          previousEffort = current.reasoningEfforts["other-api"];
         const effort = previousEffort !== null && metadata?.reasoningEfforts.includes(previousEffort) ? previousEffort : null;
         const preferences = { ...current, reasoningEfforts: { ...current.reasoningEfforts, "other-api": effort } };
-        await this.write("llm.json", JSON.stringify(preferences) + "\n"); this.preferences = preferences;
+        await this.write("llm.json", JSON.stringify(preferences) + "\n");
+        this.preferences = preferences;
       }
       if (this.preferences.provider === "other-api" && (connectionChanged || modelChanged)) this.session.invalidate();
     });
@@ -228,58 +374,74 @@ export class LlmSettingsService {
     this.catalogGenerations.set(selected, generation);
     const previous = this.catalogs[selected].models;
     this.catalogs[selected] = { status: "loading", models: previous };
-    return this.runRequest(async signal => {
-      const fetcher = this.requestOptions.fetch ?? fetch;
-      let models: readonly LlmModel[];
-      if (selected === "chatgpt-subscription") {
-        const credential = await this.freshSubscription(signal);
-        try { models = await discoverCodexModels(credential, fetcher, signal); }
-        catch (error) {
-          if (!(error instanceof LlmHttpError) || error.status !== 401 && error.status !== 403) throw error;
-          models = await discoverCodexModels(await this.freshSubscription(signal, credential.accessToken), fetcher, signal);
+    return this.runRequest(
+      async signal => {
+        const fetcher = this.requestOptions.fetch ?? fetch;
+        let models: readonly LlmModel[];
+        if (selected === "chatgpt-subscription") {
+          const credential = await this.freshSubscription(signal);
+          try {
+            models = await discoverCodexModels(credential, fetcher, signal);
+          } catch (error) {
+            if (!(error instanceof LlmHttpError) || (error.status !== 401 && error.status !== 403)) throw error;
+            models = await discoverCodexModels(await this.freshSubscription(signal, credential.accessToken), fetcher, signal);
+          }
+        } else {
+          const key = selected === "chatgpt-api" ? parseChatgpt(await this.load("chatgpt.key")).apiKey : await this.load("other.key");
+          if (key === null) throw new LlmSettingsError("Paste an API key before loading models.");
+          const other = selected === "other-api" ? otherService(parseJson((await this.load("other.service")) ?? "{}")) : null;
+          models = await discoverApiModels(other?.baseUrl ?? "https://api.openai.com/v1", apiKey(key), selected === "chatgpt-api", fetcher, signal);
         }
-      } else {
-        const key = selected === "chatgpt-api" ? parseChatgpt(await this.load("chatgpt.key")).apiKey : await this.load("other.key");
-        if (key === null) throw new LlmSettingsError("Paste an API key before loading models.");
-        const other = selected === "other-api" ? otherService(parseJson(await this.load("other.service") ?? "{}")) : null;
-        models = await discoverApiModels(other?.baseUrl ?? "https://api.openai.com/v1", apiKey(key), selected === "chatgpt-api", fetcher, signal);
-      }
-      checkRequestAbort(signal);
-      if (this.catalogGenerations.get(selected) !== generation) return models;
-      this.catalogs[selected] = { status: "ready", models };
-      await this.mutate(async () => {
-        if (this.catalogGenerations.get(selected) !== generation) return;
         checkRequestAbort(signal);
-        const current = await this.editablePreferences();
-        const name = selected === "other-api" ? this.other.model : current.models[selected];
-        const selectedModel = models.find(item => item.id === name) ?? (name === "" ? models.find(item => item.recommended) : undefined);
-        const defaultModel = name === "" ? selectedModel : undefined;
-        const oldEffort = current.reasoningEfforts[selected];
-        const effort = oldEffort !== null && !selectedModel?.reasoningEfforts.includes(oldEffort) ? null : oldEffort;
-        if (defaultModel === undefined && effort === oldEffort) return;
-        const next = { ...current, models: defaultModel !== undefined && selected !== "other-api" ? { ...current.models, [selected]: defaultModel.id } : current.models,
-          reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort } };
-        if (defaultModel !== undefined && selected === "other-api") {
-          const other = { ...this.other, model: defaultModel.id };
-          await this.write("other.service", JSON.stringify(other) + "\n", signal); this.other = other;
-        }
-        await this.write("llm.json", JSON.stringify(next) + "\n", signal); this.preferences = next;
-      });
-      return this.copyCatalog(selected).models;
-    }, caller, Math.min(this.requestOptions.timeoutMs ?? 30_000, 30_000)).catch((error: unknown) => {
-      if (this.catalogGenerations.get(selected) === generation) this.catalogs[selected] = caller?.aborted || this.closed
-        ? { status: "idle", models: previous }
-        : { status: "error", models: previous, message: error instanceof LlmSettingsError ? error.message : "Could not load models. Try Refresh models." };
+        if (this.catalogGenerations.get(selected) !== generation) return models;
+        this.catalogs[selected] = { status: "ready", models };
+        await this.mutate(async () => {
+          if (this.catalogGenerations.get(selected) !== generation) return;
+          checkRequestAbort(signal);
+          const current = await this.editablePreferences();
+          const name = selected === "other-api" ? this.other.model : current.models[selected];
+          const selectedModel = models.find(item => item.id === name) ?? (name === "" ? models.find(item => item.recommended) : undefined);
+          const defaultModel = name === "" ? selectedModel : undefined;
+          const oldEffort = current.reasoningEfforts[selected];
+          const effort = oldEffort !== null && !selectedModel?.reasoningEfforts.includes(oldEffort) ? null : oldEffort;
+          if (defaultModel === undefined && effort === oldEffort) return;
+          const next = {
+            ...current,
+            models: defaultModel !== undefined && selected !== "other-api" ? { ...current.models, [selected]: defaultModel.id } : current.models,
+            reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort },
+          };
+          if (defaultModel !== undefined && selected === "other-api") {
+            const other = { ...this.other, model: defaultModel.id };
+            await this.write("other.service", JSON.stringify(other) + "\n", signal);
+            this.other = other;
+          }
+          await this.write("llm.json", JSON.stringify(next) + "\n", signal);
+          this.preferences = next;
+        });
+        return this.copyCatalog(selected).models;
+      },
+      caller,
+      Math.min(this.requestOptions.timeoutMs ?? 30_000, 30_000),
+    ).catch((error: unknown) => {
+      if (this.catalogGenerations.get(selected) === generation)
+        this.catalogs[selected] =
+          caller?.aborted || this.closed
+            ? { status: "idle", models: previous }
+            : { status: "error", models: previous, message: error instanceof LlmSettingsError ? error.message : "Could not load models. Try Refresh models." };
       throw error;
     });
   }
   saveApiKey(selected: "chatgpt-api" | "other-api", value: string): Promise<void> {
     return this.mutate(async () => {
       const key = apiKey(value);
-      if (selected === "other-api") { await this.write("other.key", key + "\n"); this.otherKey = key; }
-      else {
-        const current = parseChatgpt(await this.load("chatgpt.key")), next = { ...current, apiKey: key };
-        await this.write("chatgpt.key", JSON.stringify(next) + "\n"); this.chatgpt = next;
+      if (selected === "other-api") {
+        await this.write("other.key", key + "\n");
+        this.otherKey = key;
+      } else {
+        const current = parseChatgpt(await this.load("chatgpt.key")),
+          next = { ...current, apiKey: key };
+        await this.write("chatgpt.key", JSON.stringify(next) + "\n");
+        this.chatgpt = next;
       }
       this.invalidateCatalog(selected);
       if (selected === this.preferences.provider) this.session.invalidate();
@@ -289,13 +451,18 @@ export class LlmSettingsService {
     if (selected === "chatgpt-subscription") this.cancelSignIn();
     return this.mutate(async () => {
       if (selected === "other-api") {
-        try { await rm(resolve(this.baseDirectory, "other.key"), { force: true }); } catch { throw new LlmSettingsError("Could not remove other.key."); }
+        try {
+          await rm(resolve(this.baseDirectory, "other.key"), { force: true });
+        } catch {
+          throw new LlmSettingsError("Could not remove other.key.");
+        }
         this.otherKey = null;
         this.errors.delete("other.key");
       } else {
         const current = await this.editableCredentials();
         const next: ChatgptCredentials = selected === "chatgpt-api" ? { ...current, apiKey: null } : { ...current, subscription: null };
-        await this.write("chatgpt.key", JSON.stringify(next) + "\n"); this.chatgpt = next;
+        await this.write("chatgpt.key", JSON.stringify(next) + "\n");
+        this.chatgpt = next;
       }
       this.invalidateCatalog(selected);
       if (selected === this.preferences.provider) this.session.invalidate();
@@ -315,8 +482,10 @@ export class LlmSettingsService {
         checkAbort(controller.signal);
         await this.mutate(async () => {
           checkAbort(controller.signal);
-          const current = parseChatgpt(await this.load("chatgpt.key")), next = { ...current, subscription: credential };
-          await this.write("chatgpt.key", JSON.stringify(next) + "\n", controller.signal); this.chatgpt = next;
+          const current = parseChatgpt(await this.load("chatgpt.key")),
+            next = { ...current, subscription: credential };
+          await this.write("chatgpt.key", JSON.stringify(next) + "\n", controller.signal);
+          this.chatgpt = next;
           this.invalidateCatalog("chatgpt-subscription");
           if (this.preferences.provider === "chatgpt-subscription") this.session.invalidate();
         });
@@ -327,12 +496,16 @@ export class LlmSettingsService {
           this.authState = { status: "error", message };
           throw new LlmSettingsError(message);
         }
-      } finally { if (this.active?.controller === controller) this.active = null; }
+      } finally {
+        if (this.active?.controller === controller) this.active = null;
+      }
     })();
     this.active = { controller, promise };
     return promise;
   }
-  signInSubscription(): Promise<void> { return this.authenticate(signal => loginSubscription(this.auth, signal)); }
+  signInSubscription(): Promise<void> {
+    return this.authenticate(signal => loginSubscription(this.auth, signal));
+  }
   refreshSubscription(): Promise<void> {
     return this.runRequest(async signal => {
       const current = await this.loadSubscription();
@@ -347,11 +520,17 @@ export class LlmSettingsService {
   private async freshSubscription(signal: AbortSignal, rejectedAccessToken?: string): Promise<SubscriptionCredential> {
     checkRequestAbort(signal);
     const credential = await this.loadSubscription();
-    if (rejectedAccessToken !== undefined && credential.accessToken !== rejectedAccessToken
-      || rejectedAccessToken === undefined && credential.expiresAt > Date.now() + 60_000) return credential;
+    if (
+      (rejectedAccessToken !== undefined && credential.accessToken !== rejectedAccessToken) ||
+      (rejectedAccessToken === undefined && credential.expiresAt > Date.now() + 60_000)
+    )
+      return credential;
     let shared = this.refreshing;
     if (shared !== null && shared.controller.signal.aborted) {
-      await withRequestAbort(shared.promise.catch(() => undefined), signal);
+      await withRequestAbort(
+        shared.promise.catch(() => undefined),
+        signal,
+      );
       return await this.freshSubscription(signal, rejectedAccessToken);
     }
     if (shared === null) {
@@ -361,8 +540,11 @@ export class LlmSettingsService {
       const promise = (async () => {
         const before = await this.loadSubscription();
         checkRequestAbort(controller.signal);
-        if (rejectedAccessToken !== undefined && before.accessToken !== rejectedAccessToken
-          || rejectedAccessToken === undefined && before.expiresAt > Date.now() + 60_000) return before;
+        if (
+          (rejectedAccessToken !== undefined && before.accessToken !== rejectedAccessToken) ||
+          (rejectedAccessToken === undefined && before.expiresAt > Date.now() + 60_000)
+        )
+          return before;
         const refreshed = await refreshSubscription(this.auth, before, controller.signal);
         checkRequestAbort(controller.signal);
         return await this.mutate(async () => {
@@ -374,7 +556,10 @@ export class LlmSettingsService {
           this.chatgpt = next;
           return refreshed;
         });
-      })().finally(() => { clearTimeout(timer); if (this.refreshing?.controller === controller) this.refreshing = null; });
+      })().finally(() => {
+        clearTimeout(timer);
+        if (this.refreshing?.controller === controller) this.refreshing = null;
+      });
       shared = { controller, promise };
       this.refreshing = shared;
     }
@@ -388,7 +573,10 @@ export class LlmSettingsService {
     caller?.addEventListener("abort", stop, { once: true });
     if (caller?.aborted) controller.abort();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     const promise = (async () => {
       try {
         checkRequestAbort(controller.signal);
@@ -400,16 +588,23 @@ export class LlmSettingsService {
         checkRequestAbort(controller.signal);
         if (error instanceof LlmSettingsError) throw error;
         throw new LlmSettingsError("LLM request failed. Check the selected service and try again.");
-      } finally { clearTimeout(timer); caller?.removeEventListener("abort", stop); this.requests.delete(controller); }
+      } finally {
+        clearTimeout(timer);
+        caller?.removeEventListener("abort", stop);
+        this.requests.delete(controller);
+      }
     })();
     this.requests.set(controller, promise);
     return promise;
   }
-  get sessionId(): string { return this.session.id; }
+  get sessionId(): string {
+    return this.session.id;
+  }
 
   /** Open/warm the one process-lifetime session without printing or executing anything. */
   prime(instructions: string): Promise<void> {
-    const snapshot = this.read(), selected = snapshot.providers[snapshot.provider];
+    const snapshot = this.read(),
+      selected = snapshot.providers[snapshot.provider];
     if (this.closed || !selected.configured || selected.model.trim() === "") return Promise.resolve();
     return this.session.prime(instructions);
   }
@@ -420,9 +615,15 @@ export class LlmSettingsService {
   }
 
   private sessionFingerprint(): string {
-    const snapshot = this.read(), selected = snapshot.providers[snapshot.provider];
-    return JSON.stringify([snapshot.provider, selected.model, snapshot.reasoningEffort, selected.configured,
-      snapshot.provider === "other-api" ? snapshot.providers["other-api"].baseUrl : ""]);
+    const snapshot = this.read(),
+      selected = snapshot.providers[snapshot.provider];
+    return JSON.stringify([
+      snapshot.provider,
+      selected.model,
+      snapshot.reasoningEffort,
+      selected.configured,
+      snapshot.provider === "other-api" ? snapshot.providers["other-api"].baseUrl : "",
+    ]);
   }
 
   private requestDirect(input: LlmRequestInput): Promise<string> {
@@ -431,24 +632,32 @@ export class LlmSettingsService {
       if (input.prompt.trim() === "") throw new LlmSettingsError("Enter a question or command request.");
       const fetcher = this.requestOptions.fetch ?? fetch;
       const selected = preferences.provider;
-      const other = selected === "other-api" ? otherService(parseJson(await this.load("other.service") ?? "{}")) : null;
-      const selectedModel = selected === "other-api" ? other?.model ?? "" : preferences.models[selected];
+      const other = selected === "other-api" ? otherService(parseJson((await this.load("other.service")) ?? "{}")) : null;
+      const selectedModel = selected === "other-api" ? (other?.model ?? "") : preferences.models[selected];
       if (selectedModel === "") throw new LlmSettingsError("Choose a Model in LLM options before sending a request.");
       const selectedEffort = preferences.reasoningEfforts[selected];
       if (selectedEffort !== null && this.modelMetadata(selected, selectedModel) === undefined) await this.refreshModels(selected, signal);
       const metadata = this.modelMetadata(selected, selectedModel);
-      if (selectedEffort !== null && !metadata?.reasoningEfforts.includes(selectedEffort)) throw new LlmSettingsError("The selected reasoning effort is not supported by this model. Choose a supported effort or Model default in LLM options.");
+      if (selectedEffort !== null && !metadata?.reasoningEfforts.includes(selectedEffort))
+        throw new LlmSettingsError("The selected reasoning effort is not supported by this model. Choose a supported effort or Model default in LLM options.");
       // Interactive console requests must stay responsive: with no explicit user choice,
       // use the fastest reasoning level the model offers instead of its (slow) default.
       const effort = selectedEffort ?? fastestReasoningEffort(metadata);
-      const request: TransportRequest = { prompt: input.prompt, instructions: input.instructions, model: selectedModel, signal, ...(effort === undefined ? {} : { reasoningEffort: effort }),
+      const request: TransportRequest = {
+        prompt: input.prompt,
+        instructions: input.instructions,
+        model: selectedModel,
+        signal,
+        ...(effort === undefined ? {} : { reasoningEffort: effort }),
         ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-        ...(input.onText === undefined ? {} : { onText: input.onText }) };
+        ...(input.onText === undefined ? {} : { onText: input.onText }),
+      };
       if (selected === "chatgpt-subscription") {
         const credential = await this.freshSubscription(signal);
-        try { return await requestCodex(request, credential, fetcher); }
-        catch (error) {
-          if (!(error instanceof LlmHttpError) || error.status !== 401 && error.status !== 403) throw error;
+        try {
+          return await requestCodex(request, credential, fetcher);
+        } catch (error) {
+          if (!(error instanceof LlmHttpError) || (error.status !== 401 && error.status !== 403)) throw error;
           const refreshed = await this.freshSubscription(signal, credential.accessToken);
           return await requestCodex(request, refreshed, fetcher);
         }
@@ -460,9 +669,14 @@ export class LlmSettingsService {
       return await requestChatCompletions(request, { apiKey: apiKey(key), baseUrl: other.baseUrl }, fetcher);
     }, input.signal);
   }
-  cancelSignIn(): void { this.active?.controller.abort(); this.authState = { status: "idle" }; }
+  cancelSignIn(): void {
+    this.active?.controller.abort();
+    this.authState = { status: "idle" };
+  }
   async close(): Promise<void> {
-    this.closed = true; this.session.close(); this.cancelSignIn();
+    this.closed = true;
+    this.session.close();
+    this.cancelSignIn();
     for (const controller of this.requests.keys()) controller.abort();
     this.refreshing?.controller.abort();
     await Promise.allSettled([...this.requests.values(), this.active?.promise, this.refreshing?.promise]);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's game/ai_main.h, ai_dmq3.h, ai_dmnet.h, inv.h, chars.h, match.h and syn.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -54,11 +55,28 @@ export const CTF_RUSHBASE_TIME = 120;
 export const CTF_RETURNFLAG_TIME = 180;
 export const CTF_ROAM_TIME = 60;
 
-export enum BotPatrolFlag { LOOP = 1, REVERSE = 2, BACK = 4 }
-export enum BotTeamTaskPreference { DEFENDER = 1, ATTACKER = 2 }
-export enum BotCtfStrategy { AGRESSIVE = 1 }
-export enum BotPresenceType { NONE = 1, NORMAL = 2, CROUCH = 4 }
-export enum BotCtfFlag { NONE = 0, RED = 1, BLUE = 2 }
+export enum BotPatrolFlag {
+  LOOP = 1,
+  REVERSE = 2,
+  BACK = 4,
+}
+export enum BotTeamTaskPreference {
+  DEFENDER = 1,
+  ATTACKER = 2,
+}
+export enum BotCtfStrategy {
+  AGRESSIVE = 1,
+}
+export enum BotPresenceType {
+  NONE = 1,
+  NORMAL = 2,
+  CROUCH = 4,
+}
+export enum BotCtfFlag {
+  NONE = 0,
+  RED = 1,
+  BLUE = 2,
+}
 export const CTF_SKIN_REDTEAM = "red";
 export const CTF_SKIN_BLUETEAM = "blue";
 

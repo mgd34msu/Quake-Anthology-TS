@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,21 +20,38 @@ import { SoftwareRenderer } from "../../src/render/cpu/rasterizer.ts";
 test("seat controls and archived cvars survive actual config files", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-settings-"));
   try {
-    const store = new ConfigStore(root), owner = createIdentityOwner("config");
+    const store = new ConfigStore(root),
+      owner = createIdentityOwner("config");
     const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat: owner.seat(1), client: owner.client(1, 0) } };
-    const cvars = new CvarRegistry({ dialect: "q3", context }), commands = new CommandBuffer({ dialect: "q3", context, cvars });
-    cvars.register("sensitivity", "3", CvarFlag.Archive); cvars.set("sensitivity", "4.5");
-    const settings: SeatSettings = { version: 1, bindings: defaultBindings(17), gamepad: defaultGamepadTuning,
-      mouse: defaultMouseTuning, history: ["map q3dm1"], rumble: true, controller: { kind: "automatic" } };
-    await store.saveSeat("seat-2.json", settings); expect(await store.loadSeat("seat-2.json")).toEqual({ ...settings, rumbleStrength: 1 });
-    await store.saveCvars("config.cfg", cvars); cvars.set("sensitivity", "1");
-    await store.execute("config.cfg", commands, context); commands.execute();
+    const cvars = new CvarRegistry({ dialect: "q3", context }),
+      commands = new CommandBuffer({ dialect: "q3", context, cvars });
+    cvars.register("sensitivity", "3", CvarFlag.Archive);
+    cvars.set("sensitivity", "4.5");
+    const settings: SeatSettings = {
+      version: 1,
+      bindings: defaultBindings(17),
+      gamepad: defaultGamepadTuning,
+      mouse: defaultMouseTuning,
+      history: ["map q3dm1"],
+      rumble: true,
+      controller: { kind: "automatic" },
+    };
+    await store.saveSeat("seat-2.json", settings);
+    expect(await store.loadSeat("seat-2.json")).toEqual({ ...settings, rumbleStrength: 1 });
+    await store.saveCvars("config.cfg", cvars);
+    cvars.set("sensitivity", "1");
+    await store.execute("config.cfg", commands, context);
+    commands.execute();
     expect(cvars.variableString("sensitivity")).toBe("4.5");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 test("Unicode editing and completion keep remaining arguments", () => {
-  const field = new ConsoleField(); field.insert("hé🙂");
-  field.key(127, false, false, () => null); expect(field.text).toBe("hé");
+  const field = new ConsoleField();
+  field.insert("hé🙂");
+  field.key(127, false, false, () => null);
+  expect(field.text).toBe("hé");
   expect(completeCommand("vid_r", ["vid_restart", "vid_ref"]).text).toBe("vid_re");
   expect(completeCommand("/map q3dm1", ["map"]).text).toBe("/map q3dm1");
 });
@@ -42,16 +60,31 @@ test("capture writes PNG bytes from the actual CPU renderer", async () => {
   try {
     const owner = createIdentityOwner("capture");
     const renderer = new SoftwareRenderer(2, 1, { identity: Symbol("renderer"), session: owner.session, generation: 0 });
-    renderer.beginView({ viewport: { x: 0, y: 0, width: 1, height: 1 }, clipPlane: null, clear: { depth: 1, color: { x: 1, y: 0, z: 0, w: 1 }, stencil: false } });
-    renderer.beginView({ viewport: { x: 1, y: 0, width: 1, height: 1 }, clipPlane: null, clear: { depth: 1, color: { x: 0, y: 1, z: 0, w: 1 }, stencil: false } });
-    const frame = renderer.readRgba(), capture = new FrameCapture(root, renderer);
-    const first = await capture.screenshot(), second = await capture.screenshot();
-    expect(first.path.endsWith("shot0000.png")).toBe(true); expect(second.path.endsWith("shot0001.png")).toBe(true);
+    renderer.beginView({
+      viewport: { x: 0, y: 0, width: 1, height: 1 },
+      clipPlane: null,
+      clear: { depth: 1, color: { x: 1, y: 0, z: 0, w: 1 }, stencil: false },
+    });
+    renderer.beginView({
+      viewport: { x: 1, y: 0, width: 1, height: 1 },
+      clipPlane: null,
+      clear: { depth: 1, color: { x: 0, y: 1, z: 0, w: 1 }, stencil: false },
+    });
+    const frame = renderer.readRgba(),
+      capture = new FrameCapture(root, renderer);
+    const first = await capture.screenshot(),
+      second = await capture.screenshot();
+    expect(first.path.endsWith("shot0000.png")).toBe(true);
+    expect(second.path.endsWith("shot0001.png")).toBe(true);
     const decoded = decodePng(new Uint8Array(await Bun.file(first.path).arrayBuffer()));
     expect(decoded.pixels).toEqual(frame.pixels);
-    const levelshot = await capture.levelshot("maps/q3dm1.bsp"); expect(levelshot.width).toBe(128); expect(levelshot.height).toBe(128);
+    const levelshot = await capture.levelshot("maps/q3dm1.bsp");
+    expect(levelshot.width).toBe(128);
+    expect(levelshot.height).toBe(128);
     renderer.close();
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("common vibration strength uses the existing frontend preference binding", async () => {
@@ -72,7 +105,11 @@ test("gyro tuning profiles persist by seat and serial without calibration bias",
   const root = await mkdtemp(join(tmpdir(), "quake-gyro-"));
   try {
     const store = new ConfigStore(root);
-    const profile = { version: 1, identity: { kind: "device", guid: "a".repeat(32), serial: "pad-A" }, tuning: { ...defaultGamepadTuning.gyro, enabled: true, yawSensitivity: 2.5 } } satisfies import("../../src/settings/config.ts").GyroProfile;
+    const profile = {
+      version: 1,
+      identity: { kind: "device", guid: "a".repeat(32), serial: "pad-A" },
+      tuning: { ...defaultGamepadTuning.gyro, enabled: true, yawSensitivity: 2.5 },
+    } satisfies import("../../src/settings/config.ts").GyroProfile;
     await store.saveGyro("controllers/seat-1/pad-A.json", profile);
     expect(await store.loadGyro("controllers/seat-1/pad-A.json")).toEqual(profile);
     expect(await store.loadGyro("controllers/seat-2/pad-A.json")).toBeNull();
@@ -80,31 +117,42 @@ test("gyro tuning profiles persist by seat and serial without calibration bias",
     expect(JSON.stringify(await store.loadGyro("controllers/seat-1/pad-A.json"))).not.toContain("bias");
     expect(() => parseGyroProfile({ ...profile, identity: { ...profile.identity, serial: "" } })).toThrow("identity");
     expect(() => parseGyroProfile({ ...profile, tuning: { ...profile.tuning, yawSensitivity: Infinity } })).toThrow("finite");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
-
 
 test("Always run seat config preserves false and true and leaves old profiles at source defaults", async () => {
   const { parseSeatSettings } = await import("../../src/settings/config.ts");
   const root = await mkdtemp(join(tmpdir(), "always-run-settings-"));
   try {
     const store = new ConfigStore(root);
-    const profile: SeatSettings = { version: 1, bindings: [], gamepad: defaultGamepadTuning, mouse: defaultMouseTuning,
-      history: [], rumble: true, controller: { kind: "automatic" } };
+    const profile: SeatSettings = {
+      version: 1,
+      bindings: [],
+      gamepad: defaultGamepadTuning,
+      mouse: defaultMouseTuning,
+      history: [],
+      rumble: true,
+      controller: { kind: "automatic" },
+    };
     for (const alwaysRun of [false, true]) {
       await store.saveSeat("input/seat-1.json", { ...profile, alwaysRun });
       expect((await store.loadSeat("input/seat-1.json"))?.alwaysRun).toBe(alwaysRun);
     }
     expect(parseSeatSettings(profile).alwaysRun).toBeUndefined();
     expect(() => parseSeatSettings({ ...profile, alwaysRun: "true" })).toThrow("Expected a settings boolean");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("typed archives preserve local owners and do not execute stored values", async () => {
   const { loadCvarArchive, saveCvarArchive } = await import("../../src/app/bootstrap/cvar-archives.ts");
   const root = await mkdtemp(join(tmpdir(), "quake-cvar-archive-"));
   try {
-    const store = new ConfigStore(root), identity = createIdentityOwner("archive-test");
+    const store = new ConfigStore(root),
+      identity = createIdentityOwner("archive-test");
     const registry = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "local-console" } }, print: () => undefined });
     registry.applyArchive([{ name: "custom", value: "a; quit\nset stolen 1" }]);
     await saveCvarArchive(store, ["client", "q3", "base", "0"], registry);
@@ -116,5 +164,7 @@ test("typed archives preserve local owners and do not execute stored values", as
     expect(restored.find("stolen")).toBeUndefined();
     expect(restored.archiveEntries()).toEqual(entries);
     await expect(loadCvarArchive(store, ["client", "q3", "base", "0"], "q2-classic")).rejects.toThrow("dialect");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { corpusTest, testCorpusRoot } from "../../support/corpus.ts";
 
@@ -23,67 +24,238 @@ import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persis
 const test = corpusTest("q1/rerelease/id1/pak0.pak", "q1/rerelease/ctf/pak0.pak", "q1/rerelease/mg1/pak0.pak");
 async function map(program: Q1SourceProgram, name: string): Promise<Q1Map> {
   const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/${program}/pak0.pak`);
-  try { const path = `maps/${name}.bsp`, entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing ${path}`); return readQ1Bsp(await archive.readEntry(entry), { source: path }); }
-  finally { archive.close(); }
+  try {
+    const path = `maps/${name}.bsp`,
+      entry = archive.findEntries(path)[0];
+    if (entry === undefined) throw new Error(`Missing ${path}`);
+    return readQ1Bsp(await archive.readEntry(entry), { source: path });
+  } finally {
+    archive.close();
+  }
 }
 interface Saved {
   readonly source: Uint8Array;
   readonly slots: ReturnType<SessionActorRegistry["checkpoint"]>;
   readonly sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]>;
   readonly bodies: ReturnType<typeof captureSharedBodies>;
-  readonly combat: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly state: NonNullable<ReturnType<GameplayAuthority["read"]>> }[];
-  readonly inventories: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly entries: ReturnType<SharedInventoryTable["entries"]> }[];
+  readonly combat: readonly {
+    readonly actor: { readonly slot: number; readonly generation: number };
+    readonly state: NonNullable<ReturnType<GameplayAuthority["read"]>>;
+  }[];
+  readonly inventories: readonly {
+    readonly actor: { readonly slot: number; readonly generation: number };
+    readonly entries: ReturnType<SharedInventoryTable["entries"]>;
+  }[];
 }
-function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved, horde = false, deathmatch = program === "ctf" ? 1 : 0, extraCvars: readonly (readonly [string, number])[] = []) {
-  const owner = createIdentityOwner("q1-composition-check"), actors = saved === undefined ? new SessionActorRegistry(owner) : SessionActorRegistry.restore(owner, saved.slots, saved.sources);
-  const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map), players: ActorId[] = [], events: Q1CompositionEvent[] = [];
+function sourceWorld(
+  map: Q1Map,
+  program: Q1SourceProgram,
+  saved?: Saved,
+  horde = false,
+  deathmatch = program === "ctf" ? 1 : 0,
+  extraCvars: readonly (readonly [string, number])[] = [],
+) {
+  const owner = createIdentityOwner("q1-composition-check"),
+    actors = saved === undefined ? new SessionActorRegistry(owner) : SessionActorRegistry.restore(owner, saved.slots, saved.sources);
+  const callbacks = new ActorCallbackTable(actors),
+    scene = createSceneQueries(map),
+    players: ActorId[] = [],
+    events: Q1CompositionEvent[] = [];
   const cvars = new Map<string, number>([["teamplay", program === "ctf" ? 130 : 0], ["horde", horde ? 1 : 0], ...extraCvars]);
-  let runtime: Q1Foundation | null = null, composed: Q1SourceComposition | null = null;
+  let runtime: Q1Foundation | null = null,
+    composed: Q1SourceComposition | null = null;
   const bodies = q1SceneBodies(actors, scene, actor => runtime?.entity(actor));
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; },
-    beforeReaction: (actor, decision) => composed?.beforeReaction(actor, decision), confirmed: () => undefined });
+  const combat = new GameplayAuthority(actors, callbacks, {
+    impulse: (actor, impulse) => {
+      const body = bodies.read(actor.id);
+      if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) });
+      return undefined;
+    },
+    beforeReaction: (actor, decision) => composed?.beforeReaction(actor, decision),
+    confirmed: () => undefined,
+  });
   const inventory = new SharedInventoryTable(actors);
   // These source lifecycle checks do not step monster chase or rider physics.
-  const { host, pending, events: sourceEvents } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => runtime?.world?.actor.id ?? null, entity: actor => runtime?.entity(actor), players: () => players }, {
-    powerup: (actor, kind, until) => { if (kind === "invulnerability") combat.setTraits(actor, { invulnerable: until > 0 }); return undefined; },
-    setGravity: () => undefined,
+  const {
+    host,
+    pending,
+    events: sourceEvents,
+  } = q1TestHost(
+    {
+      actors,
+      callbacks,
+      bodies,
+      combat,
+      inventory,
+      scene,
+      world: () => runtime?.world?.actor.id ?? null,
+      entity: actor => runtime?.entity(actor),
+      players: () => players,
+    },
+    {
+      powerup: (actor, kind, until) => {
+        if (kind === "invulnerability") combat.setTraits(actor, { invulnerable: until > 0 });
+        return undefined;
+      },
+      setGravity: () => undefined,
+    },
+  );
+  const game = new Q1Foundation(host, {
+    edition: "rerelease",
+    skill: 1,
+    coop: false,
+    deathmatch,
+    maxClients: 4,
+    gravity: 800,
+    campaign: `q1:${program}`,
+    combatProvider: "q1:combat",
+    inventoryProvider: "q1:inventory",
+    movementProvider: "q2:movement",
   });
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, coop: false, deathmatch, maxClients: 4, gravity: 800, campaign: `q1:${program}`, combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
+  runtime = game;
   const services: Q1CompositionServices = {
-    cvar: name => cvars.get(name) ?? 0, setCvar: (name, value) => { cvars.set(name, Number(value)); return undefined; }, emit: event => { events.push(event); return undefined; },
-    selectedPlayer: actor => ({ deadFlag: game.health(actor) > 0 ? 0 : 2, isBot: false, viewAngles: bodies.read(actor)?.angles ?? ZERO, viewOffset: { x: 0, y: 0, z: 26 }, frame: 0, waterType: "empty", waterLevel: 0, teleportUntil: game.player(actor)?.teleportUntil ?? 0 }),
-    setObserver: (actor, enabled) => { const owner = actors.resolveOwned(actor); if (owner === null) throw new Error("Missing observer"); combat.setTraits(owner, { canTakeDamage: !enabled }); return undefined; },
-    placePlayer: (actor, spot, travel) => { const body = bodies.read(actor.id); if (body === null || composed === null) throw new Error("Missing respawn body"); bodies.write(actor, { ...body, origin: game.body(spot).origin, bounds: PLAYER_BOUNDS, velocity: ZERO }); combat.setTraits(actor, { canTakeDamage: true }); return composed.admitTravel(actor, travel); },
-    disconnect: actor => { const owner = actors.resolveOwned(actor); if (owner !== null) actors.release(owner); const index = players.indexOf(actor); if (index >= 0) players.splice(index, 1); return undefined; },
-    teleport: (actor, origin, angles, velocity, until) => { const owner = actors.resolveOwned(actor), body = bodies.read(actor); if (owner === null || body === null) throw new Error("Missing teleport body"); bodies.write(owner, { ...body, origin, angles, velocity }); const player = game.player(actor); if (player !== null) player.teleportUntil = until; return undefined; },
-    selectedWeapon: actor => { const player = game.player(actor); return player === null ? null : game.weaponItem(player.weapon); }, selectedAmmo: actor => { const player = game.player(actor); return player === null ? null : game.weaponAmmo(player.weapon); },
-    selectWeapon: (actor, item) => { const player = game.player(actor), weapon = Q1_WEAPON_IDS.find(value => game.weaponItem(value) === item); return player !== null && weapon !== undefined && game.selectWeapon(player.actor, weapon); },
-    weaponChanged: () => undefined, promptSupported: () => true, restartSession: () => undefined, finishCampaign: () => undefined,
+    cvar: name => cvars.get(name) ?? 0,
+    setCvar: (name, value) => {
+      cvars.set(name, Number(value));
+      return undefined;
+    },
+    emit: event => {
+      events.push(event);
+      return undefined;
+    },
+    selectedPlayer: actor => ({
+      deadFlag: game.health(actor) > 0 ? 0 : 2,
+      isBot: false,
+      viewAngles: bodies.read(actor)?.angles ?? ZERO,
+      viewOffset: { x: 0, y: 0, z: 26 },
+      frame: 0,
+      waterType: "empty",
+      waterLevel: 0,
+      teleportUntil: game.player(actor)?.teleportUntil ?? 0,
+    }),
+    setObserver: (actor, enabled) => {
+      const owner = actors.resolveOwned(actor);
+      if (owner === null) throw new Error("Missing observer");
+      combat.setTraits(owner, { canTakeDamage: !enabled });
+      return undefined;
+    },
+    placePlayer: (actor, spot, travel) => {
+      const body = bodies.read(actor.id);
+      if (body === null || composed === null) throw new Error("Missing respawn body");
+      bodies.write(actor, { ...body, origin: game.body(spot).origin, bounds: PLAYER_BOUNDS, velocity: ZERO });
+      combat.setTraits(actor, { canTakeDamage: true });
+      return composed.admitTravel(actor, travel);
+    },
+    disconnect: actor => {
+      const owner = actors.resolveOwned(actor);
+      if (owner !== null) actors.release(owner);
+      const index = players.indexOf(actor);
+      if (index >= 0) players.splice(index, 1);
+      return undefined;
+    },
+    teleport: (actor, origin, angles, velocity, until) => {
+      const owner = actors.resolveOwned(actor),
+        body = bodies.read(actor);
+      if (owner === null || body === null) throw new Error("Missing teleport body");
+      bodies.write(owner, { ...body, origin, angles, velocity });
+      const player = game.player(actor);
+      if (player !== null) player.teleportUntil = until;
+      return undefined;
+    },
+    selectedWeapon: actor => {
+      const player = game.player(actor);
+      return player === null ? null : game.weaponItem(player.weapon);
+    },
+    selectedAmmo: actor => {
+      const player = game.player(actor);
+      return player === null ? null : game.weaponAmmo(player.weapon);
+    },
+    selectWeapon: (actor, item) => {
+      const player = game.player(actor),
+        weapon = Q1_WEAPON_IDS.find(value => game.weaponItem(value) === item);
+      return player !== null && weapon !== undefined && game.selectWeapon(player.actor, weapon);
+    },
+    weaponChanged: () => undefined,
+    promptSupported: () => true,
+    restartSession: () => undefined,
+    finishCampaign: () => undefined,
   };
-  const source = new Q1SourceComposition(game, { program, campaign: new Q1CampaignState(), horde, officialCampaign: true, registered: true }, services); composed = source;
-  combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => ({ ...game.combatContext(request), teamplay: services.cvar("teamplay") }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })), sourceEffects: game.damageSourceEffects }));
+  const source = new Q1SourceComposition(game, { program, campaign: new Q1CampaignState(), horde, officialCampaign: true, registered: true }, services);
+  composed = source;
+  combat.register(
+    createQ1CombatPolicy({
+      id: "q1:combat",
+      context: request => ({ ...game.combatContext(request), teamplay: services.cvar("teamplay") }),
+      armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })),
+      sourceEffects: game.damageSourceEffects,
+    }),
+  );
   if (saved === undefined) source.spawnMap(map);
   else {
-    const owner = (id: { readonly slot: number; readonly generation: number }): OwnedActor => { const actor = actors.resolveSaved(id); if (actor === null) throw new Error("Missing saved actor"); return actor; };
-    for (const record of saved.bodies) bodies.create(owner(record.actor), { ...record.body, ground: record.body.ground === null ? null : actors.referenceSaved(record.body.ground) });
+    const owner = (id: { readonly slot: number; readonly generation: number }): OwnedActor => {
+      const actor = actors.resolveSaved(id);
+      if (actor === null) throw new Error("Missing saved actor");
+      return actor;
+    };
+    for (const record of saved.bodies)
+      bodies.create(owner(record.actor), { ...record.body, ground: record.body.ground === null ? null : actors.referenceSaved(record.body.ground) });
     for (const record of saved.combat) combat.create(owner(record.actor), record.state);
     for (const record of saved.inventories) inventory.create(owner(record.actor), record.entries);
-    game.restore(decodeQ1FoundationCheckpoint(saved.source), { scheduleThinks: false }); restoreSharedBodyLinks(saved, { actors, bodies }); game.resumeThinks();
+    game.restore(decodeQ1FoundationCheckpoint(saved.source), { scheduleThinks: false });
+    restoreSharedBodyLinks(saved, { actors, bodies });
+    game.resumeThinks();
     for (const client of source.clients.records.values()) players.push(client.actor.id);
   }
   function admit(name: string, color: number, autoSwitch?: string) {
-    const slot = players.length, actor = actors.allocateAtSource("q1:official", slot + 1, "q3:sarge");
-    bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null }); combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []); players.push(actor.id);
-    source.attach(actor, { slot, userinfo: new Map([["name", name], ["topcolor", String(color)], ["bottomcolor", String(color)], ...(autoSwitch === undefined ? [] : [["qts_weapon_autoswitch", autoSwitch] satisfies [string, string]])]) }); game.attachPlayer(actor); source.admitTravel(actor, source.newTravel()); source.spawned(actor.id, true);
-    const point = source.selectSpawn(actor.id); if (point !== null) { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, origin: game.body(point).origin }); } return actor;
+    const slot = players.length,
+      actor = actors.allocateAtSource("q1:official", slot + 1, "q3:sarge");
+    bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
+    combat.create(actor, {
+      health: 100,
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+      mass: 100,
+      canTakeDamage: true,
+      invulnerable: false,
+      team: null,
+    });
+    inventory.create(actor, []);
+    players.push(actor.id);
+    source.attach(actor, {
+      slot,
+      userinfo: new Map([
+        ["name", name],
+        ["topcolor", String(color)],
+        ["bottomcolor", String(color)],
+        ...(autoSwitch === undefined ? [] : [["qts_weapon_autoswitch", autoSwitch] satisfies [string, string]]),
+      ]),
+    });
+    game.attachPlayer(actor);
+    source.admitTravel(actor, source.newTravel());
+    source.spawned(actor.id, true);
+    const point = source.selectSpawn(actor.id);
+    if (point !== null) {
+      const body = bodies.read(actor.id);
+      if (body !== null) bodies.write(actor, { ...body, origin: game.body(point).origin });
+    }
+    return actor;
   }
-  function advance(until: number) { for (;;) { const next = [...pending].filter(([, due]) => due <= until).sort((a, b) => a[1] - b[1])[0]; if (next === undefined) break; pending.delete(next[0]); callbacks.think(next[0], { frame: 0, time: { kind: "seconds", value: next[1] }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); } game.time = until; }
+  function advance(until: number) {
+    for (;;) {
+      const next = [...pending].filter(([, due]) => due <= until).sort((a, b) => a[1] - b[1])[0];
+      if (next === undefined) break;
+      pending.delete(next[0]);
+      callbacks.think(next[0], { frame: 0, time: { kind: "seconds", value: next[1] }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
+    }
+    game.time = until;
+  }
   const capture = (): Saved => ({ source: encodeQ1FoundationCheckpoint(game.capture()), ...captureSharedActors({ actors, bodies, combat, inventory }) });
   return { source, game, actors, callbacks, combat, inventory, events, sourceEvents, cvars, admit, advance, capture };
 }
 
 test("authored Shub finale acknowledges an attack edge once and retains completion through restore", async () => {
-  const level = await map("id1", "end"), world = sourceWorld(level, "id1"), player = world.admit("Ranger", 0);
+  const level = await map("id1", "end"),
+    world = sourceWorld(level, "id1"),
+    player = world.admit("Ranger", 0);
   try {
     world.source.input(player.id, { attack: true, jump: false, use: false, impulse: 0 });
     const shub = [...world.source.base.monsters.values()].find(monster => monster.spec.species === "oldone");
@@ -97,7 +269,9 @@ test("authored Shub finale acknowledges an attack edge once and retains completi
       heldRestore.advance(20.2);
       expect(heldRestore.source.base.hasFinishedFinale).toBe(false);
       expect(heldRestore.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(0);
-    } finally { heldRestore.actors.close(); }
+    } finally {
+      heldRestore.actors.close();
+    }
     world.source.requestIntermissionExit(false, { actor: player.id, attack: false });
     world.advance(20.2);
     world.source.requestIntermissionExit(true, { actor: player.id, attack: true });
@@ -110,56 +284,112 @@ test("authored Shub finale acknowledges an attack edge once and retains completi
       restored.advance(26);
       expect(restored.sourceEvents.filter(event => event.kind === "finale" && event.stage === 6)).toHaveLength(1);
       expect(restored.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(0);
-    } finally { restored.actors.close(); }
-  } finally { world.actors.close(); }
+    } finally {
+      restored.actors.close();
+    }
+  } finally {
+    world.actors.close();
+  }
 });
 
 test("actual CTF composition joins client teams, capture score, death ordering and fresh saved admission", async () => {
-  const level = await map("ctf", "ctf1"), world = sourceWorld(level, "ctf"), red = world.admit("Ranger", 4), blue = world.admit("Sarge", 13); world.advance(10);
-  const ctf = world.source.ctf; if (ctf === null) throw new Error("Missing selected CTF source");
-  const redFlag = ctf.flag("red"), blueFlag = ctf.flag("blue"); if (redFlag === null || blueFlag === null) throw new Error("Missing authored flags");
-  expect(world.combat.read(red.id)?.team).toBe("red"); expect(world.inventory.count(red.id, "q1:ammo/shells")).toBe(40);
-  touchFlag(ctf, blueFlag, red.id); touchFlag(ctf, redFlag, red.id); expect(world.source.clients.redCaptures).toBe(1); expect(world.source.clients.require(red.id).frags).toBe(15);
+  const level = await map("ctf", "ctf1"),
+    world = sourceWorld(level, "ctf"),
+    red = world.admit("Ranger", 4),
+    blue = world.admit("Sarge", 13);
+  world.advance(10);
+  const ctf = world.source.ctf;
+  if (ctf === null) throw new Error("Missing selected CTF source");
+  const redFlag = ctf.flag("red"),
+    blueFlag = ctf.flag("blue");
+  if (redFlag === null || blueFlag === null) throw new Error("Missing authored flags");
+  expect(world.combat.read(red.id)?.team).toBe("red");
+  expect(world.inventory.count(red.id, "q1:ammo/shells")).toBe(40);
+  touchFlag(ctf, blueFlag, red.id);
+  touchFlag(ctf, redFlag, red.id);
+  expect(world.source.clients.redCaptures).toBe(1);
+  expect(world.source.clients.require(red.id).frags).toBe(15);
   let scoreAtCharacterDeath = -1;
-  world.callbacks.bind(blue, { think: null, touch: null, use: null, pain: null, die: () => { scoreAtCharacterDeath = world.source.clients.require(red.id).frags; return undefined; } });
-  world.game.damage(blue.id, red.id, red.id, 1000, "shotgun"); expect(scoreAtCharacterDeath).toBeGreaterThan(15); expect(world.source.clients.require(blue.id).deathRecorded).toBe(true);
-  world.source.input(red.id, { attack: false, jump: false, use: false, impulse: 22 }); expect(world.source.impulse(red.id)).toBe(true); expect(world.game.player(red.id)?.weapon).toBe("ctf:grapple");
-  const checkpoint = world.capture(), restored = sourceWorld(level, "ctf", checkpoint), savedRed = restored.actors.resolveSaved({ slot: red.id.slot, generation: red.id.generation }); if (savedRed === null) throw new Error("Missing saved client");
-  expect(restored.source.clients.require(savedRed.id).name).toBe("Ranger"); expect(restored.source.clients.require(savedRed.id).frags).toBe(scoreAtCharacterDeath); expect(restored.source.clients.redCaptures).toBe(1);
-  expect(restored.game.player(savedRed.id)?.weapon).toBe("ctf:grapple"); expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source));
-  world.actors.close(); restored.actors.close();
+  world.callbacks.bind(blue, {
+    think: null,
+    touch: null,
+    use: null,
+    pain: null,
+    die: () => {
+      scoreAtCharacterDeath = world.source.clients.require(red.id).frags;
+      return undefined;
+    },
+  });
+  world.game.damage(blue.id, red.id, red.id, 1000, "shotgun");
+  expect(scoreAtCharacterDeath).toBeGreaterThan(15);
+  expect(world.source.clients.require(blue.id).deathRecorded).toBe(true);
+  world.source.input(red.id, { attack: false, jump: false, use: false, impulse: 22 });
+  expect(world.source.impulse(red.id)).toBe(true);
+  expect(world.game.player(red.id)?.weapon).toBe("ctf:grapple");
+  const checkpoint = world.capture(),
+    restored = sourceWorld(level, "ctf", checkpoint),
+    savedRed = restored.actors.resolveSaved({ slot: red.id.slot, generation: red.id.generation });
+  if (savedRed === null) throw new Error("Missing saved client");
+  expect(restored.source.clients.require(savedRed.id).name).toBe("Ranger");
+  expect(restored.source.clients.require(savedRed.id).frags).toBe(scoreAtCharacterDeath);
+  expect(restored.source.clients.redCaptures).toBe(1);
+  expect(restored.game.player(savedRed.id)?.weapon).toBe("ctf:grapple");
+  expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source));
+  world.actors.close();
+  restored.actors.close();
 });
 
 test("actual MG1 horde and campaign maps register their authored source behavior through composition", async () => {
   for (const name of ["hub", "horde1"]) {
-    const world = sourceWorld(await map("mg1", name), "mg1"), actor = world.admit("Sarge", 4); world.advance(0.5);
-    expect(world.source.addon?.program).toBe("mg1"); expect(world.source.horde).not.toBeNull();
-    world.game.beginFrame(0.5, 0.05); world.source.preFrame(0.05); world.source.playerPreThink(actor.id); world.game.playerFrame(actor, 0.5, 0); world.game.playerAfterPhysics(actor, 0.5); world.source.playerPostThink(actor.id);
-    expect(world.source.addon?.frameTime).toBe(0.05); expect(world.source.clients.require(actor.id).name).toBe("Sarge"); expect(() => world.capture()).not.toThrow();
-    if (name === "horde1") expect(world.source.horde?.manager?.classname).toBe("horde_manager"); world.actors.close();
+    const world = sourceWorld(await map("mg1", name), "mg1"),
+      actor = world.admit("Sarge", 4);
+    world.advance(0.5);
+    expect(world.source.addon?.program).toBe("mg1");
+    expect(world.source.horde).not.toBeNull();
+    world.game.beginFrame(0.5, 0.05);
+    world.source.preFrame(0.05);
+    world.source.playerPreThink(actor.id);
+    world.game.playerFrame(actor, 0.5, 0);
+    world.game.playerAfterPhysics(actor, 0.5);
+    world.source.playerPostThink(actor.id);
+    expect(world.source.addon?.frameTime).toBe(0.05);
+    expect(world.source.clients.require(actor.id).name).toBe("Sarge");
+    expect(() => world.capture()).not.toThrow();
+    if (name === "horde1") expect(world.source.horde?.manager?.classname).toBe("horde_manager");
+    world.actors.close();
   }
 });
 
 test("actual MG1 horde wave state survives a saved admission round trip", async () => {
-  const level = await map("mg1", "horde1"), world = sourceWorld(level, "mg1", undefined, true);
-  world.admit("Sarge", 4); world.advance(14);
-  const manager = world.source.horde?.manager; if (manager === null || manager === undefined) throw new Error("Missing horde manager");
-  const wave = manager.number("wave"); expect(wave).toBeGreaterThanOrEqual(1);
-  const checkpoint = world.capture(), restored = sourceWorld(level, "mg1", checkpoint, true);
+  const level = await map("mg1", "horde1"),
+    world = sourceWorld(level, "mg1", undefined, true);
+  world.admit("Sarge", 4);
+  world.advance(14);
+  const manager = world.source.horde?.manager;
+  if (manager === null || manager === undefined) throw new Error("Missing horde manager");
+  const wave = manager.number("wave");
+  expect(wave).toBeGreaterThanOrEqual(1);
+  const checkpoint = world.capture(),
+    restored = sourceWorld(level, "mg1", checkpoint, true);
   try {
-    const restoredManager = restored.source.horde?.manager; if (restoredManager === null || restoredManager === undefined) throw new Error("Missing restored horde manager");
+    const restoredManager = restored.source.horde?.manager;
+    if (restoredManager === null || restoredManager === undefined) throw new Error("Missing restored horde manager");
     expect(restoredManager.number("wave")).toBe(wave);
     expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source));
     restored.advance(20);
     expect(restoredManager.number("wave")).toBeGreaterThanOrEqual(wave);
-  } finally { restored.actors.close(); }
+  } finally {
+    restored.actors.close();
+  }
   world.actors.close();
 });
 
 test("horde match registers on non-MG1 Q1 programs with an authored horde map", async () => {
   const programs: readonly Q1SourceProgram[] = ["id1", "hipnotic", "mg3"];
   for (const program of programs) {
-    const world = sourceWorld(await map("mg1", "horde1"), program, undefined, true); world.admit("Sarge", 4); world.advance(0.5);
+    const world = sourceWorld(await map("mg1", "horde1"), program, undefined, true);
+    world.admit("Sarge", 4);
+    world.advance(0.5);
     expect(world.source.horde).not.toBeNull();
     expect(world.source.horde?.manager?.classname).toBe("horde_manager");
     world.actors.close();
@@ -167,65 +397,154 @@ test("horde match registers on non-MG1 Q1 programs with an authored horde map", 
 });
 
 test("official campaign selection joins base, mission packs and rerelease addons on their actual start maps", async () => {
-  const cases: readonly (readonly [Q1SourceProgram, string])[] = [["id1", "e1m1"], ["hipnotic", "hip1m1"], ["rogue", "r1m1"], ["dopa", "e5m1"], ["mg3", "hub"]];
+  const cases: readonly (readonly [Q1SourceProgram, string])[] = [
+    ["id1", "e1m1"],
+    ["hipnotic", "hip1m1"],
+    ["rogue", "r1m1"],
+    ["dopa", "e5m1"],
+    ["mg3", "hub"],
+  ];
   for (const [program, name] of cases) {
-    const level = await map(program, name), world = sourceWorld(level, program), actor = world.admit("Ranger", 4);
-    expect(world.game.mapName).toBe(name); expect(world.game.player(actor.id)).not.toBeNull();
+    const level = await map(program, name),
+      world = sourceWorld(level, program),
+      actor = world.admit("Ranger", 4);
+    expect(world.game.mapName).toBe(name);
+    expect(world.game.player(actor.id)).not.toBeNull();
     expect(world.source.packs?.pack ?? world.source.addon?.program ?? "id1").toBe(program);
     if (program === "id1") {
-      const player = world.game.player(actor.id); if (player === null) throw new Error("Missing admitted source arsenal");
-      world.inventory.configure(actor, { item: "q1:weapon/supershotgun", count: 1, capacity: 1 }); world.inventory.configure(actor, { item: "q1:ammo/shells", count: 1, capacity: 100 });
-      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 3 }); expect(world.source.impulse(actor.id)).toBe(true); expect(player.weapon).toBe("shotgun");
+      const player = world.game.player(actor.id);
+      if (player === null) throw new Error("Missing admitted source arsenal");
+      world.inventory.configure(actor, { item: "q1:weapon/supershotgun", count: 1, capacity: 1 });
+      world.inventory.configure(actor, { item: "q1:ammo/shells", count: 1, capacity: 100 });
+      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 3 });
+      expect(world.source.impulse(actor.id)).toBe(true);
+      expect(player.weapon).toBe("shotgun");
       expect(world.sourceEvents.some(event => event.kind === "message" && event.text === "$qc_not_enough_ammo")).toBe(true);
-      player.attackFinished = 1; world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 1 }); expect(world.source.impulse(actor.id)).toBe(false);
-      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 0 }); expect(world.source.clients.require(actor.id).impulse).toBe(1);
-      world.game.time = 1; expect(world.source.impulse(actor.id)).toBe(true); expect(player.weapon).toBe("axe");
-      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 9 }); expect(world.source.impulse(actor.id)).toBe(true);
-      expect(world.inventory.count(actor.id, "q1:ammo/cells")).toBe(200); expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("q1"); expect(player.weapon).toBe("rocketlauncher");
+      player.attackFinished = 1;
+      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 1 });
+      expect(world.source.impulse(actor.id)).toBe(false);
+      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 0 });
+      expect(world.source.clients.require(actor.id).impulse).toBe(1);
+      world.game.time = 1;
+      expect(world.source.impulse(actor.id)).toBe(true);
+      expect(player.weapon).toBe("axe");
+      world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 9 });
+      expect(world.source.impulse(actor.id)).toBe(true);
+      expect(world.inventory.count(actor.id, "q1:ammo/cells")).toBe(200);
+      expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("q1");
+      expect(player.weapon).toBe("rocketlauncher");
     }
     if (program === "mg3") {
-      const addon = world.source.addon, player = world.game.player(actor.id); if (addon === null || player === null) throw new Error("Missing MG3 source state");
-      const impulse = (value: number) => { world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: value }); expect(world.source.impulse(actor.id)).toBe(true); };
-      impulse(111); expect(addon.playerNumber(actor.id, "parm10")).toBe(1); expect(player.maxHealth).toBe(60);
-      impulse(100); expect(player.maxHealth).toBe(100); expect(addon.playerNumber(actor.id, "parm10")).toBe(1);
-      impulse(99); expect(world.inventory.count(actor.id, "q1:key/silver")).toBe(0); expect(world.inventory.count(actor.id, "q1:weapon/mg3:laser")).toBe(1); expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("none");
-      impulse(118); impulse(1); expect(player.weapon).toBe("mg3:mjolnir"); impulse(12); expect(player.weapon).toBe("mg3:laser");
-      impulse(227); expect(addon.playerNumber(actor.id, "parm15")).toBe(1); impulse(122); expect(addon.playerNumber(actor.id, "infiniteammo")).toBe(1);
-      impulse(2); expect(world.game.weaponInput(actor, true, ZERO, 0, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/shells")).toBe(100);
-      world.game.time = 2; impulse(4); expect(world.game.weaponInput(actor, true, ZERO, 2, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/nails")).toBe(200);
-      world.game.time = 3; impulse(121); world.combat.setArmor(actor, { regular: { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
+      const addon = world.source.addon,
+        player = world.game.player(actor.id);
+      if (addon === null || player === null) throw new Error("Missing MG3 source state");
+      const impulse = (value: number) => {
+        world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: value });
+        expect(world.source.impulse(actor.id)).toBe(true);
+      };
+      impulse(111);
+      expect(addon.playerNumber(actor.id, "parm10")).toBe(1);
+      expect(player.maxHealth).toBe(60);
+      impulse(100);
+      expect(player.maxHealth).toBe(100);
+      expect(addon.playerNumber(actor.id, "parm10")).toBe(1);
+      impulse(99);
+      expect(world.inventory.count(actor.id, "q1:key/silver")).toBe(0);
+      expect(world.inventory.count(actor.id, "q1:weapon/mg3:laser")).toBe(1);
+      expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("none");
+      impulse(118);
+      impulse(1);
+      expect(player.weapon).toBe("mg3:mjolnir");
+      impulse(12);
+      expect(player.weapon).toBe("mg3:laser");
+      impulse(227);
+      expect(addon.playerNumber(actor.id, "parm15")).toBe(1);
+      impulse(122);
+      expect(addon.playerNumber(actor.id, "infiniteammo")).toBe(1);
+      impulse(2);
+      expect(world.game.weaponInput(actor, true, ZERO, 0, 0)).toBe(true);
+      expect(world.inventory.count(actor.id, "q1:ammo/shells")).toBe(100);
+      world.game.time = 2;
+      impulse(4);
+      expect(world.game.weaponInput(actor, true, ZERO, 2, 0)).toBe(true);
+      expect(world.inventory.count(actor.id, "q1:ammo/nails")).toBe(200);
+      world.game.time = 3;
+      impulse(121);
+      world.combat.setArmor(actor, { regular: { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
       let reactions = 0;
-      world.callbacks.bind(actor, { think: null, touch: null, use: null, pain: () => { reactions++; return undefined; }, die: () => { reactions++; return undefined; } });
-      world.game.damage(actor.id, actor.id, actor.id, 200, "rocketlauncher"); expect(world.game.health(actor.id)).toBe(1); expect(reactions).toBe(0);
-      expect(world.combat.read(actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 39, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } }); expect(world.source.clients.require(actor.id).deathRecorded).toBe(false);
-      const checkpoint = world.capture(), restored = sourceWorld(level, program, checkpoint);
-      expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source)); restored.actors.close();
+      world.callbacks.bind(actor, {
+        think: null,
+        touch: null,
+        use: null,
+        pain: () => {
+          reactions++;
+          return undefined;
+        },
+        die: () => {
+          reactions++;
+          return undefined;
+        },
+      });
+      world.game.damage(actor.id, actor.id, actor.id, 200, "rocketlauncher");
+      expect(world.game.health(actor.id)).toBe(1);
+      expect(reactions).toBe(0);
+      expect(world.combat.read(actor.id)?.armor).toEqual({
+        regular: { kind: "q1", points: 39, absorption: 0.3, item: "q1:item_armor1" },
+        powered: { kind: "none" },
+      });
+      expect(world.source.clients.require(actor.id).deathRecorded).toBe(false);
+      const checkpoint = world.capture(),
+        restored = sourceWorld(level, program, checkpoint);
+      expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source));
+      restored.actors.close();
     }
-    expect(() => world.capture()).not.toThrow(); world.actors.close();
+    expect(() => world.capture()).not.toThrow();
+    world.actors.close();
   }
 });
 
-
 test("pickup preference reaches actual Q1 source players on admission update respawn and saved restore", async () => {
-  const level = await map("id1", "e1m1"), world = sourceWorld(level, "id1");
+  const level = await map("id1", "e1m1"),
+    world = sourceWorld(level, "id1");
   try {
-    const first = world.admit("First", 0, "never"), second = world.admit("Second", 0, "new");
-    expect(world.game.player(first.id)?.autoSwitch).toBe("never"); expect(world.game.player(second.id)?.autoSwitch).toBe("new");
-    const values = new Map(world.source.clients.require(first.id).userinfo); values.set("qts_weapon_autoswitch", "new"); world.source.userinfo(first.id, values);
+    const first = world.admit("First", 0, "never"),
+      second = world.admit("Second", 0, "new");
+    expect(world.game.player(first.id)?.autoSwitch).toBe("never");
+    expect(world.game.player(second.id)?.autoSwitch).toBe("new");
+    const values = new Map(world.source.clients.require(first.id).userinfo);
+    values.set("qts_weapon_autoswitch", "new");
+    world.source.userinfo(first.id, values);
     expect(world.game.player(first.id)?.autoSwitch).toBe("new");
-    world.game.attachPlayer(first); world.source.spawned(first.id, false); expect(world.game.player(first.id)?.autoSwitch).toBe("new");
+    world.game.attachPlayer(first);
+    world.source.spawned(first.id, false);
+    expect(world.game.player(first.id)?.autoSwitch).toBe("new");
     const restored = sourceWorld(level, "id1", world.capture());
-    try { expect([...restored.source.clients.records.values()].map(client => restored.game.player(client.actor.id)?.autoSwitch)).toEqual(["new", "new"]); }
-    finally { restored.actors.close(); }
-  } finally { world.actors.close(); }
+    try {
+      expect([...restored.source.clients.records.values()].map(client => restored.game.player(client.actor.id)?.autoSwitch)).toEqual(["new", "new"]);
+    } finally {
+      restored.actors.close();
+    }
+  } finally {
+    world.actors.close();
+  }
 });
 
 test("sv_gate_dev_impulses puts the MG3 developer impulses behind cheats on deathmatch servers and defaults to the source behavior", async () => {
   const level = await map("mg3", "hub");
-  for (const [gate, cheats, allowed] of [[0, 0, true], [1, 0, false], [1, 1, true]] as const) {
-    const world = sourceWorld(level, "mg3", undefined, false, 1, [["sv_gate_dev_impulses", gate], ["sv_cheats", cheats]]), actor = world.admit("Ranger", 4), addon = world.source.addon;
+  for (const [gate, cheats, allowed] of [
+    [0, 0, true],
+    [1, 0, false],
+    [1, 1, true],
+  ] as const) {
+    const world = sourceWorld(level, "mg3", undefined, false, 1, [
+        ["sv_gate_dev_impulses", gate],
+        ["sv_cheats", cheats],
+      ]),
+      actor = world.admit("Ranger", 4),
+      addon = world.source.addon;
     if (addon === null) throw new Error("Missing MG3 source state");
-    world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 227 }); expect(world.source.impulse(actor.id)).toBe(true);
+    world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 227 });
+    expect(world.source.impulse(actor.id)).toBe(true);
     expect(addon.playerNumber(actor.id, "parm15")).toBe(allowed ? 1 : 0);
     world.actors.close();
   }

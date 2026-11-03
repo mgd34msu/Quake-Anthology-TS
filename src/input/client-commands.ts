@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SeatId } from "../contracts/identity.ts";
 import { asciiFold, type CommandBuffer, type CommandHandler, type CommandInvocation } from "../core/commands/index.ts";
 
@@ -18,15 +19,19 @@ export class ClientCommandBindings {
   private readonly owners = new Set<{ readonly seat: SeatId; readonly names: Set<string>; readonly handler?: ClientCommandHandler }>();
   private readonly installed = new Map<string, CommandHandler>();
   private active = false;
-  constructor(private readonly commands: CommandBuffer, private seats: readonly SeatId[],
-    private readonly execute: (command: CommandInvocation, seat: SeatId) => undefined) {}
+  constructor(
+    private readonly commands: CommandBuffer,
+    private seats: readonly SeatId[],
+    private readonly execute: (command: CommandInvocation, seat: SeatId) => undefined,
+  ) {}
 
   publishSeats(seats: readonly SeatId[]): void {
-    for (const owner of this.owners) if (!seats.some(seat => seat.equals(owner.seat))) {
-      this.owners.delete(owner);
-      for (const name of owner.names) this.removeUnused(name);
-      owner.names.clear();
-    }
+    for (const owner of this.owners)
+      if (!seats.some(seat => seat.equals(owner.seat))) {
+        this.owners.delete(owner);
+        for (const name of owner.names) this.removeUnused(name);
+        owner.names.clear();
+      }
     this.seats = [...seats];
   }
 
@@ -69,8 +74,12 @@ export class ClientCommandBindings {
     if (!this.active) return false;
     let origin = command.source.origin;
     while (origin.kind === "script") origin = origin.caller;
-    const seat = origin.kind === "local-seat" ? origin.seat : origin.kind === "local-console"
-      ? this.seats.find(candidate => [...this.owners].some(owner => owner.seat.equals(candidate))) : undefined;
+    const seat =
+      origin.kind === "local-seat"
+        ? origin.seat
+        : origin.kind === "local-console"
+          ? this.seats.find(candidate => [...this.owners].some(owner => owner.seat.equals(candidate)))
+          : undefined;
     if (seat === undefined) return false;
     const name = asciiFold(command.argv[0] ?? "");
     const claims = [...this.owners].filter(owner => owner.seat.equals(seat) && owner.names.has(name));
@@ -79,18 +88,25 @@ export class ClientCommandBindings {
     if (producer?.kind === "client-module") {
       const claim = claims.find(owner => owner.handler?.instance === producer.instance);
       if (claim?.handler === undefined) return false;
-      claim.handler.execute(command); return true;
+      claim.handler.execute(command);
+      return true;
     }
-    if (claims.some(owner => owner.handler === undefined)) { this.execute(command, seat); return true; }
+    if (claims.some(owner => owner.handler === undefined)) {
+      this.execute(command, seat);
+      return true;
+    }
     if (claims.length > 1) throw new Error(`Ambiguous component client command ${name}: ${claims.map(owner => owner.handler?.label).join(", ")}`);
     const claim = claims[0];
     if (claim?.handler === undefined) return false;
-    claim.handler.execute(command); return true;
+    claim.handler.execute(command);
+    return true;
   }
 
   private install(name: string): void {
     if (this.installed.has(name) || this.commands.exists(name)) return;
-    const handler: CommandHandler = command => { this.dispatch(command); };
+    const handler: CommandHandler = command => {
+      this.dispatch(command);
+    };
     if (this.commands.register(name, handler)) this.installed.set(name, handler);
   }
 

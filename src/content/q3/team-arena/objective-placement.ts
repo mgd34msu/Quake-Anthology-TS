@@ -1,8 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { GameType } from "../base/shared/definitions.ts";
 import type { Product } from "../base/shared/definitions.ts";
 
-export type ObjectiveClassname = "team_CTF_redflag" | "team_CTF_blueflag" | "team_CTF_neutralflag"
-  | "team_redobelisk" | "team_blueobelisk" | "team_neutralobelisk";
+export type ObjectiveClassname =
+  | "team_CTF_redflag"
+  | "team_CTF_blueflag"
+  | "team_CTF_neutralflag"
+  | "team_redobelisk"
+  | "team_blueobelisk"
+  | "team_neutralobelisk";
 
 export type ObjectivePlacementResult =
   | { readonly kind: "ready" }
@@ -10,8 +16,11 @@ export type ObjectivePlacementResult =
   | { readonly kind: "unsupported-mode"; readonly product: Product; readonly gameType: number };
 
 /** Authored map entities and explicit cross-game placements use the same source classnames. */
-export function checkObjectivePlacements(product: Product, gameType: number,
-  placements: readonly { readonly classname: string | null }[]): ObjectivePlacementResult {
+export function checkObjectivePlacements(
+  product: Product,
+  gameType: number,
+  placements: readonly { readonly classname: string | null }[],
+): ObjectivePlacementResult {
   let required: readonly ObjectiveClassname[];
   switch (gameType) {
     case GameType.GT_FFA:

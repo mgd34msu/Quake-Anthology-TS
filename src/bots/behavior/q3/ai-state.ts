@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import type { BotOrderState } from "../orders.ts";
 // Ported from id Software's game/ai_main.h, g_local.h, q_shared.h and ai_main.c state operations.
@@ -18,17 +19,34 @@ import type { GameMemory, GameMemoryAllocation } from "../../../content/q3/base/
 // ai_main.h release32 layout: 57 scalar ints, 56 floats, 12 vec3s, five pointers,
 // three int arrays, five 56-byte goals, eight 244-byte activate goals and 80 chars.
 // Embedded playerState/usercmd/settings are 468/24/292 bytes; both products match.
-export const BOT_STATE_SOURCE_BYTES = 57 * 4 + 56 * 4 + 12 * 12 + 5 * 4
-  + (1024 + 256 + 64) * 4 + 5 * 56 + 8 * 244 + 80 + 468 + 24 + 292;
+export const BOT_STATE_SOURCE_BYTES = 57 * 4 + 56 * 4 + 12 * 12 + 5 * 4 + (1024 + 256 + 64) * 4 + 5 * 56 + 8 * 244 + 80 + 468 + 24 + 292;
 
-const COMMAND_WEAPONS = [Weapon.WP_NONE, Weapon.WP_GAUNTLET, Weapon.WP_MACHINEGUN, Weapon.WP_SHOTGUN,
-  Weapon.WP_GRENADE_LAUNCHER, Weapon.WP_ROCKET_LAUNCHER, Weapon.WP_LIGHTNING, Weapon.WP_RAILGUN,
-  Weapon.WP_PLASMAGUN, Weapon.WP_BFG, Weapon.WP_GRAPPLING_HOOK, Weapon.WP_NAILGUN,
-  Weapon.WP_PROX_LAUNCHER, Weapon.WP_CHAINGUN];
-const PLAYER_MOVE_TYPES = [MoveType.PM_NORMAL, MoveType.PM_NOCLIP, MoveType.PM_SPECTATOR,
-  MoveType.PM_DEAD, MoveType.PM_FREEZE, MoveType.PM_INTERMISSION, MoveType.PM_SPINTERMISSION];
-const PLAYER_WEAPON_STATES = [WeaponState.WEAPON_READY, WeaponState.WEAPON_RAISING,
-  WeaponState.WEAPON_DROPPING, WeaponState.WEAPON_FIRING];
+const COMMAND_WEAPONS = [
+  Weapon.WP_NONE,
+  Weapon.WP_GAUNTLET,
+  Weapon.WP_MACHINEGUN,
+  Weapon.WP_SHOTGUN,
+  Weapon.WP_GRENADE_LAUNCHER,
+  Weapon.WP_ROCKET_LAUNCHER,
+  Weapon.WP_LIGHTNING,
+  Weapon.WP_RAILGUN,
+  Weapon.WP_PLASMAGUN,
+  Weapon.WP_BFG,
+  Weapon.WP_GRAPPLING_HOOK,
+  Weapon.WP_NAILGUN,
+  Weapon.WP_PROX_LAUNCHER,
+  Weapon.WP_CHAINGUN,
+];
+const PLAYER_MOVE_TYPES = [
+  MoveType.PM_NORMAL,
+  MoveType.PM_NOCLIP,
+  MoveType.PM_SPECTATOR,
+  MoveType.PM_DEAD,
+  MoveType.PM_FREEZE,
+  MoveType.PM_INTERMISSION,
+  MoveType.PM_SPINTERMISSION,
+];
+const PLAYER_WEAPON_STATES = [WeaponState.WEAPON_READY, WeaponState.WEAPON_RAISING, WeaponState.WEAPON_DROPPING, WeaponState.WEAPON_FIRING];
 
 export interface BotSettings {
   characterfile: string;
@@ -37,17 +55,41 @@ export interface BotSettings {
 }
 
 /** The eleven implemented AINode functions. NULL remains a distinct source state. */
-export type AiNode = "intermission" | "observer" | "respawn" | "stand"
-  | "seek-activate-entity" | "seek-nbg" | "seek-ltg"
-  | "battle-fight" | "battle-chase" | "battle-retreat" | "battle-nbg";
+export type AiNode =
+  | "intermission"
+  | "observer"
+  | "respawn"
+  | "stand"
+  | "seek-activate-entity"
+  | "seek-nbg"
+  | "seek-ltg"
+  | "battle-fight"
+  | "battle-chase"
+  | "battle-retreat"
+  | "battle-nbg";
 
-export type BotSetupStage = "allocated" | "character" | "settings" | "goal-state"
-  | "item-weights" | "weapon-state" | "weapon-weights" | "chat-state" | "chat-file"
-  | "chat-gender" | "published" | "move-state" | "walker" | "counted"
-  | "scheduled" | "interbred" | "session";
+export type BotSetupStage =
+  | "allocated"
+  | "character"
+  | "settings"
+  | "goal-state"
+  | "item-weights"
+  | "weapon-state"
+  | "weapon-weights"
+  | "chat-state"
+  | "chat-file"
+  | "chat-gender"
+  | "published"
+  | "move-state"
+  | "walker"
+  | "counted"
+  | "scheduled"
+  | "interbred"
+  | "session";
 
 /** Progress does not own handles or imply inuse, including after a nested disconnect. */
-export type BotSetupProgress = { readonly kind: "empty" }
+export type BotSetupProgress =
+  | { readonly kind: "empty" }
   | { readonly kind: "setting-up"; readonly stage: BotSetupStage }
   | { readonly kind: "failed"; readonly stage: "aas" | "character" }
   | { readonly kind: "failed"; readonly stage: "item-weights" | "weapon-weights" | "chat-file"; readonly errorCode: number }
@@ -335,7 +377,10 @@ export class BotState {
    * Only function/object pointers remain typed values outside the source bytes.
    * Diagnostic states own one bounded record and do not charge a GameMemory pool.
    */
-  constructor(readonly product: Product, readonly sourceAllocation: GameMemoryAllocation | null = null) {
+  constructor(
+    readonly product: Product,
+    readonly sourceAllocation: GameMemoryAllocation | null = null,
+  ) {
     const bytes = sourceAllocation?.bytes ?? new Uint8Array(BOT_STATE_SOURCE_BYTES);
     if (bytes.byteLength < BOT_STATE_SOURCE_BYTES) throw new RangeError("bot_state_t requires 9088 bytes");
     this.#bytes = bytes.subarray(0, BOT_STATE_SOURCE_BYTES);
@@ -357,8 +402,7 @@ export class BotState {
     this.lastGoalTeamGoal = new BotGoalState(sourceRecord(view, 6768, 56));
     this.leadTeamGoal = new BotGoalState(sourceRecord(view, 6828, 56));
     this.formationGoal = new BotGoalState(sourceRecord(view, 7060, 56));
-    this.activateGoalHeap = Array.from({ length: MAX_ACTIVATESTACK },
-      (_, index) => new BotActivateGoal(sourceRecord(view, 7120 + index * 244, 244)));
+    this.activateGoalHeap = Array.from({ length: MAX_ACTIVATESTACK }, (_, index) => new BotActivateGoal(sourceRecord(view, 7120 + index * 244, 244)));
     bindSourceBoolean(this, "inuse", view, 0);
     bindSourceNumber(this, "botThinkResidual", view, 4, "int");
     bindSourceNumber(this, "client", view, 8, "int");
@@ -492,7 +536,9 @@ export class BotState {
         }
         return value;
       },
-      set(value: 0 | BotPresenceType): void { view.setInt32(4932, value, true); },
+      set(value: 0 | BotPresenceType): void {
+        view.setInt32(4932, value, true);
+      },
     });
   }
 
@@ -503,48 +549,126 @@ export class BotState {
       if (index < 0) throw new Error("Bot activation pointer escapes its heap");
       return index;
     };
-    return { bytes: this.#bytes.slice(), aiNode: this.aiNode, setup: { ...this.setup },
-      scriptedOrder: this.scriptedOrder === null ? null : { progress: this.scriptedOrder.progress,
-        order: this.scriptedOrder.order.kind === "point" ? { kind: "point", point: { ...this.scriptedOrder.order.point } }
-          : { kind: "follow", entity: { ...this.scriptedOrder.order.entity } } },
-      activateStack: activationId(this.activateStack), activationNext: this.activateGoalHeap.map(goal => activationId(goal.next)),
-      checkpoints: waypointId(this.checkpoints), patrolPoints: waypointId(this.patrolPoints), currentPatrolPoint: waypointId(this.currentPatrolPoint) };
+    return {
+      bytes: this.#bytes.slice(),
+      aiNode: this.aiNode,
+      setup: { ...this.setup },
+      scriptedOrder:
+        this.scriptedOrder === null
+          ? null
+          : {
+              progress: this.scriptedOrder.progress,
+              order:
+                this.scriptedOrder.order.kind === "point"
+                  ? { kind: "point", point: { ...this.scriptedOrder.order.point } }
+                  : { kind: "follow", entity: { ...this.scriptedOrder.order.entity } },
+            },
+      activateStack: activationId(this.activateStack),
+      activationNext: this.activateGoalHeap.map(goal => activationId(goal.next)),
+      checkpoints: waypointId(this.checkpoints),
+      patrolPoints: waypointId(this.patrolPoints),
+      currentPatrolPoint: waypointId(this.currentPatrolPoint),
+    };
   }
 
-  restoreSaveState(value: unknown, waypoint: (id: number | null) => BotWaypoint | null,
-    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
-    const reader = new SaveReader(value, "bot.state"), bytes = reader.field("bytes").bytes();
+  restoreSaveState(
+    value: unknown,
+    waypoint: (id: number | null) => BotWaypoint | null,
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number },
+  ): void {
+    const reader = new SaveReader(value, "bot.state"),
+      bytes = reader.field("bytes").bytes();
     if (bytes.length !== BOT_STATE_SOURCE_BYTES) reader.fail("incorrect bot state byte extent");
-    if (this.sourceAllocation !== null && bytes.some((byte, index) => byte !== this.#bytes[index])) reader.fail("bot bytes disagree with restored game allocation");
-    const activation = (entry: SaveReader): BotActivateGoal | null => entry.nullable(cell => {
-      const goal = this.activateGoalHeap[cell.integer(0)];
-      if (goal === undefined) return cell.fail("activation pointer outside heap");
-      return goal;
-    });
+    if (this.sourceAllocation !== null && bytes.some((byte, index) => byte !== this.#bytes[index]))
+      reader.fail("bot bytes disagree with restored game allocation");
+    const activation = (entry: SaveReader): BotActivateGoal | null =>
+      entry.nullable(cell => {
+        const goal = this.activateGoalHeap[cell.integer(0)];
+        if (goal === undefined) return cell.fail("activation pointer outside heap");
+        return goal;
+      });
     const next = reader.field("activationNext").list(activation);
     if (next.length !== this.activateGoalHeap.length) reader.fail("incorrect activation heap extent");
-    const node = reader.field("aiNode").nullable(cell => cell.choice("intermission", "observer", "respawn", "stand", "seek-activate-entity", "seek-nbg", "seek-ltg", "battle-fight", "battle-chase", "battle-retreat", "battle-nbg"));
-    const setup = reader.field("setup"), kind = setup.field("kind").choice("empty", "setting-up", "failed", "complete");
+    const node = reader
+      .field("aiNode")
+      .nullable(cell =>
+        cell.choice(
+          "intermission",
+          "observer",
+          "respawn",
+          "stand",
+          "seek-activate-entity",
+          "seek-nbg",
+          "seek-ltg",
+          "battle-fight",
+          "battle-chase",
+          "battle-retreat",
+          "battle-nbg",
+        ),
+      );
+    const setup = reader.field("setup"),
+      kind = setup.field("kind").choice("empty", "setting-up", "failed", "complete");
     let progress: BotSetupProgress;
     switch (kind) {
-      case "empty": progress = { kind }; break;
-      case "complete": progress = { kind }; break;
-      case "setting-up": progress = { kind, stage: setup.field("stage").choice("allocated", "character", "settings", "goal-state", "item-weights", "weapon-state", "weapon-weights", "chat-state", "chat-file", "chat-gender", "published", "move-state", "walker", "counted", "scheduled", "interbred", "session") }; break;
+      case "empty":
+        progress = { kind };
+        break;
+      case "complete":
+        progress = { kind };
+        break;
+      case "setting-up":
+        progress = {
+          kind,
+          stage: setup
+            .field("stage")
+            .choice(
+              "allocated",
+              "character",
+              "settings",
+              "goal-state",
+              "item-weights",
+              "weapon-state",
+              "weapon-weights",
+              "chat-state",
+              "chat-file",
+              "chat-gender",
+              "published",
+              "move-state",
+              "walker",
+              "counted",
+              "scheduled",
+              "interbred",
+              "session",
+            ),
+        };
+        break;
       case "failed": {
         const stage = setup.field("stage").choice("aas", "character", "item-weights", "weapon-weights", "chat-file");
-        progress = stage === "aas" || stage === "character" ? { kind, stage } : { kind, stage, errorCode: setup.field("errorCode").integer() }; break;
+        progress = stage === "aas" || stage === "character" ? { kind, stage } : { kind, stage, errorCode: setup.field("errorCode").integer() };
+        break;
       }
     }
     const order = reader.field("scriptedOrder").nullable((entry): BotOrderState => {
-      const order = entry.field("order"), kind = order.field("kind").choice("point", "follow");
+      const order = entry.field("order"),
+        kind = order.field("kind").choice("point", "follow");
       const progress = entry.field("progress").choice("in-progress", "success", "error");
-      if (kind === "point") { const point = order.field("point"); return { progress, order: { kind, point: { x: point.field("x").number(), y: point.field("y").number(), z: point.field("z").number() } } }; }
+      if (kind === "point") {
+        const point = order.field("point");
+        return { progress, order: { kind, point: { x: point.field("x").number(), y: point.field("y").number(), z: point.field("z").number() } } };
+      }
       const entity = order.field("entity");
       return { progress, order: { kind, entity: remapObservation(entity.field("number").integer(0), entity.field("generation").integer(0)) } };
     });
-    this.#bytes.set(bytes); this.aiNode = node; this.setup = progress; this.scriptedOrder = order;
+    this.#bytes.set(bytes);
+    this.aiNode = node;
+    this.setup = progress;
+    this.scriptedOrder = order;
     this.activateStack = activation(reader.field("activateStack"));
-    for (const [index, goal] of this.activateGoalHeap.entries()) { const target = next[index]; if (target === undefined) return reader.fail("missing activation link"); goal.next = target; }
+    for (const [index, goal] of this.activateGoalHeap.entries()) {
+      const target = next[index];
+      if (target === undefined) return reader.fail("missing activation link");
+      goal.next = target;
+    }
     this.checkpoints = waypoint(reader.field("checkpoints").nullable(cell => cell.integer(0)));
     this.patrolPoints = waypoint(reader.field("patrolPoints").nullable(cell => cell.integer(0)));
     this.currentPatrolPoint = waypoint(reader.field("currentPatrolPoint").nullable(cell => cell.integer(0)));
@@ -569,14 +693,18 @@ export class BotState {
     this.#bytes[6931] = 0;
   }
 
-  clearTeamLeader(): void { this.#bytes[6900] = 0; }
+  clearTeamLeader(): void {
+    this.#bytes[6900] = 0;
+  }
 
   copySubteam(name: string): void {
     sourceStrncpy(this.#bytes, 6980, name, 32);
     this.#bytes[7011] = 0;
   }
 
-  clearSubteam(): void { this.#bytes[6980] = 0; }
+  clearSubteam(): void {
+    this.#bytes[6980] = 0;
+  }
 
   /** BotResetState's memset/restore portion; its caller frees waypoints first and resets botlib after. */
   resetDecisionState(): void {
@@ -626,24 +754,36 @@ export class BotStateStore {
   }
 
   captureSaveState(memory: GameMemory, waypointId: (value: BotWaypoint | null) => number | null) {
-    return this.cells.map(state => state === null ? null : { allocation: state.sourceAllocation === null ? null : memory.captureAllocation(state.sourceAllocation), state: state.captureSaveState(waypointId) });
+    return this.cells.map(state =>
+      state === null
+        ? null
+        : { allocation: state.sourceAllocation === null ? null : memory.captureAllocation(state.sourceAllocation), state: state.captureSaveState(waypointId) },
+    );
   }
 
-  restoreSaveState(value: unknown, memory: GameMemory, waypoint: (id: number | null) => BotWaypoint | null,
-    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+  restoreSaveState(
+    value: unknown,
+    memory: GameMemory,
+    waypoint: (id: number | null) => BotWaypoint | null,
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number },
+  ): void {
     const reader = new SaveReader(value, "bot.states");
-    const states = reader.list(entry => entry.nullable(cell => {
-      const allocation = cell.field("allocation").nullable(pointer => memory.restoreAllocation(pointer.value));
-      const state = new BotState(this.product, allocation);
-      state.restoreSaveState(cell.field("state").value, waypoint, remapObservation);
-      return state;
-    }));
+    const states = reader.list(entry =>
+      entry.nullable(cell => {
+        const allocation = cell.field("allocation").nullable(pointer => memory.restoreAllocation(pointer.value));
+        const state = new BotState(this.product, allocation);
+        state.restoreSaveState(cell.field("state").value, waypoint, remapObservation);
+        return state;
+      }),
+    );
     if (states.length !== this.cells.length) reader.fail("incorrect bot state slot count");
     this.cells.splice(0, this.cells.length, ...states);
   }
 
   /** BotAISetup(false) zeros the pointer array without clearing its former records. */
-  clear(): void { this.cells.fill(null); }
+  clear(): void {
+    this.cells.fill(null);
+  }
 }
 
 /** Source player-state memcpy keeps the destination's embedded arrays and vectors. */
@@ -652,15 +792,17 @@ export function copyBotPlayerState(destination: PlayerState, source: PlayerState
   destination.copyFrom(source, "replace-authority");
 }
 
-function clearVector(vector: Vec3): void { Object.assign(vector, { x: 0, y: 0, z: 0 }); }
+function clearVector(vector: Vec3): void {
+  Object.assign(vector, { x: 0, y: 0, z: 0 });
+}
 
 /** Field bindings are enumerable because botlib copies goal records with object spread. */
-function bindSourceNumber<T extends object>(
-  record: T, key: keyof T, view: DataView, offset: number, kind: "int" | "float",
-): void {
+function bindSourceNumber<T extends object>(record: T, key: keyof T, view: DataView, offset: number, kind: "int" | "float"): void {
   Object.defineProperty(record, key, {
     enumerable: true,
-    get(): number { return kind === "float" ? view.getFloat32(offset, true) : view.getInt32(offset, true); },
+    get(): number {
+      return kind === "float" ? view.getFloat32(offset, true) : view.getInt32(offset, true);
+    },
     set(value: number): void {
       if (kind === "float") view.setFloat32(offset, value, true);
       else view.setInt32(offset, value, true);
@@ -671,15 +813,17 @@ function bindSourceNumber<T extends object>(
 function bindSourceBoolean<T extends object>(record: T, key: keyof T, view: DataView, offset: number): void {
   Object.defineProperty(record, key, {
     enumerable: true,
-    get(): boolean { return view.getInt32(offset, true) !== 0; },
-    set(value: boolean): void { view.setInt32(offset, value ? 1 : 0, true); },
+    get(): boolean {
+      return view.getInt32(offset, true) !== 0;
+    },
+    set(value: boolean): void {
+      view.setInt32(offset, value ? 1 : 0, true);
+    },
   });
 }
 
 /** Ordinary text assignments use Q_strncpyz; source callers use named operations for other writes. */
-function bindSourceText<T extends object>(
-  record: T, key: keyof T, bytes: Uint8Array, offset: number, size: number,
-): void {
+function bindSourceText<T extends object>(record: T, key: keyof T, bytes: Uint8Array, offset: number, size: number): void {
   const remaining = new Uint8Array(bytes.buffer, bytes.byteOffset + offset);
   Object.defineProperty(record, key, {
     enumerable: true,
@@ -714,7 +858,8 @@ function sourceStrncpy(bytes: Uint8Array, offset: number, source: string, count:
 
 /** Q_CleanStr leaves bytes after its new terminator untouched. */
 function cleanSourceString(bytes: Uint8Array, offset: number): void {
-  let read = offset, write = offset;
+  let read = offset,
+    write = offset;
   for (;;) {
     const byte = bytes[read];
     if (byte === undefined) throw new RangeError("Bot name reads beyond source storage");
@@ -729,21 +874,38 @@ function cleanSourceString(bytes: Uint8Array, offset: number): void {
   bytes[write] = 0;
 }
 
-function bindSourceVector<T extends object>(
-  record: T, key: keyof T, view: DataView, offset: number, integer = false,
-): void {
+function bindSourceVector<T extends object>(record: T, key: keyof T, view: DataView, offset: number, integer = false): void {
   const vector: Vec3 = {
-    get x(): number { return integer ? view.getInt32(offset, true) : view.getFloat32(offset, true); },
-    set x(value: number) { if (integer) view.setInt32(offset, value, true); else view.setFloat32(offset, value, true); },
-    get y(): number { return integer ? view.getInt32(offset + 4, true) : view.getFloat32(offset + 4, true); },
-    set y(value: number) { if (integer) view.setInt32(offset + 4, value, true); else view.setFloat32(offset + 4, value, true); },
-    get z(): number { return integer ? view.getInt32(offset + 8, true) : view.getFloat32(offset + 8, true); },
-    set z(value: number) { if (integer) view.setInt32(offset + 8, value, true); else view.setFloat32(offset + 8, value, true); },
+    get x(): number {
+      return integer ? view.getInt32(offset, true) : view.getFloat32(offset, true);
+    },
+    set x(value: number) {
+      if (integer) view.setInt32(offset, value, true);
+      else view.setFloat32(offset, value, true);
+    },
+    get y(): number {
+      return integer ? view.getInt32(offset + 4, true) : view.getFloat32(offset + 4, true);
+    },
+    set y(value: number) {
+      if (integer) view.setInt32(offset + 4, value, true);
+      else view.setFloat32(offset + 4, value, true);
+    },
+    get z(): number {
+      return integer ? view.getInt32(offset + 8, true) : view.getFloat32(offset + 8, true);
+    },
+    set z(value: number) {
+      if (integer) view.setInt32(offset + 8, value, true);
+      else view.setFloat32(offset + 8, value, true);
+    },
   };
   Object.defineProperty(record, key, {
     enumerable: true,
-    get(): Vec3 { return vector; },
-    set(value: Vec3): void { Object.assign(vector, value); },
+    get(): Vec3 {
+      return vector;
+    },
+    set(value: Vec3): void {
+      Object.assign(vector, value);
+    },
   });
 }
 
@@ -754,8 +916,12 @@ function sourceIntArray(view: DataView, offset: number, length: number): number[
     const fieldOffset = offset + index * 4;
     Object.defineProperty(values, index, {
       enumerable: true,
-      get(): number { return view.getInt32(fieldOffset, true); },
-      set(value: number): void { view.setInt32(fieldOffset, value, true); },
+      get(): number {
+        return view.getInt32(fieldOffset, true);
+      },
+      set(value: number): void {
+        view.setInt32(fieldOffset, value, true);
+      },
     });
   }
   Object.defineProperty(values, "length", { writable: false });
@@ -818,9 +984,7 @@ function sourcePlayerState(product: Product, view: DataView): PlayerState {
   return state;
 }
 
-function bindSourceEnum<T extends object, E extends number>(
-  record: T, key: keyof T, view: DataView, offset: number, members: readonly E[],
-): void {
+function bindSourceEnum<T extends object, E extends number>(record: T, key: keyof T, view: DataView, offset: number, members: readonly E[]): void {
   Object.defineProperty(record, key, {
     enumerable: true,
     get(): E {
@@ -828,18 +992,25 @@ function bindSourceEnum<T extends object, E extends number>(
       for (const member of members) if (value === member) return member;
       throw new RangeError(`Unsupported bot player ${String(key)} ${value}`);
     },
-    set(value: E): void { view.setInt32(offset, value, true); },
+    set(value: E): void {
+      view.setInt32(offset, value, true);
+    },
   });
 }
 
 function bindSourcePlayerSlots(
-  state: PlayerState, key: "events" | "eventParms" | "stats" | "persistant" | "powerups" | "ammo",
-  view: DataView, offset: number, length: number,
+  state: PlayerState,
+  key: "events" | "eventParms" | "stats" | "persistant" | "powerups" | "ammo",
+  view: DataView,
+  offset: number,
+  length: number,
 ): void {
   const slots = new PlayerStateSlots(length, new Int32Array(view.buffer, view.byteOffset + offset, length));
   Object.defineProperty(state, key, {
     enumerable: true,
-    get(): PlayerStateSlots { return slots; },
+    get(): PlayerStateSlots {
+      return slots;
+    },
     set(source: PlayerStateSlots): void {
       for (let index = 0; index < length; index++) slots.set(index, source.get(index));
     },
@@ -848,8 +1019,13 @@ function bindSourcePlayerSlots(
 
 function sourceCommand(view: DataView): UserCommand {
   const command: UserCommand = {
-    serverTime: 0, angles: vec3(0, 0, 0), buttons: 0, weapon: Weapon.WP_NONE,
-    forwardmove: 0, rightmove: 0, upmove: 0,
+    serverTime: 0,
+    angles: vec3(0, 0, 0),
+    buttons: 0,
+    weapon: Weapon.WP_NONE,
+    forwardmove: 0,
+    rightmove: 0,
+    upmove: 0,
   };
   bindSourceNumber(command, "serverTime", view, 0, "int");
   bindSourceVector(command, "angles", view, 4, true);
@@ -861,16 +1037,24 @@ function sourceCommand(view: DataView): UserCommand {
       for (const weapon of COMMAND_WEAPONS) if (value === weapon) return weapon;
       throw new RangeError(`Unsupported bot command weapon ${value}`);
     },
-    set(value: Weapon): void { view.setUint8(20, value); },
+    set(value: Weapon): void {
+      view.setUint8(20, value);
+    },
   });
   const moves: readonly (readonly ["forwardmove" | "rightmove" | "upmove", number])[] = [
-    ["forwardmove", 21], ["rightmove", 22], ["upmove", 23],
+    ["forwardmove", 21],
+    ["rightmove", 22],
+    ["upmove", 23],
   ];
   for (const [key, offset] of moves) {
     Object.defineProperty(command, key, {
       enumerable: true,
-      get(): number { return view.getInt8(offset); },
-      set(value: number): void { view.setInt8(offset, value); },
+      get(): number {
+        return view.getInt8(offset);
+      },
+      set(value: number): void {
+        view.setInt8(offset, value);
+      },
     });
   }
   return command;

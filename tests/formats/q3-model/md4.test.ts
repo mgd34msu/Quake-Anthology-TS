@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Synthetic fixture adapted from the reference implementation MD4 model tests. GPL-2.0-or-later. */
 import { test, expect } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";

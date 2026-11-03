@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // CL_SetCGameTime and CL_AdjustTimeDelta, cl_cgame.c. GPL-2.0-or-later.
 import { CommonError } from "../../core/common-error.ts";
 import type { Snapshot } from "./server-message.ts";
@@ -26,11 +27,22 @@ export class Q3ClientClock {
   private demoBaseTime = 0;
   private demoFrames = 0;
   private demoStart = 0;
-  publish(snapshot: Snapshot): void { this.current = snapshot; this.pending = true; }
+  publish(snapshot: Snapshot): void {
+    this.current = snapshot;
+    this.pending = true;
+  }
   clear(): void {
-    this.time = 0; this.delta = 0; this.oldTime = 0; this.oldFrameServerTime = 0;
-    this.pending = false; this.extrapolated = false; this.current = null; this.active = false;
-    this.demoBaseTime = 0; this.demoFrames = 0; this.demoStart = 0;
+    this.time = 0;
+    this.delta = 0;
+    this.oldTime = 0;
+    this.oldFrameServerTime = 0;
+    this.pending = false;
+    this.extrapolated = false;
+    this.current = null;
+    this.active = false;
+    this.demoBaseTime = 0;
+    this.demoFrames = 0;
+    this.demoStart = 0;
   }
   /** Call after module initialization has primed this client; returns null until its first active snapshot. */
   advance(realTime: number, options: Q3ClockOptions): number | null {
@@ -38,8 +50,11 @@ export class Q3ClientClock {
     const snapshot = this.current;
     if (!this.active) {
       if (!this.pending || snapshot === null || (snapshot.flags & 2) !== 0) return null;
-      this.pending = false; this.active = true; this.delta = sourceClock(snapshot.serverTime - realTime);
-      this.oldTime = snapshot.serverTime; this.demoBaseTime = snapshot.serverTime;
+      this.pending = false;
+      this.active = true;
+      this.delta = sourceClock(snapshot.serverTime - realTime);
+      this.oldTime = snapshot.serverTime;
+      this.demoBaseTime = snapshot.serverTime;
     }
     if (snapshot === null) throw new CommonError("drop", "CL_SetCGameTime: !cl.snap.valid");
     if (options.paused) return this.time;
@@ -55,12 +70,18 @@ export class Q3ClientClock {
     if (this.pending) {
       this.pending = false;
       if (!options.demo) {
-        const next = sourceClock(snapshot.serverTime - realTime), distance = sourceClock(Math.abs(sourceClock(next - this.delta)));
-        if (distance > 500) { this.delta = next; this.oldTime = snapshot.serverTime; this.time = snapshot.serverTime; }
-        else if (distance > 100) this.delta = sourceClock(this.delta + next) >> 1;
+        const next = sourceClock(snapshot.serverTime - realTime),
+          distance = sourceClock(Math.abs(sourceClock(next - this.delta)));
+        if (distance > 500) {
+          this.delta = next;
+          this.oldTime = snapshot.serverTime;
+          this.time = snapshot.serverTime;
+        } else if (distance > 100) this.delta = sourceClock(this.delta + next) >> 1;
         else if (options.timescale === 0 || options.timescale === 1) {
-          if (this.extrapolated) { this.extrapolated = false; this.delta = sourceClock(this.delta - 2); }
-          else this.delta = sourceClock(this.delta + 1);
+          if (this.extrapolated) {
+            this.extrapolated = false;
+            this.delta = sourceClock(this.delta - 2);
+          } else this.delta = sourceClock(this.delta + 1);
         }
       }
     }
@@ -71,7 +92,9 @@ export class Q3ClientClock {
     }
     return this.time;
   }
-  needsDemoMessage(): boolean { return this.current !== null && this.time >= this.current.serverTime; }
+  needsDemoMessage(): boolean {
+    return this.current !== null && this.time >= this.current.serverTime;
+  }
   demoTiming(milliseconds: number): { readonly frames: number; readonly elapsedMilliseconds: number } | null {
     const elapsed = sourceClock(milliseconds - this.demoStart);
     return elapsed > 0 ? { frames: this.demoFrames, elapsedMilliseconds: elapsed } : null;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { rendererBackends } from "../support/gl.ts";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
@@ -13,7 +14,8 @@ test("render-worker CLI distinguishes no override from explicit off and preserve
     for (const value of ["0", "1"]) {
       const parsed = parseApplicationCommand(["--renderer", renderer, "--render-worker", value]);
       if (parsed.kind !== "menu") throw new Error("Expected menu options");
-      expect(parsed.options.renderWorker).toBe(value === "1"); expect(parsed.options.renderer).toBe(renderer);
+      expect(parsed.options.renderWorker).toBe(value === "1");
+      expect(parsed.options.renderer).toBe(renderer);
     }
   }
   const defaults = parseApplicationCommand([]);
@@ -34,19 +36,37 @@ test("r_smp defaults to off, restores archived choice and honors explicit off", 
     await writeFile(join(root, "settings/images.cfg"), 'seta r_smp "1"\n');
     const restored = await ApplicationImageSettings.open(options);
     expect(restored.cvars.variableValue("r_smp")).toBe(1);
-    restored.cvars.set("r_smp", "2"); expect(restored.cvars.variableValue("r_smp")).toBe(1);
+    restored.cvars.set("r_smp", "2");
+    expect(restored.cvars.variableValue("r_smp")).toBe(1);
     const override = await ApplicationImageSettings.open({ ...options, renderWorker: false });
     expect(override.cvars.variableValue("r_smp")).toBe(0);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("render worker menu queues current backend independently of renderer draft", () => {
   let worker = false;
   const queued: string[] = [];
-  const controls = bindRendererSettings({ current: () => "cpu", apply: backend => { queued.push(backend); }, report() {},
-    worker: { read: () => worker, write: value => { worker = value; } } });
-  const choice = controls.find(control => control.id === "ui:video:renderer"), toggle = controls.find(control => control.id === "ui:video:render-worker");
+  const controls = bindRendererSettings({
+    current: () => "cpu",
+    apply: backend => {
+      queued.push(backend);
+    },
+    report() {},
+    worker: {
+      read: () => worker,
+      write: value => {
+        worker = value;
+      },
+    },
+  });
+  const choice = controls.find(control => control.id === "ui:video:renderer"),
+    toggle = controls.find(control => control.id === "ui:video:render-worker");
   if (choice?.kind !== "choice" || toggle?.kind !== "toggle") throw new Error("Missing renderer controls");
-  choice.write("gl"); toggle.write(true);
-  expect(worker).toBe(true); expect(queued).toEqual(["cpu"]); expect(choice.read()).toBe("gl");
+  choice.write("gl");
+  toggle.write(true);
+  expect(worker).toBe(true);
+  expect(queued).toEqual(["cpu"]);
+  expect(choice.read()).toBe("gl");
 });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // BG_TouchJumpPad from id Software's code/game/bg_misc.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { angleNormalize180, vec3, vectorToAngles } from "../../../../core/math.ts";

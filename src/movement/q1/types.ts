@@ -1,8 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake movement interfaces derived from WinQuake/sv_phys.c and QW/pmove.h.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
-import type { MovementContinuation, MovementInput, MovementServices, MovementState, Q1MovementInput, Q1MovementState, QwMovementInput } from "../../contracts/movement.ts";
+import type {
+  MovementContinuation,
+  MovementInput,
+  MovementServices,
+  MovementState,
+  Q1MovementInput,
+  Q1MovementState,
+  QwMovementInput,
+} from "../../contracts/movement.ts";
 import type { TraceHit, TraceResult, TraceShape } from "../../contracts/scene.ts";
 
 export const Q1_MOVE_NONE = 0;

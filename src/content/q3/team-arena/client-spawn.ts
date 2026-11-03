@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { writeGround } from "../base/game/ground.ts";
@@ -30,13 +31,25 @@ import type { EntityDie, GameEntity } from "../base/game/state.ts";
 import { findEntity, useTargets } from "../base/game/utilities.ts";
 import type { TargetUseContext } from "../base/game/utilities.ts";
 
-const PLAYER_MINS = vec3(-15, -15, -24), PLAYER_MAXS = vec3(15, 15, 32);
-const CONTENTS_BODY = 0x2000000, CONTENTS_CORPSE = 0x4000000, CONTENTS_NODROP = 0x80000000;
-const EF_DEAD = 1, EF_TELEPORT_BIT = 4, EF_KAMIKAZE = 0x200, EF_VOTED = 0x4000, EF_TEAMVOTED = 0x80000;
+const PLAYER_MINS = vec3(-15, -15, -24),
+  PLAYER_MAXS = vec3(15, 15, 32);
+const CONTENTS_BODY = 0x2000000,
+  CONTENTS_CORPSE = 0x4000000,
+  CONTENTS_NODROP = 0x80000000;
+const EF_DEAD = 1,
+  EF_TELEPORT_BIT = 4,
+  EF_KAMIKAZE = 0x200,
+  EF_VOTED = 0x4000,
+  EF_TEAMVOTED = 0x80000;
 export const BODY_QUEUE_SIZE = 8;
 
-export interface SpawnPose { readonly origin: Vec3; readonly angles: Vec3 }
-export interface SpawnPoint extends SpawnPose { readonly entity: GameEntity }
+export interface SpawnPose {
+  readonly origin: Vec3;
+  readonly angles: Vec3;
+}
+export interface SpawnPoint extends SpawnPose {
+  readonly entity: GameEntity;
+}
 export interface ClientSpawnFrame {
   readonly time: number;
   readonly gameType: number;
@@ -104,15 +117,28 @@ export class ClientSpawnState {
 }
 
 export class ClientSpawnRuntime {
-  captureSaveState() { const queue = this.state.bodyQueue; return { bodyQueue: queue === null ? null : { entities: queue.entities.map(entity => entity.slot), index: queue.index } }; }
+  captureSaveState() {
+    const queue = this.state.bodyQueue;
+    return { bodyQueue: queue === null ? null : { entities: queue.entities.map(entity => entity.slot), index: queue.index } };
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.clientSpawn");
-    const queue = reader.field("bodyQueue").nullable(entry => ({ entities: entry.field("entities").list(entity => readModuleEntity(entity, this.host.pool)), index: entry.field("index").integer(0) }));
-    if (queue !== null && (queue.entities.length !== BODY_QUEUE_SIZE || queue.index >= queue.entities.length || new Set(queue.entities).size !== queue.entities.length)) reader.fail("invalid body queue");
+    const queue = reader.field("bodyQueue").nullable(entry => ({
+      entities: entry.field("entities").list(entity => readModuleEntity(entity, this.host.pool)),
+      index: entry.field("index").integer(0),
+    }));
+    if (
+      queue !== null &&
+      (queue.entities.length !== BODY_QUEUE_SIZE || queue.index >= queue.entities.length || new Set(queue.entities).size !== queue.entities.length)
+    )
+      reader.fail("invalid body queue");
     this.state.bodyQueue = queue;
   }
 
-  constructor(readonly host: ClientSpawnHost, private readonly state = new ClientSpawnState()) {
+  constructor(
+    readonly host: ClientSpawnHost,
+    private readonly state = new ClientSpawnState(),
+  ) {
     if (host.think.host.pool !== host.pool || host.think.host.world !== host.world) {
       throw new Error("Client spawning and thinking must share entity storage and world");
     }
@@ -121,8 +147,8 @@ export class ClientSpawnRuntime {
   }
 
   private ownedClient(entity: GameEntity): GameClient {
-    if (this.host.pool.get(entity.slot) !== entity || entity.slot >= this.host.pool.maxClients ||
-      entity.client !== this.host.pool.clientAt(entity.slot)) throw new Error("Client does not belong to the configured pool slot");
+    if (this.host.pool.get(entity.slot) !== entity || entity.slot >= this.host.pool.maxClients || entity.client !== this.host.pool.clientAt(entity.slot))
+      throw new Error("Client does not belong to the configured pool slot");
     return clientOf(entity);
   }
 
@@ -132,10 +158,15 @@ export class ClientSpawnRuntime {
   }
 
   selectNearestDeathmatchSpawnPoint(from: Vec3): GameEntity | null {
-    let spot: GameEntity | null = null, nearest: GameEntity | null = null, nearestDistance = 999999;
+    let spot: GameEntity | null = null,
+      nearest: GameEntity | null = null,
+      nearestDistance = 999999;
     while ((spot = findEntity(this.host.pool, spot, "classname", "info_player_deathmatch")) !== null) {
       const distance = length3(sub3(spot.s.origin, from));
-      if (distance < nearestDistance) { nearestDistance = distance; nearest = spot; }
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = spot;
+      }
     }
     return nearest;
   }
@@ -228,7 +259,8 @@ export class ClientSpawnRuntime {
   }
 
   copyToBodyQueue(entity: GameEntity): GameEntity | null {
-    const client = this.ownedClient(entity), time = this.host.frame().time;
+    const client = this.ownedClient(entity),
+      time = this.host.frame().time;
     this.host.world.unlink(entity.slot);
     if (this.host.world.pointContents(entity.s.origin, -1) & CONTENTS_NODROP) return null;
     const queue = this.state.bodyQueue;
@@ -240,11 +272,14 @@ export class ClientSpawnRuntime {
     Object.assign(body.s, entity.s.copy());
     writeGround(body, entity.binding.body.read().ground, this.host.pool);
     body.s.eFlags = EF_DEAD;
-    if (client.ps.product === "missionpack" && (entity.s.eFlags & EF_KAMIKAZE)) {
+    if (client.ps.product === "missionpack" && entity.s.eFlags & EF_KAMIKAZE) {
       body.s.eFlags |= EF_KAMIKAZE;
       for (let index = 0; index < MAX_GENTITIES; index++) {
         const timer = this.host.pool.at(index);
-        if (timer.inuse && timer.activator === entity && timer.classname === "kamikaze timer") { timer.activator = body; break; }
+        if (timer.inuse && timer.activator === entity && timer.classname === "kamikaze timer") {
+          timer.activator = body;
+          break;
+        }
       }
     }
     body.s.powerups = 0;
@@ -253,14 +288,18 @@ export class ClientSpawnRuntime {
     body.timestamp = time;
     body.physicsObject = true;
     body.physicsBounce = 0;
-    body.s.pos = body.binding.body.read().ground === null
-      ? { ...body.s.pos, type: TrajectoryType.TR_GRAVITY, time, delta: { ...client.ps.velocity } }
-      : { ...body.s.pos, type: TrajectoryType.TR_STATIONARY };
+    body.s.pos =
+      body.binding.body.read().ground === null
+        ? { ...body.s.pos, type: TrajectoryType.TR_GRAVITY, time, delta: { ...client.ps.velocity } }
+        : { ...body.s.pos, type: TrajectoryType.TR_STATIONARY };
     body.s.event = 0;
     const animation = body.s.legsAnim & ~128;
-    body.s.torsoAnim = body.s.legsAnim = animation === PlayerAnimation.BOTH_DEATH1 || animation === PlayerAnimation.BOTH_DEAD1
-      ? PlayerAnimation.BOTH_DEAD1 : animation === PlayerAnimation.BOTH_DEATH2 || animation === PlayerAnimation.BOTH_DEAD2
-        ? PlayerAnimation.BOTH_DEAD2 : PlayerAnimation.BOTH_DEAD3;
+    body.s.torsoAnim = body.s.legsAnim =
+      animation === PlayerAnimation.BOTH_DEATH1 || animation === PlayerAnimation.BOTH_DEAD1
+        ? PlayerAnimation.BOTH_DEAD1
+        : animation === PlayerAnimation.BOTH_DEATH2 || animation === PlayerAnimation.BOTH_DEAD2
+          ? PlayerAnimation.BOTH_DEAD2
+          : PlayerAnimation.BOTH_DEAD3;
     body.r.svFlags = entity.r.svFlags;
     body.r.mins = { ...entity.r.mins };
     body.r.maxs = { ...entity.r.maxs };
@@ -277,12 +316,15 @@ export class ClientSpawnRuntime {
   }
 
   clientSpawn(entity: GameEntity): void {
-    const client = this.ownedClient(entity), frame = this.host.frame();
-    let spawn: SpawnPose, spawnEntity: GameEntity | null = null;
+    const client = this.ownedClient(entity),
+      frame = this.host.frame();
+    let spawn: SpawnPose,
+      spawnEntity: GameEntity | null = null;
     if (client.sess.sessionTeam === Team.TEAM_SPECTATOR) spawn = this.host.findIntermissionPoint();
     else if (frame.gameType >= GameType.GT_CTF) {
       const selected = this.selectTeamSpawnPoint(client.sess.sessionTeam, client.pers.teamState.state);
-      spawn = selected; spawnEntity = selected.entity;
+      spawn = selected;
+      spawnEntity = selected.entity;
     } else {
       const states = new Set<number>();
       while (true) {
@@ -298,14 +340,18 @@ export class ClientSpawnRuntime {
         } else selected = this.selectSpawnPoint(client.ps.origin);
         const bot = (entity.r.svFlags & ServerEntityFlags.BOT) !== 0;
         if ((selected.entity.flags & (bot ? GameFlags.NO_BOTS : GameFlags.NO_HUMANS)) !== 0) continue;
-        spawn = selected; spawnEntity = selected.entity; break;
+        spawn = selected;
+        spawnEntity = selected.entity;
+        break;
       }
     }
     client.pers.teamState.state = TeamState.ACTIVE;
     entity.s.eFlags &= ~EF_KAMIKAZE;
     const flags = (client.ps.eFlags & (EF_TELEPORT_BIT | EF_VOTED | EF_TEAMVOTED)) ^ EF_TELEPORT_BIT;
     const { pers, sess, accuracyHits, accuracyShots, ps } = client;
-    const ping = ps.ping, persistant = ps.persistant.copy(), eventSequence = ps.eventSequence;
+    const ping = ps.ping,
+      persistant = ps.persistant.copy(),
+      eventSequence = ps.eventSequence;
     const fresh = new GameClient(ps.product);
     Object.assign(client, fresh, { pers, sess, ps, accuracyHits, accuracyShots });
     ps.copyFrom(fresh.ps, this.host.selectedPlayer === undefined ? "replace-authority" : "preserve-authority");
@@ -368,10 +414,12 @@ export class ClientSpawnRuntime {
       if (this.host.selectedPlayer === undefined) {
         ps.weapon = Weapon.WP_GAUNTLET;
         for (let weapon = weaponCount(ps.product) - 1; weapon > 0; weapon--) {
-          if (ps.stats.get(schema.weapons) & (1 << weapon)) { ps.weapon = weapon; break; }
+          if (ps.stats.get(schema.weapons) & (1 << weapon)) {
+            ps.weapon = weapon;
+            break;
+          }
         }
-      }
-      else this.host.selectedWeaponAfterTargets?.(entity);
+      } else this.host.selectedWeaponAfterTargets?.(entity);
     }
     ps.commandTime = (frame.time - 100) | 0;
     pers.cmd.serverTime = frame.time;
@@ -393,7 +441,9 @@ export class ClientSpawnRuntime {
   }
 
   bindSaveCallbacks(): void {
-    this.host.pool.callbacks.think.intern("q3.team-arena.client-spawn.copyToBodyQueue.think", self => { this.bodySink(self); });
+    this.host.pool.callbacks.think.intern("q3.team-arena.client-spawn.copyToBodyQueue.think", self => {
+      this.bodySink(self);
+    });
     this.host.pool.callbacks.die.intern("q3.death.body", this.host.bodyDie);
     this.host.pool.callbacks.die.intern("q3.death.player", this.host.playerDie);
   }

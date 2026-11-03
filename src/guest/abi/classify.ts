@@ -12,7 +12,9 @@ export interface AbiArgument {
   readonly indirect: boolean;
   readonly locations: readonly AbiLocation[];
 }
-export type AbiResult = { readonly kind: "void" } | { readonly kind: "x87"; readonly storage: "float32" | "float64" }
+export type AbiResult =
+  | { readonly kind: "void" }
+  | { readonly kind: "x87"; readonly storage: "float32" | "float64" }
   | { readonly kind: "registers"; readonly layout: GuestValueLayout; readonly locations: readonly AbiLocation[] }
   | { readonly kind: "memory"; readonly layout: GuestValueLayout; readonly pointer: AbiArgument };
 export interface AbiCallPlan {
@@ -35,7 +37,8 @@ export function classifySystemVAggregate(layout: GuestValueLayout): readonly Eig
     const size = storageBytes(field.storage, 8);
     if (field.byteOffset % size !== 0) return "memory";
     for (let index = 0; index < field.count; index++) {
-      const start = field.byteOffset + index * size, end = start + size;
+      const start = field.byteOffset + index * size,
+        end = start + size;
       for (let slot = Math.floor(start / 8); slot < Math.ceil(end / 8); slot++) {
         const prior = classes[slot];
         if (prior === undefined) throw new RangeError("Aggregate classification exceeds layout");
@@ -58,26 +61,56 @@ type LayoutMatch = (layout: GuestValueLayout | "void" | undefined) => boolean;
 const callPlans = new WeakMap<GuestCallSignature, { readonly unchanged: () => boolean; readonly plan: AbiCallPlan }>();
 function matchLayout(layout: GuestValueLayout | "void"): LayoutMatch | null {
   if (layout === "void") return current => current === "void";
-  if (layout.kind === "scalar") { const storage = layout.storage; return current => current === layout && current.kind === "scalar" && current.storage === storage; }
+  if (layout.kind === "scalar") {
+    const storage = layout.storage;
+    return current => current === layout && current.kind === "scalar" && current.storage === storage;
+  }
   const record = layout.layout;
   if (!Object.isFrozen(record) || !Object.isFrozen(record.fields) || !record.fields.every(Object.isFrozen)) return null;
   return current => current === layout && current.kind === "aggregate" && current.layout === record;
 }
 function retainCallPlan(signature: GuestCallSignature, plan: AbiCallPlan): void {
-  const result = matchLayout(signature.result), parameters: LayoutMatch[] = [];
+  const result = matchLayout(signature.result),
+    parameters: LayoutMatch[] = [];
   if (result === null) return;
-  for (const layout of signature.parameters) { const match = matchLayout(layout); if (match === null) return; parameters.push(match); }
-  const { kind, call, pointerBytes } = signature.abi, variadic = signature.variadic;
+  for (const layout of signature.parameters) {
+    const match = matchLayout(layout);
+    if (match === null) return;
+    parameters.push(match);
+  }
+  const { kind, call, pointerBytes } = signature.abi,
+    variadic = signature.variadic;
   const unchanged = (): boolean => {
-    if (signature.abi !== plan.abi || signature.abi.kind !== kind || signature.abi.call !== call || signature.abi.pointerBytes !== pointerBytes
-      || signature.variadic !== variadic || !result(signature.result) || signature.parameters.length !== parameters.length) return false;
+    if (
+      signature.abi !== plan.abi ||
+      signature.abi.kind !== kind ||
+      signature.abi.call !== call ||
+      signature.abi.pointerBytes !== pointerBytes ||
+      signature.variadic !== variadic ||
+      !result(signature.result) ||
+      signature.parameters.length !== parameters.length
+    )
+      return false;
     for (let index = 0; index < parameters.length; index++) if (parameters[index]?.(signature.parameters[index]) !== true) return false;
     return true;
   };
-  for (const argument of plan.arguments) { for (const location of argument.locations) Object.freeze(location); Object.freeze(argument.locations); Object.freeze(argument); }
-  if (plan.result.kind === "registers") { for (const location of plan.result.locations) Object.freeze(location); Object.freeze(plan.result.locations); }
-  if (plan.result.kind === "memory") { for (const location of plan.result.pointer.locations) Object.freeze(location); Object.freeze(plan.result.pointer.locations); Object.freeze(plan.result.pointer); }
-  Object.freeze(plan.arguments); Object.freeze(plan.result); Object.freeze(plan);
+  for (const argument of plan.arguments) {
+    for (const location of argument.locations) Object.freeze(location);
+    Object.freeze(argument.locations);
+    Object.freeze(argument);
+  }
+  if (plan.result.kind === "registers") {
+    for (const location of plan.result.locations) Object.freeze(location);
+    Object.freeze(plan.result.locations);
+  }
+  if (plan.result.kind === "memory") {
+    for (const location of plan.result.pointer.locations) Object.freeze(location);
+    Object.freeze(plan.result.pointer.locations);
+    Object.freeze(plan.result.pointer);
+  }
+  Object.freeze(plan.arguments);
+  Object.freeze(plan.result);
+  Object.freeze(plan);
   callPlans.set(signature, { unchanged, plan });
 }
 
@@ -92,13 +125,20 @@ export function planGuestCall(signature: GuestCallSignature, layouts: readonly G
 }
 
 function buildCallPlan(signature: GuestCallSignature, layouts: readonly GuestValueLayout[]): AbiCallPlan {
-  const abi = signature.abi, word = abi.pointerBytes, hidden = hiddenResult(signature);
-  if ((!signature.variadic && layouts.length !== signature.parameters.length) || layouts.length < signature.parameters.length) throw new RangeError("Call argument count differs from signature");
+  const abi = signature.abi,
+    word = abi.pointerBytes,
+    hidden = hiddenResult(signature);
+  if ((!signature.variadic && layouts.length !== signature.parameters.length) || layouts.length < signature.parameters.length)
+    throw new RangeError("Call argument count differs from signature");
   for (const layout of layouts) validateValueLayout(layout, word);
   if (signature.result !== "void") validateValueLayout(signature.result, word);
-  const microsoft64 = abi.kind === "windows-x86-64", system64 = abi.kind === "linux-x86-64";
+  const microsoft64 = abi.kind === "windows-x86-64",
+    system64 = abi.kind === "linux-x86-64";
   const integerRegisters: readonly GuestRegister[] = microsoft64 ? ["rcx", "rdx", "r8", "r9"] : system64 ? ["rdi", "rsi", "rdx", "rcx", "r8", "r9"] : [];
-  let stackBytes = word + (microsoft64 ? 32 : 0), integerCount = 0, vectorCount = 0, ordinal = 0;
+  let stackBytes = word + (microsoft64 ? 32 : 0),
+    integerCount = 0,
+    vectorCount = 0,
+    ordinal = 0;
   let stackAlignment = word === 8 || abi.kind === "linux-i386" ? 16 : 4;
   const pointerLayout: GuestValueLayout = { kind: "scalar", storage: "pointer" };
   const stack = (layout: GuestValueLayout, indirect: boolean): AbiArgument => {
@@ -111,11 +151,16 @@ function buildCallPlan(signature: GuestCallSignature, layouts: readonly GuestVal
     return { layout, indirect, locations: [location] };
   };
   const assign = (layout: GuestValueLayout, isHidden: boolean, parameterIndex: number): AbiArgument => {
-    const size = argumentBytes(layout, word), floating = layout.kind === "scalar" && (layout.storage === "float32" || layout.storage === "float64");
+    const size = argumentBytes(layout, word),
+      floating = layout.kind === "scalar" && (layout.storage === "float32" || layout.storage === "float64");
     if (microsoft64) {
-      const position = ordinal++, register = integerRegisters[position], indirect = layout.kind === "aggregate" && ![1, 2, 4, 8].includes(size);
+      const position = ordinal++,
+        register = integerRegisters[position],
+        indirect = layout.kind === "aggregate" && ![1, 2, 4, 8].includes(size);
       if (register === undefined) return stack(layout, indirect);
-      const locations: AbiLocation[] = floating ? [{ kind: "sse", register: position, offset: 0, bytes: size }] : [{ kind: "integer", register, offset: 0, bytes: indirect ? word : size }];
+      const locations: AbiLocation[] = floating
+        ? [{ kind: "sse", register: position, offset: 0, bytes: size }]
+        : [{ kind: "integer", register, offset: 0, bytes: indirect ? word : size }];
       if (floating && signature.variadic) locations.push({ kind: "integer", register, offset: 0, bytes: size });
       if (floating) vectorCount = Math.max(vectorCount, position + 1);
       return { layout, indirect, locations };
@@ -123,11 +168,13 @@ function buildCallPlan(signature: GuestCallSignature, layouts: readonly GuestVal
     if (system64) {
       const classes = classifySystemVAggregate(layout);
       if (classes === "memory") return stack(layout, false);
-      const neededIntegers = classes.filter(kind => kind === "integer").length, neededVectors = classes.filter(kind => kind === "sse").length;
+      const neededIntegers = classes.filter(kind => kind === "integer").length,
+        neededVectors = classes.filter(kind => kind === "sse").length;
       if (integerCount + neededIntegers > integerRegisters.length || vectorCount + neededVectors > 8) return stack(layout, false);
       const locations: AbiLocation[] = [];
       for (const [index, kind] of classes.entries()) {
-        const offset = index * 8, bytes = Math.min(8, size - offset);
+        const offset = index * 8,
+          bytes = Math.min(8, size - offset);
         if (kind === "integer") {
           const register = integerRegisters[integerCount++];
           if (register === undefined) throw new RangeError("System V integer register allocation overflow");
@@ -150,32 +197,39 @@ function buildCallPlan(signature: GuestCallSignature, layouts: readonly GuestVal
   };
   const thisBeforeHidden = hidden && abi.kind === "windows-i386" && abi.call === "thiscall" && signature.variadic;
   const firstLayout = layouts[0];
-  if (thisBeforeHidden && (firstLayout?.kind !== "scalar" || firstLayout.storage !== "pointer")) throw new TypeError("Variadic thiscall requires an explicit this pointer");
+  if (thisBeforeHidden && (firstLayout?.kind !== "scalar" || firstLayout.storage !== "pointer"))
+    throw new TypeError("Variadic thiscall requires an explicit this pointer");
   const firstArgument = thisBeforeHidden && firstLayout !== undefined ? assign(firstLayout, false, 0) : null;
   const hiddenPointer = hidden ? assign(pointerLayout, true, -1) : null;
-  const arguments_ = layouts.map((layout, index) => index === 0 && firstArgument !== null ? firstArgument : assign(layout, false, index));
+  const arguments_ = layouts.map((layout, index) => (index === 0 && firstArgument !== null ? firstArgument : assign(layout, false, index)));
   let result: AbiResult;
   if (signature.result === "void") result = { kind: "void" };
   else if (hiddenPointer !== null) result = { kind: "memory", layout: signature.result, pointer: hiddenPointer };
-  else if (word === 4 && signature.result.kind === "scalar" && (signature.result.storage === "float32" || signature.result.storage === "float64")) result = { kind: "x87", storage: signature.result.storage };
+  else if (word === 4 && signature.result.kind === "scalar" && (signature.result.storage === "float32" || signature.result.storage === "float64"))
+    result = { kind: "x87", storage: signature.result.storage };
   else {
-    const size = valueBytes(signature.result, word), locations: AbiLocation[] = [];
+    const size = valueBytes(signature.result, word),
+      locations: AbiLocation[] = [];
     if (system64) {
       const classes = classifySystemVAggregate(signature.result);
       if (classes === "memory") throw new Error("Memory result lacks hidden pointer");
-      let integerReturn = 0, vectorReturn = 0;
+      let integerReturn = 0,
+        vectorReturn = 0;
       for (const [index, kind] of classes.entries()) {
-        const offset = index * 8, bytes = Math.min(8, size - offset);
+        const offset = index * 8,
+          bytes = Math.min(8, size - offset);
         if (kind === "integer") locations.push({ kind, register: integerReturn++ === 0 ? "rax" : "rdx", offset, bytes });
         else if (kind === "sse") locations.push({ kind, register: vectorReturn++, offset, bytes });
       }
-    } else if (microsoft64 && signature.result.kind === "scalar" && (signature.result.storage === "float32" || signature.result.storage === "float64")) locations.push({ kind: "sse", register: 0, offset: 0, bytes: size });
+    } else if (microsoft64 && signature.result.kind === "scalar" && (signature.result.storage === "float32" || signature.result.storage === "float64"))
+      locations.push({ kind: "sse", register: 0, offset: 0, bytes: size });
     else {
       locations.push({ kind: "integer", register: "rax", offset: 0, bytes: Math.min(word, size) });
       if (size > word) locations.push({ kind: "integer", register: "rdx", offset: word, bytes: size - word });
     }
     result = { kind: "registers", layout: signature.result, locations };
   }
-  const calleePopBytes = abi.kind === "linux-i386" && hidden ? 4 : abi.kind === "windows-i386" && !signature.variadic && abi.call !== "cdecl" ? stackBytes - word : 0;
+  const calleePopBytes =
+    abi.kind === "linux-i386" && hidden ? 4 : abi.kind === "windows-i386" && !signature.variadic && abi.call !== "cdecl" ? stackBytes - word : 0;
   return { abi, arguments: arguments_, result, stackBytes, stackAlignment, calleePopBytes, vectorRegisters: vectorCount };
 }

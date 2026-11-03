@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II rerelease monsterinfo_t fly_* fields. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
 
@@ -22,7 +23,21 @@ export interface Q2AlternateFlyState {
 }
 
 export function createAlternateFlyState(): Q2AlternateFlyState {
-  return { alternateFly: false, flyMinDistance: 0, flyMaxDistance: 0, flyAcceleration: 0, flySpeed: 0,
-    flyIdealPosition: { x: 0, y: 0, z: 0 }, flyPositionTime: 0, flyBuzzard: false, flyAbove: false,
-    flyPinned: false, flyThrusters: false, flyRecoveryTime: 0, flyRecoveryDirection: { x: 0, y: 0, z: 0 }, hintPath: false, pathing: null };
+  return {
+    alternateFly: false,
+    flyMinDistance: 0,
+    flyMaxDistance: 0,
+    flyAcceleration: 0,
+    flySpeed: 0,
+    flyIdealPosition: { x: 0, y: 0, z: 0 },
+    flyPositionTime: 0,
+    flyBuzzard: false,
+    flyAbove: false,
+    flyPinned: false,
+    flyThrusters: false,
+    flyRecoveryTime: 0,
+    flyRecoveryDirection: { x: 0, y: 0, z: 0 },
+    hintPath: false,
+    pathing: null,
+  };
 }

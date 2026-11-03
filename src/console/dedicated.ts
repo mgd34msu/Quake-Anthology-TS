@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing } from "../foundation/event-ring.ts";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -19,13 +20,19 @@ export class DedicatedConsole {
     this.split();
   };
   private readonly onEnd = (): void => {
-    this.pending += this.decoder.end(); this.split();
+    this.pending += this.decoder.end();
+    this.split();
     if (this.pending !== "") this.enqueue(this.pending);
-    this.pending = ""; this.ended = true;
+    this.pending = "";
+    this.ended = true;
   };
-  private readonly onError = (error: Error): void => { this.error = error; };
+  private readonly onError = (error: Error): void => {
+    this.error = error;
+  };
   constructor(private readonly input: Readable = process.stdin) {
-    input.on("data", this.onData); input.on("end", this.onEnd); input.on("error", this.onError);
+    input.on("data", this.onData);
+    input.on("end", this.onEnd);
+    input.on("error", this.onError);
   }
   /** A full ring or an over-long unterminated line drops input instead of throwing from the stream handler. */
   private enqueue(line: string): void {
@@ -34,22 +41,34 @@ export class DedicatedConsole {
   private split(): void {
     let index = this.pending.indexOf("\n");
     while (index >= 0) {
-      this.enqueue(this.pending.slice(0, index).replace(/\r$/, "")); this.pending = this.pending.slice(index + 1);
+      this.enqueue(this.pending.slice(0, index).replace(/\r$/, ""));
+      this.pending = this.pending.slice(index + 1);
       index = this.pending.indexOf("\n");
     }
-    if (this.pending.length > MAXIMUM_PENDING) { this.pending = ""; this.dropped++; }
+    if (this.pending.length > MAXIMUM_PENDING) {
+      this.pending = "";
+      this.dropped++;
+    }
   }
-  get eof(): boolean { return this.ended && this.lines.live === 0; }
+  get eof(): boolean {
+    return this.ended && this.lines.live === 0;
+  }
   drain(commands: CommandBuffer): number {
     if (this.closed) throw new Error("Dedicated console is closed");
     if (this.error !== null) throw this.error;
-    if (this.dropped !== 0) { commands.append(`echo "Dedicated console dropped ${this.dropped} input line(s)"\n`); this.dropped = 0; }
+    if (this.dropped !== 0) {
+      commands.append(`echo "Dedicated console dropped ${this.dropped} input line(s)"\n`);
+      this.dropped = 0;
+    }
     const lines = this.lines.drainAll();
     for (const line of lines) commands.append(`${line}\n`);
     return lines.length;
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.input.off("data", this.onData); this.input.off("end", this.onEnd); this.input.off("error", this.onError);
+    this.closed = true;
+    this.input.off("data", this.onData);
+    this.input.off("end", this.onEnd);
+    this.input.off("error", this.onError);
   }
 }

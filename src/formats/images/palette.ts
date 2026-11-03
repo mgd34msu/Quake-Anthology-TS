@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from Q1 VID_SetPalette/Check_Gamma and Q2 GL_Upload8/GL_InitImages.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { ResolvedResourceReference } from "../../contracts/content.ts";
@@ -17,14 +18,24 @@ export function decodeQ1Colormap(bytes: Uint8Array): { readonly levels: Uint8Arr
   return { levels: bytes.slice(0, 16384), fullbright: { first: 256 - count, last: 255 } };
 }
 
-export function indexedRenderImage(levels: readonly [ImageLevel, ...ImageLevel[]], palette: Palette,
-  transparency: PaletteTransparency = { kind: "opaque" }, fullbright: IndexedRenderImage["fullbright"] = null,
-  translation: Uint8Array | null = null): IndexedRenderImage {
+export function indexedRenderImage(
+  levels: readonly [ImageLevel, ...ImageLevel[]],
+  palette: Palette,
+  transparency: PaletteTransparency = { kind: "opaque" },
+  fullbright: IndexedRenderImage["fullbright"] = null,
+  translation: Uint8Array | null = null,
+): IndexedRenderImage {
   if (palette.colors.length !== 768) throw new RangeError("A Quake palette requires 256 RGB entries");
   if (translation !== null && translation.length !== 256) throw new RangeError("Palette translation requires 256 entries");
   for (const level of levels) {
-    if (!Number.isSafeInteger(level.width) || !Number.isSafeInteger(level.height) || level.width <= 0 || level.height <= 0
-      || level.pixels.length !== level.width * level.height) throw new RangeError("Indexed image dimensions do not match its indices");
+    if (
+      !Number.isSafeInteger(level.width) ||
+      !Number.isSafeInteger(level.height) ||
+      level.width <= 0 ||
+      level.height <= 0 ||
+      level.pixels.length !== level.width * level.height
+    )
+      throw new RangeError("Indexed image dimensions do not match its indices");
   }
   return { kind: "indexed8", levels, palette, transparency, fullbright, translation };
 }
@@ -35,7 +46,8 @@ export function q1PlayerTranslation(topColor: number, bottomColor: number): Uint
     throw new RangeError("Q1 player colors must be in 0..13");
   const translation = Uint8Array.from({ length: 256 }, (_, index) => index);
   for (let index = 0; index < 16; index++) {
-    const top = topColor * 16, bottom = bottomColor * 16;
+    const top = topColor * 16,
+      bottom = bottomColor * 16;
     translation[16 + index] = top < 128 ? top + index : top + 15 - index;
     translation[96 + index] = bottom < 128 ? bottom + index : bottom + 15 - index;
   }
@@ -64,7 +76,8 @@ export function expandIndexedImage(image: IndexedRenderImage, level = 0, layer: 
   return { width: indexed.width, height: indexed.height, pixels };
 }
 
-export type GammaProfile = { readonly kind: "q1-gl"; readonly gamma: number }
+export type GammaProfile =
+  | { readonly kind: "q1-gl"; readonly gamma: number }
   | { readonly kind: "q2-gl"; readonly gamma: number; readonly intensity: number; readonly onlyGamma: boolean }
   | { readonly kind: "q3"; readonly gamma: number; readonly intensity: number; readonly overbrightBits: number; readonly onlyGamma: boolean };
 

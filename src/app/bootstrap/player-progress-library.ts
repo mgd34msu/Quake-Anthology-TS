@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { LibraryEntry, LibraryMenuService } from "../../ui/library/menu.ts";
 import type { PlayerProgressEvent, PlayerProgressStore } from "./player-progress.ts";
 
@@ -6,13 +7,24 @@ export class PlayerProgressLibrary implements LibraryMenuService {
   private rows: readonly LibraryEntry[] = [];
   private message = "";
   private generation = 0;
-  constructor(private readonly store: () => Promise<PlayerProgressStore>, private readonly participant: () => string) {}
-  entries(): readonly LibraryEntry[] { return this.rows; }
-  status(): string { return this.message; }
-  refresh(): void { void this.load(); }
+  constructor(
+    private readonly store: () => Promise<PlayerProgressStore>,
+    private readonly participant: () => string,
+  ) {}
+  entries(): readonly LibraryEntry[] {
+    return this.rows;
+  }
+  status(): string {
+    return this.message;
+  }
+  refresh(): void {
+    void this.load();
+  }
   async load(): Promise<void> {
-    const generation = ++this.generation, participant = this.participant();
-    this.rows = []; this.message = "Loading progress...";
+    const generation = ++this.generation,
+      participant = this.participant();
+    this.rows = [];
+    this.message = "Loading progress...";
     try {
       const store = await this.store();
       if (generation !== this.generation || participant !== this.participant()) return;
@@ -20,7 +32,8 @@ export class PlayerProgressLibrary implements LibraryMenuService {
       this.message = this.rows.length === 0 ? "No recorded achievements or completed levels for this player." : `${this.rows.length} progress records`;
     } catch (error) {
       if (generation !== this.generation || participant !== this.participant()) return;
-      this.rows = []; this.message = `Cannot read progress: ${error instanceof Error ? error.message : String(error)}`;
+      this.rows = [];
+      this.message = `Cannot read progress: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
   activate(id: string): void {

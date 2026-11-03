@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q3 1.16n/1.17 g_public.h symbolic imports; SDK wrappers and botlib.h define the argument ABI.
-import { QvmGameImport, decodeQvmGameImport } from './abi.ts';
+import { QvmGameImport, decodeQvmGameImport } from "./abi.ts";
 
 const botImports = new Map<number, QvmGameImport>([
   [200, QvmGameImport.BOTLIB_SETUP],
@@ -129,5 +130,5 @@ const botImports = new Map<number, QvmGameImport>([
 ]);
 
 export function decodeLegacyQvmGameImport(code: number): QvmGameImport | null {
-  return code >= 0 && code <= 40 ? decodeQvmGameImport(code) : botImports.get(code) ?? null;
+  return code >= 0 && code <= 40 ? decodeQvmGameImport(code) : (botImports.get(code) ?? null);
 }

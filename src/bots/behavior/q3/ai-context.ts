@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { BotWaypoint, BotGoalState } from "./ai-state.ts";
 /*
@@ -42,30 +43,49 @@ export interface BotSnapshotEntity {
 /** Bot settings borrow the application registry; cached reads retain source frame update timing. */
 export class BotCvar implements VmCvar {
   private name: string | null = null;
-  value = ""; numericValue = 0; integerValue = 0; modificationCount = 0;
+  value = "";
+  numericValue = 0;
+  integerValue = 0;
+  modificationCount = 0;
   constructor(private readonly registry: CvarRegistry) {}
   register(name: string, defaultValue: string, flags = 0): void {
     this.name = name;
-    const selectedFlags = this.registry.dialect === "q2-classic" || this.registry.dialect === "q2-rerelease"
-      ? (flags & (CvarFlag.Archive | CvarFlag.UserInfo | CvarFlag.ServerInfo)) | ((flags & CvarFlag.Latch) !== 0 ? Q2CvarFlag.Latch : 0) | ((flags & (CvarFlag.ReadOnly | CvarFlag.Init)) !== 0 ? Q2CvarFlag.NoSet : 0) : flags;
-    this.registry.register(name, defaultValue, selectedFlags); this.modificationCount = -1; this.update();
+    const selectedFlags =
+      this.registry.dialect === "q2-classic" || this.registry.dialect === "q2-rerelease"
+        ? (flags & (CvarFlag.Archive | CvarFlag.UserInfo | CvarFlag.ServerInfo)) |
+          ((flags & CvarFlag.Latch) !== 0 ? Q2CvarFlag.Latch : 0) |
+          ((flags & (CvarFlag.ReadOnly | CvarFlag.Init)) !== 0 ? Q2CvarFlag.NoSet : 0)
+        : flags;
+    this.registry.register(name, defaultValue, selectedFlags);
+    this.modificationCount = -1;
+    this.update();
   }
-  captureSaveState() { return { name: this.name, value: this.value, numericValue: this.numericValue, integerValue: this.integerValue, modificationCount: this.modificationCount }; }
+  captureSaveState() {
+    return { name: this.name, value: this.value, numericValue: this.numericValue, integerValue: this.integerValue, modificationCount: this.modificationCount };
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "bot.cvar");
     this.name = reader.field("name").nullable(cell => cell.string());
     const cachedValue = reader.field("value").string();
     if (cachedValue.length > 255) reader.fail("cached cvar exceeds source storage");
-    this.value = cachedValue; this.numericValue = reader.field("numericValue").number();
-    this.integerValue = reader.field("integerValue").integer(); this.modificationCount = reader.field("modificationCount").integer();
+    this.value = cachedValue;
+    this.numericValue = reader.field("numericValue").number();
+    this.integerValue = reader.field("integerValue").integer();
+    this.modificationCount = reader.field("modificationCount").integer();
   }
   update(): void {
     const source = this.name === null ? undefined : this.registry.find(this.name);
     if (source === undefined || source.modificationCount === this.modificationCount) return;
     // The source cell holds 255 characters; a longer value is cut rather than ending the frame.
-    this.value = source.value.slice(0, 255); this.numericValue = source.numericValue; this.integerValue = source.integerValue; this.modificationCount = source.modificationCount;
+    this.value = source.value.slice(0, 255);
+    this.numericValue = source.numericValue;
+    this.integerValue = source.integerValue;
+    this.modificationCount = source.modificationCount;
   }
-  writeInteger(value: number): void { if (!Number.isSafeInteger(value)) throw new RangeError("Bot cvar integer requires a safe integer"); this.integerValue = value | 0; }
+  writeInteger(value: number): void {
+    if (!Number.isSafeInteger(value)) throw new RangeError("Bot cvar integer requires a safe integer");
+    this.integerValue = value | 0;
+  }
 }
 
 /** Construction allocates source cells only; every game and botlib service is borrowed. */
@@ -84,7 +104,11 @@ export class GameAiContext {
   interbreed = false;
   interbreedMatchCount = 0;
 
-  constructor(readonly game: SourceBotGame, readonly library: BotLibrary, readonly host: GameAiHost) {
+  constructor(
+    readonly game: SourceBotGame,
+    readonly library: BotLibrary,
+    readonly host: GameAiHost,
+  ) {
     this.states = new BotStateStore(game.options.product);
   }
 
@@ -95,15 +119,26 @@ export class GameAiContext {
       if (id < 0) throw new Error("Waypoint pointer escapes AI heap");
       return id;
     };
-    const goal = (value: BotGoalState) => ({ origin: { ...value.origin }, area: value.area, mins: { ...value.mins }, maxs: { ...value.maxs }, entity: value.entity, number: value.number, flags: value.flags, itemInfo: value.itemInfo });
+    const goal = (value: BotGoalState) => ({
+      origin: { ...value.origin },
+      area: value.area,
+      mins: { ...value.mins },
+      maxs: { ...value.maxs },
+      entity: value.entity,
+      number: value.number,
+      flags: value.flags,
+      itemInfo: value.itemInfo,
+    });
     return {
       time: this.time,
       regularUpdateTime: this.regularUpdateTime,
       numBots: this.numBots,
       interbreed: this.interbreed,
       interbreedMatchCount: this.interbreedMatchCount,
-      states: this.states.captureSaveState(this.game.memory, waypointId), observations: this.observations.captureSaveState(),
-      nodeSwitches: [...this.nodeSwitches], cvars: [...this.vmCvars].map(([name, cell]) => ({ name, state: cell.captureSaveState() })),
+      states: this.states.captureSaveState(this.game.memory, waypointId),
+      observations: this.observations.captureSaveState(),
+      nodeSwitches: [...this.nodeSwitches],
+      cvars: [...this.vmCvars].map(([name, cell]) => ({ name, state: cell.captureSaveState() })),
       deathmatch: {
         gametype: this.deathmatch.gametype,
         maxclients: this.deathmatch.maxclients,
@@ -119,7 +154,13 @@ export class GameAiContext {
         lastTeleportOrigin: { ...this.deathmatch.lastTeleportOrigin },
         redAlternateGoals: this.deathmatch.redAlternateGoals.map(value => ({ ...value, origin: { ...value.origin } })),
         blueAlternateGoals: this.deathmatch.blueAlternateGoals.map(value => ({ ...value, origin: { ...value.origin } })),
-        waypoints: this.deathmatch.waypoints.map(value => ({ inuse: value.inuse, name: value.name, goal: goal(value.goal), next: waypointId(value.next), prev: waypointId(value.prev) })),
+        waypoints: this.deathmatch.waypoints.map(value => ({
+          inuse: value.inuse,
+          name: value.name,
+          goal: goal(value.goal),
+          next: waypointId(value.next),
+          prev: waypointId(value.prev),
+        })),
         freeWaypoints: waypointId(this.deathmatch.freeWaypoints),
       },
       team: {
@@ -136,13 +177,43 @@ export class GameAiContext {
   }
 
   restoreSaveState(value: unknown, remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
-    const reader = new SaveReader(value, "bot.context"), dm = reader.field("deathmatch"), team = reader.field("team");
+    const reader = new SaveReader(value, "bot.context"),
+      dm = reader.field("deathmatch"),
+      team = reader.field("team");
     const vector = (cell: SaveReader) => ({ x: cell.field("x").number(), y: cell.field("y").number(), z: cell.field("z").number() });
-    const goal = (cell: SaveReader) => ({ origin: vector(cell.field("origin")), area: cell.field("area").integer(), mins: vector(cell.field("mins")), maxs: vector(cell.field("maxs")), entity: cell.field("entity").integer(), number: cell.field("number").integer(), flags: cell.field("flags").integer(), itemInfo: cell.field("itemInfo").integer() });
-    const waypoint = (id: number | null): BotWaypoint | null => { if (id === null) return null; const result = this.deathmatch.waypoints[id]; if (result === undefined) return reader.fail("waypoint outside heap"); return result; };
-    const points = dm.field("waypoints").list(cell => ({ inuse: cell.field("inuse").boolean(), name: cell.field("name").string(), goal: goal(cell.field("goal")), next: cell.field("next").nullable(id => id.integer(0)), prev: cell.field("prev").nullable(id => id.integer(0)) }));
+    const goal = (cell: SaveReader) => ({
+      origin: vector(cell.field("origin")),
+      area: cell.field("area").integer(),
+      mins: vector(cell.field("mins")),
+      maxs: vector(cell.field("maxs")),
+      entity: cell.field("entity").integer(),
+      number: cell.field("number").integer(),
+      flags: cell.field("flags").integer(),
+      itemInfo: cell.field("itemInfo").integer(),
+    });
+    const waypoint = (id: number | null): BotWaypoint | null => {
+      if (id === null) return null;
+      const result = this.deathmatch.waypoints[id];
+      if (result === undefined) return reader.fail("waypoint outside heap");
+      return result;
+    };
+    const points = dm.field("waypoints").list(cell => ({
+      inuse: cell.field("inuse").boolean(),
+      name: cell.field("name").string(),
+      goal: goal(cell.field("goal")),
+      next: cell.field("next").nullable(id => id.integer(0)),
+      prev: cell.field("prev").nullable(id => id.integer(0)),
+    }));
     if (points.length !== this.deathmatch.waypoints.length) dm.fail("incorrect waypoint heap extent");
-    for (const [index, point] of points.entries()) { const target = waypoint(index); if (target === null) return dm.fail("missing waypoint"); target.inuse = point.inuse; target.name = point.name; target.goal.copyFrom(point.goal); target.next = waypoint(point.next); target.prev = waypoint(point.prev); }
+    for (const [index, point] of points.entries()) {
+      const target = waypoint(index);
+      if (target === null) return dm.fail("missing waypoint");
+      target.inuse = point.inuse;
+      target.name = point.name;
+      target.goal.copyFrom(point.goal);
+      target.next = waypoint(point.next);
+      target.prev = waypoint(point.prev);
+    }
     this.deathmatch.freeWaypoints = waypoint(dm.field("freeWaypoints").nullable(id => id.integer(0)));
     this.time = reader.field("time").number();
     this.regularUpdateTime = reader.field("regularUpdateTime").number();
@@ -161,7 +232,13 @@ export class GameAiContext {
     this.deathmatch.blueObelisk.copyFrom(goal(dm.field("blueObelisk")));
     this.deathmatch.neutralObelisk.copyFrom(goal(dm.field("neutralObelisk")));
     Object.assign(this.deathmatch.lastTeleportOrigin, vector(dm.field("lastTeleportOrigin")));
-    const alternative = (cell: SaveReader) => ({ origin: vector(cell.field("origin")), area: cell.field("area").integer(), startTravelTime: cell.field("startTravelTime").number(), goalTravelTime: cell.field("goalTravelTime").number(), extraTravelTime: cell.field("extraTravelTime").number() });
+    const alternative = (cell: SaveReader) => ({
+      origin: vector(cell.field("origin")),
+      area: cell.field("area").integer(),
+      startTravelTime: cell.field("startTravelTime").number(),
+      goalTravelTime: cell.field("goalTravelTime").number(),
+      extraTravelTime: cell.field("extraTravelTime").number(),
+    });
     this.deathmatch.redAlternateGoals = dm.field("redAlternateGoals").list(alternative);
     this.deathmatch.blueAlternateGoals = dm.field("blueAlternateGoals").list(alternative);
     this.team.numTeamMatesMaxClients = team.field("numTeamMatesMaxClients").integer();
@@ -173,28 +250,44 @@ export class GameAiContext {
     if (preferences.length !== this.team.taskPreferences.length) team.fail("incorrect team preference extent");
     this.team.taskPreferences.splice(0, this.team.taskPreferences.length, ...preferences);
     const restoreMap = (target: Map<string, number>, cell: SaveReader): void => {
-      target.clear(); for (const entry of cell.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").integer() }))) {
-        if (target.has(entry.name)) cell.fail("duplicate cached cell"); target.set(entry.name, entry.value);
+      target.clear();
+      for (const entry of cell.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").integer() }))) {
+        if (target.has(entry.name)) cell.fail("duplicate cached cell");
+        target.set(entry.name, entry.value);
       }
     };
-    restoreMap(this.chat.maxClients, reader.field("chat")); restoreMap(this.command.maxClients, reader.field("command").field("maxClients"));
-    const leaders = reader.field("command").field("notLeader").list(cell => cell.boolean());
+    restoreMap(this.chat.maxClients, reader.field("chat"));
+    restoreMap(this.command.maxClients, reader.field("command").field("maxClients"));
+    const leaders = reader
+      .field("command")
+      .field("notLeader")
+      .list(cell => cell.boolean());
     if (leaders.length !== this.command.notLeader.length) reader.fail("incorrect leader cell extent");
     this.command.notLeader.splice(0, this.command.notLeader.length, ...leaders);
     this.nodeSwitches.splice(0, this.nodeSwitches.length, ...reader.field("nodeSwitches").list(cell => cell.string()));
     this.vmCvars.clear();
     for (const entry of reader.field("cvars").list(cell => ({ name: cell.field("name").string(), state: cell.field("state").value }))) {
       if (this.vmCvars.has(entry.name)) reader.fail("duplicate bot cvar");
-      const cvar = new BotCvar(this.game.options.cvars); cvar.restoreSaveState(entry.state); this.vmCvars.set(entry.name, cvar);
+      const cvar = new BotCvar(this.game.options.cvars);
+      cvar.restoreSaveState(entry.state);
+      this.vmCvars.set(entry.name, cvar);
     }
     this.observations.restoreSaveState(reader.field("observations").value, remapObservation);
     this.states.restoreSaveState(reader.field("states").value, this.game.memory, waypoint, remapObservation);
   }
 
-  get gameType(): number { return this.deathmatch.gametype; }
-  get navigation(): BotNavigation { return this.host.navigation; }
-  get maxClients(): number { return this.deathmatch.maxclients; }
-  random(): number { return this.game.random.random(); }
+  get gameType(): number {
+    return this.deathmatch.gametype;
+  }
+  get navigation(): BotNavigation {
+    return this.host.navigation;
+  }
+  get maxClients(): number {
+    return this.deathmatch.maxclients;
+  }
+  random(): number {
+    return this.game.random.random();
+  }
 
   cvar(name: string): VmCvar {
     let cell = this.vmCvars.get(name);
@@ -239,4 +332,6 @@ export class GameAiContext {
   }
 }
 
-export function botResetState(context: GameAiContext, state: BotState): void { context.resetState(state); }
+export function botResetState(context: GameAiContext, state: BotState): void {
+  context.resetState(state);
+}

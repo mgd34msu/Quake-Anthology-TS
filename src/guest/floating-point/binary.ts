@@ -2,12 +2,21 @@
 export type Sign = 0 | 1;
 export type Rounding = "nearest" | "down" | "up" | "zero";
 export type BinaryWidth = 32 | 64 | 80;
-export type BinaryValue = { readonly kind: "finite"; readonly sign: Sign; readonly coefficient: bigint; readonly exponent: number; readonly denormal: boolean }
+export type BinaryValue =
+  | { readonly kind: "finite"; readonly sign: Sign; readonly coefficient: bigint; readonly exponent: number; readonly denormal: boolean }
   | { readonly kind: "infinity"; readonly sign: Sign }
   | { readonly kind: "nan"; readonly sign: Sign; readonly payload: bigint; readonly signaling: boolean }
   | { readonly kind: "unsupported"; readonly sign: Sign };
-export interface BinaryResult { readonly value: BinaryValue; readonly flags: number; readonly roundedUp: boolean }
-export interface BinaryFormat { readonly precision: number; readonly minimumExponent: number; readonly maximumExponent: number }
+export interface BinaryResult {
+  readonly value: BinaryValue;
+  readonly flags: number;
+  readonly roundedUp: boolean;
+}
+export interface BinaryFormat {
+  readonly precision: number;
+  readonly minimumExponent: number;
+  readonly maximumExponent: number;
+}
 export const binary32: BinaryFormat = { precision: 24, minimumExponent: -126, maximumExponent: 127 };
 export const binary64: BinaryFormat = { precision: 53, minimumExponent: -1022, maximumExponent: 1023 };
 export const binary80: BinaryFormat = { precision: 64, minimumExponent: -16382, maximumExponent: 16383 };
@@ -19,32 +28,53 @@ export const underflow = 16;
 export const precision = 32;
 
 export function rounding(bits: number): Rounding {
-  switch (bits & 3) { case 0: return "nearest"; case 1: return "down"; case 2: return "up"; default: return "zero"; }
+  switch (bits & 3) {
+    case 0:
+      return "nearest";
+    case 1:
+      return "down";
+    case 2:
+      return "up";
+    default:
+      return "zero";
+  }
 }
-export function formatFor(width: BinaryWidth): BinaryFormat { return width === 32 ? binary32 : width === 64 ? binary64 : binary80; }
-export function zero(sign: Sign = 0): BinaryValue { return { kind: "finite", sign, coefficient: 0n, exponent: 0, denormal: false }; }
-export function indefinite(): BinaryValue { return { kind: "nan", sign: 1, payload: 1n << 62n, signaling: false }; }
+export function formatFor(width: BinaryWidth): BinaryFormat {
+  return width === 32 ? binary32 : width === 64 ? binary64 : binary80;
+}
+export function zero(sign: Sign = 0): BinaryValue {
+  return { kind: "finite", sign, coefficient: 0n, exponent: 0, denormal: false };
+}
+export function indefinite(): BinaryValue {
+  return { kind: "nan", sign: 1, payload: 1n << 62n, signaling: false };
+}
 export function fromInteger(value: bigint): BinaryValue {
   return { kind: "finite", sign: value < 0n ? 1 : 0, coefficient: value < 0n ? -value : value, exponent: 0, denormal: false };
 }
-export function negate(value: BinaryValue): BinaryValue { return { ...value, sign: value.sign === 0 ? 1 : 0 }; }
+export function negate(value: BinaryValue): BinaryValue {
+  return { ...value, sign: value.sign === 0 ? 1 : 0 };
+}
 export function quiet(value: BinaryValue): BinaryValue {
   return value.kind === "nan" ? { ...value, signaling: false, payload: value.payload | (1n << 62n) } : value;
 }
 
 export function readBits(bytes: Uint8Array): bigint {
   switch (bytes.byteLength) {
-    case 1: return BigInt(bytes[0] ?? 0);
-    case 2: return BigInt((bytes[0] ?? 0) | (bytes[1] ?? 0) << 8);
-    case 4: return BigInt(((bytes[0] ?? 0) | (bytes[1] ?? 0) << 8 | (bytes[2] ?? 0) << 16 | (bytes[3] ?? 0) << 24) >>> 0);
-    case 8: return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, true);
+    case 1:
+      return BigInt(bytes[0] ?? 0);
+    case 2:
+      return BigInt((bytes[0] ?? 0) | ((bytes[1] ?? 0) << 8));
+    case 4:
+      return BigInt(((bytes[0] ?? 0) | ((bytes[1] ?? 0) << 8) | ((bytes[2] ?? 0) << 16) | ((bytes[3] ?? 0) << 24)) >>> 0);
+    case 8:
+      return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, true);
     case 10: {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      return view.getBigUint64(0, true) | BigInt(view.getUint16(8, true)) << 64n;
+      return view.getBigUint64(0, true) | (BigInt(view.getUint16(8, true)) << 64n);
     }
     case 16: {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      return view.getBigUint64(0, true) | view.getBigUint64(8, true) << 64n;
+      return view.getBigUint64(0, true) | (view.getBigUint64(8, true) << 64n);
     }
   }
   let result = 0n;
@@ -53,7 +83,10 @@ export function readBits(bytes: Uint8Array): bigint {
 }
 export function writeBits(value: bigint, byteLength: number): Uint8Array {
   const result = new Uint8Array(byteLength);
-  if (byteLength === 1) { result[0] = Number(BigInt.asUintN(8, value)); return result; }
+  if (byteLength === 1) {
+    result[0] = Number(BigInt.asUintN(8, value));
+    return result;
+  }
   if (byteLength === 2 || byteLength === 4 || byteLength === 8 || byteLength === 10 || byteLength === 16) {
     const view = new DataView(result.buffer);
     if (byteLength === 2) view.setUint16(0, Number(BigInt.asUintN(16, value)), true);
@@ -70,14 +103,20 @@ export function writeBits(value: bigint, byteLength: number): Uint8Array {
 }
 /** Decode an IEEE binary32 word without rounding its stored significand. */
 export function decodeBinary32(bits: number): BinaryValue {
-  const sign: Sign = (bits >>> 31) === 0 ? 0 : 1;
-  const exponent = (bits >>> 23) & 255, fraction = bits & 0x7fffff;
+  const sign: Sign = bits >>> 31 === 0 ? 0 : 1;
+  const exponent = (bits >>> 23) & 255,
+    fraction = bits & 0x7fffff;
   if (exponent === 255) {
     if (fraction === 0) return { kind: "infinity", sign };
     return { kind: "nan", sign, payload: BigInt(fraction) << 40n, signaling: (fraction & 0x400000) === 0 };
   }
-  return { kind: "finite", sign, coefficient: BigInt(exponent === 0 ? fraction : fraction | 0x800000),
-    exponent: (exponent === 0 ? 1 : exponent) - 150, denormal: exponent === 0 && fraction !== 0 };
+  return {
+    kind: "finite",
+    sign,
+    coefficient: BigInt(exponent === 0 ? fraction : fraction | 0x800000),
+    exponent: (exponent === 0 ? 1 : exponent) - 150,
+    denormal: exponent === 0 && fraction !== 0,
+  };
 }
 
 export function decodeBinary(bits: bigint, width: BinaryWidth): BinaryValue {
@@ -97,14 +136,19 @@ export function decodeBinary(bits: bigint, width: BinaryWidth): BinaryValue {
     return { kind: "nan", sign, payload, signaling: (payload & (1n << 62n)) === 0n };
   }
   const coefficient = (integer << BigInt(fractionBits)) | fraction;
-  return { kind: "finite", sign, coefficient, exponent: (exponent === 0 ? 1 : exponent) - bias - fractionBits,
-    denormal: exponent === 0 && coefficient !== 0n && integer === 0n };
+  return {
+    kind: "finite",
+    sign,
+    coefficient,
+    exponent: (exponent === 0 ? 1 : exponent) - bias - fractionBits,
+    denormal: exponent === 0 && coefficient !== 0n && integer === 0n,
+  };
 }
 
 function length(value: bigint): number {
   const numeric = Number(value);
-  if (numeric >= 0 && Number.isSafeInteger(numeric)) return numeric <= 0xffffffff
-    ? 32 - Math.clz32(numeric) : 64 - Math.clz32(Math.floor(numeric / 0x100000000));
+  if (numeric >= 0 && Number.isSafeInteger(numeric))
+    return numeric <= 0xffffffff ? 32 - Math.clz32(numeric) : 64 - Math.clz32(Math.floor(numeric / 0x100000000));
   return value.toString(2).length;
 }
 function compareScaled(left: bigint, right: bigint, shift: number): number {
@@ -122,8 +166,15 @@ function roundedQuotient(numerator: bigint, denominator: bigint, sign: Sign, mod
   const quotient = numerator / denominator;
   const remainder = numerator % denominator;
   const inexact = remainder !== 0n;
-  const up = inexact && (mode === "nearest" ? remainder * 2n > denominator || (remainder * 2n === denominator && (quotient & 1n) !== 0n)
-    : mode === "up" ? sign === 0 : mode === "down" ? sign === 1 : false);
+  const up =
+    inexact &&
+    (mode === "nearest"
+      ? remainder * 2n > denominator || (remainder * 2n === denominator && (quotient & 1n) !== 0n)
+      : mode === "up"
+        ? sign === 0
+        : mode === "down"
+          ? sign === 1
+          : false);
   return { quotient: quotient + (up ? 1n : 0n), inexact, up };
 }
 
@@ -132,19 +183,30 @@ export function roundRational(sign: Sign, numerator: bigint, denominator: bigint
   const top = ratioExponent(numerator, denominator) + exponent;
   const quantum = Math.max(top - format.precision + 1, format.minimumExponent - format.precision + 1);
   const shift = exponent - quantum;
-  const rounded = roundedQuotient(shift >= 0 ? numerator << BigInt(shift) : numerator,
-    shift >= 0 ? denominator : denominator << BigInt(-shift), sign, mode);
+  const rounded = roundedQuotient(shift >= 0 ? numerator << BigInt(shift) : numerator, shift >= 0 ? denominator : denominator << BigInt(-shift), sign, mode);
   const resultTop = length(rounded.quotient) - 1 + quantum;
   if (resultTop > format.maximumExponent) {
     const infinite = mode === "nearest" || (mode === "up" && sign === 0) || (mode === "down" && sign === 1);
-    return { value: infinite ? { kind: "infinity", sign } : {
-      kind: "finite", sign, coefficient: (1n << BigInt(format.precision)) - 1n,
-      exponent: format.maximumExponent - format.precision + 1, denormal: false,
-    }, flags: overflow | precision, roundedUp: infinite };
+    return {
+      value: infinite
+        ? { kind: "infinity", sign }
+        : {
+            kind: "finite",
+            sign,
+            coefficient: (1n << BigInt(format.precision)) - 1n,
+            exponent: format.maximumExponent - format.precision + 1,
+            denormal: false,
+          },
+      flags: overflow | precision,
+      roundedUp: infinite,
+    };
   }
   const tiny = resultTop < format.minimumExponent;
-  return { value: { kind: "finite", sign, coefficient: rounded.quotient, exponent: quantum, denormal: tiny && rounded.quotient !== 0n },
-    flags: rounded.inexact ? precision | (tiny ? underflow : 0) : 0, roundedUp: rounded.up };
+  return {
+    value: { kind: "finite", sign, coefficient: rounded.quotient, exponent: quantum, denormal: tiny && rounded.quotient !== 0n },
+    flags: rounded.inexact ? precision | (tiny ? underflow : 0) : 0,
+    roundedUp: rounded.up,
+  };
 }
 
 export function convertBinary(value: BinaryValue, format: BinaryFormat, mode: Rounding): BinaryResult {
@@ -191,13 +253,20 @@ function propagateNaN(left: BinaryValue, right: BinaryValue, selection: "x87" | 
 }
 
 export type BinaryOperation = "add" | "subtract" | "multiply" | "divide";
-export function arithmetic(operation: BinaryOperation, left: BinaryValue, right: BinaryValue, format: BinaryFormat, mode: Rounding, selection: "x87" | "sse" = "x87"): BinaryResult {
+export function arithmetic(
+  operation: BinaryOperation,
+  left: BinaryValue,
+  right: BinaryValue,
+  format: BinaryFormat,
+  mode: Rounding,
+  selection: "x87" | "sse" = "x87",
+): BinaryResult {
   const nan = propagateNaN(left, right, selection);
   if (nan !== null) return nan;
   if (left.kind === "nan" || left.kind === "unsupported" || right.kind === "nan" || right.kind === "unsupported") throw new Error("Unresolved special operand");
   const sourceFlags = (left.kind === "finite" && left.denormal) || (right.kind === "finite" && right.denormal) ? denormalOperand : 0;
   const result = (value: BinaryValue, flags = 0): BinaryResult => ({ value, flags: flags | sourceFlags, roundedUp: false });
-  const rightSign: Sign = operation === "subtract" ? right.sign === 0 ? 1 : 0 : right.sign;
+  const rightSign: Sign = operation === "subtract" ? (right.sign === 0 ? 1 : 0) : right.sign;
   if (operation === "add" || operation === "subtract") {
     if (left.kind === "infinity" || right.kind === "infinity") {
       if (left.kind === "infinity" && right.kind === "infinity" && left.sign !== rightSign) return result(indefinite(), invalid);
@@ -223,7 +292,8 @@ export function arithmetic(operation: BinaryOperation, left: BinaryValue, right:
   if (left.kind === "infinity" && right.kind === "infinity") return result(indefinite(), invalid);
   if (left.kind === "infinity") return result({ kind: "infinity", sign });
   if (right.kind === "infinity") return result(zero(sign));
-  if (right.coefficient === 0n) return result(left.coefficient === 0n ? indefinite() : { kind: "infinity", sign }, left.coefficient === 0n ? invalid : zeroDivide);
+  if (right.coefficient === 0n)
+    return result(left.coefficient === 0n ? indefinite() : { kind: "infinity", sign }, left.coefficient === 0n ? invalid : zeroDivide);
   const rounded = roundRational(sign, left.coefficient, right.coefficient, left.exponent - right.exponent, format, mode);
   return { ...rounded, flags: rounded.flags | sourceFlags };
 }
@@ -243,8 +313,12 @@ export function compareBinary(left: BinaryValue, right: BinaryValue): "less" | "
 export function integerConversion(value: BinaryValue, width: 16 | 32 | 64, mode: Rounding): { value: bigint; flags: number; roundedUp: boolean } {
   const bad = { value: -(1n << BigInt(width - 1)), flags: invalid, roundedUp: false };
   if (value.kind !== "finite") return bad;
-  const rounded = roundedQuotient(value.exponent >= 0 ? value.coefficient << BigInt(value.exponent) : value.coefficient,
-    value.exponent >= 0 ? 1n : 1n << BigInt(-value.exponent), value.sign, mode);
+  const rounded = roundedQuotient(
+    value.exponent >= 0 ? value.coefficient << BigInt(value.exponent) : value.coefficient,
+    value.exponent >= 0 ? 1n : 1n << BigInt(-value.exponent),
+    value.sign,
+    mode,
+  );
   const signed = value.sign === 1 ? -rounded.quotient : rounded.quotient;
   if (signed < -(1n << BigInt(width - 1)) || signed >= 1n << BigInt(width - 1)) return bad;
   return { value: signed, flags: rounded.inexact ? precision : 0, roundedUp: rounded.up };
@@ -254,8 +328,11 @@ export function roundIntegral(value: BinaryValue, mode: Rounding): BinaryResult 
   if (value.kind !== "finite") return convertBinary(value, binary80, mode);
   if (value.exponent >= 0) return { value, flags: 0, roundedUp: false };
   const rounded = roundedQuotient(value.coefficient, 1n << BigInt(-value.exponent), value.sign, mode);
-  return { value: { kind: "finite", sign: value.sign, coefficient: rounded.quotient, exponent: 0, denormal: false },
-    flags: (rounded.inexact ? precision : 0) | (value.denormal ? denormalOperand : 0), roundedUp: rounded.up };
+  return {
+    value: { kind: "finite", sign: value.sign, coefficient: rounded.quotient, exponent: 0, denormal: false },
+    flags: (rounded.inexact ? precision : 0) | (value.denormal ? denormalOperand : 0),
+    roundedUp: rounded.up,
+  };
 }
 
 function integerSquareRoot(value: bigint): bigint {
@@ -281,6 +358,9 @@ export function squareRoot(value: BinaryValue, format: BinaryFormat, mode: Round
   const inexact = floor * floor * denominator !== numerator;
   const halfway = (floor * 2n + 1n) ** 2n * denominator;
   const up = inexact && (mode === "up" || (mode === "nearest" && (numerator * 4n > halfway || (numerator * 4n === halfway && (floor & 1n) !== 0n))));
-  return { value: { kind: "finite", sign: 0, coefficient: floor + (up ? 1n : 0n), exponent: quantum, denormal: false },
-    flags: (inexact ? precision : 0) | (value.denormal ? denormalOperand : 0), roundedUp: up };
+  return {
+    value: { kind: "finite", sign: 0, coefficient: floor + (up ? 1n : 0n), exponent: quantum, denormal: false },
+    flags: (inexact ? precision : 0) | (value.denormal ? denormalOperand : 0),
+    roundedUp: up,
+  };
 }

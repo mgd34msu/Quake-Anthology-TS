@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import type { ActorCollision } from "../../../../src/world/spatial/index.ts";
@@ -19,22 +20,57 @@ import { createQ1Collision, Q1_HULL_BOUNDS } from "../../../../src/world/collisi
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const bounds: Bounds = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } };
 function cube(): Q1WorldGeometry {
-  const normals: readonly Vec3[] = [{ x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 }];
+  const normals: readonly Vec3[] = [
+    { x: 1, y: 0, z: 0 },
+    { x: -1, y: 0, z: 0 },
+    { x: 0, y: 1, z: 0 },
+    { x: 0, y: -1, z: 0 },
+    { x: 0, y: 0, z: 1 },
+    { x: 0, y: 0, z: -1 },
+  ];
   const planes: BspPlane[] = normals.map(normal => ({ normal, distance: 1, type: 3, signbits: 0 }));
   const nodes: BspNode[] = normals.map((_normal, i) => {
     const children: readonly [BspChild, BspChild] = [{ kind: "leaf", index: 1 }, i === 5 ? { kind: "leaf", index: 0 } : { kind: "node", index: i + 1 }];
     return { plane: i, children, bounds, faces: { first: 0, count: 0 } };
   });
-  return { kind: "q1-bsp", format: "bsp29", entities: "", planes, nodes, vertices: [], edges: [], surfaceEdges: [],
+  return {
+    kind: "q1-bsp",
+    format: "bsp29",
+    entities: "",
+    planes,
+    nodes,
+    vertices: [],
+    edges: [],
+    surfaceEdges: [],
     leaves: [-2, -1].map(contents => ({ contents, bounds, faces: { first: 0, count: 0 }, visibilityOffset: null, ambientSound: [0, 0, 0, 0] })),
-    leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: zero, headnodes: [0, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
-    clipnodes: [], visibility: new Uint8Array(), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] };
+    leafFaces: [],
+    textures: [],
+    textureInfo: [],
+    faces: [],
+    models: [{ bounds, origin: zero, headnodes: [0, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
+    clipnodes: [],
+    visibility: new Uint8Array(),
+    lighting: { kind: "luminance8", samples: new Uint8Array() },
+    decoupledLightmaps: null,
+    brushList: null,
+    extensions: [],
+  };
 }
 function query(start: Vec3, end: Vec3, shape: TraceShape = { kind: "point" }): TraceQuery {
-  return { start, end, shape, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null, derived: true }, numeric: Q1_DONOR_PROFILE, passActor: null };
+  return {
+    start,
+    end,
+    shape,
+    target: { kind: "world" },
+    policy: { kind: "q1", move: "normal", hull: null, derived: true },
+    numeric: Q1_DONOR_PROFILE,
+    passActor: null,
+  };
 }
 function clipOnlyCube(): Q1WorldGeometry {
-  const map = cube(), planes = [...map.planes], clipnodes: Q1ClipNode[] = [];
+  const map = cube(),
+    planes = [...map.planes],
+    clipnodes: Q1ClipNode[] = [];
   for (let hullIndex = 1; hullIndex <= 2; hullIndex++) {
     const hull = Q1_HULL_BOUNDS[hullIndex];
     if (hull === undefined) throw new Error("Missing stock hull bounds");
@@ -46,7 +82,10 @@ function clipOnlyCube(): Q1WorldGeometry {
       const offset = -(n.x * (n.x >= 0 ? hull.min.x : hull.max.x) + n.y * (n.y >= 0 ? hull.min.y : hull.max.y) + n.z * (n.z >= 0 ? hull.min.z : hull.max.z));
       const index = planes.length;
       planes.push({ ...plane, distance: plane.distance + offset });
-      const children: readonly [Q1ClipChild, Q1ClipChild] = [{ kind: "contents", value: -1 }, i === 5 ? { kind: "contents", value: -2 } : { kind: "clipnode", index: first + i + 1 }];
+      const children: readonly [Q1ClipChild, Q1ClipChild] = [
+        { kind: "contents", value: -1 },
+        i === 5 ? { kind: "contents", value: -2 } : { kind: "clipnode", index: first + i + 1 },
+      ];
       clipnodes.push({ plane: index, children });
     }
   }
@@ -55,11 +94,14 @@ function clipOnlyCube(): Q1WorldGeometry {
 
 describe("Quake hulls and derived solid cells", () => {
   test("drawing hits bound clip reconstruction without losing earlier clips or solid exits", () => {
-    const map = clipOnlyCube(), model = map.models[0];
+    const map = clipOnlyCube(),
+      model = map.models[0];
     if (model === undefined) throw new Error("Missing fixture model");
-    const geometry: Q1WorldGeometry = { ...map,
-      planes: map.planes.map((plane, index) => index < 6 ? plane : { ...plane, distance: plane.distance + plane.normal.x * 4 }),
-      models: [{ ...model, headnodes: [0, 0, 6, -1] }] };
+    const geometry: Q1WorldGeometry = {
+      ...map,
+      planes: map.planes.map((plane, index) => (index < 6 ? plane : { ...plane, distance: plane.distance + plane.normal.x * 4 })),
+      models: [{ ...model, headnodes: [0, 0, 6, -1] }],
+    };
     const prepare = spyOn(clipspace, "prepareQ1ClipSolids");
     try {
       for (const kind of ["box", "capsule"] satisfies readonly TraceShape["kind"][]) {
@@ -78,12 +120,15 @@ describe("Quake hulls and derived solid cells", () => {
         expect(trapped.startSolid).toBe(true);
         expect(trapped.allSolid).toBe(true);
       }
-    } finally { prepare.mockRestore(); }
+    } finally {
+      prepare.mockRestore();
+    }
   });
   test("exact derived cells retain policy checks and separate hull and collision owners", () => {
     const derive = spyOn(clipspace, "prepareQ1ClipSolids");
     try {
-      const map = clipOnlyCube(), first = map.models[0];
+      const map = clipOnlyCube(),
+        first = map.models[0];
       if (first === undefined) throw new Error("Missing fixture model");
       const geometry: Q1WorldGeometry = { ...map, models: [first, { ...first, headnodes: [-2, -1, -1, -1] }] };
       let enabled = true;
@@ -103,14 +148,19 @@ describe("Quake hulls and derived solid cells", () => {
       expect(derive).toHaveBeenCalledTimes(2);
       deepStrictEqual(createQ1Collision(geometry).trace(input), firstHit);
       expect(derive).toHaveBeenCalledTimes(3);
-    } finally { derive.mockRestore(); }
+    } finally {
+      derive.mockRestore();
+    }
   });
   test("exact derived-cell entries evict without changing rederived results", () => {
     const original = clipspace.prepareQ1ClipSolids;
     let derivations = 0;
     const prepare = spyOn(clipspace, "prepareQ1ClipSolids").mockImplementation(hulls => {
       const prepared = original(hulls);
-      return envelope => { derivations++; return prepared(envelope); };
+      return envelope => {
+        derivations++;
+        return prepared(envelope);
+      };
     });
     try {
       const collision = createQ1Collision(clipOnlyCube());
@@ -129,7 +179,9 @@ describe("Quake hulls and derived solid cells", () => {
       // The most recently used entries survive: the last envelope traced is still cached.
       collision.trace({ ...input, start: { ...input.start, y: 1280 }, end: { ...input.end, y: 1280 } });
       expect(derivations).toBe(130);
-    } finally { prepare.mockRestore(); }
+    } finally {
+      prepare.mockRestore();
+    }
   });
   test("nonfinite derived envelopes retain the uncached behavior", () => {
     const derive = spyOn(clipspace, "deriveQ1ClipSolids");
@@ -143,7 +195,9 @@ describe("Quake hulls and derived solid cells", () => {
         deepStrictEqual(collision.trace(input), result);
         expect(derive.mock.calls.length).toBe(before + 2);
       }
-    } finally { derive.mockRestore(); }
+    } finally {
+      derive.mockRestore();
+    }
   });
   test("native hull zero preserves the source impact epsilon and start-solid exit", () => {
     const collision = createQ1Collision(cube());
@@ -188,14 +242,19 @@ describe("Quake hulls and derived solid cells", () => {
         { kind: "q2", contentsMask: 0x46000003, leafContents: "merged" },
         { kind: "q2", contentsMask: 56, leafContents: "merged" },
         { kind: "q3", contentsMask: 0x06000039, curves: true, playerCurveClip: true },
-      ] satisfies readonly TraceQuery["policy"][]) for (const numeric of [Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, Q3_BINARY32_PROFILE]) {
-        for (const target of [{ kind: "world" }, { kind: "model", model: 0, origin: { x: 10, y: 20, z: 0 }, angles: { x: 0, y: 45, z: 0 } }] satisfies readonly TraceQuery["target"][]) {
-          const request = { ...query({ x: 30, y: 20, z: 0 }, zero), target, policy, numeric };
-          expect(scene.trace({ ...request, shape: { kind: "box", bounds: { min: zero, max: zero } } })).toEqual(scene.trace(request));
+      ] satisfies readonly TraceQuery["policy"][])
+        for (const numeric of [Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, Q3_BINARY32_PROFILE]) {
+          for (const target of [
+            { kind: "world" },
+            { kind: "model", model: 0, origin: { x: 10, y: 20, z: 0 }, angles: { x: 0, y: 45, z: 0 } },
+          ] satisfies readonly TraceQuery["target"][]) {
+            const request = { ...query({ x: 30, y: 20, z: 0 }, zero), target, policy, numeric };
+            expect(scene.trace({ ...request, shape: { kind: "box", bounds: { min: zero, max: zero } } })).toEqual(scene.trace(request));
+          }
         }
-      }
     }
-    const scene = createSceneQueries(solid), request = query({ x: 5, y: 0, z: 0 }, zero);
+    const scene = createSceneQueries(solid),
+      request = query({ x: 5, y: 0, z: 0 }, zero);
     const shifted = { x: 2, y: 0, z: 0 };
     expect(scene.trace({ ...request, shape: { kind: "box", bounds: { min: shifted, max: shifted } } }).fraction).not.toBe(scene.trace(request).fraction);
   });
@@ -203,8 +262,9 @@ describe("Quake hulls and derived solid cells", () => {
     const collision = createQ1Collision(clipOnlyCube());
     expect(collision.trace(query({ x: 30, y: 0, z: 0 }, zero)).fraction).toBe(1);
     for (const radius of [3, 8]) {
-      const foreign = collision.trace(query({ x: 30, y: 0, z: 0 }, zero,
-        { kind: "box", bounds: { min: { x: -radius, y: -radius, z: -radius }, max: { x: radius, y: radius, z: radius } } }));
+      const foreign = collision.trace(
+        query({ x: 30, y: 0, z: 0 }, zero, { kind: "box", bounds: { min: { x: -radius, y: -radius, z: -radius }, max: { x: radius, y: radius, z: radius } } }),
+      );
       expect(foreign.startSolid).toBe(false);
       expect(foreign.end.x).toBeCloseTo(1 + radius + 1 / 32, 5);
     }
@@ -221,10 +281,13 @@ test.skipIf(!existsSync(pakPath))("real Quake start.bsp supports native and fore
     const player = map.entityList.find(entity => q1EntityValue(entity, "classname") === "info_player_start");
     if (player === undefined) throw new Error("Quake start lacks player start");
     const coordinates = q1EntityValue(player, "origin")?.trim().split(/\s+/).map(Number);
-    const x = coordinates?.[0], y = coordinates?.[1], z = coordinates?.[2];
+    const x = coordinates?.[0],
+      y = coordinates?.[1],
+      z = coordinates?.[2];
     if (x === undefined || y === undefined || z === undefined) throw new Error("Invalid player origin");
     const collision = createQ1Collision(map);
-    const start = { x, y, z: z + 96 }, end = { x, y, z: z - 256 };
+    const start = { x, y, z: z + 96 },
+      end = { x, y, z: z - 256 };
     const point = collision.trace(query(start, end));
     const foreign = collision.trace(query(start, end, { kind: "box", bounds: { min: { x: -10, y: -10, z: -20 }, max: { x: 10, y: 10, z: 40 } } }));
     expect(point.startSolid).toBe(false);
@@ -235,7 +298,9 @@ test.skipIf(!existsSync(pakPath))("real Quake start.bsp supports native and fore
     const leaf = collision.leafAt(start);
     expect(leaf).toBeGreaterThan(0);
     expect(collision.clusterVisible(collision.leafCluster(leaf), collision.leafCluster(leaf))).toBe(true);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordinary faces through inline transforms", async () => {
@@ -243,19 +308,29 @@ test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordin
   try {
     const entry = archive.findEntries("maps/e1m1.bsp")[0];
     if (entry === undefined) throw new Error("Missing retail e1m1");
-    const map = readQ1Bsp(await archive.readEntry(entry)), collision = createQ1Collision(map);
+    const map = readQ1Bsp(await archive.readEntry(entry)),
+      collision = createQ1Collision(map);
     expect(map.leaves.filter(leaf => leaf.contents === -6)).toHaveLength(0);
-    let sky = false, ordinary = false, inline = false;
+    let sky = false,
+      ordinary = false,
+      inline = false;
     for (const [modelIndex, model] of map.models.entries()) {
       for (let i = model.faces.first; i < model.faces.first + model.faces.count; i++) {
-        const face = map.faces[i], plane = face === undefined ? undefined : map.planes[face.plane];
+        const face = map.faces[i],
+          plane = face === undefined ? undefined : map.planes[face.plane];
         if (face === undefined || plane === undefined) throw new Error("Missing retail face");
-        const info = map.textureInfo[face.textureInfo], texture = info === undefined ? undefined : map.textures[info.texture];
+        const info = map.textureInfo[face.textureInfo],
+          texture = info === undefined ? undefined : map.textures[info.texture];
         if (texture === undefined || texture === null) continue;
         const isSky = texture.name.startsWith("sky");
-        if (modelIndex === 0 && (isSky ? sky : ordinary) || modelIndex > 0 && inline) continue;
-        const vertices = q1FaceVertices(map, i), center = { x: 0, y: 0, z: 0 };
-        for (const vertex of vertices) { center.x += vertex.x / vertices.length; center.y += vertex.y / vertices.length; center.z += vertex.z / vertices.length; }
+        if ((modelIndex === 0 && (isSky ? sky : ordinary)) || (modelIndex > 0 && inline)) continue;
+        const vertices = q1FaceVertices(map, i),
+          center = { x: 0, y: 0, z: 0 };
+        for (const vertex of vertices) {
+          center.x += vertex.x / vertices.length;
+          center.y += vertex.y / vertices.length;
+          center.z += vertex.z / vertices.length;
+        }
         const side = face.back ? -1 : 1;
         const start = { x: center.x + plane.normal.x * side * 8, y: center.y + plane.normal.y * side * 8, z: center.z + plane.normal.z * side * 8 };
         const end = { x: center.x - plane.normal.x * side * 8, y: center.y - plane.normal.y * side * 8, z: center.z - plane.normal.z * side * 8 };
@@ -269,14 +344,20 @@ test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordin
         expect(q3.surfaceFlags).toBe(isSky ? 20 : 0);
         if (modelIndex === 0) {
           if (isSky) {
-            const footprint = collision.trace({ ...query(start, end, { kind: "box", bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 0 } } }), policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } });
+            const footprint = collision.trace({
+              ...query(start, end, { kind: "box", bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 0 } } }),
+              policy: { kind: "q2", contentsMask: 3, leafContents: "merged" },
+            });
             expect(footprint.surfaceFlags).toBeUndefined();
             sky = true;
           } else ordinary = true;
-        }
-        else {
-          const origin = { x: 103, y: -71, z: 29 }, transform = (p: Vec3): Vec3 => ({ x: origin.x - p.y, y: origin.y + p.x, z: origin.z + p.z });
-          const moved = collision.trace({ ...query(transform(start), transform(end)), target: { kind: "model", model: modelIndex, origin, angles: { x: 0, y: 90, z: 0 } } });
+        } else {
+          const origin = { x: 103, y: -71, z: 29 },
+            transform = (p: Vec3): Vec3 => ({ x: origin.x - p.y, y: origin.y + p.x, z: origin.z + p.z });
+          const moved = collision.trace({
+            ...query(transform(start), transform(end)),
+            target: { kind: "model", model: modelIndex, origin, angles: { x: 0, y: 90, z: 0 } },
+          });
           expect(moved.startSolid).toBe(false);
           expect(moved.fraction).toBeCloseTo(base.fraction, 5);
           expect(moved.surfaceFlags).toBe(base.surfaceFlags);
@@ -286,21 +367,36 @@ test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordin
       if (sky && ordinary && inline) break;
     }
     expect({ sky, ordinary, inline }).toEqual({ sky: true, ordinary: true, inline: true });
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 describe("Quake entity collision rules", () => {
   const owner = createIdentityOwner("q1 collision rules");
   const solid: ActorCollision = { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false };
   function link(scene: ReturnType<typeof createSceneQueries>, slot: number, origin: Vec3, half: number): ReturnType<typeof owner.actor> {
-    const actor = owner.actor(slot, 0), box: Bounds = { min: { x: -half, y: -half, z: -half }, max: { x: half, y: half, z: half } };
-    scene.link({ actor, state: { origin, angles: zero, velocity: zero, bounds: box, ground: null },
-      absoluteBounds: { min: { x: origin.x - half - 1, y: origin.y - half - 1, z: origin.z - half - 1 }, max: { x: origin.x + half + 1, y: origin.y + half + 1, z: origin.z + half + 1 } }, linkCount: 1 }, solid);
+    const actor = owner.actor(slot, 0),
+      box: Bounds = { min: { x: -half, y: -half, z: -half }, max: { x: half, y: half, z: half } };
+    scene.link(
+      {
+        actor,
+        state: { origin, angles: zero, velocity: zero, bounds: box, ground: null },
+        absoluteBounds: {
+          min: { x: origin.x - half - 1, y: origin.y - half - 1, z: origin.z - half - 1 },
+          max: { x: origin.x + half + 1, y: origin.y + half + 1, z: origin.z + half + 1 },
+        },
+        linkCount: 1,
+      },
+      solid,
+    );
     return actor;
   }
   test("points never interact with a sized mover, but sized candidates and unsized movers still hit", () => {
     const scene = createSceneQueries(cube());
-    const mover = link(scene, 1, { x: 100, y: 0, z: 100 }, 16), point = link(scene, 2, { x: 120, y: 0, z: 100 }, 0), sized = link(scene, 3, { x: 120, y: 60, z: 100 }, 8);
+    const mover = link(scene, 1, { x: 100, y: 0, z: 100 }, 16),
+      point = link(scene, 2, { x: 120, y: 0, z: 100 }, 0),
+      sized = link(scene, 3, { x: 120, y: 60, z: 100 }, 8);
     const box: TraceShape = { kind: "box", bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } } };
     const through = { ...query({ x: 100, y: 0, z: 100 }, { x: 140, y: 0, z: 100 }, box), passActor: mover };
     expect(scene.trace(through).fraction).toBe(1);
@@ -310,8 +406,12 @@ describe("Quake entity collision rules", () => {
   test("native hulls are chosen by width alone and monsters of odd sizes follow the compiled clip hull", () => {
     const collision = createQ1Collision(clipOnlyCube());
     const policy = (hull: number | null): Extract<TraceQuery["policy"], { kind: "q1" }> => ({ kind: "q1", move: "normal", hull });
-    const box = (half: number, below: number, above: number): TraceShape => ({ kind: "box", bounds: { min: { x: -half, y: -half, z: -below }, max: { x: half, y: half, z: above } } });
-    const run = (shape: TraceShape, chosen: TraceQuery["policy"]): ReturnType<typeof collision.trace> => collision.trace({ ...query({ x: 0, y: 0, z: -80 }, zero, shape), policy: chosen });
+    const box = (half: number, below: number, above: number): TraceShape => ({
+      kind: "box",
+      bounds: { min: { x: -half, y: -half, z: -below }, max: { x: half, y: half, z: above } },
+    });
+    const run = (shape: TraceShape, chosen: TraceQuery["policy"]): ReturnType<typeof collision.trace> =>
+      collision.trace({ ...query({ x: 0, y: 0, z: -80 }, zero, shape), policy: chosen });
     expect(run(box(10, 12, 12), policy(null))).toEqual(run(box(10, 12, 12), policy(1)));
     expect(run(box(20, 12, 12), policy(null))).toEqual(run(box(20, 12, 12), policy(2)));
     expect(run(box(16, 24, 40), policy(null))).toEqual(run(box(16, 24, 40), policy(1)));

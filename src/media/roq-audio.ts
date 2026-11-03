@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // RllSetupTable and RllDecode functions from id Software code/client/cl_cin.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 

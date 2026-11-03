@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // CG_DrawRect, CG_DrawTopBottom and CG_DrawSides from code/cgame/cg_drawtools.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Vec4 } from "../../../contracts/math.ts";

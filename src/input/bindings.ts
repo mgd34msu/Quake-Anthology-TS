@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SeatId } from "../contracts/identity.ts";
 import type { CommandDialect } from "../contracts/common.ts";
 import type { InputBinding, PhysicalInput } from "../contracts/ui.ts";
@@ -9,14 +10,27 @@ import type { BindingStore } from "./binding-store.ts";
 import { defaultWeaponBindings, type WeaponBindingItem } from "./weapon-bindings.ts";
 
 const controllerButtons: readonly (readonly [command: string, button: number, label: string])[] = [
-  ["gamepad_a_button", 0, "A"], ["gamepad_b_button", 1, "B"], ["gamepad_x_button", 2, "X"], ["gamepad_y_button", 3, "Y"],
-  ["gamepad_back", 4, "Back"], ["gamepad_guide", 5, "Guide"], ["gamepad_start", 6, "Start"],
-  ["gamepad_left_stick", 7, "Left stick press"], ["gamepad_right_stick", 8, "Right stick press"],
-  ["gamepad_left_shoulder", 9, "Left shoulder"], ["gamepad_right_shoulder", 10, "Right shoulder"],
-  ["gamepad_dpad_up", 11, "D-pad up"], ["gamepad_dpad_down", 12, "D-pad down"],
-  ["gamepad_dpad_left", 13, "D-pad left"], ["gamepad_dpad_right", 14, "D-pad right"],
-  ["gamepad_misc", 15, "Miscellaneous"], ["gamepad_paddle1", 16, "Paddle 1"], ["gamepad_paddle2", 17, "Paddle 2"],
-  ["gamepad_paddle3", 18, "Paddle 3"], ["gamepad_paddle4", 19, "Paddle 4"], ["gamepad_touchpad", 20, "Touchpad"],
+  ["gamepad_a_button", 0, "A"],
+  ["gamepad_b_button", 1, "B"],
+  ["gamepad_x_button", 2, "X"],
+  ["gamepad_y_button", 3, "Y"],
+  ["gamepad_back", 4, "Back"],
+  ["gamepad_guide", 5, "Guide"],
+  ["gamepad_start", 6, "Start"],
+  ["gamepad_left_stick", 7, "Left stick press"],
+  ["gamepad_right_stick", 8, "Right stick press"],
+  ["gamepad_left_shoulder", 9, "Left shoulder"],
+  ["gamepad_right_shoulder", 10, "Right shoulder"],
+  ["gamepad_dpad_up", 11, "D-pad up"],
+  ["gamepad_dpad_down", 12, "D-pad down"],
+  ["gamepad_dpad_left", 13, "D-pad left"],
+  ["gamepad_dpad_right", 14, "D-pad right"],
+  ["gamepad_misc", 15, "Miscellaneous"],
+  ["gamepad_paddle1", 16, "Paddle 1"],
+  ["gamepad_paddle2", 17, "Paddle 2"],
+  ["gamepad_paddle3", 18, "Paddle 3"],
+  ["gamepad_paddle4", 19, "Paddle 4"],
+  ["gamepad_touchpad", 20, "Touchpad"],
 ];
 
 export function namedPhysicalInput(name: string, device = 0): PhysicalInput | null {
@@ -26,25 +40,35 @@ export function namedPhysicalInput(name: string, device = 0): PhysicalInput | nu
   const controllerName = lower.startsWith("gamepad_") ? lower : `gamepad_${lower}`;
   const button = controllerButtons.find(([command]) => command === controllerName)?.[1];
   if (button !== undefined) return { kind: "controller-button", device, button };
-  if (controllerName === "gamepad_left_trigger" || controllerName === "gamepad_right_trigger") return { kind: "controller-axis", device,
-    axis: controllerName === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
+  if (controllerName === "gamepad_left_trigger" || controllerName === "gamepad_right_trigger")
+    return { kind: "controller-axis", device, axis: controllerName === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
   const code = stringToKeynum(lower);
   return code < 0 ? null : { kind: "key", code };
 }
 export function physicalInputName(input: PhysicalInput): string {
   switch (input.kind) {
-    case "key": return keynumToString(input.code);
-    case "mouse-button": return `MOUSE${quakeMouseButton(input.button)}`;
-    case "controller-button": return `Pad ${input.device + 1} ${controllerButtons.find(([, button]) => button === input.button)?.[2] ?? `Button ${input.button + 1}`}`;
+    case "key":
+      return keynumToString(input.code);
+    case "mouse-button":
+      return `MOUSE${quakeMouseButton(input.button)}`;
+    case "controller-button":
+      return `Pad ${input.device + 1} ${controllerButtons.find(([, button]) => button === input.button)?.[2] ?? `Button ${input.button + 1}`}`;
     case "controller-axis": {
-      const prefix = `Pad ${input.device + 1}`, positive = input.direction === "positive";
+      const prefix = `Pad ${input.device + 1}`,
+        positive = input.direction === "positive";
       switch (input.axis) {
-        case "left-x": return `${prefix} Left stick ${positive ? "right" : "left"}`;
-        case "left-y": return `${prefix} Left stick ${positive ? "down" : "up"}`;
-        case "right-x": return `${prefix} Right stick ${positive ? "right" : "left"}`;
-        case "right-y": return `${prefix} Right stick ${positive ? "down" : "up"}`;
-        case "left-trigger": return `${prefix} Left trigger${positive ? "" : " released"}`;
-        case "right-trigger": return `${prefix} Right trigger${positive ? "" : " released"}`;
+        case "left-x":
+          return `${prefix} Left stick ${positive ? "right" : "left"}`;
+        case "left-y":
+          return `${prefix} Left stick ${positive ? "down" : "up"}`;
+        case "right-x":
+          return `${prefix} Right stick ${positive ? "right" : "left"}`;
+        case "right-y":
+          return `${prefix} Right stick ${positive ? "down" : "up"}`;
+        case "left-trigger":
+          return `${prefix} Left trigger${positive ? "" : " released"}`;
+        case "right-trigger":
+          return `${prefix} Right trigger${positive ? "" : " released"}`;
       }
     }
   }
@@ -52,11 +76,25 @@ export function physicalInputName(input: PhysicalInput): string {
 export function defaultBindings(device = 0, dialect: CommandDialect = "q3", items: readonly WeaponBindingItem[] = []): readonly InputBinding[] {
   const bindings: InputBinding[] = [];
   const defaults: readonly (readonly [string, string])[] = [
-    ["w", "+forward"], ["s", "+back"], ["a", "+moveleft"], ["d", "+moveright"], ["SPACE", dialect.startsWith("q1") ? "+jump" : "+moveup"],
-    ["CTRL", "+movedown"], ["SHIFT", "+speed"], ["MOUSE1", "+attack"], ["TAB", "+scores"],
-    ["MWHEELUP", "weapprev"], ["MWHEELDOWN", "weapnext"], ["q", "+weaponwheel"], ["GAMEPAD_RIGHT_TRIGGER", "+attack"],
-    ["GAMEPAD_A_BUTTON", dialect.startsWith("q1") ? "+jump" : "+moveup"], ["GAMEPAD_B_BUTTON", "+movedown"], ["GAMEPAD_X_BUTTON", "+use"],
-    ["GAMEPAD_LEFT_SHOULDER", "weapprev"], ["GAMEPAD_RIGHT_SHOULDER", "weapnext"], ["GAMEPAD_BACK", "+scores"],
+    ["w", "+forward"],
+    ["s", "+back"],
+    ["a", "+moveleft"],
+    ["d", "+moveright"],
+    ["SPACE", dialect.startsWith("q1") ? "+jump" : "+moveup"],
+    ["CTRL", "+movedown"],
+    ["SHIFT", "+speed"],
+    ["MOUSE1", "+attack"],
+    ["TAB", "+scores"],
+    ["MWHEELUP", "weapprev"],
+    ["MWHEELDOWN", "weapnext"],
+    ["q", "+weaponwheel"],
+    ["GAMEPAD_RIGHT_TRIGGER", "+attack"],
+    ["GAMEPAD_A_BUTTON", dialect.startsWith("q1") ? "+jump" : "+moveup"],
+    ["GAMEPAD_B_BUTTON", "+movedown"],
+    ["GAMEPAD_X_BUTTON", "+use"],
+    ["GAMEPAD_LEFT_SHOULDER", "weapprev"],
+    ["GAMEPAD_RIGHT_SHOULDER", "weapnext"],
+    ["GAMEPAD_BACK", "+scores"],
     ...defaultWeaponBindings(items),
   ];
   for (const [name, text] of defaults) {
@@ -87,78 +125,151 @@ export function archivedBindings(input: Pick<BindingStore, "bindings">, includeC
 }
 export type BindingCommandSeat = Pick<BindingStore, "bindings" | "binding" | "bind" | "unbind" | "unbindAll">;
 
-export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: SeatId) => BindingCommandSeat | null,
-  print: (text: string) => void, consoleBindings: BindingCommandSeat | null = null): () => void {
+export function registerBindingCommands(
+  commands: CommandBuffer,
+  lookup: (seat: SeatId) => BindingCommandSeat | null,
+  print: (text: string) => void,
+  consoleBindings: BindingCommandSeat | null = null,
+): () => void {
   const registered: string[] = [];
   const local = (invocation: CommandInvocation): BindingCommandSeat | null => {
     let origin = invocation.source.origin;
     while (origin.kind === "script") origin = origin.caller;
-    return origin.kind === "local-seat" ? lookup(origin.seat)
-      : origin.kind === "local-console" || origin.kind === "server-console" ? consoleBindings : null;
+    return origin.kind === "local-seat" ? lookup(origin.seat) : origin.kind === "local-console" || origin.kind === "server-console" ? consoleBindings : null;
   };
-  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => { if (commands.registerEngine(name, handler, documentation)) registered.push(name); };
-  add("bind", invocation => {
-    const seat = local(invocation), name = invocation.argv[1];
-    if (seat === null || name === undefined) { print("bind <key> [command]\n"); return; }
-    const pad = seat.bindings.find(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis");
-    const device = pad?.input.kind === "controller-button" || pad?.input.kind === "controller-axis" ? pad.input.device : 0;
-    const input = namedPhysicalInput(name, device);
-    if (input === null) { print(`Unknown key ${name}\n`); return; }
-    if (invocation.argv.length === 2) {
-      const binding = seat.binding(input);
-      print(binding === null ? `${physicalInputName(input)} = Unbound\n`
-        : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`); return;
-    }
-    seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
-  }, { summary: "Read or set a binding for the invoking local seat or dedicated console. Quote multiple commands to keep them on one key.",
-    usage: "bind <key> [command]", examples: ["bind Q", 'bind SPACE "+jump"', 'bind F1 "echo ready; echo done"'] });
-  add("unbind", invocation => {
-    const name = invocation.argv[1], seat = local(invocation);
-    if (invocation.argv.length !== 2 || name === undefined) { print("unbind <key> : remove commands from a key\n"); return; }
-    if (seat === null) { print("unbind requires a local binding owner.\n"); return; }
-    const input = namedPhysicalInput(name);
-    if (input === null) { print(`Unknown key ${name}\n`); return; }
-    if (input.kind === "controller-button" || input.kind === "controller-axis") {
-      for (const binding of seat.bindings) {
-        const candidate = binding.input;
-        if (input.kind === "controller-button" && candidate.kind === "controller-button" && input.button === candidate.button
-          || input.kind === "controller-axis" && candidate.kind === "controller-axis" && input.axis === candidate.axis && input.direction === candidate.direction) seat.unbind(candidate);
+  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => {
+    if (commands.registerEngine(name, handler, documentation)) registered.push(name);
+  };
+  add(
+    "bind",
+    invocation => {
+      const seat = local(invocation),
+        name = invocation.argv[1];
+      if (seat === null || name === undefined) {
+        print("bind <key> [command]\n");
+        return;
       }
-    } else seat.unbind(input);
-  }, { summary: "Remove a key or mouse binding from the invoking local seat or dedicated console. Named controller buttons are cleared on that seat's devices.",
-    usage: "unbind <key>", examples: ["unbind Q", "unbind MOUSE2"] });
-  add("unbindall", invocation => { local(invocation)?.unbindAll(); },
-    { summary: "Clear all bindings for the invoking local seat or dedicated console, including controller bindings.", usage: "unbindall", examples: ["unbindall"] });
-  add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); },
-    { summary: "List the invoking local seat or dedicated console's current key, mouse and controller bindings.", usage: "bindlist", examples: ["bindlist"] });
-  return () => { for (const name of registered) commands.unregister(name); };
+      const pad = seat.bindings.find(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis");
+      const device = pad?.input.kind === "controller-button" || pad?.input.kind === "controller-axis" ? pad.input.device : 0;
+      const input = namedPhysicalInput(name, device);
+      if (input === null) {
+        print(`Unknown key ${name}\n`);
+        return;
+      }
+      if (invocation.argv.length === 2) {
+        const binding = seat.binding(input);
+        print(
+          binding === null
+            ? `${physicalInputName(input)} = Unbound\n`
+            : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`,
+        );
+        return;
+      }
+      seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
+    },
+    {
+      summary: "Read or set a binding for the invoking local seat or dedicated console. Quote multiple commands to keep them on one key.",
+      usage: "bind <key> [command]",
+      examples: ["bind Q", 'bind SPACE "+jump"', 'bind F1 "echo ready; echo done"'],
+    },
+  );
+  add(
+    "unbind",
+    invocation => {
+      const name = invocation.argv[1],
+        seat = local(invocation);
+      if (invocation.argv.length !== 2 || name === undefined) {
+        print("unbind <key> : remove commands from a key\n");
+        return;
+      }
+      if (seat === null) {
+        print("unbind requires a local binding owner.\n");
+        return;
+      }
+      const input = namedPhysicalInput(name);
+      if (input === null) {
+        print(`Unknown key ${name}\n`);
+        return;
+      }
+      if (input.kind === "controller-button" || input.kind === "controller-axis") {
+        for (const binding of seat.bindings) {
+          const candidate = binding.input;
+          if (
+            (input.kind === "controller-button" && candidate.kind === "controller-button" && input.button === candidate.button) ||
+            (input.kind === "controller-axis" &&
+              candidate.kind === "controller-axis" &&
+              input.axis === candidate.axis &&
+              input.direction === candidate.direction)
+          )
+            seat.unbind(candidate);
+        }
+      } else seat.unbind(input);
+    },
+    {
+      summary: "Remove a key or mouse binding from the invoking local seat or dedicated console. Named controller buttons are cleared on that seat's devices.",
+      usage: "unbind <key>",
+      examples: ["unbind Q", "unbind MOUSE2"],
+    },
+  );
+  add(
+    "unbindall",
+    invocation => {
+      local(invocation)?.unbindAll();
+    },
+    {
+      summary: "Clear all bindings for the invoking local seat or dedicated console, including controller bindings.",
+      usage: "unbindall",
+      examples: ["unbindall"],
+    },
+  );
+  add(
+    "bindlist",
+    invocation => {
+      const seat = local(invocation);
+      if (seat !== null)
+        for (const binding of seat.bindings)
+          print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`);
+    },
+    { summary: "List the invoking local seat or dedicated console's current key, mouse and controller bindings.", usage: "bindlist", examples: ["bindlist"] },
+  );
+  return () => {
+    for (const name of registered) commands.unregister(name);
+  };
 }
 
 const wheelCommands: readonly (readonly [name: string, mode: "weapons" | "powerups"])[] = [
-  ["weaponwheel", "weapons"], ["wheel", "weapons"], ["powerupwheel", "powerups"], ["wheel2", "powerups"],
+  ["weaponwheel", "weapons"],
+  ["wheel", "weapons"],
+  ["powerupwheel", "powerups"],
+  ["wheel2", "powerups"],
 ];
 
 export function canonicalWheelCommand(text: string): string {
-  const command = text.trim().toLowerCase(), prefix = command.charAt(0);
+  const command = text.trim().toLowerCase(),
+    prefix = command.charAt(0);
   if (prefix !== "+" && prefix !== "-") return text;
   const mode = wheelCommands.find(([name]) => name === command.slice(1))?.[1];
   return mode === undefined ? text : `${prefix}${mode === "weapons" ? "weaponwheel" : "powerupwheel"}`;
 }
 
-export function registerWheelCommands(commands: CommandBuffer,
-  wheel: (seat: SeatId, mode: "weapons" | "powerups", down: boolean) => void): () => void {
+export function registerWheelCommands(commands: CommandBuffer, wheel: (seat: SeatId, mode: "weapons" | "powerups", down: boolean) => void): () => void {
   const registered: string[] = [];
   for (const [name, mode] of wheelCommands) {
     for (const down of [true, false]) {
       const command = `${down ? "+" : "-"}${name}`;
-      if (commands.registerEngine(command, invocation => {
-        let origin = invocation.source.origin;
-        while (origin.kind === "script") origin = origin.caller;
-        if (origin.kind === "local-seat") wheel(origin.seat, mode, down);
-      })) registered.push(command);
+      if (
+        commands.registerEngine(command, invocation => {
+          let origin = invocation.source.origin;
+          while (origin.kind === "script") origin = origin.caller;
+          if (origin.kind === "local-seat") wheel(origin.seat, mode, down);
+        })
+      )
+        registered.push(command);
     }
   }
-  return () => { for (const command of registered) commands.unregister(command); };
+  return () => {
+    for (const command of registered) commands.unregister(command);
+  };
 }
 
 /** VM-facing source key values stay separate from the shared physical namespace. */

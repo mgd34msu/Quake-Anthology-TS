@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/bg_misc.c, BG_PlayerStateToEntityState
 // and BG_PlayerStateToEntityStateExtraPolate. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
@@ -17,14 +18,12 @@ function sourceSnapComponent(component: number): number {
 }
 
 function copyPosition(value: Vec3, snap: boolean): Vec3 {
-  return snap
-    ? vec3(sourceSnapComponent(value.x), sourceSnapComponent(value.y), sourceSnapComponent(value.z))
-    : { ...value };
+  return snap ? vec3(sourceSnapComponent(value.x), sourceSnapComponent(value.y), sourceSnapComponent(value.z)) : { ...value };
 }
 
 function convertPlayerState(ps: SourcePlayerState, s: EntityState, snap: boolean, extrapolationTime: number | null): void {
-  s.eType = ps.pmType === MoveType.PM_INTERMISSION || ps.pmType === MoveType.PM_SPECTATOR || ps.health <= GIB_HEALTH
-    ? EntityType.ET_INVISIBLE : EntityType.ET_PLAYER;
+  s.eType =
+    ps.pmType === MoveType.PM_INTERMISSION || ps.pmType === MoveType.PM_SPECTATOR || ps.health <= GIB_HEALTH ? EntityType.ET_INVISIBLE : EntityType.ET_PLAYER;
   s.number = ps.clientNum;
   s.pos = {
     type: extrapolationTime === null ? TrajectoryType.TR_INTERPOLATE : TrajectoryType.TR_LINEAR_STOP,

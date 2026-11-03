@@ -12,13 +12,25 @@ export function loadGlFramebuffers(context: Pick<SdlRenderContext, "getGlProcAdd
     glFramebufferTexture2D: { args: ["u32", "u32", "u32", "u32", "i32"], returns: "void", ptr: context.getGlProcAddress("glFramebufferTexture2D") },
     glCheckFramebufferStatus: { args: ["u32"], returns: "u32", ptr: context.getGlProcAddress("glCheckFramebufferStatus") },
     glTexImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "ptr"], returns: "void", ptr: context.getGlProcAddress("glTexImage2D") },
-    glBlitFramebuffer: { args: ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "u32", "u32"], returns: "void", ptr: context.getGlProcAddress("glBlitFramebuffer") },
-    glGetFramebufferAttachmentParameteriv: { args: ["u32", "u32", "u32", "buffer"], returns: "void", ptr: context.getGlProcAddress("glGetFramebufferAttachmentParameteriv") },
+    glBlitFramebuffer: {
+      args: ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "u32", "u32"],
+      returns: "void",
+      ptr: context.getGlProcAddress("glBlitFramebuffer"),
+    },
+    glGetFramebufferAttachmentParameteriv: {
+      args: ["u32", "u32", "u32", "buffer"],
+      returns: "void",
+      ptr: context.getGlProcAddress("glGetFramebufferAttachmentParameteriv"),
+    },
     glReadBuffer: { args: ["u32"], returns: "void", ptr: context.getGlProcAddress("glReadBuffer") },
   });
   let release: () => void;
-  try { release = context.retainProcedures(); }
-  catch (error) { table.close(); throw error; }
+  try {
+    release = context.retainProcedures();
+  } catch (error) {
+    table.close();
+    throw error;
+  }
   let closed = false;
   return {
     symbols: table.symbols,
@@ -28,6 +40,8 @@ export function loadGlFramebuffers(context: Pick<SdlRenderContext, "getGlProcAdd
       closed = true;
       release();
     },
-    [Symbol.dispose](): void { this.close(); },
+    [Symbol.dispose](): void {
+      this.close();
+    },
   };
 }

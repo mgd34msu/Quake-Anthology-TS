@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentDigest } from "./content.ts";
 import type { QvmAbiProfile } from "./execution.ts";
 
@@ -10,7 +11,21 @@ export type QvmBodyPart = "body" | "lower" | "upper" | "head";
 /** Original C arguments, with pointers supplied by the declared caller storage. */
 export type QvmPresentationArgument =
   | { readonly kind: "int32" | "float32" | "address"; readonly value: number }
-  | { readonly kind: "source"; readonly value: "player-state" | "entity-state" | "centity" | "origin" | "snapshot" | "client-number" | "time" | "event" | "parameter" | "snapshot-number" | "server-command-sequence" };
+  | {
+      readonly kind: "source";
+      readonly value:
+        | "player-state"
+        | "entity-state"
+        | "centity"
+        | "origin"
+        | "snapshot"
+        | "client-number"
+        | "time"
+        | "event"
+        | "parameter"
+        | "snapshot-number"
+        | "server-command-sequence";
+    };
 export interface QvmPresentationCall {
   readonly entry: number;
   readonly when?: "weapon-presented";
@@ -63,8 +78,14 @@ export interface QvmScenePresentation extends QvmPresentationBase {
     readonly viewOrigin: readonly number[];
     readonly viewAngles?: readonly number[];
     readonly viewAxis?: readonly number[];
-    readonly centities: { readonly address: number; readonly stride: number; readonly capacity: number;
-      readonly state: number; readonly previousEvent: number; readonly snapshotTime: number };
+    readonly centities: {
+      readonly address: number;
+      readonly stride: number;
+      readonly capacity: number;
+      readonly state: number;
+      readonly previousEvent: number;
+      readonly snapshotTime: number;
+    };
   };
   /** Original CG_ProcessSnapshots or the artifact's equivalent caller. */
   readonly snapshots: readonly QvmPresentationCall[];
@@ -74,9 +95,14 @@ export interface QvmScenePresentation extends QvmPresentationBase {
   /** Qualified original player mesh submission; effects continue through its original helper. */
   readonly body: {
     readonly player: { readonly entry: number; readonly centityArgument: number };
-    readonly mesh: { readonly entry: number; readonly entityArgument: number; readonly stateArgument: number; readonly shaderOffset: number;
+    readonly mesh: {
+      readonly entry: number;
+      readonly entityArgument: number;
+      readonly stateArgument: number;
+      readonly shaderOffset: number;
       /** Exact original direct CALL sites in player, mapped to selected anatomical parts. */
-      readonly parts?: readonly { readonly call: number; readonly part: QvmBodyPart }[] };
+      readonly parts?: readonly { readonly call: number; readonly part: QvmBodyPart }[];
+    };
   };
 }
 export type QvmModPresentationDeclaration = QvmPlayerEventPresentation | QvmScenePresentation;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +25,11 @@ function resolveCaseInsensitive(path: string): string | null {
   let current = path.startsWith("/") ? "/" : ".";
   for (const segment of segments) {
     let entries: string[];
-    try { entries = readdirSync(current); } catch { return null; }
+    try {
+      entries = readdirSync(current);
+    } catch {
+      return null;
+    }
     const match = entries.find(entry => entry === segment) ?? entries.find(entry => entry.toLowerCase() === segment.toLowerCase());
     if (match === undefined) return null;
     current = join(current, match);
@@ -34,7 +39,8 @@ function resolveCaseInsensitive(path: string): string | null {
 
 /** Actual filesystem path for a logical corpus file ("q2/baseq2/pak0.pak") in either layout. */
 export function corpusFile(logicalPath: string): string {
-  const root = testCorpusRoot(), direct = resolveCaseInsensitive(join(root, logicalPath));
+  const root = testCorpusRoot(),
+    direct = resolveCaseInsensitive(join(root, logicalPath));
   if (direct !== null) return direct;
   const [head, ...rest] = logicalPath.split("/");
   const steamHead = head === undefined ? undefined : steamHeads[head];
@@ -62,7 +68,10 @@ export function corpusMissing(...logicalPaths: readonly string[]): string[] {
 export function corpusTest(...logicalPaths: readonly string[]): typeof test {
   const missing = corpusMissing(...logicalPaths);
   if (missing.length === 0) return test;
-  if (process.env["QTS_TEST_REQUIRE_CORPUS"] === "1") test("corpus files are present", () => { throw new Error(`Corpus file missing: ${missing.join(", ")}`); });
+  if (process.env["QTS_TEST_REQUIRE_CORPUS"] === "1")
+    test("corpus files are present", () => {
+      throw new Error(`Corpus file missing: ${missing.join(", ")}`);
+    });
   return test.skip;
 }
 
@@ -70,7 +79,10 @@ export function corpusTest(...logicalPaths: readonly string[]): typeof test {
 export function corpusDescribe(...logicalPaths: readonly string[]): typeof describe {
   const missing = corpusMissing(...logicalPaths);
   if (missing.length === 0) return describe;
-  if (process.env["QTS_TEST_REQUIRE_CORPUS"] === "1") test("corpus files are present", () => { throw new Error(`Corpus file missing: ${missing.join(", ")}`); });
+  if (process.env["QTS_TEST_REQUIRE_CORPUS"] === "1")
+    test("corpus files are present", () => {
+      throw new Error(`Corpus file missing: ${missing.join(", ")}`);
+    });
   return describe.skip;
 }
 
@@ -78,10 +90,15 @@ const copperLogical = "q1/rerelease/copper/progs.dat";
 let copperNoticed = false;
 
 /** The Copper add-on is an optional, user-installed mod and is not in the assembled corpus; put it at q1/rerelease/copper under the corpus root to enable its tests. */
-export function copperProgramPath(): string { return corpusFile(copperLogical); }
+export function copperProgramPath(): string {
+  return corpusFile(copperLogical);
+}
 
 export function copperAvailable(): boolean {
   const present = corpusHasFile(copperLogical);
-  if (!present && !copperNoticed) { copperNoticed = true; console.warn(`Copper add-on not found at ${copperProgramPath()}; its tests are skipped.`); }
+  if (!present && !copperNoticed) {
+    copperNoticed = true;
+    console.warn(`Copper add-on not found at ${copperProgramPath()}; its tests are skipped.`);
+  }
   return present;
 }

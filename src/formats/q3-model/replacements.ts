@@ -1,7 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Replacement conventions from Ironwail and q2repro. GPL-2.0-or-later. */
 import type { Md5Model, Q1AliasModel, Q2AliasModel, TimedFrames } from "../../contracts/scene.ts";
 
-export interface Md5Paths { readonly meshPath: string; readonly animPath: string; readonly scalePath: string; }
+export interface Md5Paths {
+  readonly meshPath: string;
+  readonly animPath: string;
+  readonly scalePath: string;
+}
 
 function splitPath(path: string): { readonly directory: string; readonly filename: string; readonly stem: string } {
   const slash = path.lastIndexOf("/");
@@ -26,8 +31,11 @@ export function md5ReplacementAllowed(md2Rank: number | null, meshRank: number |
   return md2Rank === null || meshRank === null || meshRank <= md2Rank;
 }
 
-export function md2ReplacementSkinSelection(alias: Pick<Q2AliasModel, "skins" | "frames">, scaleSource: string | null,
-  diagnostics: readonly string[]): Md5Model["skinSelection"] {
+export function md2ReplacementSkinSelection(
+  alias: Pick<Q2AliasModel, "skins" | "frames">,
+  scaleSource: string | null,
+  diagnostics: readonly string[],
+): Md5Model["skinSelection"] {
   return { kind: "q2-md2-replacement", skins: alias.skins.map(md5SkinPathFor), sourceFrameCount: alias.frames.length, scaleSource, diagnostics };
 }
 
@@ -37,17 +45,21 @@ export function q1Md5SkinPath(shader: string, group: number, frame: number): str
   return `progs/${shader}_${String(group).padStart(2, "0")}_${String(frame).padStart(2, "0")}`;
 }
 
-export type ReplacementAnimationTiming = { readonly kind: "entity-frame" }
-  | { readonly kind: "elapsed-time"; readonly frameRate: number };
+export type ReplacementAnimationTiming = { readonly kind: "entity-frame" } | { readonly kind: "elapsed-time"; readonly frameRate: number };
 
 export function q1Md5AnimationTiming(aliasFrameCount: number, model: Md5Model): ReplacementAnimationTiming {
   return aliasFrameCount === model.frames.length ? { kind: "entity-frame" } : { kind: "elapsed-time", frameRate: 2 };
 }
 
 export function q1ReplacementSkinSelection(model: Md5Model, alias: Pick<Q1AliasModel, "skins" | "frames" | "flags">): Md5Model["skinSelection"] {
-  const meshSkinGroups = model.meshes.map(mesh => alias.skins.map((skin, group): TimedFrames<string> => {
-    if (skin.kind === "single") return { kind: "single", frame: q1Md5SkinPath(mesh.shader, group, 0) };
-    return { kind: "group", frames: skin.frames.map((frame, index) => ({ intervalSeconds: frame.intervalSeconds, frame: q1Md5SkinPath(mesh.shader, group, index) })) };
-  }));
+  const meshSkinGroups = model.meshes.map(mesh =>
+    alias.skins.map((skin, group): TimedFrames<string> => {
+      if (skin.kind === "single") return { kind: "single", frame: q1Md5SkinPath(mesh.shader, group, 0) };
+      return {
+        kind: "group",
+        frames: skin.frames.map((frame, index) => ({ intervalSeconds: frame.intervalSeconds, frame: q1Md5SkinPath(mesh.shader, group, index) })),
+      };
+    }),
+  );
   return { kind: "q1-mdl-replacement", meshSkinGroups, flags: alias.flags, timing: q1Md5AnimationTiming(alias.frames.length, model) };
 }

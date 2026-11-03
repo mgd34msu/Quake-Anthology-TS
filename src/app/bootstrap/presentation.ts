@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { resolveNativeModCamera } from "./simulation/native-mod-camera.ts";
 import { ComponentDrawings } from "./component-drawings.ts";
@@ -56,39 +57,55 @@ interface ComponentClientFrame {
   readonly hud: ApplicationQ2NativeHud;
 }
 
-export type ComponentEffectFrame = (camera: SceneCamera, source: SourceSceneOrder, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }) => ApplicationEffectFrame;
+export type ComponentEffectFrame = (
+  camera: SceneCamera,
+  source: SourceSceneOrder,
+  q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" },
+) => ApplicationEffectFrame;
 
 /** Viewport ownership is independent of the simulation actor and renderer. */
 export function seatViewport(index: number, count: number, width: number, height: number): Rect {
   if (!Number.isInteger(index) || index < 0 || index >= count || count < 1 || count > 4) throw new RangeError("Invalid local seat layout");
   if (count === 1) return { x: 0, y: 0, width, height };
-  const columns = count === 2 ? 1 : 2, rows = 2;
-  const column = index % columns, row = Math.trunc(index / columns);
-  const x = Math.trunc(column * width / columns), y = Math.trunc(row * height / rows);
-  return { x, y, width: Math.trunc((column + 1) * width / columns) - x, height: Math.trunc((row + 1) * height / rows) - y };
+  const columns = count === 2 ? 1 : 2,
+    rows = 2;
+  const column = index % columns,
+    row = Math.trunc(index / columns);
+  const x = Math.trunc((column * width) / columns),
+    y = Math.trunc((row * height) / rows);
+  return { x, y, width: Math.trunc(((column + 1) * width) / columns) - x, height: Math.trunc(((row + 1) * height) / rows) - y };
 }
 
 export function cameraWithKick(camera: SceneCamera, kick: Vec3): SceneCamera {
   if (kick.x === 0 && kick.y === 0 && kick.z === 0) return camera;
-  const local = anglesToAxis(kick), axis = camera.axis;
-  const rotate = (v: Vec3): Vec3 => ({ x: axis[0].x * v.x + axis[1].x * v.y + axis[2].x * v.z,
-    y: axis[0].y * v.x + axis[1].y * v.y + axis[2].y * v.z, z: axis[0].z * v.x + axis[1].z * v.y + axis[2].z * v.z });
+  const local = anglesToAxis(kick),
+    axis = camera.axis;
+  const rotate = (v: Vec3): Vec3 => ({
+    x: axis[0].x * v.x + axis[1].x * v.y + axis[2].x * v.z,
+    y: axis[0].y * v.x + axis[1].y * v.y + axis[2].y * v.z,
+    z: axis[0].z * v.x + axis[1].z * v.y + axis[2].z * v.z,
+  });
   return { ...camera, axis: [rotate(local[0]), rotate(local[1]), rotate(local[2])] };
 }
 
 export function cameraWithClientOffset(camera: SceneCamera, player: PlayerView): SceneCamera {
   const delta = player.clientViewOffsetDelta;
-  return delta === undefined || camera.clip.kind !== "none" ? camera : { ...camera,
-    origin: { x: camera.origin.x + delta.x, y: camera.origin.y + delta.y, z: camera.origin.z + delta.z } };
+  return delta === undefined || camera.clip.kind !== "none"
+    ? camera
+    : { ...camera, origin: { x: camera.origin.x + delta.x, y: camera.origin.y + delta.y, z: camera.origin.z + delta.z } };
 }
 
 export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView): SceneCamera {
-  return player.foreignCharacterDeath === true && camera.clip.kind === "none" ? { ...camera,
-    origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles) } : camera;
+  return player.foreignCharacterDeath === true && camera.clip.kind === "none"
+    ? { ...camera, origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles) }
+    : camera;
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
-  private readonly componentEffects = new Map<ComponentEffectFrame, { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined>();
+  private readonly componentEffects = new Map<
+    ComponentEffectFrame,
+    { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined
+  >();
   private readonly q1Messages: Q1MessageLocalization;
   private readonly pendingMessages = new EventRing<{ readonly text: string; readonly sourcePresentationSequence: number | undefined }>(4096);
   private readonly pendingMessagesCursor: EventCursor = this.pendingMessages.openCursor();
@@ -115,10 +132,17 @@ export class WorldSeatPresentation implements SeatPresentation {
   private componentMovementOrigin: PlayerView["origin"] | null = null;
   private closed = false;
 
-  constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
-    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText" | "modClientPresentationSources">, seatCount: number,
-    font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
-    private readonly effects: ApplicationEffects, private currentQ3Client: ApplicationQ3Client | null = null,
+  constructor(
+    readonly local: LocalInput,
+    readonly assets: ApplicationAssets,
+    private readonly native: NativeRenderer,
+    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText" | "modClientPresentationSources">,
+    seatCount: number,
+    font: TextFontSelection,
+    characterAssets: Q3CharacterAssets | null,
+    readonly ui: ApplicationSeatUi,
+    private readonly effects: ApplicationEffects,
+    private currentQ3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
     private readonly worldTextCullFactor: (() => number) | null = null,
     private readonly fieldOfView: () => number = () => 90,
@@ -128,13 +152,19 @@ export class WorldSeatPresentation implements SeatPresentation {
     planarShadows: () => boolean = () => false,
     private readonly cameraOverride: (camera: SceneCamera) => SceneCamera = camera => camera,
     private readonly graphOverlay: ((draw: Draw2D, view: Rect, components: ComponentDrawings) => void) | null = null,
-    private readonly nativeQ2?: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: boolean }) {
+    private readonly nativeQ2?: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: boolean },
+  ) {
     this.layoutIndex = local.player.seat.id.index;
     effects.bindRendererHardware(() => {
       return q3Hardware(native.driver?.renderer ?? "");
     });
     this.layoutCount = seatCount;
-    this.q1Fog = new Q1MapFog(assets.content.world.kind === "q1-bsp" ? assets.content.world.entities : "", new Set(assets.content.recipe.mounts.mounts.map(mount => mount.identity.content)), local.player.actor, assets.content.world.kind === "q1-bsp");
+    this.q1Fog = new Q1MapFog(
+      assets.content.world.kind === "q1-bsp" ? assets.content.world.entities : "",
+      new Set(assets.content.recipe.mounts.mounts.map(mount => mount.identity.content)),
+      local.player.actor,
+      assets.content.world.kind === "q1-bsp",
+    );
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
     this.scene = new ApplicationWorldScene(assets, characterAssets, planarShadows);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -142,10 +172,14 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.finale = new SourceFinale(assets, this.text, this.q1Messages);
   }
 
-  get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.layoutIndex, this.layoutCount, size.width, size.height); }
+  get viewport(): Rect {
+    const size = this.native.window.drawableSize;
+    return seatViewport(this.layoutIndex, this.layoutCount, size.width, size.height);
+  }
 
   publishLayout(index: number, count: number): void {
-    if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || index < 0 || index >= count || count < 1 || count > 4) throw new RangeError("Invalid local seat layout");
+    if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || index < 0 || index >= count || count < 1 || count > 4)
+      throw new RangeError("Invalid local seat layout");
     this.layoutIndex = index;
     this.layoutCount = count;
   }
@@ -156,26 +190,57 @@ export class WorldSeatPresentation implements SeatPresentation {
     try {
       for (const content of this.worldFonts.keys()) {
         const provider = await images.provider(content);
-        replacements.set(content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
-          rerelease: this.assets.content.catalog.product(content).expectation.edition === "rerelease", images: this.assets.images,
-          imagePolicy: images.policy }));
+        replacements.set(
+          content,
+          await loadMenuFont({
+            catalog: this.assets.content.catalog,
+            mounts: provider.mounts,
+            family: provider.family,
+            rerelease: this.assets.content.catalog.product(content).expectation.edition === "rerelease",
+            images: this.assets.images,
+            imagePolicy: images.policy,
+          }),
+        );
       }
       const hud = await this.ui.prepareImageRefresh(images);
       const sky = await this.q1Services.prepareImageRefresh(images);
-      return { commit: () => {
-        this.text.font = font; this.ui.refreshImages(font, typography); hud(); sky();
-        for (const client of this.componentClients) client.hud.clear();
-        for (const font of this.worldFonts.values()) font.close();
-        this.worldFonts.clear(); for (const [content, font] of replacements) this.worldFonts.set(content, font);
-      }, discard: () => { for (const font of replacements.values()) font.close(); } };
-    } catch (error) { for (const font of replacements.values()) font.close(); throw error; }
+      return {
+        commit: () => {
+          this.text.font = font;
+          this.ui.refreshImages(font, typography);
+          hud();
+          sky();
+          for (const client of this.componentClients) client.hud.clear();
+          for (const font of this.worldFonts.values()) font.close();
+          this.worldFonts.clear();
+          for (const [content, font] of replacements) this.worldFonts.set(content, font);
+        },
+        discard: () => {
+          for (const font of replacements.values()) font.close();
+        },
+      };
+    } catch (error) {
+      for (const font of replacements.values()) font.close();
+      throw error;
+    }
   }
 
   get state(): SeatClientState {
-    const seat = this.local.player.seat.id, client = this.local.player.seat.client.id, viewport = this.viewport;
-    return { seat, client, actor: { kind: "player", actor: this.local.player.actor },
-      ui: { ...this.ui.controller.state(), focus: this.local.input.focus, ...this.ui.messages.active(this.preparedTime * 1000), showScores: this.local.input.button("scores").active },
-      presentation: { seat, client, viewport, safeArea: viewport, hudScale: 1, presentation: this.assets.content.recipe.presentation } };
+    const seat = this.local.player.seat.id,
+      client = this.local.player.seat.client.id,
+      viewport = this.viewport;
+    return {
+      seat,
+      client,
+      actor: { kind: "player", actor: this.local.player.actor },
+      ui: {
+        ...this.ui.controller.state(),
+        focus: this.local.input.focus,
+        ...this.ui.messages.active(this.preparedTime * 1000),
+        showScores: this.local.input.button("scores").active,
+      },
+      presentation: { seat, client, viewport, safeArea: viewport, hudScale: 1, presentation: this.assets.content.recipe.presentation },
+    };
   }
 
   camera(): SceneCamera {
@@ -189,25 +254,41 @@ export class WorldSeatPresentation implements SeatPresentation {
       const player = this.simulation.playerView(this.local.player.actor);
       return cameraWithKick(cameraWithClientOffset(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
     }
-    const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
+    const player = this.simulation.playerView(this.local.player.actor),
+      size = this.viewSize();
     const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-    if (this.q3Client !== null) return this.applyViewSize(cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? cameraWithClientOffset(this.q3Client.camera(), player)
-      : cameraWithCharacterDeath(cameraWithClientOffset(this.q3Client.camera(), player), player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
-    const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
-    const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
-      projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
+    if (this.q3Client !== null)
+      return this.applyViewSize(
+        cameraWithKick(
+          (this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0
+            ? cameraWithClientOffset(this.q3Client.camera(), player)
+            : cameraWithCharacterDeath(cameraWithClientOffset(this.q3Client.camera(), player), player),
+          player.kickAngles ?? { x: 0, y: 0, z: 0 },
+        ),
+      );
+    const fovX = player.fieldOfView ?? this.fieldOfView(),
+      fovY = (Math.atan((viewport.height / viewport.width) * Math.tan((fovX * Math.PI) / 360)) * 360) / Math.PI;
+    const camera: SceneCamera = {
+      origin: { ...player.origin, z: player.origin.z + player.viewHeight },
+      axis: anglesToAxis(player.angles),
+      viewport,
+      projection: perspectiveProjection(fovX, fovY, 16384),
+      clip: { kind: "none" },
+    };
     const firstPerson = this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;
     const chase = this.chaseSettings;
     if (chase === null) return firstPerson;
-    const recipe = this.assets.content.recipe, timing = recipe.timing.find(value => value.provider === recipe.engineBehavior.provider);
+    const recipe = this.assets.content.recipe,
+      timing = recipe.timing.find(value => value.provider === recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Chase camera requires the selected numeric profile");
     return q1ChaseCamera(firstPerson, player.angles, chase, this.effects.queries, timing.numeric, this.local.player.actor);
   }
   private componentView(): PlayerView | null {
     const frame = this.componentClients.find(client => client.frame.view !== null)?.frame;
     if (frame === undefined || frame.view === null) return null;
-    return frame.kind === "native" ? resolveNativeModCamera(frame.view, this.componentMovementOrigin,
-      this.simulation.playerView(this.local.player.actor).angles) : frame.view;
+    return frame.kind === "native"
+      ? resolveNativeModCamera(frame.view, this.componentMovementOrigin, this.simulation.playerView(this.local.player.actor).angles)
+      : frame.view;
   }
   private nativeView(): NativeModCameraView | null {
     const frame = this.componentClients.find(client => client.frame.view !== null)?.frame;
@@ -218,46 +299,73 @@ export class WorldSeatPresentation implements SeatPresentation {
     return frame?.kind !== "native" || frame.view === null || frame.view.native.weaponVisible;
   }
   private clientCamera(view: PlayerView): SceneCamera {
-    const viewport = this.viewport, x = view.fieldOfView ?? this.fieldOfView();
-    const y = Math.atan(viewport.height / viewport.width * Math.tan(x * Math.PI / 360)) * 360 / Math.PI;
-    return cameraWithKick({ origin: { ...view.origin, z: view.origin.z + view.viewHeight }, axis: anglesToAxis(view.angles), viewport,
-      projection: perspectiveProjection(x, y, 16384), clip: { kind: "none" } }, view.kickAngles ?? { x: 0, y: 0, z: 0 });
+    const viewport = this.viewport,
+      x = view.fieldOfView ?? this.fieldOfView();
+    const y = (Math.atan((viewport.height / viewport.width) * Math.tan((x * Math.PI) / 360)) * 360) / Math.PI;
+    return cameraWithKick(
+      {
+        origin: { ...view.origin, z: view.origin.z + view.viewHeight },
+        axis: anglesToAxis(view.angles),
+        viewport,
+        projection: perspectiveProjection(x, y, 16384),
+        clip: { kind: "none" },
+      },
+      view.kickAngles ?? { x: 0, y: 0, z: 0 },
+    );
   }
   private async prepareComponentClients(): Promise<void> {
-    const sources = this.simulation.modClientPresentationSources?.() ?? [], actor = this.local.player.actor;
+    const sources = this.simulation.modClientPresentationSources?.() ?? [],
+      actor = this.local.player.actor;
     const next: ComponentClientFrame[] = [];
     for (const source of sources) {
       source.source.assertCurrent();
       const frame = source.source.frame(actor);
       if (frame === null) continue;
-      const previous = this.componentClients.find(client => samePresentationOwner(client.source.owner, source.owner)
-        && client.source.source === source.source && client.generation === source.source.generation);
+      const previous = this.componentClients.find(
+        client =>
+          samePresentationOwner(client.source.owner, source.owner) && client.source.source === source.source && client.generation === source.source.generation,
+      );
       next.push({ source, generation: source.source.generation, frame, hud: previous?.hud ?? new ApplicationQ2NativeHud() });
     }
     for (const previous of this.componentClients) if (!next.some(client => client.hud === previous.hud)) previous.hud.clear();
     this.componentClients = next;
-    for (const client of next) if (client.frame.kind === "native" && client.frame.hud !== null) {
-      const assertCurrent = (): void => {
-        client.source.source.assertCurrent();
-        if (this.closed || !this.local.player.actor.equals(actor) || client.generation !== client.source.source.generation
-          || !this.componentClients.includes(client) || client.source.source.frame(actor) === null) throw new Error("Component client presentation is retired");
-      };
-      await this.ui.prepareNativeQ2Hud(client.frame.hud.frame, client.source.identity.source.content, this.assets,
-        { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
-        { renderer: client.hud, mode: client.frame.hud.mode, assertCurrent });
-      assertCurrent();
-    }
+    for (const client of next)
+      if (client.frame.kind === "native" && client.frame.hud !== null) {
+        const assertCurrent = (): void => {
+          client.source.source.assertCurrent();
+          if (
+            this.closed ||
+            !this.local.player.actor.equals(actor) ||
+            client.generation !== client.source.source.generation ||
+            !this.componentClients.includes(client) ||
+            client.source.source.frame(actor) === null
+          )
+            throw new Error("Component client presentation is retired");
+        };
+        await this.ui.prepareNativeQ2Hud(
+          client.frame.hud.frame,
+          client.source.identity.source.content,
+          this.assets,
+          { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
+          { renderer: client.hud, mode: client.frame.hud.mode, assertCurrent },
+        );
+        assertCurrent();
+      }
   }
 
-  get q3Client(): ApplicationQ3Client | null { return this.currentQ3Client; }
+  get q3Client(): ApplicationQ3Client | null {
+    return this.currentQ3Client;
+  }
   replaceQ3Client(candidate: ApplicationQ3Client): ApplicationQ3Client | null {
-    if (!candidate.options.local.player.seat.id.equals(this.local.player.seat.id)
-      || !candidate.options.local.player.actor.equals(this.local.player.actor)) throw new Error("Replacement presentation belongs to another local player");
+    if (!candidate.options.local.player.seat.id.equals(this.local.player.seat.id) || !candidate.options.local.player.actor.equals(this.local.player.actor))
+      throw new Error("Replacement presentation belongs to another local player");
     const previous = this.currentQ3Client;
     this.currentQ3Client = candidate;
     return previous;
   }
-  private get chaseSettings() { return this.q3Client === null && !this.finale.active ? this.viewSize()?.chase ?? null : null; }
+  private get chaseSettings() {
+    return this.q3Client === null && !this.finale.active ? (this.viewSize()?.chase ?? null) : null;
+  }
 
   private applyViewSize(camera: SceneCamera): SceneCamera {
     const settings = this.viewSize();
@@ -265,32 +373,40 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   receive(events: readonly SimulationEvent[]): undefined {
-    for (const event of events) if (event.payload.kind === "message") {
-      const message = event.payload.event;
-      if ("text" in message && typeof message.text === "string") this.pendingMessages.admit({ text: message.text, sourcePresentationSequence: event.payload.sourcePresentationSequence });
-    }
+    for (const event of events)
+      if (event.payload.kind === "message") {
+        const message = event.payload.event;
+        if ("text" in message && typeof message.text === "string")
+          this.pendingMessages.admit({ text: message.text, sourcePresentationSequence: event.payload.sourcePresentationSequence });
+      }
     return undefined;
   }
 
   sourceEvents(incoming: readonly SimulationPresentationEvent[]): void {
     const events = incoming.filter(event => event.recipient === undefined || event.recipient.equals(this.local.player.actor));
-    for (const event of events) if (event.kind === "presentation-owner") {
-      for (const client of this.componentClients) if (samePresentationOwner(client.source.owner, event.event.owner)) client.hud.clear();
-      this.componentClients = this.componentClients.filter(client => !samePresentationOwner(client.source.owner, event.event.owner));
-    }
+    for (const event of events)
+      if (event.kind === "presentation-owner") {
+        for (const client of this.componentClients) if (samePresentationOwner(client.source.owner, event.event.owner)) client.hud.clear();
+        this.componentClients = this.componentClients.filter(client => !samePresentationOwner(client.source.owner, event.event.owner));
+      }
     this.componentDrawings.receive(events);
     this.q1Fog.receive(events);
     this.q1Services.receive(events);
-    for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.admit(source);
+    for (const source of events)
+      if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.admit(source);
     if (this.q3Client !== null) {
       if (this.local.builder.dialect === "q3") return;
-      for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
+      for (const source of events)
+        if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
       return;
     }
     this.scene.receive(events);
-    this.ui.receive(events.filter(source => source.kind !== "q1" || source.event.kind !== "message")
-      .filter(source => source.kind !== "q2" || !["help", "pickup", "print", "centerprint"].includes(source.event.kind))
-      .filter(source => source.kind !== "q2-player" || source.event.kind !== "print"));
+    this.ui.receive(
+      events
+        .filter(source => source.kind !== "q1" || source.event.kind !== "message")
+        .filter(source => source.kind !== "q2" || !["help", "pickup", "print", "centerprint"].includes(source.event.kind))
+        .filter(source => source.kind !== "q2-player" || source.event.kind !== "print"),
+    );
     this.finale.receive(events);
     const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
     for (const source of events) {
@@ -303,8 +419,11 @@ export class WorldSeatPresentation implements SeatPresentation {
         if (["help", "pickup", "print", "centerprint"].includes(source.event.kind)) this.pendingQ2Messages.admit(source);
       } else if (source.kind === "q2-player") {
         if (source.event.kind === "print") this.pendingQ2Messages.admit(source);
-      } else if (source.kind === "q3-source" && source.event.kind === "server-command"
-        && (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)) {
+      } else if (
+        source.kind === "q3-source" &&
+        source.event.kind === "server-command" &&
+        (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)
+      ) {
         const [command, text] = tokenizeCommand(source.event.text, "q3").argv;
         if ((command === "print" || command === "chat" || command === "tchat") && text !== undefined) this.local.console.print(text);
       }
@@ -321,13 +440,25 @@ export class WorldSeatPresentation implements SeatPresentation {
       return provider.palette;
     });
     const bodies = [...this.componentEffects.values()].flatMap(owner => owner?.bodies?.() ?? []);
-    const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
-      && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
-    const q1Messages = this.pendingQ1Messages.take(this.pendingQ1Cursor); this.pendingQ1Messages.retire();
-    const q2Messages = this.pendingQ2Messages.take(this.pendingQ2Cursor); this.pendingQ2Messages.retire();
-    const mirrored = new Set([...q1Messages.map(source => source.sequence), ...q2Messages.filter(source => source.kind === "q2"
-      && (source.event.kind === "help" || source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))).map(source => source.sequence)]);
-    const pendingMessages = this.pendingMessages.take(this.pendingMessagesCursor); this.pendingMessages.retire();
+    const visiblePresentations = presentations.filter(
+      presentation => presentation.renderOwner !== "source-client" && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false,
+    );
+    const q1Messages = this.pendingQ1Messages.take(this.pendingQ1Cursor);
+    this.pendingQ1Messages.retire();
+    const q2Messages = this.pendingQ2Messages.take(this.pendingQ2Cursor);
+    this.pendingQ2Messages.retire();
+    const mirrored = new Set([
+      ...q1Messages.map(source => source.sequence),
+      ...q2Messages
+        .filter(
+          source =>
+            source.kind === "q2" &&
+            (source.event.kind === "help" || (source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))),
+        )
+        .map(source => source.sequence),
+    ]);
+    const pendingMessages = this.pendingMessages.take(this.pendingMessagesCursor);
+    this.pendingMessages.retire();
     for (const message of pendingMessages) {
       if (message.sourcePresentationSequence === undefined || !mirrored.has(message.sourcePresentationSequence)) this.local.console.print(`${message.text}\n`);
     }
@@ -339,12 +470,17 @@ export class WorldSeatPresentation implements SeatPresentation {
       this.ui.receive([{ ...source, event: { ...event, text } }]);
     }
     for (const source of q2Messages) {
-      const resolve = (text: string): Promise<string> => this.rerelease?.localizeMessage(this.local.player.seat.id, source.content, text) ?? Promise.resolve(text);
+      const resolve = (text: string): Promise<string> =>
+        this.rerelease?.localizeMessage(this.local.player.seat.id, source.content, text) ?? Promise.resolve(text);
       const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
       if (source.kind === "q2") {
         const event = source.event;
         if (event.kind === "pickup" && owns(event.player)) this.local.console.print(`${await resolve(event.name)}\n`);
-        else if (event.kind === "help" || event.kind === "print" && (event.actor === null || owns(event.actor)) || event.kind === "centerprint" && owns(event.actor)) {
+        else if (
+          event.kind === "help" ||
+          (event.kind === "print" && (event.actor === null || owns(event.actor))) ||
+          (event.kind === "centerprint" && owns(event.actor))
+        ) {
           const text = await resolve(event.text);
           if (event.kind !== "centerprint") this.local.console.print(event.kind === "help" ? `${text}\n` : text);
           this.ui.receive([{ ...source, event: { ...event, text } }]);
@@ -360,156 +496,355 @@ export class WorldSeatPresentation implements SeatPresentation {
     const drawings = this.componentDrawings.snapshot(this.preparedTime, ++this.componentDrawingFrame);
     this.componentLines = drawings.lines;
     this.worldText = [...this.simulation.worldText(), ...drawings.text];
-    for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
-      const provider = await this.assets.provider(text.content);
-      this.worldFonts.set(text.content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
-        rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease", images: this.assets.images,
-        ...(this.assets.imagePolicy === undefined ? {} : { imagePolicy: this.assets.imagePolicy }) }));
-    }
+    for (const text of this.worldText)
+      if (!this.worldFonts.has(text.content)) {
+        const provider = await this.assets.provider(text.content);
+        this.worldFonts.set(
+          text.content,
+          await loadMenuFont({
+            catalog: this.assets.content.catalog,
+            mounts: provider.mounts,
+            family: provider.family,
+            rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease",
+            images: this.assets.images,
+            ...(this.assets.imagePolicy === undefined ? {} : { imagePolicy: this.assets.imagePolicy }),
+          }),
+        );
+      }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     this.nativeQ2Frame = this.nativeQ2?.frame() ?? null;
-    if (this.nativeQ2Frame !== null) await this.ui.prepareNativeQ2Hud(this.nativeQ2Frame, this.assets.content.recipe.presentation.assets,
-      this.assets, { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 });
+    if (this.nativeQ2Frame !== null)
+      await this.ui.prepareNativeQ2Hud(this.nativeQ2Frame, this.assets.content.recipe.presentation.assets, this.assets, {
+        binding: this.state.presentation,
+        timeMilliseconds: this.preparedTime * 1000,
+      });
     const q3Client = this.q3Client;
     if (q3Client !== null) {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-      await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations,
-        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")), bodies, this.componentWeaponVisible(), this.nativeView() !== null);
+      await q3Client.prepare(
+        snapshot.frame.frame,
+        viewport,
+        visiblePresentations,
+        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")),
+        bodies,
+        this.componentWeaponVisible(),
+        this.nativeView() !== null,
+      );
       const thirdPerson = this.nativeView() === null && (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
       const drawWeapon = this.componentWeaponVisible() && (q3Client.sharedEquipmentViewVisible ?? (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0);
-      const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client").map(source => {
-        const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
-        return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
-      });
-      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90, q3Client.sharedHeldWeapons, drawWeapon, bodies, q3Client.sharedBodies);
+      const supplemental = visiblePresentations
+        .filter(source => source.renderOwner !== "source-client")
+        .map(source => {
+          const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
+          return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
+        });
+      await this.scene.prepare(
+        thirdPerson ? null : this.local.player.actor,
+        snapshot,
+        supplemental,
+        [],
+        q3Client.cvars.get("cg_fov")?.integerValue ?? 90,
+        q3Client.sharedHeldWeapons,
+        drawWeapon,
+        bodies,
+        q3Client.sharedBodies,
+      );
       return;
     }
     await this.finale.prepare();
-    await this.scene.prepare(this.nativeView() !== null || this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters,
-      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI, [], this.componentWeaponVisible(), bodies);
+    await this.scene.prepare(
+      this.nativeView() !== null || this.chaseSettings === null ? this.local.player.actor : null,
+      snapshot,
+      visiblePresentations,
+      characters,
+      (Math.atan(1 / this.camera().projection[0]) * 360) / Math.PI,
+      [],
+      this.componentWeaponVisible(),
+      bodies,
+    );
   }
 
-  get splitScreen(): boolean { return this.layoutCount > 1; }
-  bindComponentEffects(frame: ComponentEffectFrame, overlay?: { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void }): () => void {
-    this.componentEffects.set(frame, overlay);
-    return () => { this.componentEffects.delete(frame); };
+  get splitScreen(): boolean {
+    return this.layoutCount > 1;
   }
-  private effectFrame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null, fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
+  bindComponentEffects(
+    frame: ComponentEffectFrame,
+    overlay?: { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void },
+  ): () => void {
+    this.componentEffects.set(frame, overlay);
+    return () => {
+      this.componentEffects.delete(frame);
+    };
+  }
+  private effectFrame(
+    camera: SceneCamera,
+    source: SourceSceneOrder,
+    viewer: ActorId | null,
+    fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" },
+  ): ApplicationEffectFrame {
     const base = this.effects.frame(camera, source, viewer, fog);
     if (this.componentEffects.size === 0) return base;
     const frames = [base, ...[...this.componentEffects.keys()].map(frame => frame(camera, source, fog))];
     const operations = frames.flatMap(frame => frame.operations);
-    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
-    return { q3Admissions: frames.flatMap(frame => frame.q3Admissions),
+    const polygon = (operation: SceneOperation): boolean =>
+      operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    return {
+      q3Admissions: frames.flatMap(frame => frame.q3Admissions),
       operations: [...operations.filter(polygon), ...operations.filter(operation => !polygon(operation))],
-      lights: frames.flatMap(frame => frame.lights), q3Lights: frames.flatMap(frame => frame.q3Lights).slice(0, 32) };
+      lights: frames.flatMap(frame => frame.lights),
+      q3Lights: frames.flatMap(frame => frame.q3Lights).slice(0, 32),
+    };
   }
   frame(snapshot: WorldSnapshot): RenderFrame {
     const viewer = this.nativeView() !== null || this.chaseSettings === null ? this.local.player.actor : null;
-    const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
+    const time = snapshot.frame.time,
+      camera = this.camera(),
+      source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
       fog = this.q1Fog.active ? this.q1Fog.current(this.preparedTime) : undefined,
       effects = source === null ? null : this.effectFrame(camera, source, viewer, fog);
-    const playerView = this.effects.playerView(this.local.player.actor, camera), nativeView = this.nativeView();
+    const playerView = this.effects.playerView(this.local.player.actor, camera),
+      nativeView = this.nativeView();
     const noWorldModel = nativeView !== null && (nativeView.native.renderFlags & 2) !== 0;
     const infrared = nativeView === null ? playerView.infrared : (nativeView.native.renderFlags & 4) !== 0;
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
-    const input: WorldViewInput = { noWorldModel, ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+    const input: WorldViewInput = {
+      noWorldModel,
+      ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }),
+      camera,
+      target: { kind: "seat", seat: this.local.player.seat.id },
+      time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
       ...this.q1Services.view(this.local.player.actor),
       ...(fog === undefined ? {} : { q1Fog: fog }),
       clear: { depth: 1, color: noWorldModel ? { x: 0.3, y: 0.3, z: 0.3, w: 1 } : { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
-      lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
-      ...this.scene.styles() };
-    const nativeFrame = this.q3Client?.frame((camera, source) => {
-      const effects = this.effectFrame(camera, source, this.local.player.actor, fog);
-      const input: WorldViewInput = { noWorldModel, camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
-        worldSpaceBatches: this.native.window.backend === "gl" && process.env["QTS_WORLD_SPACE"] !== "0",
-        source: createWorldSurfaceAdmission(source), lights: effects.lights, q3Lights: effects.q3Lights,
-        ...(fog === undefined ? {} : { q1Fog: fog }) };
-      return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera, infrared)] };
-    }, camera => {
-      const controlled = this.componentView();
-      if (controlled !== null) return this.cameraOverride(this.clientCamera(controlled));
-      if (this.q3Client?.options.kind === "qvm") {
+      lights: effects?.lights ?? [],
+      q3Lights: effects?.q3Lights ?? [],
+      ...this.scene.styles(),
+    };
+    const nativeFrame = this.q3Client?.frame(
+      (camera, source) => {
+        const effects = this.effectFrame(camera, source, this.local.player.actor, fog);
+        const input: WorldViewInput = {
+          noWorldModel,
+          camera,
+          time,
+          target: { kind: "seat", seat: this.local.player.seat.id },
+          worldSpaceBatches: this.native.window.backend === "gl" && process.env["QTS_WORLD_SPACE"] !== "0",
+          source: createWorldSurfaceAdmission(source),
+          lights: effects.lights,
+          q3Lights: effects.q3Lights,
+          ...(fog === undefined ? {} : { q1Fog: fog }),
+        };
+        return {
+          ...effects,
+          operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera, infrared)],
+        };
+      },
+      camera => {
+        const controlled = this.componentView();
+        if (controlled !== null) return this.cameraOverride(this.clientCamera(controlled));
+        if (this.q3Client?.options.kind === "qvm") {
+          const player = this.simulation.playerView(this.local.player.actor);
+          return this.cameraOverride(cameraWithKick(cameraWithClientOffset(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
+        }
         const player = this.simulation.playerView(this.local.player.actor);
-        return this.cameraOverride(cameraWithKick(cameraWithClientOffset(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
-      }
-      const player = this.simulation.playerView(this.local.player.actor);
-      return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? cameraWithClientOffset(camera, player) : cameraWithCharacterDeath(cameraWithClientOffset(camera, player), player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
-    }, { noWorldModel, ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) }, this.componentView() === null ? this.simulation.playerView(this.local.player.actor).clientViewOffsetDelta : undefined);
+        return this.cameraOverride(
+          this.applyViewSize(
+            cameraWithKick(
+              (this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0
+                ? cameraWithClientOffset(camera, player)
+                : cameraWithCharacterDeath(cameraWithClientOffset(camera, player), player),
+              player.kickAngles ?? { x: 0, y: 0, z: 0 },
+            ),
+          ),
+        );
+      },
+      { noWorldModel, ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) },
+      this.componentView() === null ? this.simulation.playerView(this.local.player.actor).clientViewOffsetDelta : undefined,
+    );
     this.frames.begin();
     const area = this.viewport;
     if (camera.viewport.x !== area.x || camera.viewport.y !== area.y || camera.viewport.width !== area.width || camera.viewport.height !== area.height)
-      this.frames.view({ target: input.target, time, viewport: area,
-      clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false }, clipPlane: null, beforeView: [], operations: [] });
+      this.frames.view({
+        target: input.target,
+        time,
+        viewport: area,
+        clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
+        clipPlane: null,
+        beforeView: [],
+        operations: [],
+      });
     if (nativeFrame === undefined) {
       if (effects === null) throw new Error("Shared view lost its prepared effects");
-      this.frames.world(this.scene.view(input, effects.operations,
-        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12, viewer), infrared,
-        weaponViewCamera(camera, this.ui.weaponOcclusion({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, !this.finale.active))));
-    } else for (const command of nativeFrame.commands) {
-      if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
-      this.frames.command(command);
-    }
+      this.frames.world(
+        this.scene.view(
+          input,
+          effects.operations,
+          this.effects.shadowSceneLights(camera, index => style(index, 12) / 12, viewer),
+          infrared,
+          weaponViewCamera(
+            camera,
+            this.ui.weaponOcclusion({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, !this.finale.active),
+          ),
+        ),
+      );
+    } else
+      for (const command of nativeFrame.commands) {
+        if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
+        this.frames.command(command);
+      }
     const debugLines = [...(this.debugShapes?.lines() ?? []), ...this.componentLines];
-    if (debugLines.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
-      beforeView: [], operations: [{ kind: "draw", batches: prepareDebugShapes(debugLines, camera, this.assets.world.shaders.textures.white.image, this.debugShapes?.lineWidth()) }] });
-    if (this.worldText.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
-      beforeView: [], operations: [{ kind: "draw", batches: prepareWorldText(this.worldText, camera, text => {
-        const font = this.worldFonts.get(text.content);
-        if (font === undefined) throw new Error("World text font was not prepared");
-        return font.font;
-      }, this.worldTextCullFactor?.()) }] });
+    if (debugLines.length > 0)
+      this.frames.view({
+        target: input.target,
+        time,
+        viewport: camera.viewport,
+        clear: null,
+        clipPlane: null,
+        beforeView: [],
+        operations: [
+          { kind: "draw", batches: prepareDebugShapes(debugLines, camera, this.assets.world.shaders.textures.white.image, this.debugShapes?.lineWidth()) },
+        ],
+      });
+    if (this.worldText.length > 0)
+      this.frames.view({
+        target: input.target,
+        time,
+        viewport: camera.viewport,
+        clear: null,
+        clipPlane: null,
+        beforeView: [],
+        operations: [
+          {
+            kind: "draw",
+            batches: prepareWorldText(
+              this.worldText,
+              camera,
+              text => {
+                const font = this.worldFonts.get(text.content);
+                if (font === undefined) throw new Error("World text font was not prepared");
+                return font.font;
+              },
+              this.worldTextCullFactor?.(),
+            ),
+          },
+        ],
+      });
     const material = (draw: Parameters<typeof prepareMaterialText>[0]): void => {
-      this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: this.viewport, clear: null, clipPlane: null,
-        beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, this.viewport, this.assets.world.materialContext(input)) }] });
+      this.frames.view({
+        target: { kind: "seat", seat: this.local.player.seat.id },
+        time,
+        viewport: this.viewport,
+        clear: null,
+        clipPlane: null,
+        beforeView: [],
+        operations: [{ kind: "draw", batches: prepareMaterialText(draw, this.viewport, this.assets.world.materialContext(input)) }],
+      });
     };
-    const draw = new Draw2D(new TextCommandSink(this.local.player.seat.id, this.viewport, command => {
-      if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
-      this.frames.command(command);
-    }, material), "pixels");
+    const draw = new Draw2D(
+      new TextCommandSink(
+        this.local.player.seat.id,
+        this.viewport,
+        command => {
+          if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
+          this.frames.command(command);
+        },
+        material,
+      ),
+      "pixels",
+    );
     const controlledView = this.componentView();
     const sourceView = controlledView ?? this.simulation.playerView(this.local.player.actor);
     const blend = sourceView.blend ?? playerView.blend;
-    if ((controlledView !== null || this.q3Client === null) && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
-      blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
+    if ((controlledView !== null || this.q3Client === null) && blend !== null)
+      draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height }, blend, {
+        kind: "image",
+        name: "white",
+        image: this.assets.world.shaders.textures.white.image,
+      });
     if ((controlledView !== null || this.q3Client === null) && sourceView.damageBlend !== undefined) {
       const batches = prepareQ2DamageBlend(sourceView.damageBlend, camera.viewport, this.assets.world.shaders.textures.white.image);
-      if (batches.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
+      if (batches.length > 0)
+        this.frames.view({
+          target: input.target,
+          time,
+          viewport: camera.viewport,
+          clear: null,
+          clipPlane: null,
+          beforeView: [],
+          operations: [{ kind: "draw", batches }],
+        });
     }
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
     const nativeReplacement = this.componentClients.some(client => client.frame.kind !== "quakec" && client.frame.hud?.mode === "replace-status");
     const qcStatus = this.componentClients.find(client => client.frame.kind === "quakec" && client.frame.hud !== null)?.frame;
-    this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
-      !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
-      nativeReplacement || this.q3Client !== null || this.nativeQ2 !== undefined, this.q3Client?.weaponHudView().aggregateWarning ?? true, this.q3Client !== null,
-      nativeReplacement ? { kind: "native" } : qcStatus?.kind === "quakec" && qcStatus.hud !== null ? { kind: "vitals", ...qcStatus.hud } : undefined);
-    if (this.nativeQ2Frame !== null && !nativeReplacement && qcStatus === undefined) this.ui.drawNativeQ2Hud(this.nativeQ2Frame,
-      { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material);
+    this.ui.draw(
+      { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
+      camera,
+      command => this.frames.command(command),
+      material,
+      !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true),
+      !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
+      nativeReplacement || this.q3Client !== null || this.nativeQ2 !== undefined,
+      this.q3Client?.weaponHudView().aggregateWarning ?? true,
+      this.q3Client !== null,
+      nativeReplacement ? { kind: "native" } : qcStatus?.kind === "quakec" && qcStatus.hud !== null ? { kind: "vitals", ...qcStatus.hud } : undefined,
+    );
+    if (this.nativeQ2Frame !== null && !nativeReplacement && qcStatus === undefined)
+      this.ui.drawNativeQ2Hud(
+        this.nativeQ2Frame,
+        { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
+        command => this.frames.command(command),
+        material,
+      );
     for (const client of this.componentClients) {
-      if (client.frame.kind === "native" && client.frame.hud !== null) this.ui.drawNativeQ2Hud(client.frame.hud.frame,
-        { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material, undefined,
-        { renderer: client.hud, mode: client.frame.hud.mode });
-      else if (client.frame.kind === "qvm") for (const overlay of this.componentEffects.values())
-        if (overlay !== undefined && samePresentationOwner(overlay.owner, client.source.owner)) overlay.draw(this.frames, camera);
+      if (client.frame.kind === "native" && client.frame.hud !== null)
+        this.ui.drawNativeQ2Hud(
+          client.frame.hud.frame,
+          { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
+          command => this.frames.command(command),
+          material,
+          undefined,
+          { renderer: client.hud, mode: client.frame.hud.mode },
+        );
+      else if (client.frame.kind === "qvm")
+        for (const overlay of this.componentEffects.values())
+          if (overlay !== undefined && samePresentationOwner(overlay.owner, client.source.owner)) overlay.draw(this.frames, camera);
     }
-    this.graphOverlay?.(draw, { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y,
-      width: camera.viewport.width, height: camera.viewport.height }, this.componentDrawings);
+    this.graphOverlay?.(
+      draw,
+      { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y, width: camera.viewport.width, height: camera.viewport.height },
+      this.componentDrawings,
+    );
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(this.viewport.height * 0.5);
-      const logical = this.native.window.logicalSize, drawable = this.native.window.drawableSize;
-      const metrics = consoleMetrics({ width: this.viewport.width, height: this.viewport.height,
+      const logical = this.native.window.logicalSize,
+        drawable = this.native.window.drawableSize;
+      const metrics = consoleMetrics({
+        width: this.viewport.width,
+        height: this.viewport.height,
         pixelRatio: Math.max(drawable.width / logical.width, drawable.height / logical.height),
-        requestedScale: this.consoleScale(), font: this.text.font });
+        requestedScale: this.consoleScale(),
+        font: this.text.font,
+      });
       const { scale, columns } = metrics;
       const white = this.assets.world.shaders.textures.white.image;
       draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height }, { x: 0, y: 0, z: 0, w: 0.85 }, { kind: "image", name: "white", image: white });
       if (this.local.console.buffer.width !== columns) this.local.console.buffer.resize(columns);
-      drawConsole({ draw, text: this.text, rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / metrics.lineHeight))),
-        field: this.local.console.field, selectedEntry: this.local.console.selectedCompletionEntry,
-        height, scale, cellWidth: metrics.cellWidth, nowMilliseconds: this.preparedTime * 1000, background: null });
+      drawConsole({
+        draw,
+        text: this.text,
+        rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / metrics.lineHeight))),
+        field: this.local.console.field,
+        selectedEntry: this.local.console.selectedCompletionEntry,
+        height,
+        scale,
+        cellWidth: metrics.cellWidth,
+        nowMilliseconds: this.preparedTime * 1000,
+        background: null,
+      });
     }
     return this.frames.finish(false);
   }
@@ -525,10 +860,19 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.componentClients = [];
     this.componentEffects.clear();
     const errors: unknown[] = [];
-    const close = (dispose: () => void): void => { try { dispose(); } catch (error) { errors.push(error); } };
+    const close = (dispose: () => void): void => {
+      try {
+        dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
     for (const font of this.worldFonts.values()) close(() => font.close());
-    this.worldFonts.clear(); this.worldText = []; this.nativeQ2Frame = null;
-    this.componentDrawings.clear(); this.componentLines = [];
+    this.worldFonts.clear();
+    this.worldText = [];
+    this.nativeQ2Frame = null;
+    this.componentDrawings.clear();
+    this.componentLines = [];
     close(() => this.q3Client?.close());
     close(() => this.ui.close());
     close(() => this.scene.close());

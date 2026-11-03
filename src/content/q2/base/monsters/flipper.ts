@@ -1,13 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II m_flipper.c. id Software, GPL-2.0-or-later. */
 import type { Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { beginDeath, damagedSkin, finishCorpse, move, sound, standardGib } from "./common.ts";
 import { flipperMoves } from "./tables/flipper.ts";
 
 export const flipperDefinition: Q2MonsterDefinition = {
-  classname: "monster_flipper", kind: "flipper", model: "models/monsters/flipper/tris.md2", health: 50, gibHealth: -30, mass: 100,
-  bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 32 } }, scale: 1, locomotion: "swim", hasRangedAttack: false,
-  initialMove: "flipper_move_stand", moves: flipperMoves, stand: move("flipper_move_stand"), walk: move("flipper_move_walk"), run: move("flipper_move_start_run"),
-  attack: move("flipper_move_attack"), melee: move("flipper_move_attack"), sight: sound("flipper/flpsght1.wav"),
+  classname: "monster_flipper",
+  kind: "flipper",
+  model: "models/monsters/flipper/tris.md2",
+  health: 50,
+  gibHealth: -30,
+  mass: 100,
+  bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 32 } },
+  scale: 1,
+  locomotion: "swim",
+  hasRangedAttack: false,
+  initialMove: "flipper_move_stand",
+  moves: flipperMoves,
+  stand: move("flipper_move_stand"),
+  walk: move("flipper_move_walk"),
+  run: move("flipper_move_start_run"),
+  attack: move("flipper_move_attack"),
+  melee: move("flipper_move_attack"),
+  sight: sound("flipper/flpsght1.wav"),
   pain(context) {
     damagedSkin(context);
     if (context.game.host.now() < context.state.painTime) return undefined;
@@ -22,8 +37,13 @@ export const flipperDefinition: Q2MonsterDefinition = {
     return beginDeath(context, reaction, "flipper/flpdeth1.wav", "flipper_move_death");
   },
   callbacks: {
-    flipper_run: move("flipper_move_run_start"), flipper_run_loop: move("flipper_move_run_loop"), flipper_dead: finishCorpse,
+    flipper_run: move("flipper_move_run_start"),
+    flipper_run_loop: move("flipper_move_run_loop"),
+    flipper_dead: finishCorpse,
     flipper_preattack: sound("flipper/flpatck1.wav", 1),
-    flipper_bite(context) { context.weapons.fireHit(context.entity, context.game, { x: 80, y: 0, z: 0 }, 5, 0); return undefined; },
+    flipper_bite(context) {
+      context.weapons.fireHit(context.entity, context.game, { x: 80, y: 0, z: 0 }, 5, 0);
+      return undefined;
+    },
   },
 };

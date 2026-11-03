@@ -1,20 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponHudIcon } from "./ui.ts";
 import type { ProviderReference, ResolvedResourceReference } from "./content.ts";
 import type { InventoryEntry, ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "./identity.ts";
 import type { HeldWeaponDeclaration } from "./held-weapon.ts";
 
-export interface SourceEquipmentContext { readonly provider: ProviderId; readonly item: ItemId | null; }
+export interface SourceEquipmentContext {
+  readonly provider: ProviderId;
+  readonly item: ItemId | null;
+}
 
 export function sourceEquipmentItem(contexts: readonly SourceEquipmentContext[], provider: ProviderId): ItemId | null {
-  const matches = contexts.filter(context => context.provider === provider), context = matches[0];
+  const matches = contexts.filter(context => context.provider === provider),
+    context = matches[0];
   if (context === undefined) throw new Error(`Equipment ${provider} has no declared original cadence context`);
   if (matches.length !== 1) throw new Error(`Equipment ${provider} has duplicate original cadence contexts`);
   return context.item;
 }
 
 export type SourceItemAction = "use" | "drop";
-export interface SourceItemActionCalls<Call> { readonly use?: Call; readonly drop?: Call; }
+export interface SourceItemActionCalls<Call> {
+  readonly use?: Call;
+  readonly drop?: Call;
+}
 export function sourceItemActionNames<Call>(calls: SourceItemActionCalls<Call>): readonly SourceItemAction[] {
   const names: SourceItemAction[] = [];
   if (calls.use !== undefined) names.push("use");
@@ -23,8 +31,11 @@ export function sourceItemActionNames<Call>(calls: SourceItemActionCalls<Call>):
 }
 
 /** Exact canonical IDs take precedence over display names shared by composed sources. */
-export function sourceItemNamed<Item extends { readonly item: ItemId; readonly label: string }>(items: readonly Item[], text: string, original: ItemId | null = null):
-  { readonly kind: "match"; readonly item: Item; readonly exact: boolean } | { readonly kind: "ambiguous"; readonly items: readonly Item[] } | null {
+export function sourceItemNamed<Item extends { readonly item: ItemId; readonly label: string }>(
+  items: readonly Item[],
+  text: string,
+  original: ItemId | null = null,
+): { readonly kind: "match"; readonly item: Item; readonly exact: boolean } | { readonly kind: "ambiguous"; readonly items: readonly Item[] } | null {
   const requested = text.toLowerCase().replaceAll(" ", "");
   const exact = items.find(item => item.item.toLowerCase() === requested);
   if (exact !== undefined) return { kind: "match", item: exact, exact: true };
@@ -39,22 +50,46 @@ export type SourceItemIconDeclaration =
   | { readonly kind: "wad-picture"; readonly path: string; readonly lump: string }
   | { readonly kind: "shader"; readonly name: string };
 
-export interface SourceWeaponItem { readonly kind: "weapon"; readonly ammo: ItemId | null; readonly held?: HeldWeaponDeclaration; }
+export interface SourceWeaponItem {
+  readonly kind: "weapon";
+  readonly ammo: ItemId | null;
+  readonly held?: HeldWeaponDeclaration;
+}
 
-export type SourceItemDefinition = { readonly item: ItemId; readonly label: string; readonly source: ProviderReference; readonly icon?: WeaponHudIcon | null; readonly actions?: readonly SourceItemAction[] } & (
-  | { readonly kind: "counter" }
-  | SourceWeaponItem
-);
-export interface SourceItemAdmission { readonly definition: SourceItemDefinition; readonly admission: "add" | "replace-primary"; }
-export interface SourceItemStore { readonly before: InventoryEntry; readonly after: InventoryEntry; }
-export interface SourceItemLease { current(): boolean; stored(changes: readonly SourceItemStore[]): undefined; close(): undefined; }
+export type SourceItemDefinition = {
+  readonly item: ItemId;
+  readonly label: string;
+  readonly source: ProviderReference;
+  readonly icon?: WeaponHudIcon | null;
+  readonly actions?: readonly SourceItemAction[];
+} & ({ readonly kind: "counter" } | SourceWeaponItem);
+export interface SourceItemAdmission {
+  readonly definition: SourceItemDefinition;
+  readonly admission: "add" | "replace-primary";
+}
+export interface SourceItemStore {
+  readonly before: InventoryEntry;
+  readonly after: InventoryEntry;
+}
+export interface SourceItemLease {
+  current(): boolean;
+  stored(changes: readonly SourceItemStore[]): undefined;
+  close(): undefined;
+}
 /** Identifies only retirement of the exact source lease delivering a committed store. */
 export class SourceItemRetired extends Error {
-  constructor(readonly lease: SourceItemLease, readonly actor: OwnedActor, readonly owner: ProviderId) {
+  constructor(
+    readonly lease: SourceItemLease,
+    readonly actor: OwnedActor,
+    readonly owner: ProviderId,
+  ) {
     super("Committed inventory source is no longer current");
   }
 }
-export interface WeaponReference { readonly provider: ProviderId; readonly item: ItemId; }
+export interface WeaponReference {
+  readonly provider: ProviderId;
+  readonly item: ItemId;
+}
 
 /** Source traversal retains animation, deadlines, ammunition and committed attacks. */
 interface SourceWeaponHandoffBase {
@@ -69,16 +104,20 @@ export interface SourceWeaponRequest {
   status(): "pending" | "accepted" | "refused";
   cancel(): void;
 }
-export type SourceWeaponHandoff = SourceWeaponHandoffBase & (
-  | { readonly kind: "immediate"; resume(item: ItemId | null): boolean }
-  | { readonly kind: "source-input"; resume(item: ItemId | null): SourceWeaponRequest;
-      restoreRequest(id: number, item: ItemId | null): SourceWeaponRequest }
-);
+export type SourceWeaponHandoff = SourceWeaponHandoffBase &
+  (
+    | { readonly kind: "immediate"; resume(item: ItemId | null): boolean }
+    | { readonly kind: "source-input"; resume(item: ItemId | null): SourceWeaponRequest; restoreRequest(id: number, item: ItemId | null): SourceWeaponRequest }
+  );
 export interface SourceWeaponPresentation {
   readonly source: ProviderReference;
   readonly active: ItemId | null;
   readonly pending: ItemId | null;
-  readonly model: ({ readonly kind: "resolved"; readonly resource: ResolvedResourceReference } | { readonly kind: "source-path"; readonly path: string }) & { readonly frame: number } | null;
+  readonly model:
+    | (({ readonly kind: "resolved"; readonly resource: ResolvedResourceReference } | { readonly kind: "source-path"; readonly path: string }) & {
+        readonly frame: number;
+      })
+    | null;
   readonly items: readonly SourceItemDefinition[];
 }
 export interface SourceWeaponBinding {

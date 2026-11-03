@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { hasNonFinite } from './unified-finite.ts';
 import { finiteVectors, nonNegative, positive } from './unified-frame-values.ts';
 import type { PresentationOwner } from "../../../contracts/presentation.ts";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Row-parallel rasterization worker: decodes flat triangle setups from the
  * shared job buffer and rasterizes disjoint row bands into the shared
  * framebuffer. See row-parallel.ts for the coordinator and encoding. */
@@ -11,7 +12,9 @@ import type { BoundTexture, Framebuffer, Sample, TextureStorage } from "./triang
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-function unknownArray(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
+function unknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
 function list(value: unknown): readonly unknown[] {
   if (!unknownArray(value)) throw new Error("Invalid row worker list");
   return value;
@@ -51,9 +54,16 @@ function decodeLevel(level: unknown): TextureStorage {
   if (levelFormat !== "rgba8" && levelFormat !== "rgb8") throw new Error("Invalid row worker level format");
   const uniform = level["uniform"] === null ? null : sample(level["uniform"]);
   if (num(level["componentMaximum"]) !== 255) throw new Error("Invalid row worker component maximum");
-  return { width: int(level["width"]), height: int(level["height"]), pixels,
+  return {
+    width: int(level["width"]),
+    height: int(level["height"]),
+    pixels,
     data: new DataView(pixels.buffer, pixels.byteOffset, pixels.byteLength),
-    internalFormat: levelFormat, hasAlpha: bool(level["hasAlpha"]), componentMaximum: 255, uniform };
+    internalFormat: levelFormat,
+    hasAlpha: bool(level["hasAlpha"]),
+    componentMaximum: 255,
+    uniform,
+  };
 }
 
 function decodeTexture(value: unknown): BoundTexture {
@@ -80,9 +90,17 @@ function decodeTexture(value: unknown): BoundTexture {
   const first = levels[0];
   if (first === undefined) throw new Error("Row worker texture has no levels");
   const rest = levels.slice(1);
-  return { kind: "image", internalFormat: format, wrap, minifyLinear: bool(value["minifyLinear"]),
-    magnifyLinear: bool(value["magnifyLinear"]), mipmapping, magnificationLimit: num(value["magnificationLimit"]),
-    borderColor: vec4(value["borderColor"]), levels: [first, ...rest] };
+  return {
+    kind: "image",
+    internalFormat: format,
+    wrap,
+    minifyLinear: bool(value["minifyLinear"]),
+    magnifyLinear: bool(value["magnifyLinear"]),
+    mipmapping,
+    magnificationLimit: num(value["magnificationLimit"]),
+    borderColor: vec4(value["borderColor"]),
+    levels: [first, ...rest],
+  };
 }
 
 function isBatchLighting(value: unknown): value is BatchLighting {
@@ -95,18 +113,34 @@ function decodeDepth(value: unknown): DepthImageLevel {
 
 const initial: unknown = workerData;
 if (!record(initial)) throw new Error("Invalid row worker bootstrap");
-const controlBuffer = initial["control"], errorBuffer = initial["error"], colorBuffer = initial["color"];
-const depthBuffer = initial["depth"], stencilBuffer = initial["stencil"];
-if (!(controlBuffer instanceof SharedArrayBuffer) || !(errorBuffer instanceof SharedArrayBuffer)
-  || !(colorBuffer instanceof SharedArrayBuffer) || !(depthBuffer instanceof SharedArrayBuffer)
-  || (stencilBuffer !== null && !(stencilBuffer instanceof SharedArrayBuffer)))
+const controlBuffer = initial["control"],
+  errorBuffer = initial["error"],
+  colorBuffer = initial["color"];
+const depthBuffer = initial["depth"],
+  stencilBuffer = initial["stencil"];
+if (
+  !(controlBuffer instanceof SharedArrayBuffer) ||
+  !(errorBuffer instanceof SharedArrayBuffer) ||
+  !(colorBuffer instanceof SharedArrayBuffer) ||
+  !(depthBuffer instanceof SharedArrayBuffer) ||
+  (stencilBuffer !== null && !(stencilBuffer instanceof SharedArrayBuffer))
+)
   throw new Error("Invalid row worker shared buffers");
-const width = int(initial["width"]), height = int(initial["height"]);
+const width = int(initial["width"]),
+  height = int(initial["height"]);
 const control = new Int32Array(controlBuffer);
 const errorBytes = new Uint8Array(errorBuffer);
-const framebuffer: Framebuffer = { width, height, pixels: new Uint8Array(colorBuffer), colorWords: new Int32Array(colorBuffer),
-  depth: new Float64Array(depthBuffer), stencil: stencilBuffer === null ? null : new Uint32Array(stencilBuffer),
-  originX: 0, originY: 0, stride: width };
+const framebuffer: Framebuffer = {
+  width,
+  height,
+  pixels: new Uint8Array(colorBuffer),
+  colorWords: new Int32Array(colorBuffer),
+  depth: new Float64Array(depthBuffer),
+  stencil: stencilBuffer === null ? null : new Uint32Array(stencilBuffer),
+  originX: 0,
+  originY: 0,
+  stride: width,
+};
 const textures = new Map<number, BoundTexture>();
 const levelStore = new Map<number, TextureStorage>();
 const lightings = new Map<number, BatchLighting>();
@@ -147,7 +181,9 @@ parentPort.on("message", (value: unknown) => {
   try {
     if (!record(value) || value["kind"] !== "job") throw new Error("Invalid row worker job");
     // Registrations cover one job. Keeping them would retain a texture copy per dispatched batch.
-    textures.clear(); lightings.clear(); lightingBases.clear();
+    textures.clear();
+    lightings.clear();
+    lightingBases.clear();
     for (const id of list(value["evictLevels"])) levelStore.delete(int(id));
     for (const entry of list(value["levels"])) {
       if (!record(entry)) throw new Error("Invalid row worker level registration");
@@ -179,7 +215,8 @@ parentPort.on("message", (value: unknown) => {
     const fresh = value["jobBuffer"];
     if (fresh instanceof SharedArrayBuffer) jobData = new Float64Array(fresh);
     if (jobData === null) throw new Error("Row worker has no job buffer");
-    const count = int(value["count"]), bandRows = Math.max(1, int(value["bandRows"]));
+    const count = int(value["count"]),
+      bandRows = Math.max(1, int(value["bandRows"]));
     const setups = Array.from({ length: count }, (_, index) => {
       const data = jobData;
       if (data === null) throw new Error("Row worker lost job buffer");
@@ -189,10 +226,13 @@ parentPort.on("message", (value: unknown) => {
     for (;;) {
       const band = Atomics.add(control, 0, 1);
       if (band >= bandCount) break;
-      const firstY = band * bandRows, lastY = Math.min(height - 1, firstY + bandRows - 1);
+      const firstY = band * bandRows,
+        lastY = Math.min(height - 1, firstY + bandRows - 1);
       for (const setup of setups) runWorkerTriangleRows(setup, framebuffer, sampled, firstY, lastY);
     }
-  } catch (error) { fail(error); }
+  } catch (error) {
+    fail(error);
+  }
   Atomics.add(control, 1, 1);
   Atomics.notify(control, 1);
 });

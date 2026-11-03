@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Rerelease m_flipper.cpp. ZeniMax Media, GPL-2.0.
 import { corpse, health } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
@@ -7,10 +8,17 @@ import { checkGib, reactsToPain, rereleaseRandom } from "../common.ts";
 import { flipperMoves } from "../tables/flipper.ts";
 
 export const rereleaseFlipperDefinition: Q2MonsterDefinition = {
-  ...flipperDefinition, moves: flipperMoves, bounds: { min: { x: -16, y: -16, z: -8 }, max: { x: 16, y: 16, z: 20 } },
+  ...flipperDefinition,
+  moves: flipperMoves,
+  bounds: { min: { x: -16, y: -16, z: -8 }, max: { x: 16, y: 16, z: 20 } },
   initialize(context) {
-    const { state } = context; state.alternateFly = true; state.flyThrusters = false;
-    state.flyAcceleration = 30; state.flySpeed = 110; state.flyMinDistance = 10; state.flyMaxDistance = 10;
+    const { state } = context;
+    state.alternateFly = true;
+    state.flyThrusters = false;
+    state.flyAcceleration = 30;
+    state.flySpeed = 110;
+    state.flyMinDistance = 10;
+    state.flyMaxDistance = 10;
     return undefined;
   },
   pain(context) {
@@ -30,14 +38,23 @@ export const rereleaseFlipperDefinition: Q2MonsterDefinition = {
       for (let i = 0; i < 2; i++) throwGib(entity, game, "models/objects/gibs/bone/tris.md2", reaction.damage);
       for (let i = 0; i < 2; i++) throwGib(entity, game, "models/objects/gibs/sm_meat/tris.md2", reaction.damage);
       throwGib(entity, game, "models/objects/gibs/head2/tris.md2", reaction.damage, { head: true });
-      state.dead = true; state.gibbed = true; return undefined;
+      state.dead = true;
+      state.gibbed = true;
+      return undefined;
     }
     if (state.dead) return undefined;
-    game.sound(entity, "flipper/flpdeth1.wav", 2); state.dead = true; state.canTakeDamage = true; entity.serverFlags |= 2;
-    game.host.combat.setTraits(entity.actor, { canTakeDamage: true }); return context.setMove("flipper_move_death");
+    game.sound(entity, "flipper/flpdeth1.wav", 2);
+    state.dead = true;
+    state.canTakeDamage = true;
+    entity.serverFlags |= 2;
+    game.host.combat.setTraits(entity.actor, { canTakeDamage: true });
+    return context.setMove("flipper_move_death");
   },
   callbacks: {
     ...flipperDefinition.callbacks,
-    flipper_dead(context) { corpse(context); return context.game.move(context.entity, { bounds: { min: { x: -16, y: -16, z: -8 }, max: { x: 16, y: 16, z: 8 } } }); },
+    flipper_dead(context) {
+      corpse(context);
+      return context.game.move(context.entity, { bounds: { min: { x: -16, y: -16, z: -8 }, max: { x: 16, y: 16, z: 8 } } });
+    },
   },
 };

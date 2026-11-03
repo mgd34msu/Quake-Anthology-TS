@@ -1,4 +1,7 @@
-export interface SessionResource { close(): undefined; }
+// SPDX-License-Identifier: GPL-2.0-or-later
+export interface SessionResource {
+  close(): undefined;
+}
 
 /** Reverse acquisition order follows the Q3 host's deferred resource cleanup. */
 export class ResourceScope implements SessionResource {
@@ -7,7 +10,9 @@ export class ResourceScope implements SessionResource {
 
   constructor(readonly name: string) {}
 
-  get isClosed(): boolean { return this.closed; }
+  get isClosed(): boolean {
+    return this.closed;
+  }
 
   assertOpen(): undefined {
     if (this.closed) throw new Error(`${this.name} is closed`);
@@ -31,7 +36,11 @@ export class ResourceScope implements SessionResource {
     const errors: unknown[] = [];
     let cleanup = this.cleanups.pop();
     while (cleanup !== undefined) {
-      try { cleanup(); } catch (error) { errors.push(error); }
+      try {
+        cleanup();
+      } catch (error) {
+        errors.push(error);
+      }
       cleanup = this.cleanups.pop();
     }
     if (errors.length > 0) throw new AggregateError(errors, `Failed to close ${this.name}`);

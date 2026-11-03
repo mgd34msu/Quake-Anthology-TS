@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
@@ -17,8 +18,12 @@ function slider(bindings: readonly SettingBinding[], id: string) {
 }
 
 function controls() {
-  const owner = createIdentityOwner("mouse-axis-settings"), seat = owner.seat(0);
-  const context = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } } satisfies import("../../src/contracts/common.ts").CommandContext;
+  const owner = createIdentityOwner("mouse-axis-settings"),
+    seat = owner.seat(0);
+  const context = {
+    session: owner.session,
+    origin: { kind: "local-seat", seat, client: owner.client(0, 0) },
+  } satisfies import("../../src/contracts/common.ts").CommandContext;
   const commands = new CommandBuffer({ dialect: "q3", context });
   const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
   const cvars = new CvarRegistry({ dialect: "q3", context });
@@ -28,28 +33,34 @@ function controls() {
 
 test("shared axis controls scale actual mouse movement independently and retain inversion through zero", () => {
   const { seat, builder, bindings } = controls();
-  const horizontal = slider(bindings, "mouse-yaw"), vertical = slider(bindings, "mouse-pitch");
+  const horizontal = slider(bindings, "mouse-yaw"),
+    vertical = slider(bindings, "mouse-pitch");
   slider(bindings, "sensitivity").write(5);
   vertical.write(50);
   expect(builder.mouse.tuning.pitch).toBeCloseTo(0.011, 6);
   expect(builder.mouse.tuning.yaw).toBeCloseTo(0.022, 6);
   const motion = builder.mouse.sample({ x: 10, y: 10 }, 16, false, true);
-  expect(motion.yaw).toBeCloseTo(-1.1, 4); expect(motion.pitch).toBeCloseTo(0.55, 4);
+  expect(motion.yaw).toBeCloseTo(-1.1, 4);
+  expect(motion.pitch).toBeCloseTo(0.55, 4);
   expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "50%" });
   builder.mouse.tuning = { ...builder.mouse.tuning, invertPitch: true, yaw: -0.022 };
-  vertical.write(0); vertical.write(100);
+  vertical.write(0);
+  vertical.write(100);
   horizontal.write(0);
   expect(Object.is(builder.mouse.tuning.yaw, -0)).toBe(true);
   horizontal.write(50);
   expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.011, 6);
   expect(builder.mouse.tuning.invertPitch).toBe(true);
   expect(builder.mouse.sample({ x: 10, y: 10 }, 16, false, true).pitch).toBeLessThan(0);
-  expect(vertical.minimum).toBe(0); expect(vertical.maximum).toBe(200); expect(vertical.step).toBe(1);
+  expect(vertical.minimum).toBe(0);
+  expect(vertical.maximum).toBe(200);
+  expect(vertical.step).toBe(1);
 });
 
 test("menu reads retain console coefficients beyond the slider range", () => {
   const { seat, builder, cvars, bindings } = controls();
-  cvars.set("m_pitch", "0.11"); cvars.set("m_yaw", "-0.066");
+  cvars.set("m_pitch", "0.11");
+  cvars.set("m_yaw", "-0.066");
   const vertical = slider(bindings, "mouse-pitch");
   expect(vertical.read()).toBeCloseTo(500, 4);
   expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "500%" });
@@ -66,7 +77,19 @@ test("frontend uses the same axis bindings and transfers only selected coefficie
   slider(bindings, "mouse-pitch").write(50);
   expect(preferences.values).toEqual({ pitch: 0.011 });
   expect(slider(preferences.bindings(), "mouse-pitch").read()).toBe(50);
-  const before = { sensitivity: 3, pitch: 0.022, yaw: 0.022, invertMouse: false, alwaysRun: false,
-    acceleration: 0, filter: false, freeLook: true, effectsVolume: 0.7, musicVolume: 0.25, controllerVibration: true, controllerVibrationStrength: 1 };
+  const before = {
+    sensitivity: 3,
+    pitch: 0.022,
+    yaw: 0.022,
+    invertMouse: false,
+    alwaysRun: false,
+    acceleration: 0,
+    filter: false,
+    freeLook: true,
+    effectsVolume: 0.7,
+    musicVolume: 0.25,
+    controllerVibration: true,
+    controllerVibrationStrength: 1,
+  };
   expect(changedFrontendPreferences(before, { ...before, yaw: -0 }, preferences.values)).toEqual({ pitch: 0.011, yaw: -0 });
 });

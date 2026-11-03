@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's game/ai_dmq3.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -14,17 +15,51 @@ import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
 import { qvmAngleMod, qvmAngleVectors } from "../../../core/math.ts";
-import { EntityEvent, EntityType, EV_EVENT_BITS, GameType, MoveType, PersistentIndex, Powerup, Team, Weapon, WeaponState, statSchema } from "../../../content/q3/base/shared/definitions.ts";
+import {
+  EntityEvent,
+  EntityType,
+  EV_EVENT_BITS,
+  GameType,
+  MoveType,
+  PersistentIndex,
+  Powerup,
+  Team,
+  Weapon,
+  WeaponState,
+  statSchema,
+} from "../../../content/q3/base/shared/definitions.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
 import { ENTITYNUM_NONE, ENTITYNUM_WORLD } from "../../../content/q3/base/shared/player-state.ts";
 import type { ServerTraceResult } from "../../../content/q3/base/world.ts";
 import type { GameAiContext } from "./ai-context.ts";
-import { BotCharacteristic, BotFlag, BotInventory, BotLongTermGoal, BotModelIndex, BotTeamTaskPreference, MAX_NODESWITCHES, MAX_PROXMINES } from "./ai-definitions.ts";
+import {
+  BotCharacteristic,
+  BotFlag,
+  BotInventory,
+  BotLongTermGoal,
+  BotModelIndex,
+  BotTeamTaskPreference,
+  MAX_NODESWITCHES,
+  MAX_PROXMINES,
+} from "./ai-definitions.ts";
 import { BotGoalState } from "./ai-state.ts";
 import type { BotState } from "./ai-state.ts";
-import { bot1FCTFCarryingFlag, botCTFCarryingFlag, botHarvesterCarryingCubes, botSameTeam, botTeam,
-  botTeamFlagCarrierVisible, botEnemyFlagCarrierVisible, botTeamCubeCarrierVisible, botEnemyCubeCarrierVisible,
-  botVisibleTeamMatesAndEnemies, clientFromName, clientName, botSynonymContext, teamPlayIsOn } from "./ai-orders.ts";
+import {
+  bot1FCTFCarryingFlag,
+  botCTFCarryingFlag,
+  botHarvesterCarryingCubes,
+  botSameTeam,
+  botTeam,
+  botTeamFlagCarrierVisible,
+  botEnemyFlagCarrierVisible,
+  botTeamCubeCarrierVisible,
+  botEnemyCubeCarrierVisible,
+  botVisibleTeamMatesAndEnemies,
+  clientFromName,
+  clientName,
+  botSynonymContext,
+  teamPlayIsOn,
+} from "./ai-orders.ts";
 import { botTeamAI, botVoiceChat } from "./ai-team.ts";
 import { botTeamLeader } from "./ai-main.ts";
 import { botSetupAlternativeRouteGoals } from "./ai-navigation.ts";
@@ -36,9 +71,18 @@ import { gameFormat } from "../../../content/q3/base/game/format.ts";
 import { GlobalTeamSound } from "../../../content/q3/team-arena/team.ts";
 
 const f = Math.fround;
-const SOLID = 1, LAVA = 8, SLIME = 16, WATER = 32, FOG = 64, PLAYERCLIP = 0x10000;
-const LIQUID = LAVA | SLIME | WATER, MASK_SHOT = SOLID | 0x2000000 | 0x4000000;
-const EF_TELEPORT_BIT = 4, EF_KAMIKAZE = 0x200, EF_FIRING = 0x100, EF_TALK = 0x1000;
+const SOLID = 1,
+  LAVA = 8,
+  SLIME = 16,
+  WATER = 32,
+  FOG = 64,
+  PLAYERCLIP = 0x10000;
+const LIQUID = LAVA | SLIME | WATER,
+  MASK_SHOT = SOLID | 0x2000000 | 0x4000000;
+const EF_TELEPORT_BIT = 4,
+  EF_KAMIKAZE = 0x200,
+  EF_FIRING = 0x100,
+  EF_TALK = 0x1000;
 
 export { vectorToAngles } from "../../../core/math.ts";
 
@@ -52,10 +96,14 @@ function characteristic(context: GameAiContext, state: BotState, index: BotChara
   return context.library.characters.boundedFloat(state.character, index, 0, 1);
 }
 
-export function botAITrace(context: GameAiContext, start: Vec3, end: Vec3, passEntity: number,
-  mask: number, bounds: Bounds | null = null): ServerTraceResult {
-  const trace = context.game.world.trace({ start, end, passEntityNum: passEntity, mask,
-    shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max } });
+export function botAITrace(context: GameAiContext, start: Vec3, end: Vec3, passEntity: number, mask: number, bounds: Bounds | null = null): ServerTraceResult {
+  const trace = context.game.world.trace({
+    start,
+    end,
+    passEntityNum: passEntity,
+    mask,
+    shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max },
+  });
   // ai_main.c clears bsp_trace_t.contents after copying the engine trace.
   return { ...trace, contents: 0 };
 }
@@ -71,18 +119,29 @@ export function entityIsDead(context: GameAiContext, info: AasEntityInfo): boole
 }
 
 export function entityCarriesFlag(context: GameAiContext, info: AasEntityInfo): boolean {
-  return (info.powerups & ((1 << Powerup.PW_REDFLAG) | (1 << Powerup.PW_BLUEFLAG)
-    | (context.game.options.product === "missionpack" ? 1 << Powerup.PW_NEUTRALFLAG : 0))) !== 0;
+  return (
+    (info.powerups &
+      ((1 << Powerup.PW_REDFLAG) | (1 << Powerup.PW_BLUEFLAG) | (context.game.options.product === "missionpack" ? 1 << Powerup.PW_NEUTRALFLAG : 0))) !==
+    0
+  );
 }
 
 export function entityIsInvisible(context: GameAiContext, info: AasEntityInfo): boolean {
   return !entityCarriesFlag(context, info) && (info.powerups & (1 << Powerup.PW_INVIS)) !== 0;
 }
 
-export function entityIsShooting(info: AasEntityInfo): boolean { return (info.flags & EF_FIRING) !== 0; }
-export function entityIsChatting(info: AasEntityInfo): boolean { return (info.flags & EF_TALK) !== 0; }
-export function entityHasQuad(info: AasEntityInfo): boolean { return (info.powerups & (1 << Powerup.PW_QUAD)) !== 0; }
-export function entityHasKamikaze(info: AasEntityInfo): boolean { return (info.flags & EF_KAMIKAZE) !== 0; }
+export function entityIsShooting(info: AasEntityInfo): boolean {
+  return (info.flags & EF_FIRING) !== 0;
+}
+export function entityIsChatting(info: AasEntityInfo): boolean {
+  return (info.flags & EF_TALK) !== 0;
+}
+export function entityHasQuad(info: AasEntityInfo): boolean {
+  return (info.powerups & (1 << Powerup.PW_QUAD)) !== 0;
+}
+export function entityHasKamikaze(info: AasEntityInfo): boolean {
+  return (info.flags & EF_KAMIKAZE) !== 0;
+}
 export function entityCarriesCubes(context: GameAiContext, info: AasEntityInfo): boolean {
   return context.deathmatch.gametype === GameType.GT_HARVESTER && context.game.entity(info.number).state.generic1 > 0;
 }
@@ -113,14 +172,20 @@ export function botCheckItemPickup(context: GameAiContext, state: BotState, oldI
   }
   if (offense === null) return;
   const leader = clientFromName(context, state.teamLeader);
-  const flagsAtBase = (context.deathmatch.gametype !== GameType.GT_CTF || state.redFlagStatus === 0 && state.blueFlagStatus === 0)
-    && (context.deathmatch.gametype !== GameType.GT_1FCTF || state.neutralFlagStatus === 0);
+  const flagsAtBase =
+    (context.deathmatch.gametype !== GameType.GT_CTF || (state.redFlagStatus === 0 && state.blueFlagStatus === 0)) &&
+    (context.deathmatch.gametype !== GameType.GT_1FCTF || state.neutralFlagStatus === 0);
   if (offense) {
     if ((state.teamTaskPreference & BotTeamTaskPreference.ATTACKER) === 0) {
       if (botTeamLeader(context, state)) botVoiceChat(context, state, leader, "wantonoffense");
       else if (context.cvar("g_spSkill").integerValue <= 3) {
-        if (state.ltgType !== BotLongTermGoal.GETFLAG && state.ltgType !== BotLongTermGoal.ATTACKENEMYBASE
-          && state.ltgType !== BotLongTermGoal.HARVEST && flagsAtBase) botVoiceChat(context, state, leader, "wantonoffense");
+        if (
+          state.ltgType !== BotLongTermGoal.GETFLAG &&
+          state.ltgType !== BotLongTermGoal.ATTACKENEMYBASE &&
+          state.ltgType !== BotLongTermGoal.HARVEST &&
+          flagsAtBase
+        )
+          botVoiceChat(context, state, leader, "wantonoffense");
         state.teamTaskPreference |= BotTeamTaskPreference.ATTACKER;
       }
     }
@@ -138,44 +203,68 @@ export function botCheckItemPickup(context: GameAiContext, state: BotState, oldI
 }
 
 const weaponInventory: readonly (readonly [BotInventory, Weapon])[] = [
-  [BotInventory.GAUNTLET, Weapon.WP_GAUNTLET], [BotInventory.SHOTGUN, Weapon.WP_SHOTGUN],
-  [BotInventory.MACHINEGUN, Weapon.WP_MACHINEGUN], [BotInventory.GRENADELAUNCHER, Weapon.WP_GRENADE_LAUNCHER],
-  [BotInventory.ROCKETLAUNCHER, Weapon.WP_ROCKET_LAUNCHER], [BotInventory.LIGHTNING, Weapon.WP_LIGHTNING],
-  [BotInventory.RAILGUN, Weapon.WP_RAILGUN], [BotInventory.PLASMAGUN, Weapon.WP_PLASMAGUN],
-  [BotInventory.BFG10K, Weapon.WP_BFG], [BotInventory.GRAPPLINGHOOK, Weapon.WP_GRAPPLING_HOOK],
-  [BotInventory.NAILGUN, Weapon.WP_NAILGUN], [BotInventory.PROXLAUNCHER, Weapon.WP_PROX_LAUNCHER],
+  [BotInventory.GAUNTLET, Weapon.WP_GAUNTLET],
+  [BotInventory.SHOTGUN, Weapon.WP_SHOTGUN],
+  [BotInventory.MACHINEGUN, Weapon.WP_MACHINEGUN],
+  [BotInventory.GRENADELAUNCHER, Weapon.WP_GRENADE_LAUNCHER],
+  [BotInventory.ROCKETLAUNCHER, Weapon.WP_ROCKET_LAUNCHER],
+  [BotInventory.LIGHTNING, Weapon.WP_LIGHTNING],
+  [BotInventory.RAILGUN, Weapon.WP_RAILGUN],
+  [BotInventory.PLASMAGUN, Weapon.WP_PLASMAGUN],
+  [BotInventory.BFG10K, Weapon.WP_BFG],
+  [BotInventory.GRAPPLINGHOOK, Weapon.WP_GRAPPLING_HOOK],
+  [BotInventory.NAILGUN, Weapon.WP_NAILGUN],
+  [BotInventory.PROXLAUNCHER, Weapon.WP_PROX_LAUNCHER],
   [BotInventory.CHAINGUN, Weapon.WP_CHAINGUN],
 ];
 const ammoInventory: readonly (readonly [BotInventory, Weapon])[] = [
-  [BotInventory.SHELLS, Weapon.WP_SHOTGUN], [BotInventory.BULLETS, Weapon.WP_MACHINEGUN],
-  [BotInventory.GRENADES, Weapon.WP_GRENADE_LAUNCHER], [BotInventory.CELLS, Weapon.WP_PLASMAGUN],
-  [BotInventory.LIGHTNINGAMMO, Weapon.WP_LIGHTNING], [BotInventory.ROCKETS, Weapon.WP_ROCKET_LAUNCHER],
-  [BotInventory.SLUGS, Weapon.WP_RAILGUN], [BotInventory.BFGAMMO, Weapon.WP_BFG],
-  [BotInventory.NAILS, Weapon.WP_NAILGUN], [BotInventory.MINES, Weapon.WP_PROX_LAUNCHER],
+  [BotInventory.SHELLS, Weapon.WP_SHOTGUN],
+  [BotInventory.BULLETS, Weapon.WP_MACHINEGUN],
+  [BotInventory.GRENADES, Weapon.WP_GRENADE_LAUNCHER],
+  [BotInventory.CELLS, Weapon.WP_PLASMAGUN],
+  [BotInventory.LIGHTNINGAMMO, Weapon.WP_LIGHTNING],
+  [BotInventory.ROCKETS, Weapon.WP_ROCKET_LAUNCHER],
+  [BotInventory.SLUGS, Weapon.WP_RAILGUN],
+  [BotInventory.BFGAMMO, Weapon.WP_BFG],
+  [BotInventory.NAILS, Weapon.WP_NAILGUN],
+  [BotInventory.MINES, Weapon.WP_PROX_LAUNCHER],
   [BotInventory.BELT, Weapon.WP_CHAINGUN],
 ];
 const holdableInventory: readonly (readonly [BotInventory, BotModelIndex])[] = [
-  [BotInventory.TELEPORTER, BotModelIndex.TELEPORTER], [BotInventory.MEDKIT, BotModelIndex.MEDKIT],
-  [BotInventory.KAMIKAZE, BotModelIndex.KAMIKAZE], [BotInventory.PORTAL, BotModelIndex.PORTAL],
+  [BotInventory.TELEPORTER, BotModelIndex.TELEPORTER],
+  [BotInventory.MEDKIT, BotModelIndex.MEDKIT],
+  [BotInventory.KAMIKAZE, BotModelIndex.KAMIKAZE],
+  [BotInventory.PORTAL, BotModelIndex.PORTAL],
   [BotInventory.INVULNERABILITY, BotModelIndex.INVULNERABILITY],
 ];
 const powerupInventory: readonly (readonly [BotInventory, Powerup])[] = [
-  [BotInventory.QUAD, Powerup.PW_QUAD], [BotInventory.ENVIRONMENTSUIT, Powerup.PW_BATTLESUIT],
-  [BotInventory.HASTE, Powerup.PW_HASTE], [BotInventory.INVISIBILITY, Powerup.PW_INVIS],
-  [BotInventory.REGEN, Powerup.PW_REGEN], [BotInventory.FLIGHT, Powerup.PW_FLIGHT],
-  [BotInventory.REDFLAG, Powerup.PW_REDFLAG], [BotInventory.BLUEFLAG, Powerup.PW_BLUEFLAG],
+  [BotInventory.QUAD, Powerup.PW_QUAD],
+  [BotInventory.ENVIRONMENTSUIT, Powerup.PW_BATTLESUIT],
+  [BotInventory.HASTE, Powerup.PW_HASTE],
+  [BotInventory.INVISIBILITY, Powerup.PW_INVIS],
+  [BotInventory.REGEN, Powerup.PW_REGEN],
+  [BotInventory.FLIGHT, Powerup.PW_FLIGHT],
+  [BotInventory.REDFLAG, Powerup.PW_REDFLAG],
+  [BotInventory.BLUEFLAG, Powerup.PW_BLUEFLAG],
   [BotInventory.NEUTRALFLAG, Powerup.PW_NEUTRALFLAG],
 ];
 const persistentInventory: readonly (readonly [BotInventory, BotModelIndex])[] = [
-  [BotInventory.SCOUT, BotModelIndex.SCOUT], [BotInventory.GUARD, BotModelIndex.GUARD],
-  [BotInventory.DOUBLER, BotModelIndex.DOUBLER], [BotInventory.AMMOREGEN, BotModelIndex.AMMOREGEN],
+  [BotInventory.SCOUT, BotModelIndex.SCOUT],
+  [BotInventory.GUARD, BotModelIndex.GUARD],
+  [BotInventory.DOUBLER, BotModelIndex.DOUBLER],
+  [BotInventory.AMMOREGEN, BotModelIndex.AMMOREGEN],
 ];
 
 export function updateQ3BotInventory(state: BotState): void {
-  const ps = state.curPs, schema = statSchema(state.product);
+  const ps = state.curPs,
+    schema = statSchema(state.product);
   state.inventory[BotInventory.ARMOR] = ps.stats.get(schema.armor);
   const weapons = ps.stats.get(schema.weapons);
-  updateQ3BotWeaponInventory(state, weapon => (weapons & (1 << weapon)) !== 0, weapon => ps.ammo.get(weapon));
+  updateQ3BotWeaponInventory(
+    state,
+    weapon => (weapons & (1 << weapon)) !== 0,
+    weapon => ps.ammo.get(weapon),
+  );
   updateQ3BotItemInventory(state);
 }
 
@@ -191,7 +280,8 @@ export function updateQ3BotWeaponInventory(state: BotState, owned: (weapon: numb
 }
 
 export function updateQ3BotItemInventory(state: BotState): void {
-  const ps = state.curPs, schema = statSchema(state.product);
+  const ps = state.curPs,
+    schema = statSchema(state.product);
   state.inventory[BotInventory.HEALTH] = ps.stats.get(schema.health);
   for (const [index, model] of holdableInventory) {
     if (state.product === "baseq3" && index > BotInventory.MEDKIT) continue;
@@ -222,8 +312,10 @@ export function botUpdateBattleInventory(context: GameAiContext, state: BotState
 }
 
 function carryingObjective(context: GameAiContext, state: BotState): boolean {
-  return Boolean(botCTFCarryingFlag(context, state)) || state.product === "missionpack"
-    && (Boolean(bot1FCTFCarryingFlag(context, state)) || Boolean(botHarvesterCarryingCubes(context, state)));
+  return (
+    Boolean(botCTFCarryingFlag(context, state)) ||
+    (state.product === "missionpack" && (Boolean(bot1FCTFCarryingFlag(context, state)) || Boolean(botHarvesterCarryingCubes(context, state))))
+  );
 }
 
 function carrierWithin(context: GameAiContext, state: BotState, entity: number, distance: number): boolean {
@@ -233,7 +325,8 @@ function carrierWithin(context: GameAiContext, state: BotState, entity: number, 
 }
 
 function goalVisibleWithin(context: GameAiContext, state: BotState, goal: BotGoalState, distance: number): boolean {
-  const target = add3(goal.origin, vec3(0, 0, 1)), direction = sub3(state.origin, target);
+  const target = add3(goal.origin, vec3(0, 0, 1)),
+    direction = sub3(state.origin, target);
   if (dot3(direction, direction) >= f(distance * distance)) return false;
   const trace = botAITrace(context, state.eye, target, state.client, SOLID);
   return trace.fraction >= 1 || trace.entityNum === goal.entity;
@@ -247,16 +340,21 @@ export function botUseKamikaze(context: GameAiContext, state: BotState): void {
     if (carryingObjective(context, state)) return;
     if (carrierWithin(context, state, botTeamFlagCarrierVisible(context, state), 1024)) return;
     if (carrierWithin(context, state, botEnemyFlagCarrierVisible(context, state), 1024)) {
-      context.library.actions.use(state.client); return;
+      context.library.actions.use(state.client);
+      return;
     }
   } else if (mode === GameType.GT_OBELISK) {
     const goal = botTeam(context, state) === Team.TEAM_RED ? context.deathmatch.blueObelisk : context.deathmatch.redObelisk;
-    if (goalVisibleWithin(context, state, goal, f(1024 * f(0.9)))) { context.library.actions.use(state.client); return; }
+    if (goalVisibleWithin(context, state, goal, f(1024 * f(0.9)))) {
+      context.library.actions.use(state.client);
+      return;
+    }
   } else if (mode === GameType.GT_HARVESTER) {
     if (botHarvesterCarryingCubes(context, state)) return;
     if (carrierWithin(context, state, botTeamCubeCarrierVisible(context, state), 1024)) return;
     if (carrierWithin(context, state, botEnemyCubeCarrierVisible(context, state), 1024)) {
-      context.library.actions.use(state.client); return;
+      context.library.actions.use(state.client);
+      return;
     }
   }
   const visible = botVisibleTeamMatesAndEnemies(context, state, 1024);
@@ -266,7 +364,8 @@ export function botUseKamikaze(context: GameAiContext, state: BotState): void {
 export function botUseInvulnerability(context: GameAiContext, state: BotState): void {
   if (botInventoryValue(state, BotInventory.INVULNERABILITY) <= 0 || state.invulnerabilityTime > context.time) return;
   state.invulnerabilityTime = f(context.time + f(0.2));
-  const mode = context.deathmatch.gametype, red = botTeam(context, state) === Team.TEAM_RED;
+  const mode = context.deathmatch.gametype,
+    red = botTeam(context, state) === Team.TEAM_RED;
   if (mode === GameType.GT_CTF || mode === GameType.GT_1FCTF) {
     if (carryingObjective(context, state) || botEnemyFlagCarrierVisible(context, state) >= 0) return;
     if (goalVisibleWithin(context, state, red ? context.deathmatch.ctfBlueFlag : context.deathmatch.ctfRedFlag, 200)) context.library.actions.use(state.client);
@@ -279,17 +378,22 @@ export function botUseInvulnerability(context: GameAiContext, state: BotState): 
 }
 
 export function botBattleUseItems(context: GameAiContext, state: BotState): void {
-  if (botInventoryValue(state, BotInventory.HEALTH) < 40 && botInventoryValue(state, BotInventory.TELEPORTER) > 0
-    && !carryingObjective(context, state)) context.library.actions.use(state.client);
+  if (botInventoryValue(state, BotInventory.HEALTH) < 40 && botInventoryValue(state, BotInventory.TELEPORTER) > 0 && !carryingObjective(context, state))
+    context.library.actions.use(state.client);
   if (botInventoryValue(state, BotInventory.HEALTH) < 60 && botInventoryValue(state, BotInventory.MEDKIT) > 0) context.library.actions.use(state.client);
-  if (state.product === "missionpack") { botUseKamikaze(context, state); botUseInvulnerability(context, state); }
+  if (state.product === "missionpack") {
+    botUseKamikaze(context, state);
+    botUseInvulnerability(context, state);
+  }
 }
 
 export function botSetTeleportTime(context: GameAiContext, state: BotState): void {
   if (((state.curPs.eFlags ^ state.lastEFlags) & EF_TELEPORT_BIT) !== 0) state.teleportTime = context.time;
   state.lastEFlags = state.curPs.eFlags;
 }
-export function botIsDead(_context: GameAiContext, state: BotState): boolean { return state.curPs.pmType === MoveType.PM_DEAD; }
+export function botIsDead(_context: GameAiContext, state: BotState): boolean {
+  return state.curPs.pmType === MoveType.PM_DEAD;
+}
 export function botIsObserver(context: GameAiContext, state: BotState): boolean {
   if (state.curPs.pmType === MoveType.PM_SPECTATOR) return true;
   return gameAtoi(infoValueForKey(context.game.options.configstrings.get(544 + state.client).slice(0, 1023), "t")) === Team.TEAM_SPECTATOR;
@@ -301,7 +405,9 @@ export function botInLavaOrSlime(context: GameAiContext, state: BotState): boole
   return (context.game.world.pointContents(add3(state.origin, vec3(0, 0, -23)), -1) & (LAVA | SLIME)) !== 0;
 }
 
-export function botAggression(context: GameAiContext, state: BotState): number { return context.game.knowledge.aggression(state); }
+export function botAggression(context: GameAiContext, state: BotState): number {
+  return context.game.knowledge.aggression(state);
+}
 
 export function botFeelingBad(context: GameAiContext, state: BotState): number {
   if (context.game.knowledge.tactics(state.weaponNum).melee || botInventoryValue(state, BotInventory.HEALTH) < 40) return 100;
@@ -314,8 +420,11 @@ export function botFeelingBad(context: GameAiContext, state: BotState): number {
 export function botWantsToRetreat(context: GameAiContext, state: BotState): boolean {
   if (carryingObjective(context, state)) return true;
   if (state.product === "missionpack" && context.deathmatch.gametype === GameType.GT_OBELISK) {
-    if (state.ltgType === BotLongTermGoal.ATTACKENEMYBASE && (state.enemy !== context.deathmatch.redObelisk.entity
-      || state.enemy !== context.deathmatch.blueObelisk.entity)) return true;
+    if (
+      state.ltgType === BotLongTermGoal.ATTACKENEMYBASE &&
+      (state.enemy !== context.deathmatch.redObelisk.entity || state.enemy !== context.deathmatch.blueObelisk.entity)
+    )
+      return true;
     return botFeelingBad(context, state) > 50;
   }
   if (state.enemy >= 0 && entityCarriesFlag(context, botEntityInfo(context, state.enemy))) return false;
@@ -325,14 +434,24 @@ export function botWantsToRetreat(context: GameAiContext, state: BotState): bool
 export function botWantsToChase(context: GameAiContext, state: BotState): boolean {
   if (carryingObjective(context, state)) return false;
   const mode = context.deathmatch.gametype;
-  if ((mode === GameType.GT_CTF || state.product === "missionpack" && mode === GameType.GT_1FCTF)
-    && entityCarriesFlag(context, botEntityInfo(context, state.enemy))) return true;
-  if (state.product === "missionpack" && mode === GameType.GT_OBELISK && state.ltgType === BotLongTermGoal.ATTACKENEMYBASE
-    && (state.enemy !== context.deathmatch.redObelisk.entity || state.enemy !== context.deathmatch.blueObelisk.entity)) return false;
+  if (
+    (mode === GameType.GT_CTF || (state.product === "missionpack" && mode === GameType.GT_1FCTF)) &&
+    entityCarriesFlag(context, botEntityInfo(context, state.enemy))
+  )
+    return true;
+  if (
+    state.product === "missionpack" &&
+    mode === GameType.GT_OBELISK &&
+    state.ltgType === BotLongTermGoal.ATTACKENEMYBASE &&
+    (state.enemy !== context.deathmatch.redObelisk.entity || state.enemy !== context.deathmatch.blueObelisk.entity)
+  )
+    return false;
   return state.ltgType !== BotLongTermGoal.GETFLAG && botAggression(context, state) > 50;
 }
 
-export function botWantsToHelp(_context: GameAiContext, _state: BotState): boolean { return true; }
+export function botWantsToHelp(_context: GameAiContext, _state: BotState): boolean {
+  return true;
+}
 export function botCanAndWantsToRocketJump(context: GameAiContext, state: BotState): boolean {
   if (context.cvar("bot_rocketjump").integerValue === 0) return false;
   if (botInventoryValue(state, BotInventory.ROCKETLAUNCHER) <= 0 || botInventoryValue(state, BotInventory.ROCKETS) < 3) return false;
@@ -345,13 +464,18 @@ export function botHasPersistantPowerupAndWeapon(_context: GameAiContext, state:
   if (state.product === "missionpack" && persistentInventory.every(([index]) => botInventoryValue(state, index) === 0)) return false;
   if (botInventoryValue(state, BotInventory.HEALTH) < 60) return false;
   if (botInventoryValue(state, BotInventory.HEALTH) < 80 && botInventoryValue(state, BotInventory.ARMOR) < 40) return false;
-  return ([
-    [BotInventory.BFG10K, BotInventory.BFGAMMO, 7], [BotInventory.RAILGUN, BotInventory.SLUGS, 5],
-    [BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO, 50], [BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS, 5],
-    [BotInventory.NAILGUN, BotInventory.NAILS, 5], [BotInventory.PROXLAUNCHER, BotInventory.MINES, 5],
-    [BotInventory.CHAINGUN, BotInventory.BELT, 40], [BotInventory.PLASMAGUN, BotInventory.CELLS, 20],
-  ] satisfies readonly (readonly [BotInventory, BotInventory, number])[])
-    .some(([weapon, ammo, minimum]) => botInventoryValue(state, weapon) > 0 && botInventoryValue(state, ammo) > minimum);
+  return (
+    [
+      [BotInventory.BFG10K, BotInventory.BFGAMMO, 7],
+      [BotInventory.RAILGUN, BotInventory.SLUGS, 5],
+      [BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO, 50],
+      [BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS, 5],
+      [BotInventory.NAILGUN, BotInventory.NAILS, 5],
+      [BotInventory.PROXLAUNCHER, BotInventory.MINES, 5],
+      [BotInventory.CHAINGUN, BotInventory.BELT, 40],
+      [BotInventory.PLASMAGUN, BotInventory.CELLS, 20],
+    ] satisfies readonly (readonly [BotInventory, BotInventory, number])[]
+  ).some(([weapon, ammo, minimum]) => botInventoryValue(state, weapon) > 0 && botInventoryValue(state, ammo) > minimum);
 }
 
 export function botGoCamp(context: GameAiContext, state: BotState, goal: BotGoal): void {
@@ -360,8 +484,7 @@ export function botGoCamp(context: GameAiContext, state: BotState, goal: BotGoal
   state.ltgType = BotLongTermGoal.CAMP;
   state.teamGoal.copyFrom(goal);
   const camper = characteristic(context, state, BotCharacteristic.CAMPER);
-  state.teamGoalTime = camper > f(0.99) ? f(context.time + 99999)
-    : f(f(f(context.time + 120) + f(180 * camper)) + f(context.game.random.random() * 15));
+  state.teamGoalTime = camper > f(0.99) ? f(context.time + 99999) : f(f(f(context.time + 120) + f(180 * camper)) + f(context.game.random.random() * 15));
   state.campTime = context.time;
   state.teammate = 0;
   state.arriveTime = 1;
@@ -370,22 +493,42 @@ export function botGoCamp(context: GameAiContext, state: BotState, goal: BotGoal
 export function botWantsToCamp(context: GameAiContext, state: BotState): boolean {
   const camper = characteristic(context, state, BotCharacteristic.CAMPER);
   if (camper < f(0.1)) return false;
-  if ([BotLongTermGoal.TEAMHELP, BotLongTermGoal.TEAMACCOMPANY, BotLongTermGoal.DEFENDKEYAREA, BotLongTermGoal.GETFLAG,
-    BotLongTermGoal.RUSHBASE, BotLongTermGoal.CAMP, BotLongTermGoal.CAMPORDER, BotLongTermGoal.PATROL].includes(state.ltgType)) return false;
+  if (
+    [
+      BotLongTermGoal.TEAMHELP,
+      BotLongTermGoal.TEAMACCOMPANY,
+      BotLongTermGoal.DEFENDKEYAREA,
+      BotLongTermGoal.GETFLAG,
+      BotLongTermGoal.RUSHBASE,
+      BotLongTermGoal.CAMP,
+      BotLongTermGoal.CAMPORDER,
+      BotLongTermGoal.PATROL,
+    ].includes(state.ltgType)
+  )
+    return false;
   if (state.campTime > f(f(context.time - 60) + f(300 * f(1 - camper)))) return false;
-  if (context.game.random.random() > camper) { state.campTime = context.time; return false; }
+  if (context.game.random.random() > camper) {
+    state.campTime = context.time;
+    return false;
+  }
   if (botAggression(context, state) < 50) return false;
   // The original indexes inventory[INVENTORY_ROCKETS < 10], which selects slot zero.
-  if ((botInventoryValue(state, BotInventory.ROCKETLAUNCHER) <= 0 || botInventoryValue(state, 0) !== 0)
-    && (botInventoryValue(state, BotInventory.RAILGUN) <= 0 || botInventoryValue(state, BotInventory.SLUGS) < 10)
-    && (botInventoryValue(state, BotInventory.BFG10K) <= 0 || botInventoryValue(state, BotInventory.BFGAMMO) < 10)) return false;
+  if (
+    (botInventoryValue(state, BotInventory.ROCKETLAUNCHER) <= 0 || botInventoryValue(state, 0) !== 0) &&
+    (botInventoryValue(state, BotInventory.RAILGUN) <= 0 || botInventoryValue(state, BotInventory.SLUGS) < 10) &&
+    (botInventoryValue(state, BotInventory.BFG10K) <= 0 || botInventoryValue(state, BotInventory.BFGAMMO) < 10)
+  )
+    return false;
   const navigation = context.navigation;
   if (!navigation.ready) return false;
   let bestTime = 99999;
   const bestGoal = new BotGoalState();
   for (let spot = context.library.goals.getNextCampSpotGoal(0); spot !== null; spot = context.library.goals.getNextCampSpotGoal(spot.next)) {
     const time = navigation.areaTravelTimeToGoal({ area: state.areaNum, origin: state.origin, goalArea: spot.goal.area, travelFlags: TravelFlags.DEFAULT });
-    if (time !== 0 && time < bestTime) { bestTime = time; bestGoal.copyFrom(spot.goal); }
+    if (time !== 0 && time < bestTime) {
+      bestTime = time;
+      bestGoal.copyFrom(spot.goal);
+    }
   }
   if (bestTime > 150) return false;
   botGoCamp(context, state, bestGoal);
@@ -405,11 +548,13 @@ export function botGoForPowerups(context: GameAiContext, state: BotState): void 
 
 export function inFieldOfVision(viewangles: Vec3, fov: number, angles: Vec3): boolean {
   for (const axis of ["x", "y"] satisfies readonly (keyof Vec3)[]) {
-    const angle = qvmAngleMod(viewangles[axis]), target = qvmAngleMod(angles[axis]);
+    const angle = qvmAngleMod(viewangles[axis]),
+      target = qvmAngleMod(angles[axis]);
     Object.assign(angles, { [axis]: target });
     let difference = f(target - angle);
-    if (target > angle) { if (difference > 180) difference = f(difference - 360); }
-    else if (difference < -180) difference = f(difference + 360);
+    if (target > angle) {
+      if (difference > 180) difference = f(difference - 360);
+    } else if (difference < -180) difference = f(difference + 360);
     if (difference > f(fov * 0.5) || difference < f(-fov * 0.5)) return false;
   }
   return true;
@@ -419,16 +564,28 @@ export function botEntityVisible(context: GameAiContext, viewer: number, eye: Ve
   const info = botEntityInfo(context, entity);
   let middle = add3(info.origin, scale3(add3(info.mins, info.maxs), 0.5));
   if (!inFieldOfVision(viewangles, fov, vectorToAngles(sub3(middle, eye)))) return 0;
-  const contents = context.game.world.pointContents(eye, -1), inFog = (contents & FOG) !== 0, inWater = (contents & LIQUID) !== 0;
+  const contents = context.game.world.pointContents(eye, -1),
+    inFog = (contents & FOG) !== 0,
+    inWater = (contents & LIQUID) !== 0;
   let bestVisibility = 0;
   for (let i = 0; i < 3; i++) {
-    let mask = SOLID | PLAYERCLIP, pass = viewer, hit = entity, start = eye, end = middle;
+    let mask = SOLID | PLAYERCLIP,
+      pass = viewer,
+      hit = entity,
+      start = eye,
+      end = middle;
     if ((context.game.world.pointContents(middle, -1) & LIQUID) !== 0) mask |= LIQUID;
     if (inWater) {
-      if ((mask & LIQUID) === 0) { pass = entity; hit = viewer; start = middle; end = eye; }
+      if ((mask & LIQUID) === 0) {
+        pass = entity;
+        hit = viewer;
+        start = middle;
+        end = eye;
+      }
       mask ^= LIQUID;
     }
-    let trace = botAITrace(context, start, end, pass, mask), waterFactor = 1;
+    let trace = botAITrace(context, start, end, pass, mask),
+      waterFactor = 1;
     if ((trace.contents & LIQUID) !== 0) {
       mask &= ~LIQUID;
       trace = botAITrace(context, trace.end, end, pass, mask);
@@ -438,14 +595,17 @@ export function botEntityVisible(context: GameAiContext, viewer: number, eye: Ve
       const otherInFog = (context.game.world.pointContents(middle, -1) & FOG) !== 0;
       let fogDistanceSquared = 0;
       if (inFog && otherInFog) {
-        const direction = sub3(trace.end, eye); fogDistanceSquared = dot3(direction, direction);
+        const direction = sub3(trace.end, eye);
+        fogDistanceSquared = dot3(direction, direction);
       } else if (inFog) {
         trace = botAITrace(context, trace.end, eye, viewer, FOG);
-        const direction = sub3(eye, trace.end); fogDistanceSquared = dot3(direction, direction);
+        const direction = sub3(eye, trace.end);
+        fogDistanceSquared = dot3(direction, direction);
       } else if (otherInFog) {
         end = trace.end;
         trace = botAITrace(context, eye, end, viewer, FOG);
-        const direction = sub3(end, trace.end); fogDistanceSquared = dot3(direction, direction);
+        const direction = sub3(end, trace.end);
+        fogDistanceSquared = dot3(direction, direction);
       }
       const visibility = f(f(1 / Math.max(1, f(fogDistanceSquared * f(0.001)))) * waterFactor);
       if (visibility > bestVisibility) bestVisibility = visibility;
@@ -458,22 +618,27 @@ export function botEntityVisible(context: GameAiContext, viewer: number, eye: Ve
 }
 
 export function botFindEnemy(context: GameAiContext, state: BotState, currentEnemy: number): boolean {
-  const alertness = characteristic(context, state, BotCharacteristic.ALERTNESS), easyFragger = characteristic(context, state, BotCharacteristic.EASY_FRAGGER);
+  const alertness = characteristic(context, state, BotCharacteristic.ALERTNESS),
+    easyFragger = characteristic(context, state, BotCharacteristic.EASY_FRAGGER);
   const healthDecreased = state.lastHealth > botInventoryValue(state, BotInventory.HEALTH);
   state.lastHealth = botInventoryValue(state, BotInventory.HEALTH);
   let currentDistance = 0;
   if (currentEnemy >= 0) {
     const info = botEntityInfo(context, currentEnemy);
     if (entityCarriesFlag(context, info)) return false;
-    const direction = sub3(info.origin, state.origin); currentDistance = dot3(direction, direction);
+    const direction = sub3(info.origin, state.origin);
+    currentDistance = dot3(direction, direction);
   }
   if (state.product === "missionpack" && context.deathmatch.gametype === GameType.GT_OBELISK) {
     const goal = botTeam(context, state) === Team.TEAM_RED ? context.deathmatch.blueObelisk : context.deathmatch.redObelisk;
     const trace = botAITrace(context, state.eye, add3(goal.origin, vec3(0, 0, 1)), state.client, SOLID);
     if (trace.fraction >= 1 || trace.entityNum === goal.entity) {
       if (goal.entity === state.enemy) return false;
-      state.enemy = goal.entity; state.enemySightTime = context.time; state.enemySuicide = false;
-      state.enemyDeathTime = 0; state.enemyVisibleTime = context.time;
+      state.enemy = goal.entity;
+      state.enemySightTime = context.time;
+      state.enemySuicide = false;
+      state.enemyDeathTime = 0;
+      state.enemyVisibleTime = context.time;
       return true;
     }
   }
@@ -487,20 +652,28 @@ export function botFindEnemy(context: GameAiContext, state: BotState, currentEne
       const direction = sub3(info.origin, context.deathmatch.lastTeleportOrigin);
       if (dot3(direction, direction) < 70 * 70) continue;
     }
-    const direction = sub3(info.origin, state.origin), distance = dot3(direction, direction);
+    const direction = sub3(info.origin, state.origin),
+      distance = dot3(direction, direction);
     if (!entityCarriesFlag(context, info) && currentEnemy >= 0 && distance > currentDistance) continue;
     const alertRange = f(900 + f(alertness * 4000));
     if (distance > f(alertRange * alertRange) || botSameTeam(context, state, client)) continue;
     const fov = currentEnemy < 0 && (healthDecreased || entityIsShooting(info)) ? 360 : f(180 - f(90 - f(Math.min(810 * 810, distance) / (810 * 9))));
     if (botEntityVisible(context, state.entityNum, state.eye, state.viewangles, fov, client) <= 0) continue;
-    if (currentEnemy < 0 && distance > 100 * 100 && !healthDecreased && !entityIsShooting(info)
-      && !inFieldOfVision(info.angles, 90, vectorToAngles(sub3(state.origin, info.origin)))) {
+    if (
+      currentEnemy < 0 &&
+      distance > 100 * 100 &&
+      !healthDecreased &&
+      !entityIsShooting(info) &&
+      !inFieldOfVision(info.angles, 90, vectorToAngles(sub3(state.origin, info.origin)))
+    ) {
       botUpdateBattleInventory(context, state, client);
       if (botWantsToRetreat(context, state)) continue;
     }
     state.enemy = info.number;
     state.enemySightTime = currentEnemy >= 0 ? f(context.time - 2) : context.time;
-    state.enemySuicide = false; state.enemyDeathTime = 0; state.enemyVisibleTime = context.time;
+    state.enemySuicide = false;
+    state.enemyDeathTime = 0;
+    state.enemyVisibleTime = context.time;
     return true;
   }
   return false;
@@ -516,19 +689,23 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
   if (state.enemy < 0) return;
   let info = botEntityInfo(context, state.enemy);
   if (state.enemy >= 64) {
-    const target = state.product === "missionpack" && (state.enemy === context.deathmatch.redObelisk.entity || state.enemy === context.deathmatch.blueObelisk.entity)
-      ? add3(info.origin, vec3(0, 0, 32)) : info.origin;
+    const target =
+      state.product === "missionpack" && (state.enemy === context.deathmatch.redObelisk.entity || state.enemy === context.deathmatch.blueObelisk.entity)
+        ? add3(info.origin, vec3(0, 0, 32))
+        : info.origin;
     Object.assign(state.idealViewangles, vectorToAngles(sub3(target, state.eye)));
     Object.assign(state.aimTarget, target);
     return;
   }
-  let aimSkill = characteristic(context, state, BotCharacteristic.AIM_SKILL), aimAccuracy = characteristic(context, state, BotCharacteristic.AIM_ACCURACY);
+  let aimSkill = characteristic(context, state, BotCharacteristic.AIM_SKILL),
+    aimAccuracy = characteristic(context, state, BotCharacteristic.AIM_ACCURACY);
   if (aimSkill > f(0.95)) {
     const reactionTime = f(0.5 * characteristic(context, state, BotCharacteristic.REACTIONTIME));
     if (state.enemySightTime > f(context.time - reactionTime) || state.teleportTime > f(context.time - reactionTime)) return;
   }
   const weapon = weaponInfo(context, state);
-  const tactics = context.game.knowledge.tactics(state.weaponNum), accuracyIndex = tactics.aimAccuracy;
+  const tactics = context.game.knowledge.tactics(state.weaponNum),
+    accuracyIndex = tactics.aimAccuracy;
   if (accuracyIndex !== null) aimAccuracy = characteristic(context, state, accuracyIndex);
   const skillIndex = tactics.aimSkill;
   if (skillIndex !== null) aimSkill = characteristic(context, state, skillIndex);
@@ -556,14 +733,23 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
       if (!(distance > 100 && dot3(movement, movement) < 32 * 32)) {
         if (aimSkill > f(0.8) && state.curPs.weaponState === WeaponState.WEAPON_READY) {
           const predicted = context.navigation.predictClientMovement({
-            entityNum: state.enemy, origin: add3(info.origin, vec3(0, 0, 1)), presence: 4, onGround: false,
-            velocity, commandMove: vec3(0, 0, 0), commandFrames: 0,
+            entityNum: state.enemy,
+            origin: add3(info.origin, vec3(0, 0, 1)),
+            presence: 4,
+            onGround: false,
+            velocity,
+            commandMove: vec3(0, 0, 0),
+            commandFrames: 0,
             maxFrames: qvmFloatToInt(f(f(length3(sub3(info.origin, state.origin)) * 10) / weapon.speed)),
-            frameTime: f(0.1), stopEvents: 0, stopArea: 0, visualize: false,
+            frameTime: f(0.1),
+            stopEvents: 0,
+            stopArea: 0,
+            visualize: false,
           });
           bestOrigin = predicted.move.end;
         } else if (aimSkill > f(0.4)) {
-          const displacement = sub3(info.origin, info.lastVisibleOrigin), horizontal = vec3(displacement.x, displacement.y, 0);
+          const displacement = sub3(info.origin, info.lastVisibleOrigin),
+            horizontal = vec3(displacement.x, displacement.y, 0);
           const speed = f(length3(horizontal) / info.updateInterval);
           bestOrigin = add3(info.origin, scale3(normalize3(horizontal), f(f(length3(sub3(info.origin, state.origin)) / weapon.speed) * speed)));
         }
@@ -573,20 +759,27 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
       trace = botAITrace(context, info.origin, add3(info.origin, vec3(0, 0, -64)), info.number, MASK_SHOT);
       const groundTarget = vec3(bestOrigin.x, bestOrigin.y, trace.solidity !== "clear" ? info.origin.z - 16 : trace.end.z - 8);
       trace = botAITrace(context, start, groundTarget, state.entityNum, MASK_SHOT);
-      const groundDelta = sub3(trace.end, groundTarget), selfDelta = sub3(trace.end, start);
+      const groundDelta = sub3(trace.end, groundTarget),
+        selfDelta = sub3(trace.end, start);
       if (Math.abs(f(trace.end.z - groundTarget.z)) < 50 && dot3(groundDelta, groundDelta) < 60 * 60 && dot3(selfDelta, selfDelta) > 100 * 100) {
         trace = botAITrace(context, add3(trace.end, vec3(0, 0, 1)), info.origin, info.number, MASK_SHOT);
         if (trace.fraction >= 1) bestOrigin = groundTarget;
       }
     }
-    bestOrigin = vec3(bestOrigin.x + f(f(20 * context.game.random.crandom()) * f(1 - aimAccuracy)),
-      bestOrigin.y + f(f(20 * context.game.random.crandom()) * f(1 - aimAccuracy)), bestOrigin.z + f(f(10 * context.game.random.crandom()) * f(1 - aimAccuracy)));
+    bestOrigin = vec3(
+      bestOrigin.x + f(f(20 * context.game.random.crandom()) * f(1 - aimAccuracy)),
+      bestOrigin.y + f(f(20 * context.game.random.crandom()) * f(1 - aimAccuracy)),
+      bestOrigin.z + f(f(10 * context.game.random.crandom()) * f(1 - aimAccuracy)),
+    );
   } else {
     bestOrigin = add3(state.lastEnemyOrigin, vec3(0, 0, 8));
     if (aimSkill > 0.5 && context.game.knowledge.tactics(state.weaponNum).predictOccludedSplash) {
-      const goal = new BotGoalState(); goal.entity = state.client; goal.area = state.areaNum;
+      const goal = new BotGoalState();
+      goal.entity = state.client;
+      goal.area = state.areaNum;
       Object.assign(goal.origin, state.eye);
-      goal.mins = vec3(-8, -8, -8); goal.maxs = vec3(8, 8, 8);
+      goal.mins = vec3(-8, -8, -8);
+      goal.maxs = vec3(8, 8, 8);
       const target = { value: vec3(0, 0, 0) };
       if (context.navigation.predictVisiblePosition(state.lastEnemyOrigin, state.lastEnemyAreaNum, goal, TravelFlags.DEFAULT, target)) {
         const direction = sub3(target.value, state.eye);
@@ -602,12 +795,21 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
   }
   if (aimAccuracy < f(0.8)) {
     direction = normalize3(direction);
-    direction = vec3(direction.x + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)),
-      direction.y + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)), direction.z + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)));
+    direction = vec3(
+      direction.x + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)),
+      direction.y + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)),
+      direction.z + f(f(f(0.3) * context.game.random.crandom()) * f(1 - aimAccuracy)),
+    );
   }
   const angles = vectorToAngles(direction);
-  Object.assign(state.idealViewangles, vec3(qvmAngleMod(f(angles.x + f(f(f(6 * weapon.verticalSpread) * context.game.random.crandom()) * f(1 - aimAccuracy)))),
-    qvmAngleMod(f(angles.y + f(f(f(6 * weapon.horizontalSpread) * context.game.random.crandom()) * f(1 - aimAccuracy)))), angles.z));
+  Object.assign(
+    state.idealViewangles,
+    vec3(
+      qvmAngleMod(f(angles.x + f(f(f(6 * weapon.verticalSpread) * context.game.random.crandom()) * f(1 - aimAccuracy)))),
+      qvmAngleMod(f(angles.y + f(f(f(6 * weapon.horizontalSpread) * context.game.random.crandom()) * f(1 - aimAccuracy)))),
+      angles.z,
+    ),
+  );
   if (context.cvar("bot_challenge").integerValue !== 0 && aimAccuracy > f(0.9) && state.enemySightTime < f(context.time - 1)) {
     if (state.idealViewangles.x > 180) Object.assign(state.idealViewangles, { x: f(state.idealViewangles.x - 360) });
     Object.assign(state.viewangles, state.idealViewangles);
@@ -616,29 +818,43 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
 }
 
 export function botCheckAttack(context: GameAiContext, state: BotState): void {
-  const attackEntity = state.enemy, info = botEntityInfo(context, attackEntity);
-  if (attackEntity >= 64 && state.product === "missionpack"
-    && (info.number === context.deathmatch.redObelisk.entity || info.number === context.deathmatch.blueObelisk.entity)
-    && context.game.entity(info.number).activatorFrame === 2) return;
+  const attackEntity = state.enemy,
+    info = botEntityInfo(context, attackEntity);
+  if (
+    attackEntity >= 64 &&
+    state.product === "missionpack" &&
+    (info.number === context.deathmatch.redObelisk.entity || info.number === context.deathmatch.blueObelisk.entity) &&
+    context.game.entity(info.number).activatorFrame === 2
+  )
+    return;
   const reactionTime = characteristic(context, state, BotCharacteristic.REACTIONTIME);
   if (state.enemySightTime > f(context.time - reactionTime) || state.teleportTime > f(context.time - reactionTime)) return;
   if (state.weaponChangeTime > f(context.time - f(0.1)) || state.fireThrottleWaitTime > context.time) return;
   const throttle = characteristic(context, state, BotCharacteristic.FIRETHROTTLE);
   if (state.fireThrottleShootTime < context.time) {
-    if (context.game.random.random() > throttle) { state.fireThrottleWaitTime = f(context.time + throttle); state.fireThrottleShootTime = 0; }
-    else { state.fireThrottleShootTime = f(f(context.time + 1) - throttle); state.fireThrottleWaitTime = 0; }
+    if (context.game.random.random() > throttle) {
+      state.fireThrottleWaitTime = f(context.time + throttle);
+      state.fireThrottleShootTime = 0;
+    } else {
+      state.fireThrottleShootTime = f(f(context.time + 1) - throttle);
+      state.fireThrottleWaitTime = 0;
+    }
   }
-  const direction = sub3(state.aimTarget, state.eye), distance = dot3(direction, direction);
+  const direction = sub3(state.aimTarget, state.eye),
+    distance = dot3(direction, direction);
   const maximumRange = context.game.knowledge.tactics(state.weaponNum).maximumRange;
   if (maximumRange !== null && distance > maximumRange * maximumRange) return;
   if (!inFieldOfVision(state.viewangles, distance < 100 * 100 ? 120 : 50, vectorToAngles(direction))) return;
   const sightTrace = botAITrace(context, state.eye, state.aimTarget, state.client, SOLID | PLAYERCLIP);
   if (sightTrace.fraction < 1 && sightTrace.entityNum !== attackEntity) return;
-  const weapon = weaponInfo(context, state), axes = qvmAngleVectors(state.viewangles);
+  const weapon = weaponInfo(context, state),
+    axes = qvmAngleVectors(state.viewangles);
   let start = add3(state.origin, vec3(0, 0, state.curPs.viewheight));
-  start = vec3(start.x + f(f(axes.forward.x * weapon.offset.x) + f(axes.right.x * weapon.offset.y)),
+  start = vec3(
+    start.x + f(f(axes.forward.x * weapon.offset.x) + f(axes.right.x * weapon.offset.y)),
     start.y + f(f(axes.forward.y * weapon.offset.x) + f(axes.right.y * weapon.offset.y)),
-    start.z + f(f(f(axes.forward.z * weapon.offset.x) + f(axes.right.z * weapon.offset.y)) + weapon.offset.z));
+    start.z + f(f(f(axes.forward.z * weapon.offset.x) + f(axes.right.z * weapon.offset.y)) + weapon.offset.z),
+  );
   const end = add3(start, scale3(axes.forward, 1000));
   start = add3(start, scale3(axes.forward, -12));
   const trace = botAITrace(context, start, end, state.entityNum, MASK_SHOT, { min: vec3(-8, -8, -8), max: vec3(8, 8, 8) });
@@ -651,7 +867,8 @@ export function botCheckAttack(context: GameAiContext, state: BotState): void {
 }
 
 export function botCheckConsoleMessages(context: GameAiContext, state: BotState): void {
-  const library = context.library.chat, botName = clientName(context, state.client);
+  const library = context.library.chat,
+    botName = clientName(context, state.client);
   for (let message = library.nextConsoleMessage(state.cs); message !== null; message = library.nextConsoleMessage(state.cs)) {
     if (library.numConsoleMessages(state.cs) < 10 && message.type === 1 && message.time > f(context.time - f(1 + context.game.random.random()))) break;
     let offset = 0;
@@ -663,9 +880,16 @@ export function botCheckConsoleMessages(context: GameAiContext, state: BotState)
     const text = message.message.slice(0, offset) + library.replaceSynonyms(unifyWhiteSpaces(message.message.slice(offset)), synonymContext);
     if (!botMatchMessage(context, state, text) && message.type === 1 && context.cvar("bot_nochat").integerValue === 0) {
       const match = library.findMatch(text, 128);
-      if (match === null || (match.subtype & 32768) !== 0) { library.removeConsoleMessage(state.cs, message.handle); continue; }
-      const netName = library.matchVariable(match, 0, 36), body = unifyWhiteSpaces(library.matchVariable(match, 2));
-      if (state.client === clientFromName(context, netName)) { library.removeConsoleMessage(state.cs, message.handle); continue; }
+      if (match === null || (match.subtype & 32768) !== 0) {
+        library.removeConsoleMessage(state.cs, message.handle);
+        continue;
+      }
+      const netName = library.matchVariable(match, 0, 36),
+        body = unifyWhiteSpaces(library.matchVariable(match, 2));
+      if (state.client === clientFromName(context, netName)) {
+        library.removeConsoleMessage(state.cs, message.handle);
+        continue;
+      }
       context.cvar("bot_testrchat").update();
       if (context.cvar("bot_testrchat").integerValue !== 0) {
         context.library.variables.set("bot_testrchat", "1");
@@ -673,8 +897,11 @@ export function botCheckConsoleMessages(context: GameAiContext, state: BotState)
         context.game.options.engine.print(replied ? "------------------------\n" : "**** no valid reply ****\n");
       } else if (state.aiNode !== "stand" && botValidChatPosition(context, state) && !teamPlayIsOn(context)) {
         const replyChance = characteristic(context, state, BotCharacteristic.CHAT_REPLY);
-        if (context.game.random.random() < f(1.5 / ((context.numBots + 1) | 0)) && context.game.random.random() < replyChance
-          && library.replyChat(state.cs, body, synonymContext, 16, [null, null, null, null, null, null, botName, netName])) {
+        if (
+          context.game.random.random() < f(1.5 / ((context.numBots + 1) | 0)) &&
+          context.game.random.random() < replyChance &&
+          library.replyChat(state.cs, body, synonymContext, 16, [null, null, null, null, null, null, botName, netName])
+        ) {
           library.removeConsoleMessage(state.cs, message.handle);
           state.standTime = f(context.time + botChatTime(context, state));
           aiEnterStand(context, state, "BotCheckConsoleMessages: reply chat");
@@ -694,9 +921,12 @@ export function botCheckForGrenades(context: GameAiContext, state: BotState, ent
 
 export function botCheckForProxMines(context: GameAiContext, state: BotState, entity: EntityState): void {
   if (entity.eType !== EntityType.ET_MISSILE || entity.weapon !== Weapon.WP_PROX_LAUNCHER || entity.generic1 === botTeam(context, state)) return;
-  if (!(botInventoryValue(state, BotInventory.PLASMAGUN) > 0 && botInventoryValue(state, BotInventory.CELLS) > 0)
-    && !(botInventoryValue(state, BotInventory.ROCKETLAUNCHER) > 0 && botInventoryValue(state, BotInventory.ROCKETS) > 0)
-    && !(botInventoryValue(state, BotInventory.BFG10K) > 0 && botInventoryValue(state, BotInventory.BFGAMMO) > 0)) return;
+  if (
+    !(botInventoryValue(state, BotInventory.PLASMAGUN) > 0 && botInventoryValue(state, BotInventory.CELLS) > 0) &&
+    !(botInventoryValue(state, BotInventory.ROCKETLAUNCHER) > 0 && botInventoryValue(state, BotInventory.ROCKETS) > 0) &&
+    !(botInventoryValue(state, BotInventory.BFG10K) > 0 && botInventoryValue(state, BotInventory.BFGAMMO) > 0)
+  )
+    return;
   context.library.moveStates.addAvoidSpot(state.ms, entity.pos.base, 160, BotAvoidSpotType.ALWAYS);
   if (state.numProxMines >= MAX_PROXMINES) return;
   state.proxMines[state.numProxMines++] = entity.number;
@@ -715,24 +945,35 @@ export function botCheckEvents(context: GameAiContext, state: BotState, entity: 
   const event = (entity.eType > EntityType.ET_EVENTS ? entity.eType - EntityType.ET_EVENTS : entity.event) & ~EV_EVENT_BITS;
   switch (event) {
     case EntityEvent.EV_OBITUARY: {
-      const target = entity.otherEntityNum, attacker = entity.otherEntityNum2, mod = entity.eventParm;
+      const target = entity.otherEntityNum,
+        attacker = entity.otherEntityNum2,
+        mod = entity.eventParm;
       if (target === state.client) {
-        state.botDeathType = mod; state.lastKilledBy = attacker;
+        state.botDeathType = mod;
+        state.lastKilledBy = attacker;
         state.botSuicide = target === attacker || target === ENTITYNUM_NONE || target === ENTITYNUM_WORLD;
         state.numDeaths = (state.numDeaths + 1) | 0;
       } else if (attacker === state.client) {
-        state.enemyDeathType = mod; state.lastKilledPlayer = target; state.killedEnemyTime = context.time;
+        state.enemyDeathType = mod;
+        state.lastKilledPlayer = target;
+        state.killedEnemyTime = context.time;
         state.numKills = (state.numKills + 1) | 0;
       } else if (attacker === state.enemy && target === attacker) state.enemySuicide = true;
-      if (state.product === "missionpack" && context.deathmatch.gametype === GameType.GT_1FCTF
-        && (botEntityInfo(context, target).powerups & (1 << Powerup.PW_NEUTRALFLAG)) !== 0 && !botSameTeam(context, state, target)) {
-        state.neutralFlagStatus = 3; state.flagStatusChanged = true;
+      if (
+        state.product === "missionpack" &&
+        context.deathmatch.gametype === GameType.GT_1FCTF &&
+        (botEntityInfo(context, target).powerups & (1 << Powerup.PW_NEUTRALFLAG)) !== 0 &&
+        !botSameTeam(context, state, target)
+      ) {
+        state.neutralFlagStatus = 3;
+        state.flagStatusChanged = true;
       }
       break;
     }
     case EntityEvent.EV_GLOBAL_SOUND: {
       if (entity.eventParm < 0 || entity.eventParm > 256) {
-        context.game.options.engine.print(`EV_GLOBAL_SOUND: eventParm (${entity.eventParm}) out of range\n`); break;
+        context.game.options.engine.print(`EV_GLOBAL_SOUND: eventParm (${entity.eventParm}) out of range\n`);
+        break;
       }
       const sound = context.game.options.configstrings.get(288 + entity.eventParm).slice(0, 127);
       if (state.product === "missionpack" && sound === "sound/items/kamikazerespawn.wav") botDontAvoid(context, state, "Kamikaze");
@@ -742,22 +983,46 @@ export function botCheckEvents(context: GameAiContext, state: BotState, entity: 
     case EntityEvent.EV_GLOBAL_TEAM_SOUND: {
       if (context.deathmatch.gametype === GameType.GT_CTF) {
         switch (entity.eventParm) {
-          case GlobalTeamSound.RED_CAPTURE: case GlobalTeamSound.BLUE_CAPTURE:
-            state.blueFlagStatus = 0; state.redFlagStatus = 0; state.flagStatusChanged = true; break;
-          case GlobalTeamSound.RED_RETURN: state.blueFlagStatus = 0; state.flagStatusChanged = true; break;
-          case GlobalTeamSound.BLUE_RETURN: state.redFlagStatus = 0; state.flagStatusChanged = true; break;
-          case GlobalTeamSound.RED_TAKEN: state.blueFlagStatus = 1; state.flagStatusChanged = true; break;
-          case GlobalTeamSound.BLUE_TAKEN: state.redFlagStatus = 1; state.flagStatusChanged = true; break;
+          case GlobalTeamSound.RED_CAPTURE:
+          case GlobalTeamSound.BLUE_CAPTURE:
+            state.blueFlagStatus = 0;
+            state.redFlagStatus = 0;
+            state.flagStatusChanged = true;
+            break;
+          case GlobalTeamSound.RED_RETURN:
+            state.blueFlagStatus = 0;
+            state.flagStatusChanged = true;
+            break;
+          case GlobalTeamSound.BLUE_RETURN:
+            state.redFlagStatus = 0;
+            state.flagStatusChanged = true;
+            break;
+          case GlobalTeamSound.RED_TAKEN:
+            state.blueFlagStatus = 1;
+            state.flagStatusChanged = true;
+            break;
+          case GlobalTeamSound.BLUE_TAKEN:
+            state.redFlagStatus = 1;
+            state.flagStatusChanged = true;
+            break;
         }
       } else if (state.product === "missionpack" && context.deathmatch.gametype === GameType.GT_1FCTF) {
         switch (entity.eventParm) {
-          case GlobalTeamSound.RED_CAPTURE: case GlobalTeamSound.BLUE_CAPTURE:
-          case GlobalTeamSound.RED_RETURN: case GlobalTeamSound.BLUE_RETURN:
-            state.neutralFlagStatus = 0; state.flagStatusChanged = true; break;
+          case GlobalTeamSound.RED_CAPTURE:
+          case GlobalTeamSound.BLUE_CAPTURE:
+          case GlobalTeamSound.RED_RETURN:
+          case GlobalTeamSound.BLUE_RETURN:
+            state.neutralFlagStatus = 0;
+            state.flagStatusChanged = true;
+            break;
           case GlobalTeamSound.RED_TAKEN:
-            state.neutralFlagStatus = botTeam(context, state) === Team.TEAM_RED ? 2 : 1; state.flagStatusChanged = true; break;
+            state.neutralFlagStatus = botTeam(context, state) === Team.TEAM_RED ? 2 : 1;
+            state.flagStatusChanged = true;
+            break;
           case GlobalTeamSound.BLUE_TAKEN:
-            state.neutralFlagStatus = botTeam(context, state) === Team.TEAM_BLUE ? 2 : 1; state.flagStatusChanged = true; break;
+            state.neutralFlagStatus = botTeam(context, state) === Team.TEAM_BLUE ? 2 : 1;
+            state.flagStatusChanged = true;
+            break;
         }
       }
       break;
@@ -769,7 +1034,8 @@ export function botCheckEvents(context: GameAiContext, state: BotState, entity: 
     case EntityEvent.EV_GENERAL_SOUND:
       if (entity.number === state.client) {
         if (entity.eventParm < 0 || entity.eventParm > 256) {
-          context.game.options.engine.print(`EV_GENERAL_SOUND: eventParm (${entity.eventParm}) out of range\n`); break;
+          context.game.options.engine.print(`EV_GENERAL_SOUND: eventParm (${entity.eventParm}) out of range\n`);
+          break;
         }
         const sound = context.game.options.configstrings.get(288 + entity.eventParm).slice(0, 127);
         if (sound === "*falling1.wav" && botInventoryValue(state, BotInventory.TELEPORTER) > 0) context.library.actions.use(state.client);
@@ -780,7 +1046,8 @@ export function botCheckEvents(context: GameAiContext, state: BotState, entity: 
 
 export function botCheckSnapshot(context: GameAiContext, state: BotState): void {
   context.library.moveStates.addAvoidSpot(state.ms, vec3(0, 0, 0), 0, BotAvoidSpotType.CLEAR);
-  state.kamikazeBody = 0; state.numProxMines = 0;
+  state.kamikazeBody = 0;
+  state.numProxMines = 0;
   let sequence = 0;
   while (true) {
     const snapshot = context.getSnapshotEntity(state.client, sequence);
@@ -808,10 +1075,12 @@ export function botDeathmatchAI(context: GameAiContext, state: BotState, _thinkT
   if (state.setupCount > 0) {
     state.setupCount--;
     if (state.setupCount > 0) return;
-    const gender = context.library.characters.string(state.character, BotCharacteristic.GENDER).slice(0, 143), engine = context.game.options.engine;
+    const gender = context.library.characters.string(state.character, BotCharacteristic.GENDER).slice(0, 143),
+      engine = context.game.options.engine;
     const userinfo = infoSetValueForKey(engine.getUserinfo(state.client).slice(0, 1023), "sex", gender, text => engine.print(text));
     engine.setUserinfo(state.client, userinfo);
-    if (!state.mapRestart && context.game.gameType !== GameType.GT_TOURNAMENT) context.library.actions.command(state.client, `team ${state.settings.team}`.slice(0, 143));
+    if (!state.mapRestart && context.game.gameType !== GameType.GT_TOURNAMENT)
+      context.library.actions.command(state.client, `team ${state.settings.team}`.slice(0, 143));
     context.library.chat.setGender(state.cs, gender.startsWith("m") ? ChatGender.Male : gender.startsWith("f") ? ChatGender.Female : ChatGender.Genderless);
     context.library.chat.setName(state.cs, clientName(context, state.client, 144), state.client);
     state.lastFrameHealth = botInventoryValue(state, BotInventory.HEALTH);
@@ -844,8 +1113,9 @@ export function botDeathmatchAI(context: GameAiContext, state: BotState, _thinkT
     context.library.goals.dumpGoalStack(state.gs);
     context.library.goals.dumpAvoidGoals(state.gs);
     botDumpNodeSwitches(context, state);
-    context.game.options.engine.print(gameFormat("^1Error: %s at %1.1f switched more than %d AI nodes\n",
-      [clientName(context, state.client, 144), context.time, MAX_NODESWITCHES]));
+    context.game.options.engine.print(
+      gameFormat("^1Error: %s at %1.1f switched more than %d AI nodes\n", [clientName(context, state.client, 144), context.time, MAX_NODESWITCHES]),
+    );
   }
   state.lastFrameHealth = botInventoryValue(state, BotInventory.HEALTH);
   state.lastHitCount = state.curPs.persistant.get(PersistentIndex.PERS_HITS);

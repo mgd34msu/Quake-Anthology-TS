@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * QVM image decoding translated from Quake III Arena's qfiles.h, vm_local.h,
  * vm.c VM_Create/VM_Restart and vm_interpreted.c VM_PrepareInterpreter.
@@ -17,30 +18,87 @@ const MAX_CODE_LENGTH = 0x1fffffff;
 export const QVM_MAX_PRIVATE_ARGUMENT_WORDS = 62;
 
 export enum QvmOpcode {
-  OP_UNDEF, OP_IGNORE, OP_BREAK,
-  OP_ENTER, OP_LEAVE, OP_CALL, OP_PUSH, OP_POP,
-  OP_CONST, OP_LOCAL, OP_JUMP,
-  OP_EQ, OP_NE, OP_LTI, OP_LEI, OP_GTI, OP_GEI,
-  OP_LTU, OP_LEU, OP_GTU, OP_GEU,
-  OP_EQF, OP_NEF, OP_LTF, OP_LEF, OP_GTF, OP_GEF,
-  OP_LOAD1, OP_LOAD2, OP_LOAD4, OP_STORE1, OP_STORE2, OP_STORE4,
-  OP_ARG, OP_BLOCK_COPY, OP_SEX8, OP_SEX16,
-  OP_NEGI, OP_ADD, OP_SUB, OP_DIVI, OP_DIVU, OP_MODI, OP_MODU,
-  OP_MULI, OP_MULU, OP_BAND, OP_BOR, OP_BXOR, OP_BCOM,
-  OP_LSH, OP_RSHI, OP_RSHU, OP_NEGF, OP_ADDF, OP_SUBF,
-  OP_DIVF, OP_MULF, OP_CVIF, OP_CVFI,
+  OP_UNDEF,
+  OP_IGNORE,
+  OP_BREAK,
+  OP_ENTER,
+  OP_LEAVE,
+  OP_CALL,
+  OP_PUSH,
+  OP_POP,
+  OP_CONST,
+  OP_LOCAL,
+  OP_JUMP,
+  OP_EQ,
+  OP_NE,
+  OP_LTI,
+  OP_LEI,
+  OP_GTI,
+  OP_GEI,
+  OP_LTU,
+  OP_LEU,
+  OP_GTU,
+  OP_GEU,
+  OP_EQF,
+  OP_NEF,
+  OP_LTF,
+  OP_LEF,
+  OP_GTF,
+  OP_GEF,
+  OP_LOAD1,
+  OP_LOAD2,
+  OP_LOAD4,
+  OP_STORE1,
+  OP_STORE2,
+  OP_STORE4,
+  OP_ARG,
+  OP_BLOCK_COPY,
+  OP_SEX8,
+  OP_SEX16,
+  OP_NEGI,
+  OP_ADD,
+  OP_SUB,
+  OP_DIVI,
+  OP_DIVU,
+  OP_MODI,
+  OP_MODU,
+  OP_MULI,
+  OP_MULU,
+  OP_BAND,
+  OP_BOR,
+  OP_BXOR,
+  OP_BCOM,
+  OP_LSH,
+  OP_RSHI,
+  OP_RSHU,
+  OP_NEGF,
+  OP_ADDF,
+  OP_SUBF,
+  OP_DIVF,
+  OP_MULF,
+  OP_CVIF,
+  OP_CVFI,
 }
 
 type BranchOpcode =
-  | QvmOpcode.OP_EQ | QvmOpcode.OP_NE
-  | QvmOpcode.OP_LTI | QvmOpcode.OP_LEI | QvmOpcode.OP_GTI | QvmOpcode.OP_GEI
-  | QvmOpcode.OP_LTU | QvmOpcode.OP_LEU | QvmOpcode.OP_GTU | QvmOpcode.OP_GEU
-  | QvmOpcode.OP_EQF | QvmOpcode.OP_NEF
-  | QvmOpcode.OP_LTF | QvmOpcode.OP_LEF | QvmOpcode.OP_GTF | QvmOpcode.OP_GEF;
+  | QvmOpcode.OP_EQ
+  | QvmOpcode.OP_NE
+  | QvmOpcode.OP_LTI
+  | QvmOpcode.OP_LEI
+  | QvmOpcode.OP_GTI
+  | QvmOpcode.OP_GEI
+  | QvmOpcode.OP_LTU
+  | QvmOpcode.OP_LEU
+  | QvmOpcode.OP_GTU
+  | QvmOpcode.OP_GEU
+  | QvmOpcode.OP_EQF
+  | QvmOpcode.OP_NEF
+  | QvmOpcode.OP_LTF
+  | QvmOpcode.OP_LEF
+  | QvmOpcode.OP_GTF
+  | QvmOpcode.OP_GEF;
 
-type WordOpcode = BranchOpcode
-  | QvmOpcode.OP_ENTER | QvmOpcode.OP_LEAVE | QvmOpcode.OP_CONST
-  | QvmOpcode.OP_LOCAL | QvmOpcode.OP_BLOCK_COPY;
+type WordOpcode = BranchOpcode | QvmOpcode.OP_ENTER | QvmOpcode.OP_LEAVE | QvmOpcode.OP_CONST | QvmOpcode.OP_LOCAL | QvmOpcode.OP_BLOCK_COPY;
 
 type SingleByteOpcode = Exclude<QvmOpcode, WordOpcode | QvmOpcode.OP_ARG>;
 
@@ -49,11 +107,12 @@ interface InstructionLocation {
   readonly byteOffset: number;
 }
 
-export type QvmInstruction = InstructionLocation & (
-  | { readonly opcode: SingleByteOpcode; readonly operandWidth: 0 }
-  | { readonly opcode: WordOpcode; readonly operandWidth: 4; readonly operand: number }
-  | { readonly opcode: QvmOpcode.OP_ARG; readonly operandWidth: 1; readonly operand: number }
-);
+export type QvmInstruction = InstructionLocation &
+  (
+    | { readonly opcode: SingleByteOpcode; readonly operandWidth: 0 }
+    | { readonly opcode: WordOpcode; readonly operandWidth: 4; readonly operand: number }
+    | { readonly opcode: QvmOpcode.OP_ARG; readonly operandWidth: 1; readonly operand: number }
+  );
 
 export interface QvmDataImage {
   /** Owned initialized data followed by literals. Words retain little-endian bytes. */
@@ -75,7 +134,10 @@ export interface QvmImage extends QvmDataImage {
 
 /** The source frees its VM only for these header failures. */
 export class QvmHeaderError extends Error {
-  constructor(source: string) { super(`${source} has bad header`); this.name = "QvmHeaderError"; }
+  constructor(source: string) {
+    super(`${source} has bad header`);
+    this.name = "QvmHeaderError";
+  }
 }
 
 interface QvmSourceHeader {
@@ -90,8 +152,11 @@ export function readQvmSourceHeader(bytes: Uint8Array, source: string): QvmSourc
   const reader = new BinaryReader(bytes, source);
   const magic = reader.i32();
   reader.skip(8);
-  const codeLength = reader.i32(), dataOffset = reader.i32();
-  const dataLength = reader.i32(), literalLength = reader.i32(), bssLength = reader.i32();
+  const codeLength = reader.i32(),
+    dataOffset = reader.i32();
+  const dataLength = reader.i32(),
+    literalLength = reader.i32(),
+    bssLength = reader.i32();
   if (magic !== QVM_MAGIC || bssLength < 0 || dataLength < 0 || literalLength < 0 || codeLength <= 0) {
     throw new QvmHeaderError(source);
   }
@@ -101,7 +166,8 @@ export function readQvmSourceHeader(bytes: Uint8Array, source: string): QvmSourc
 /** VM_Restart retains prepared code and never consumes the replacement instruction table. */
 export function parseQvmRestart(bytes: Uint8Array, source = "<qvm>"): QvmDataImage {
   const { dataOffset, dataLength, literalLength, bssLength } = readQvmSourceHeader(bytes, source);
-  const initializedLength = dataLength + literalLength, totalDataLength = initializedLength + bssLength;
+  const initializedLength = dataLength + literalLength,
+    totalDataLength = initializedLength + bssLength;
   if (totalDataLength > MAX_DATA_LENGTH) {
     throw new BinaryError(source, 28, "QVM data exceeds the supported hunk allocation");
   }
@@ -112,20 +178,29 @@ export function parseQvmRestart(bytes: Uint8Array, source = "<qvm>"): QvmDataIma
   return { initializedData: reader.bytes(initializedLength), allocatedDataLength };
 }
 
-function decodeInstruction(
-  reader: BinaryReader, codeOffset: number, codeEnd: number, instructionCount: number,
-): QvmInstruction {
+function decodeInstruction(reader: BinaryReader, codeOffset: number, codeEnd: number, instructionCount: number): QvmInstruction {
   const byteOffset = reader.offset - codeOffset;
   if (reader.offset >= codeEnd) {
     throw new BinaryError(reader.source, reader.offset, "QVM instruction exceeds code section");
   }
   const opcode = reader.u8();
   switch (opcode) {
-    case QvmOpcode.OP_EQ: case QvmOpcode.OP_NE:
-    case QvmOpcode.OP_LTI: case QvmOpcode.OP_LEI: case QvmOpcode.OP_GTI: case QvmOpcode.OP_GEI:
-    case QvmOpcode.OP_LTU: case QvmOpcode.OP_LEU: case QvmOpcode.OP_GTU: case QvmOpcode.OP_GEU:
-    case QvmOpcode.OP_EQF: case QvmOpcode.OP_NEF:
-    case QvmOpcode.OP_LTF: case QvmOpcode.OP_LEF: case QvmOpcode.OP_GTF: case QvmOpcode.OP_GEF: {
+    case QvmOpcode.OP_EQ:
+    case QvmOpcode.OP_NE:
+    case QvmOpcode.OP_LTI:
+    case QvmOpcode.OP_LEI:
+    case QvmOpcode.OP_GTI:
+    case QvmOpcode.OP_GEI:
+    case QvmOpcode.OP_LTU:
+    case QvmOpcode.OP_LEU:
+    case QvmOpcode.OP_GTU:
+    case QvmOpcode.OP_GEU:
+    case QvmOpcode.OP_EQF:
+    case QvmOpcode.OP_NEF:
+    case QvmOpcode.OP_LTF:
+    case QvmOpcode.OP_LEF:
+    case QvmOpcode.OP_GTF:
+    case QvmOpcode.OP_GEF: {
       const operand = readWord(reader, codeEnd);
       // Source preparation rewrites these indices to byte offsets. Keep indices
       // here; CALL/JUMP get their dynamic indices from the operand stack instead.
@@ -134,25 +209,55 @@ function decodeInstruction(
       }
       return { opcode, byteOffset, operandWidth: 4, operand };
     }
-    case QvmOpcode.OP_ENTER: case QvmOpcode.OP_LEAVE: case QvmOpcode.OP_CONST:
-    case QvmOpcode.OP_LOCAL: case QvmOpcode.OP_BLOCK_COPY:
+    case QvmOpcode.OP_ENTER:
+    case QvmOpcode.OP_LEAVE:
+    case QvmOpcode.OP_CONST:
+    case QvmOpcode.OP_LOCAL:
+    case QvmOpcode.OP_BLOCK_COPY:
       return { opcode, byteOffset, operandWidth: 4, operand: readWord(reader, codeEnd) };
     case QvmOpcode.OP_ARG:
       if (reader.offset >= codeEnd) {
         throw new BinaryError(reader.source, reader.offset, "QVM byte operand exceeds code section");
       }
       return { opcode, byteOffset, operandWidth: 1, operand: reader.u8() };
-    case QvmOpcode.OP_UNDEF: case QvmOpcode.OP_IGNORE: case QvmOpcode.OP_BREAK:
-    case QvmOpcode.OP_CALL: case QvmOpcode.OP_PUSH: case QvmOpcode.OP_POP: case QvmOpcode.OP_JUMP:
-    case QvmOpcode.OP_LOAD1: case QvmOpcode.OP_LOAD2: case QvmOpcode.OP_LOAD4:
-    case QvmOpcode.OP_STORE1: case QvmOpcode.OP_STORE2: case QvmOpcode.OP_STORE4:
-    case QvmOpcode.OP_SEX8: case QvmOpcode.OP_SEX16: case QvmOpcode.OP_NEGI:
-    case QvmOpcode.OP_ADD: case QvmOpcode.OP_SUB: case QvmOpcode.OP_DIVI: case QvmOpcode.OP_DIVU:
-    case QvmOpcode.OP_MODI: case QvmOpcode.OP_MODU: case QvmOpcode.OP_MULI: case QvmOpcode.OP_MULU:
-    case QvmOpcode.OP_BAND: case QvmOpcode.OP_BOR: case QvmOpcode.OP_BXOR: case QvmOpcode.OP_BCOM:
-    case QvmOpcode.OP_LSH: case QvmOpcode.OP_RSHI: case QvmOpcode.OP_RSHU:
-    case QvmOpcode.OP_NEGF: case QvmOpcode.OP_ADDF: case QvmOpcode.OP_SUBF:
-    case QvmOpcode.OP_DIVF: case QvmOpcode.OP_MULF: case QvmOpcode.OP_CVIF: case QvmOpcode.OP_CVFI:
+    case QvmOpcode.OP_UNDEF:
+    case QvmOpcode.OP_IGNORE:
+    case QvmOpcode.OP_BREAK:
+    case QvmOpcode.OP_CALL:
+    case QvmOpcode.OP_PUSH:
+    case QvmOpcode.OP_POP:
+    case QvmOpcode.OP_JUMP:
+    case QvmOpcode.OP_LOAD1:
+    case QvmOpcode.OP_LOAD2:
+    case QvmOpcode.OP_LOAD4:
+    case QvmOpcode.OP_STORE1:
+    case QvmOpcode.OP_STORE2:
+    case QvmOpcode.OP_STORE4:
+    case QvmOpcode.OP_SEX8:
+    case QvmOpcode.OP_SEX16:
+    case QvmOpcode.OP_NEGI:
+    case QvmOpcode.OP_ADD:
+    case QvmOpcode.OP_SUB:
+    case QvmOpcode.OP_DIVI:
+    case QvmOpcode.OP_DIVU:
+    case QvmOpcode.OP_MODI:
+    case QvmOpcode.OP_MODU:
+    case QvmOpcode.OP_MULI:
+    case QvmOpcode.OP_MULU:
+    case QvmOpcode.OP_BAND:
+    case QvmOpcode.OP_BOR:
+    case QvmOpcode.OP_BXOR:
+    case QvmOpcode.OP_BCOM:
+    case QvmOpcode.OP_LSH:
+    case QvmOpcode.OP_RSHI:
+    case QvmOpcode.OP_RSHU:
+    case QvmOpcode.OP_NEGF:
+    case QvmOpcode.OP_ADDF:
+    case QvmOpcode.OP_SUBF:
+    case QvmOpcode.OP_DIVF:
+    case QvmOpcode.OP_MULF:
+    case QvmOpcode.OP_CVIF:
+    case QvmOpcode.OP_CVFI:
       return { opcode, byteOffset, operandWidth: 0 };
     default:
       throw new BinaryError(reader.source, reader.offset - 1, `unknown QVM opcode ${opcode}`);
@@ -216,8 +321,15 @@ export function parseQvm(bytes: Uint8Array, source = "<qvm>"): QvmImage {
   reader.seek(dataOffset);
   const initializedData = reader.bytes(initializedLength);
   return {
-    source, instructions, codeOffset, codeLength, initializedData,
-    dataLength, literalLength, bssLength, allocatedDataLength,
+    source,
+    instructions,
+    codeOffset,
+    codeLength,
+    initializedData,
+    dataLength,
+    literalLength,
+    bssLength,
+    allocatedDataLength,
     dataMask: allocatedDataLength - 1,
   };
 }

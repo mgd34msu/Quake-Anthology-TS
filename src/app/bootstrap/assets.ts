@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CleanupStack } from "../../foundation/cleanup.ts";
 import { SceneMaterialRegistrations } from "../../render/scene/material-registrations.ts";
 import { CinematicPlayback, cinematicBytes } from "../../media/playback.ts";
@@ -40,7 +41,10 @@ export interface ProviderSceneAssets {
   readonly shaders: SceneShaderRegistry;
 }
 
-export interface PreparedApplicationImageBinding { commit(): void; discard(): void; }
+export interface PreparedApplicationImageBinding {
+  commit(): void;
+  discard(): void;
+}
 export interface PreparedApplicationImages extends PreparedApplicationImageBinding {
   readonly font: TextFontSelection;
   readonly typography: Awaited<ReturnType<typeof loadMenuTypography>>;
@@ -72,8 +76,14 @@ async function paletteFor(mounts: MountedContent, family: GameFamily): Promise<P
 async function shaderPaths(content: LoadedApplicationContent, mounts: MountedContent): Promise<readonly string[]> {
   const archives = new Map(content.catalog.products.flatMap(product => product.archives).map(archive => [archive.path, archive] as const));
   const byId = new Map(mounts.plan.mounts.map(mount => [mount.identity.id, mount] as const));
-  const seen = new Set<string>(), paths: string[] = [];
-  const add = (path: string): void => { if (!seen.has(path.toLowerCase())) { seen.add(path.toLowerCase()); paths.push(path); } };
+  const seen = new Set<string>(),
+    paths: string[] = [];
+  const add = (path: string): void => {
+    if (!seen.has(path.toLowerCase())) {
+      seen.add(path.toLowerCase());
+      paths.push(path);
+    }
+  };
   for (const id of mounts.plan.defaultOrder) {
     const mount = byId.get(id);
     if (mount === undefined) continue;
@@ -88,7 +98,11 @@ async function shaderPaths(content: LoadedApplicationContent, mounts: MountedCon
       throw error;
     });
     const names = listed.filter(entry => entry.isFile() && /\.shader$/i.test(entry.name)).map(entry => entry.name);
-    names.sort((left, right) => { const a = left.toLowerCase(), b = right.toLowerCase(); return a < b ? -1 : a > b ? 1 : 0; });
+    names.sort((left, right) => {
+      const a = left.toLowerCase(),
+        b = right.toLowerCase();
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
     for (const name of names) add(`scripts/${name}`);
   }
   return paths;
@@ -115,8 +129,18 @@ export class ApplicationAssets {
   private modelPolicyValue: ModelReplacementPolicy;
   private readonly retiredImages = new CleanupStack();
 
-  constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
-    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy; readonly imageRegistry?: SceneImageRegistry; readonly shaderProfile?: () => FinishShaderProfile; readonly warn?: (text: string) => void } = {}) {
+  constructor(
+    readonly content: LoadedApplicationContent,
+    owner: RendererResourceOwner,
+    private readonly mediaClock: MediaClock = { sample: () => performance.now() },
+    options: {
+      readonly imagePolicy?: ImagePolicy;
+      readonly modelPolicy?: ModelReplacementPolicy;
+      readonly imageRegistry?: SceneImageRegistry;
+      readonly shaderProfile?: () => FinishShaderProfile;
+      readonly warn?: (text: string) => void;
+    } = {},
+  ) {
     if (options.imageRegistry !== undefined && options.imageRegistry.owner !== owner) throw new Error("Application images belong to another renderer");
     this.images = options.imageRegistry?.fork(mediaClock) ?? new SceneImageRegistry(owner, mediaClock);
     this.imagePolicyValue = options.imagePolicy;
@@ -131,11 +155,18 @@ export class ApplicationAssets {
   /** Reports a missing optional resource once per key. */
   warnOnce(key: string, text: string): void {
     if (this.warned.has(key)) return;
-    this.warned.add(key); this.warnText?.(text);
+    this.warned.add(key);
+    this.warnText?.(text);
   }
-  get imagePolicy(): ImagePolicy | undefined { return this.imagePolicyValue; }
-  get modelPolicy(): ModelReplacementPolicy { return this.modelPolicyValue; }
-  setModelPolicy(policy: ModelReplacementPolicy): void { this.modelPolicyValue = policy; }
+  get imagePolicy(): ImagePolicy | undefined {
+    return this.imagePolicyValue;
+  }
+  get modelPolicy(): ModelReplacementPolicy {
+    return this.modelPolicyValue;
+  }
+  setModelPolicy(policy: ModelReplacementPolicy): void {
+    this.modelPolicyValue = policy;
+  }
 
   get world(): WorldScene {
     if (this.currentWorld === null) throw new Error("World presentation has not loaded");
@@ -149,10 +180,15 @@ export class ApplicationAssets {
     const registrations = this.materialRegistrations.provider(content);
     const pending = (async (): Promise<ProviderSceneAssets> => {
       const family = this.content.catalog.product(content).expectation.family;
-      const mounts = await this.content.forContent(content), palette = await paletteFor(mounts, family);
+      const mounts = await this.content.forContent(content),
+        palette = await paletteFor(mounts, family);
       if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, mounts), palette,
-        this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue });
+      const textures = new SceneTextureLoader(
+        this.images,
+        mountedImageReader(this.content.catalog, mounts),
+        palette,
+        this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue },
+      );
       this.activeTextures.add(textures);
       try {
         const shaders = new SceneShaderRegistry(textures, registrations, this.shaderProfile(), path => this.materialMovie(content, mounts, path), family);
@@ -168,22 +204,36 @@ export class ApplicationAssets {
         else await loadScripts();
         if (this.closed) throw new Error("Scene provider loaded after assets closed");
         const assets = this;
-        return { family, mounts, palette, get textures() { return shaders.textures; }, shaders,
-          get modelPolicy() { return assets.modelPolicyValue; } };
+        return {
+          family,
+          mounts,
+          palette,
+          get textures() {
+            return shaders.textures;
+          },
+          shaders,
+          get modelPolicy() {
+            return assets.modelPolicyValue;
+          },
+        };
       } catch (error) {
         this.activeTextures.delete(textures);
         textures.disposeImages();
         throw error;
       }
     })();
-    const cached = pending.catch((error: unknown) => { if (this.providers.get(content) === cached) this.providers.delete(content); throw error; });
+    const cached = pending.catch((error: unknown) => {
+      if (this.providers.get(content) === cached) this.providers.delete(content);
+      throw error;
+    });
     this.providers.set(content, cached);
     return cached;
   }
 
   private materialMovie(content: ContentId, mounts: MountedContent, argument: string): Promise<RegisteredShaderVideo | null> {
     if (this.closed) throw new Error("Application assets are closed");
-    const end = argument.indexOf("\0"), name = end < 0 ? argument : argument.slice(0, end);
+    const end = argument.indexOf("\0"),
+      name = end < 0 ? argument : argument.slice(0, end);
     const path = name.includes("/") || name.includes("\\") ? name : `video/${name}`;
     const key = `${content}\0${path}`;
     const previous = this.movies.get(key);
@@ -197,14 +247,32 @@ export class ApplicationAssets {
       const extension = path.toLowerCase().split(".").at(-1);
       if (extension !== "roq" && extension !== "cin" && extension !== "ogv") return null;
       let source: ReturnType<typeof cinematicBytes>, dimensions: ReturnType<typeof cinematicDimensions>;
-      try { source = cinematicBytes(extension, asset.bytes, path); dimensions = cinematicDimensions(source); }
-      catch { if (this.closed) throw new Error("Material movie loaded after assets closed"); return null; }
+      try {
+        source = cinematicBytes(extension, asset.bytes, path);
+        dimensions = cinematicDimensions(source);
+      } catch {
+        if (this.closed) throw new Error("Material movie loaded after assets closed");
+        return null;
+      }
       const image = this.images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: asset.reference });
-      const playback = new CinematicPlayback(source, { clock: this.mediaClock, target: { kind: "material", id: key }, loop: true, silent: true,
-        onAudio: () => { throw new Error("Silent material movie produced audio"); }, onAudioReset: () => undefined,
-        onAudioPause: () => undefined, onComplete: () => undefined });
-      const movie = new MaterialCinematic(playback, image, (width, height, provenance) => this.images.allocate(width, height, provenance),
-        operation => this.images.commit(operation));
+      const playback = new CinematicPlayback(source, {
+        clock: this.mediaClock,
+        target: { kind: "material", id: key },
+        loop: true,
+        silent: true,
+        onAudio: () => {
+          throw new Error("Silent material movie produced audio");
+        },
+        onAudioReset: () => undefined,
+        onAudioPause: () => undefined,
+        onComplete: () => undefined,
+      });
+      const movie = new MaterialCinematic(
+        playback,
+        image,
+        (width, height, provenance) => this.images.allocate(width, height, provenance),
+        operation => this.images.commit(operation),
+      );
       this.activeMovies.add(movie);
       return { source: movie, image: { frame: { image }, tmu: 0 } };
     })();
@@ -221,8 +289,16 @@ export class ApplicationAssets {
     if (this.currentWorld !== null) return this.currentWorld;
     const provider = await this.provider(this.content.recipe.presentation.assets);
     const worldspawn = parseEntities(this.content.world.entities).find(entity => entity.get("classname") === "worldspawn");
-    this.currentWorld = await WorldScene.load(this.content.world, provider.shaders,
-      this.content.world.kind === "q2-bsp" ? { q2SkyName: worldspawn?.get("sky") ?? "unit1_", q2LightModulate: this.q2LightModulate(this.content.recipe.map.geometry.provenance.mount.identity.content) } : {});
+    this.currentWorld = await WorldScene.load(
+      this.content.world,
+      provider.shaders,
+      this.content.world.kind === "q2-bsp"
+        ? {
+            q2SkyName: worldspawn?.get("sky") ?? "unit1_",
+            q2LightModulate: this.q2LightModulate(this.content.recipe.map.geometry.provenance.mount.identity.content),
+          }
+        : {},
+    );
     return this.currentWorld;
   }
 
@@ -231,9 +307,14 @@ export class ApplicationAssets {
     this.font = (async (): Promise<TextFontSelection> => {
       const provider = await this.provider(this.content.recipe.presentation.assets);
       const product = this.content.catalog.product(this.content.recipe.presentation.assets);
-      this.fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
-        rerelease: product.expectation.edition === "rerelease", images: this.images,
-        ...(this.imagePolicyValue === undefined ? {} : { imagePolicy: this.imagePolicyValue }) });
+      this.fonts = await loadMenuFont({
+        catalog: this.content.catalog,
+        mounts: provider.mounts,
+        family: provider.family,
+        rerelease: product.expectation.edition === "rerelease",
+        images: this.images,
+        ...(this.imagePolicyValue === undefined ? {} : { imagePolicy: this.imagePolicyValue }),
+      });
       return this.fonts.font;
     })();
     return this.font;
@@ -251,12 +332,18 @@ export class ApplicationAssets {
   async prepareImageRefresh(policy: ImagePolicy, modelPolicy = this.modelPolicyValue): Promise<PreparedApplicationImages> {
     if (this.closed) throw new Error("Application assets are closed");
     if (this.retiredImages.length !== 0) throw new Error("Previous image refresh has not finished rebinding");
-    const replacements = new Map<ContentId, { readonly provider: ProviderSceneAssets; readonly textures: SceneTextureLoader; readonly shaders: SceneShaderRegistry }>();
+    const replacements = new Map<
+      ContentId,
+      { readonly provider: ProviderSceneAssets; readonly textures: SceneTextureLoader; readonly shaders: SceneShaderRegistry }
+    >();
     const stagedProvider = async (content: ContentId): Promise<ProviderSceneAssets> => {
       let replacement = replacements.get(content);
       if (replacement === undefined) {
         const provider = await this.provider(content);
-        const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, provider.mounts), provider.palette, { policy, strict: true });
+        const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, provider.mounts), provider.palette, {
+          policy,
+          strict: true,
+        });
         replacement = { provider, textures, shaders: provider.shaders.replacement(textures) };
         replacements.set(content, replacement);
         await provider.textures.prepareReplacement(textures);
@@ -281,29 +368,50 @@ export class ApplicationAssets {
       for (const current of [...(this.currentWorld === null ? [] : [this.currentWorld]), ...this.brushScenes]) {
         const provider = [...replacements.values()].find(replacement => replacement.provider.shaders === current.shaders);
         if (provider === undefined) throw new Error("World image provider is absent");
-        worlds.push({ current, replacement: await current.prepareImages(provider.shaders, source => {
-          const selected = [...replacements.values()].find(value => value.provider.shaders === source);
-          if (selected === undefined) throw new Error("Remap image provider is absent");
-          return selected.shaders;
-        }) });
+        worlds.push({
+          current,
+          replacement: await current.prepareImages(provider.shaders, source => {
+            const selected = [...replacements.values()].find(value => value.provider.shaders === source);
+            if (selected === undefined) throw new Error("Remap image provider is absent");
+            return selected.shaders;
+          }),
+        });
       }
-      preparedRemaps = await this.materialRegistrations.prepareRemapRefresh(new Map([...replacements.values()].map(value => [value.provider.shaders, value.shaders])));
+      preparedRemaps = await this.materialRegistrations.prepareRemapRefresh(
+        new Map([...replacements.values()].map(value => [value.provider.shaders, value.shaders])),
+      );
       {
-        const content = this.content.recipe.presentation.assets, provider = await this.provider(content);
-        fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
-          rerelease: this.content.catalog.product(content).expectation.edition === "rerelease", images: this.images, imagePolicy: policy });
+        const content = this.content.recipe.presentation.assets,
+          provider = await this.provider(content);
+        fonts = await loadMenuFont({
+          catalog: this.content.catalog,
+          mounts: provider.mounts,
+          family: provider.family,
+          rerelease: this.content.catalog.product(content).expectation.edition === "rerelease",
+          images: this.images,
+          imagePolicy: policy,
+        });
         typography = await loadMenuTypography(this.content.catalog, this.images, fonts.font.classic, policy);
       }
     } catch (error) {
-      typography?.close(); fonts?.close();
+      typography?.close();
+      fonts?.close();
       for (const world of worlds) world.replacement.close();
-      for (const replacement of replacements.values()) { replacement.shaders.discardReplacement(); replacement.textures.disposeImages(); }
+      for (const replacement of replacements.values()) {
+        replacement.shaders.discardReplacement();
+        replacement.textures.disposeImages();
+      }
       throw error;
     }
-    const preparedFonts = fonts, preparedTypography = typography;
+    const preparedFonts = fonts,
+      preparedTypography = typography;
     const remaps = preparedRemaps;
     if (preparedFonts === null || preparedTypography === null || remaps === null) throw new Error("Image refresh resources were not prepared");
-    return { provider: stagedProvider, font: preparedFonts.font, typography: preparedTypography, policy,
+    return {
+      provider: stagedProvider,
+      font: preparedFonts.font,
+      typography: preparedTypography,
+      policy,
       commit: () => {
         remaps.validate();
         for (const world of worlds) world.current.validateImages(world.replacement);
@@ -313,25 +421,41 @@ export class ApplicationAssets {
           const previous = replacement.provider.textures;
           replacement.provider.shaders.commitReplacement(replacement.shaders);
           this.activeTextures.add(replacement.textures);
-          this.retiredImages.push(() => { previous.disposeImages(); this.activeTextures.delete(previous); });
+          this.retiredImages.push(() => {
+            previous.disposeImages();
+            this.activeTextures.delete(previous);
+          });
         }
         for (const world of worlds) world.current.commitImages(world.replacement);
         remaps.commit();
-        const previousFonts = this.fonts, previousTypography = this.loadedTypography;
-        this.retiredImages.push(() => previousFonts?.close(), () => previousTypography?.close());
-        this.fonts = preparedFonts; this.font = Promise.resolve(preparedFonts.font);
-        this.loadedTypography = preparedTypography; this.typography = Promise.resolve(preparedTypography);
+        const previousFonts = this.fonts,
+          previousTypography = this.loadedTypography;
+        this.retiredImages.push(
+          () => previousFonts?.close(),
+          () => previousTypography?.close(),
+        );
+        this.fonts = preparedFonts;
+        this.font = Promise.resolve(preparedFonts.font);
+        this.loadedTypography = preparedTypography;
+        this.typography = Promise.resolve(preparedTypography);
         this.imagePolicyValue = policy;
         this.modelPolicyValue = modelPolicy;
       },
       discard: () => {
-        preparedTypography.close(); preparedFonts.close();
+        preparedTypography.close();
+        preparedFonts.close();
         for (const world of worlds) world.replacement.close();
-        for (const replacement of replacements.values()) { replacement.shaders.discardReplacement(); replacement.textures.disposeImages(); }
-      } };
+        for (const replacement of replacements.values()) {
+          replacement.shaders.discardReplacement();
+          replacement.textures.disposeImages();
+        }
+      },
+    };
   }
 
-  finishImageRefresh(): void { this.retiredImages.runAll(); }
+  finishImageRefresh(): void {
+    this.retiredImages.runAll();
+  }
 
   model(content: ContentId, path: string): Promise<ModelAsset> {
     const key = `${content}\0${path}`;
@@ -342,15 +466,28 @@ export class ApplicationAssets {
       if (path.startsWith("*")) {
         const model = Number(path.slice(1));
         if (!Number.isSafeInteger(model) || this.content.world.models[model] === undefined) throw new Error(`Missing inline model ${path}`);
-        return { resource: this.content.recipe.map.geometry, model: { kind: "brush-model", world: this.content.world, model }, provider, brushScene: this.world };
+        return {
+          resource: this.content.recipe.map.geometry,
+          model: { kind: "brush-model", world: this.content.world, model },
+          provider,
+          brushScene: this.world,
+        };
       }
       const asset = await provider.mounts.open(path);
       if (asset === null) throw new Error(`Model is absent from selected content: ${content}/${path}`);
       if (path.toLowerCase().endsWith(".bsp")) {
         const format = classifyBsp(asset.bytes, path);
-        const world = format === "q1" ? readQ1Bsp(asset.bytes, { source: path })
-          : format === "q2" ? toQ2WorldGeometry(readQ2Bsp(asset.bytes, path)) : decodeQ3World(asset.bytes, path);
-        const brushScene = await WorldScene.load(world, provider.shaders, world.kind === "q2-bsp" ? { q2LightModulate: this.q2LightModulate(asset.reference.provenance.mount.identity.content) } : {});
+        const world =
+          format === "q1"
+            ? readQ1Bsp(asset.bytes, { source: path })
+            : format === "q2"
+              ? toQ2WorldGeometry(readQ2Bsp(asset.bytes, path))
+              : decodeQ3World(asset.bytes, path);
+        const brushScene = await WorldScene.load(
+          world,
+          provider.shaders,
+          world.kind === "q2-bsp" ? { q2LightModulate: this.q2LightModulate(asset.reference.provenance.mount.identity.content) } : {},
+        );
         this.brushScenes.push(brushScene);
         return { resource: asset.reference, model: { kind: "brush-model", world, model: 0 }, provider, brushScene };
       }
@@ -358,7 +495,10 @@ export class ApplicationAssets {
       if (loaded.variants !== undefined) this.modelVariants.set(loaded.variants, content);
       return { ...loaded, provider, brushScene: null };
     })();
-    const cached = pending.catch((error: unknown) => { if (this.models.get(key) === cached) this.models.delete(key); throw error; });
+    const cached = pending.catch((error: unknown) => {
+      if (this.models.get(key) === cached) this.models.delete(key);
+      throw error;
+    });
     this.models.set(key, cached);
     return cached;
   }
@@ -370,9 +510,11 @@ export class ApplicationAssets {
     for (const textures of this.activeTextures) textures.close();
     this.activeTextures.clear();
     for (const movie of this.activeMovies) movie.close();
-    this.activeMovies.clear(); this.movies.clear();
+    this.activeMovies.clear();
+    this.movies.clear();
     this.loadedTypography?.close();
-    this.loadedTypography = null; this.typography = null;
+    this.loadedTypography = null;
+    this.typography = null;
     this.fonts?.close();
     this.fonts = null;
     this.font = null;
@@ -389,8 +531,15 @@ export class ApplicationAssets {
 }
 
 /** Assets for a world that shares a renderer's image registry and follows the live image and shader policy. */
-export function createWorldAssets(content: LoadedApplicationContent, renderer: { readonly owner: RendererResourceOwner; readonly images: SceneImageRegistry },
-  warn: (text: string) => void, images: { readonly policy: ImagePolicy; readonly modelPolicy: ModelReplacementPolicy; readonly cvars: CvarRegistry } | null): ApplicationAssets {
-  return new ApplicationAssets(content, renderer.owner, undefined, { imageRegistry: renderer.images, warn,
-    ...(images === null ? {} : { imagePolicy: images.policy, modelPolicy: images.modelPolicy, shaderProfile: () => shaderProfileFromCvars(images.cvars) }) });
+export function createWorldAssets(
+  content: LoadedApplicationContent,
+  renderer: { readonly owner: RendererResourceOwner; readonly images: SceneImageRegistry },
+  warn: (text: string) => void,
+  images: { readonly policy: ImagePolicy; readonly modelPolicy: ModelReplacementPolicy; readonly cvars: CvarRegistry } | null,
+): ApplicationAssets {
+  return new ApplicationAssets(content, renderer.owner, undefined, {
+    imageRegistry: renderer.images,
+    warn,
+    ...(images === null ? {} : { imagePolicy: images.policy, modelPolicy: images.modelPolicy, shaderProfile: () => shaderProfileFromCvars(images.cvars) }),
+  });
 }

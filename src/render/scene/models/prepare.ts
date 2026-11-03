@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { md3WorldEnvelope } from "./md3-bounds.ts";
 /* Scene model assembly from Q1 r_alias.c/r_sprite.c, Q2 gl_mesh.c and
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -18,7 +19,15 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
+import type {
+  ModelGroupContext,
+  ModelImageSelection,
+  ModelPreparationContext,
+  ModelSourceOptions,
+  PreparedModelEntity,
+  PreparedModelSurface,
+  PreparedVertexLighting,
+} from "./types.ts";
 import { PoseLru } from "../../../formats/q12-model/pose-lru.ts";
 
 const MAX_MODEL_BEAM_SEGMENTS = 512;
@@ -36,18 +45,31 @@ export function repairFrames(entity: SceneEntity): { frame: number; previousFram
   if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q2-md2-replacement") {
     const count = entity.model.skinSelection.sourceFrameCount;
     const fallback = frame < 0 || frame >= count || previousFrame < 0 || previousFrame >= count;
-    if (fallback) { frame = 0; previousFrame = 0; }
+    if (fallback) {
+      frame = 0;
+      previousFrame = 0;
+    }
     return { frame, previousFrame, backLerp: frame === previousFrame ? 0 : backLerp, fallback };
   }
   const count = countFrames(entity.model);
   if (count === 0) throw new RangeError("Scene model has no animation frames");
-  if (entity.model.kind === "q2-sp2" || entity.model.kind === "md5" && entity.model.skinSelection.kind !== "q1-mdl-replacement"
-    || entity.flags.kind === "q3" && (entity.flags.bits & 512) !== 0) {
-    frame %= count; previousFrame %= count;
+  if (
+    entity.model.kind === "q2-sp2" ||
+    (entity.model.kind === "md5" && entity.model.skinSelection.kind !== "q1-mdl-replacement") ||
+    (entity.flags.kind === "q3" && (entity.flags.bits & 512) !== 0)
+  ) {
+    frame %= count;
+    previousFrame %= count;
   }
-  const badFrame = frame < 0 || frame >= count, badOld = previousFrame < 0 || previousFrame >= count;
-  if ((entity.flags.kind === "q3" || entity.model.kind === "q2-md2") && (badFrame || badOld)) { frame = 0; previousFrame = 0; }
-  else { if (badFrame) frame = 0; if (badOld) previousFrame = 0; }
+  const badFrame = frame < 0 || frame >= count,
+    badOld = previousFrame < 0 || previousFrame >= count;
+  if ((entity.flags.kind === "q3" || entity.model.kind === "q2-md2") && (badFrame || badOld)) {
+    frame = 0;
+    previousFrame = 0;
+  } else {
+    if (badFrame) frame = 0;
+    if (badOld) previousFrame = 0;
+  }
   if (frame === previousFrame && entity.model.kind !== "q2-md2") backLerp = 0;
   return { frame, previousFrame, backLerp, fallback: badFrame || badOld };
 }
@@ -68,8 +90,15 @@ function lodIndex(entity: SceneEntity, count: number, radius: number, context: M
   if (count > 1) {
     const distance = Math.fround(dot3(context.camera.axis[0], entity.transform.origin) - dot3(context.camera.axis[0], context.camera.origin));
     const matrix = context.camera.projection;
-    const projected = distance > 0 ? Math.min(Math.fround(Math.fround(radius * matrix[5] - distance * matrix[9] + matrix[13])
-      / Math.fround(radius * matrix[7] - distance * matrix[11] + matrix[15])), 1) : 0;
+    const projected =
+      distance > 0
+        ? Math.min(
+            Math.fround(
+              Math.fround(radius * matrix[5] - distance * matrix[9] + matrix[13]) / Math.fround(radius * matrix[7] - distance * matrix[11] + matrix[15]),
+            ),
+            1,
+          )
+        : 0;
     const fraction = projected !== 0 ? Math.fround(1 - Math.fround(projected * Math.min(options.lodScale ?? 5, 20))) : 0;
     lod = Math.max(0, Math.min(count - 1, Math.trunc(Math.fround(fraction * count))));
   }
@@ -101,24 +130,55 @@ interface PoseGeometryCaches {
  * backLerp, and world transforms are keyed by transform object identity
  * (fresh objects each frame simply miss and are garbage-collected). The
  * lit layer is keyed by transform values, so it keeps only a few entries per pose. */
-const persistentPoseCaches: PoseGeometryCaches = { mdl: new PoseLru(256), md3: new PoseLru(512), md4: new PoseLru(512), world: new WeakMap(), lit: new WeakMap() };
+const persistentPoseCaches: PoseGeometryCaches = {
+  mdl: new PoseLru(256),
+  md3: new PoseLru(512),
+  md4: new PoseLru(512),
+  world: new WeakMap(),
+  lit: new WeakMap(),
+};
 function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
   void context;
   return persistentPoseCaches;
 }
 const LIT_RETENTION_LIMIT = 16;
-function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
+function lerpKey(backLerp: number): string {
+  return Object.is(backLerp, -0) ? "-0" : `${backLerp}`;
+}
 function transformKey(transform: SceneEntity["transform"]): string {
   const [forward, left, up] = transform.axis;
-  return [transform.origin.x, transform.origin.y, transform.origin.z,
-    forward.x, forward.y, forward.z, left.x, left.y, left.z, up.x, up.y, up.z,
-    transform.scale.x, transform.scale.y, transform.scale.z].map(lerpKey).join("|");
+  return [
+    transform.origin.x,
+    transform.origin.y,
+    transform.origin.z,
+    forward.x,
+    forward.y,
+    forward.z,
+    left.x,
+    left.y,
+    left.z,
+    up.x,
+    up.y,
+    up.z,
+    transform.scale.x,
+    transform.scale.y,
+    transform.scale.z,
+  ]
+    .map(lerpKey)
+    .join("|");
 }
 
 /** Q2 stores scaled packed coordinates after interpolating translation and origin. */
-export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, frame: number, oldFrame: number, backLerp: number,
-  shell: boolean): readonly ModelVertex[] {
-  const current = at(model.frames, frame, "MD2 frame"), old = at(model.frames, oldFrame, "MD2 old frame");
+export function interpolateSceneMd2(
+  model: Q2AliasModel,
+  entity: SceneEntity,
+  frame: number,
+  oldFrame: number,
+  backLerp: number,
+  shell: boolean,
+): readonly ModelVertex[] {
+  const current = at(model.frames, frame, "MD2 frame"),
+    old = at(model.frames, oldFrame, "MD2 old frame");
   const delta = modelLocalDelta(entity.transform, sub3(entity.previousOrigin, entity.transform.origin));
   // Interpolation is a pure function of these inputs; many entities share
   // a model pose in the same frame (and static poses repeat every frame).
@@ -127,24 +187,36 @@ export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, fr
   const cached = md2InterpolationCache.get(poseKey);
   if (cached !== undefined) return cached;
   const front = 1 - backLerp;
-  const move = { x: backLerp * (delta.x + old.translation.x) + front * current.translation.x,
+  const move = {
+    x: backLerp * (delta.x + old.translation.x) + front * current.translation.x,
     y: backLerp * (delta.y + old.translation.y) + front * current.translation.y,
-    z: backLerp * (delta.z + old.translation.z) + front * current.translation.z };
-  const compressed = current.compressedVertices, previousCompressed = old.compressedVertices, normals = current.vertices;
-  if (previousCompressed.length !== compressed.length || normals.length !== compressed.length)
-    throw new RangeError("MD2 frame vertex counts differ");
-  const backX = backLerp * old.scale.x, backY = backLerp * old.scale.y, backZ = backLerp * old.scale.z;
-  const frontX = front * current.scale.x, frontY = front * current.scale.y, frontZ = front * current.scale.z;
+    z: backLerp * (delta.z + old.translation.z) + front * current.translation.z,
+  };
+  const compressed = current.compressedVertices,
+    previousCompressed = old.compressedVertices,
+    normals = current.vertices;
+  if (previousCompressed.length !== compressed.length || normals.length !== compressed.length) throw new RangeError("MD2 frame vertex counts differ");
+  const backX = backLerp * old.scale.x,
+    backY = backLerp * old.scale.y,
+    backZ = backLerp * old.scale.z;
+  const frontX = front * current.scale.x,
+    frontY = front * current.scale.y,
+    frontZ = front * current.scale.z;
   const result: ModelVertex[] = [];
   result.length = compressed.length;
   for (let index = 0; index < compressed.length; index++) {
-    const vertex = compressed[index], previous = previousCompressed[index], normal = normals[index]?.normal;
+    const vertex = compressed[index],
+      previous = previousCompressed[index],
+      normal = normals[index]?.normal;
     if (vertex === undefined || previous === undefined || normal === undefined) throw new RangeError(`Missing MD2 vertex ${index}`);
-    result[index] = { normal, position: {
-      x: Math.fround(move.x + previous.position[0] * backX + vertex.position[0] * frontX + (shell ? normal.x * 4 : 0)),
-      y: Math.fround(move.y + previous.position[1] * backY + vertex.position[1] * frontY + (shell ? normal.y * 4 : 0)),
-      z: Math.fround(move.z + previous.position[2] * backZ + vertex.position[2] * frontZ + (shell ? normal.z * 4 : 0)),
-    } };
+    result[index] = {
+      normal,
+      position: {
+        x: Math.fround(move.x + previous.position[0] * backX + vertex.position[0] * frontX + (shell ? normal.x * 4 : 0)),
+        y: Math.fround(move.y + previous.position[1] * backY + vertex.position[1] * frontY + (shell ? normal.y * 4 : 0)),
+        z: Math.fround(move.z + previous.position[2] * backZ + vertex.position[2] * frontZ + (shell ? normal.z * 4 : 0)),
+      },
+    };
   }
   md2InterpolationCache.set(poseKey, result);
   return result;
@@ -154,10 +226,16 @@ function cullGeometry(bounds: Bounds | null, context: ModelPreparationContext): 
   if (context.noCull === true || context.frustum === undefined || bounds === null) return "clip";
   let clipped = false;
   for (const plane of context.frustum) {
-    const near = { x: plane.normal.x >= 0 ? bounds.min.x : bounds.max.x,
-      y: plane.normal.y >= 0 ? bounds.min.y : bounds.max.y, z: plane.normal.z >= 0 ? bounds.min.z : bounds.max.z };
-    const far = { x: plane.normal.x >= 0 ? bounds.max.x : bounds.min.x,
-      y: plane.normal.y >= 0 ? bounds.max.y : bounds.min.y, z: plane.normal.z >= 0 ? bounds.max.z : bounds.min.z };
+    const near = {
+      x: plane.normal.x >= 0 ? bounds.min.x : bounds.max.x,
+      y: plane.normal.y >= 0 ? bounds.min.y : bounds.max.y,
+      z: plane.normal.z >= 0 ? bounds.min.z : bounds.max.z,
+    };
+    const far = {
+      x: plane.normal.x >= 0 ? bounds.max.x : bounds.min.x,
+      y: plane.normal.y >= 0 ? bounds.max.y : bounds.min.y,
+      z: plane.normal.z >= 0 ? bounds.max.z : bounds.min.z,
+    };
     if (dot3(far, plane.normal) <= plane.distance) return "out";
     if (dot3(near, plane.normal) <= plane.distance) clipped = true;
   }
@@ -168,58 +246,94 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
   const beam = context.options?.(entity).modelBeam;
   if (beam === undefined) return prepareEntityAtTransform(entity, entity, context);
   // Rerelease CL_DrawBeam: centered models, with only the final segment stretched.
-  const delta = sub3(entity.previousOrigin, entity.transform.origin), distance = length3(delta);
+  const delta = sub3(entity.previousOrigin, entity.transform.origin),
+    distance = length3(delta);
   const segmentLength = beam.segmentLength === 0 ? 30 : beam.segmentLength;
   if (!Number.isFinite(segmentLength) || segmentLength <= 0) throw new RangeError("Invalid model beam segment length");
-  const direction = distance === 0 ? delta : scale3(delta, 1 / distance), angles = vectorToAngles(direction);
+  const direction = distance === 0 ? delta : scale3(delta, 1 / distance),
+    angles = vectorToAngles(direction);
   const random = new GameRandom(Math.trunc(context.timeSeconds * 1000) + (entity.actor?.slot ?? 0));
   const segments: PreparedModelEntity[] = [];
   for (let offset = 0, count = 0; offset < distance && count < MAX_MODEL_BEAM_SEGMENTS; offset += segmentLength, count++) {
-    const length = Math.min(distance - offset, segmentLength), frame = random.rand() % countFrames(entity.model);
-    const segment: SceneEntity = { ...entity,
-      transform: { origin: add3(entity.transform.origin, scale3(direction, offset + length * 0.5)),
-        axis: anglesToAxis({ ...angles, z: random.rand() % 360 }), scale: { x: length / segmentLength, y: 1, z: 1 } },
+    const length = Math.min(distance - offset, segmentLength),
+      frame = random.rand() % countFrames(entity.model);
+    const segment: SceneEntity = {
+      ...entity,
+      transform: {
+        origin: add3(entity.transform.origin, scale3(direction, offset + length * 0.5)),
+        axis: anglesToAxis({ ...angles, z: random.rand() % 360 }),
+        scale: { x: length / segmentLength, y: 1, z: 1 },
+      },
       pose: { kind: "frame", frame, previousFrame: frame, backLerp: 0 },
-      flags: { kind: entity.flags.kind, bits: 8192 }, attachments: [] };
+      flags: { kind: entity.flags.kind, bits: 8192 },
+      attachments: [],
+    };
     segments.push(prepareEntityAtTransform(segment, entity, context));
   }
-  return { entity, frame: 0, previousFrame: 0, frameFallback: false, lod: 0, bounds: null,
-    cull: "in", personalModel: false, surfaces: [], attachments: segments, missingAttachments: [], modelEffectFlags: 0 };
+  return {
+    entity,
+    frame: 0,
+    previousFrame: 0,
+    frameFallback: false,
+    lod: 0,
+    bounds: null,
+    cull: "in",
+    personalModel: false,
+    surfaces: [],
+    attachments: segments,
+    missingAttachments: [],
+    modelEffectFlags: 0,
+  };
 }
 
 function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
-  const options = context.options?.(source) ?? {}, pose = repairFrames(entity), surfaces: PreparedModelSurface[] = [];
+  const options = context.options?.(source) ?? {},
+    pose = repairFrames(entity),
+    surfaces: PreparedModelSurface[] = [];
   const native = entity;
   if (entity.model.kind !== "q1-mdl" || options.indexedSkin === undefined)
     entity = selectModelEntity(entity, context.camera.origin, context.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY, context.purpose);
-  const flags = entity.flags, bits = flags.bits, model = entity.model;
+  const flags = entity.flags,
+    bits = flags.bits,
+    model = entity.model;
   const shell = flags.kind === "q2" ? q2ShellColor(bits) : null;
   const portal = context.camera.clip.kind === "portal";
   const personalModel = flags.kind === "q3" && (bits & 2) !== 0 && !portal;
-  const invisibleWeapon = (flags.kind === "q3" && (bits & 4) !== 0 && portal)
-    || (flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 2);
-  const translucent = entity.color.w < 1 || flags.kind === "q2" && (bits & (32 | 128)) !== 0;
+  const invisibleWeapon = (flags.kind === "q3" && (bits & 4) !== 0 && portal) || (flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 2);
+  const translucent = entity.color.w < 1 || (flags.kind === "q2" && (bits & (32 | 128)) !== 0);
   const alpha = translucent ? entity.color.w : 1;
   const color = byteColor({ ...entity.color, w: alpha });
   let lod = 0;
   let fogSphere: PreparedModelSurface["fogSphere"] = null;
   let preparedLighting: PreparedVertexLighting | undefined;
   function localVertex(vertex: ModelVertex, texCoord: Vec2, corner: number, unlit: boolean, vertexColor?: Vec4): MaterialVertex {
-    if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord,
-      lightmapCoord: ZERO_LIGHTMAP_COORD, color: vertexColor ?? color };
+    if (context.purpose === "shadow")
+      return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: ZERO_LIGHTMAP_COORD, color: vertexColor ?? color };
     const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
-    const light = preparedLighting?.shade(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
-      ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
-      : sampled ?? { x: 1, y: 1, z: 1 });
+    const light =
+      preparedLighting?.shade(vertex.normal, vertex.position, corner) ??
+      (flags.kind === "q2"
+        ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
+        : (sampled ?? { x: 1, y: 1, z: 1 }));
     const base = vertexColor ?? color;
     const lit = unlit && shell === null ? base : { x: base.x * light.x, y: base.y * light.y, z: base.z * light.z, w: base.w };
     return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: ZERO_LIGHTMAP_COORD, color: lit };
   }
-  function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
-    indices: readonly number[], unlit = false, world = false, poseKey?: object): void {
+  function append(
+    name: string,
+    image: ModelImageSelection,
+    vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
+    indices: readonly number[],
+    unlit = false,
+    world = false,
+    poseKey?: object,
+  ): void {
     if (context.purpose !== "shadow") preparedLighting ??= context.prepareVertexLighting?.(entity, options);
     if (world) {
-      const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
+      const localGeometry: MaterialGeometry = {
+        indices,
+        vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)),
+      };
       appendGeometry(name, image, localGeometry, unlit, world, poseKey);
       return;
     }
@@ -227,31 +341,43 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     // are produced in one loop (same float operations as the previous
     // map-then-transform two-pass form).
     const caches = poseCaches(context);
-    const transform = entity.transform, [forward, left, up] = transform.axis;
-    const lightingKey = context.purpose === "shadow" ? "shadow" : preparedLighting?.key ?? null;
-    const retentionKey = poseKey === undefined || caches === null || lightingKey === null || shell !== null
-      || context.purpose !== "shadow" && context.lightVertex !== undefined ? undefined
-      : `${transformKey(transform)}|${lerpKey(color.x)},${lerpKey(color.y)},${lerpKey(color.z)},${lerpKey(color.w)}|${unlit ? 1 : 0}|${lightingKey}`;
+    const transform = entity.transform,
+      [forward, left, up] = transform.axis;
+    const lightingKey = context.purpose === "shadow" ? "shadow" : (preparedLighting?.key ?? null);
+    const retentionKey =
+      poseKey === undefined || caches === null || lightingKey === null || shell !== null || (context.purpose !== "shadow" && context.lightVertex !== undefined)
+        ? undefined
+        : `${transformKey(transform)}|${lerpKey(color.x)},${lerpKey(color.y)},${lerpKey(color.z)},${lerpKey(color.w)}|${unlit ? 1 : 0}|${lightingKey}`;
     if (retentionKey !== undefined && poseKey !== undefined && caches !== null) {
       const retained = caches.lit.get(poseKey)?.get(indices)?.get(retentionKey);
-      if (retained !== undefined) { pushSurface(name, image, retained.local, retained.world, unlit); return; }
+      if (retained !== undefined) {
+        pushSurface(name, image, retained.local, retained.world, unlit);
+        return;
+      }
     }
     let shared = poseKey !== undefined && caches !== null ? caches.world.get(poseKey)?.get(transform) : undefined;
     if (shared !== undefined && shared.positions.length !== vertices.length) shared = undefined;
-    const localVertices: MaterialVertex[] = [], worldVertices: MaterialVertex[] = [];
-    const positions: Vec3[] = [], normals: Vec3[] = [];
+    const localVertices: MaterialVertex[] = [],
+      worldVertices: MaterialVertex[] = [];
+    const positions: Vec3[] = [],
+      normals: Vec3[] = [];
     for (let index = 0; index < vertices.length; index++) {
       const vertex = vertices[index];
       if (vertex === undefined) throw new RangeError("Model vertex is missing");
       const local = localVertex(vertex, vertex.texCoord, index, unlit, vertex.color);
       localVertices.push(local);
       if (shared !== undefined) {
-        const position = shared.positions[index], normal = shared.normals[index];
+        const position = shared.positions[index],
+          normal = shared.normals[index];
         if (position === undefined || normal === undefined) throw new RangeError("Shared world geometry is shorter than its pose");
         worldVertices.push({ position, normal, texCoord: local.texCoord, lightmapCoord: local.lightmapCoord, color: local.color });
       } else {
-        const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
-        const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
+        const px = vertex.position.x * transform.scale.x,
+          py = vertex.position.y * transform.scale.y,
+          pz = vertex.position.z * transform.scale.z;
+        const nx = vertex.normal.x * transform.scale.x,
+          ny = vertex.normal.y * transform.scale.y,
+          nz = vertex.normal.z * transform.scale.z;
         const position: Vec3 = {
           x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
           y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
@@ -262,40 +388,74 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           y: Math.fround(Math.fround(Math.fround(forward.y * nx) + Math.fround(left.y * ny)) + Math.fround(up.y * nz)),
           z: Math.fround(Math.fround(Math.fround(forward.z * nx) + Math.fround(left.z * ny)) + Math.fround(up.z * nz)),
         };
-        positions.push(position); normals.push(normal);
+        positions.push(position);
+        normals.push(normal);
         worldVertices.push({ position, normal, texCoord: local.texCoord, lightmapCoord: local.lightmapCoord, color: local.color });
       }
     }
     if (shared === undefined && poseKey !== undefined && caches !== null) {
       let byTransform = caches.world.get(poseKey);
-      if (byTransform === undefined) { byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>(); caches.world.set(poseKey, byTransform); }
+      if (byTransform === undefined) {
+        byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+        caches.world.set(poseKey, byTransform);
+      }
       byTransform.set(transform, { positions, normals });
     }
     const localGeometry: MaterialGeometry = { indices, vertices: localVertices };
     const worldGeometry: MaterialGeometry = { indices, vertices: worldVertices };
     if (retentionKey !== undefined && poseKey !== undefined && caches !== null) {
       let byIndices = caches.lit.get(poseKey);
-      if (byIndices === undefined) { byIndices = new WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>(); caches.lit.set(poseKey, byIndices); }
+      if (byIndices === undefined) {
+        byIndices = new WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>();
+        caches.lit.set(poseKey, byIndices);
+      }
       let byKey = byIndices.get(indices);
-      if (byKey === undefined) { byKey = new Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>(); byIndices.set(indices, byKey); }
+      if (byKey === undefined) {
+        byKey = new Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>();
+        byIndices.set(indices, byKey);
+      }
       // Moving or rotating entities never repeat a transform, so keep only a few recent entries per pose and surface.
-      if (byKey.size >= LIT_RETENTION_LIMIT) { const oldest = byKey.keys().next(); if (oldest.done !== true) byKey.delete(oldest.value); }
+      if (byKey.size >= LIT_RETENTION_LIMIT) {
+        const oldest = byKey.keys().next();
+        if (oldest.done !== true) byKey.delete(oldest.value);
+      }
       byKey.set(retentionKey, { local: localGeometry, world: worldGeometry });
     }
     pushSurface(name, image, localGeometry, worldGeometry, unlit);
   }
   function pushSurface(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, geometry: MaterialGeometry, unlit: boolean): void {
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
-    surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
-      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
+    surfaces.push({
+      surfaceIndex: surfaces.length,
+      fogSphere,
+      name,
+      entity,
+      options,
+      transform: entity.transform,
+      image,
+      localGeometry,
+      geometry,
+      depthRange: depthHack ? [0, 0.3] : [0, 1],
+      cull:
+        model.kind === "q1-spr" || model.kind === "q2-sp2"
+          ? "none"
+          : model.kind === "q1-mdl" ||
+              model.kind === "q2-md2" ||
+              (model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement"))
+            ? "front"
+            : "back",
       alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
-      translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
+      translucent,
+      unlit: unlit || shell !== null,
+      mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1,
+    });
   }
   function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false, poseKey?: object): void {
     const indices = localGeometry.indices;
     // modelWorldPoint/modelWorldDirection inlined with the transform scalars
     // hoisted; the fround placement (source float discipline) is unchanged.
-    const transform = entity.transform, [forward, left, up] = transform.axis;
+    const transform = entity.transform,
+      [forward, left, up] = transform.axis;
     let geometry: MaterialGeometry;
     if (world) geometry = localGeometry;
     else {
@@ -303,17 +463,27 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       let shared = poseKey !== undefined && caches !== null ? caches.world.get(poseKey)?.get(transform) : undefined;
       if (shared !== undefined && shared.positions.length !== localGeometry.vertices.length) shared = undefined;
       if (shared !== undefined) {
-        const sharedPositions = shared.positions, sharedNormals = shared.normals;
-        geometry = { indices, vertices: localGeometry.vertices.map((vertex, index) => {
-          const position = sharedPositions[index], normal = sharedNormals[index];
-          if (position === undefined || normal === undefined) throw new RangeError("Shared world geometry is shorter than its pose");
-          return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
-        }) };
+        const sharedPositions = shared.positions,
+          sharedNormals = shared.normals;
+        geometry = {
+          indices,
+          vertices: localGeometry.vertices.map((vertex, index) => {
+            const position = sharedPositions[index],
+              normal = sharedNormals[index];
+            if (position === undefined || normal === undefined) throw new RangeError("Shared world geometry is shorter than its pose");
+            return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
+          }),
+        };
       } else {
-        const positions: Vec3[] = [], normals: Vec3[] = [];
+        const positions: Vec3[] = [],
+          normals: Vec3[] = [];
         for (const vertex of localGeometry.vertices) {
-          const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
-          const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
+          const px = vertex.position.x * transform.scale.x,
+            py = vertex.position.y * transform.scale.y,
+            pz = vertex.position.z * transform.scale.z;
+          const nx = vertex.normal.x * transform.scale.x,
+            ny = vertex.normal.y * transform.scale.y,
+            nz = vertex.normal.z * transform.scale.z;
           positions.push({
             x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
             y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
@@ -327,14 +497,21 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         }
         if (poseKey !== undefined && caches !== null) {
           let byTransform = caches.world.get(poseKey);
-          if (byTransform === undefined) { byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>(); caches.world.set(poseKey, byTransform); }
+          if (byTransform === undefined) {
+            byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+            caches.world.set(poseKey, byTransform);
+          }
           byTransform.set(transform, { positions, normals });
         }
-        geometry = { indices, vertices: localGeometry.vertices.map((vertex, index) => {
-          const position = positions[index], normal = normals[index];
-          if (position === undefined || normal === undefined) throw new RangeError("World geometry is shorter than its pose");
-          return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
-        }) };
+        geometry = {
+          indices,
+          vertices: localGeometry.vertices.map((vertex, index) => {
+            const position = positions[index],
+              normal = normals[index];
+            if (position === undefined || normal === undefined) throw new RangeError("World geometry is shorter than its pose");
+            return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
+          }),
+        };
       }
     }
     pushSurface(name, image, localGeometry, geometry, unlit);
@@ -358,160 +535,252 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     if (palette === undefined) throw new Error("Q2 beam preparation requires its source palette");
     const geometry = q2BeamGeometry(entity.transform.origin, entity.previousOrigin, frame, { ...palette, w: entity.color.w * 255 });
     append("beam", { kind: "white" }, geometry.vertices, geometry.indices, true, true);
-  } else if (sourceCull !== "out") switch (model.kind) {
-    case "q1-mdl": {
-      const current = sampleTimedFrame(at(model.frames, frame, "MDL frame"), context.timeSeconds, options.syncBase ?? 0);
-      const previous = sampleTimedFrame(at(model.frames, previousFrame, "MDL old frame"), context.timeSeconds, options.syncBase ?? 0);
-      const mdlCache = poseCaches(context)?.mdl;
-      const mdlKey = mdlCache?.key([current, previous], lerpKey(backLerp));
-      let geometry = mdlKey === undefined ? undefined : mdlCache?.get(mdlKey);
-      if (geometry === undefined) {
-        geometry = buildMdlGeometry(model, interpolateAliasFrames(current, previous, backLerp));
-        if (mdlCache !== undefined && mdlKey !== undefined) mdlCache.set(mdlKey, geometry);
-      }
-      const skin = entity.skin >= 0 && entity.skin < model.skins.length ? entity.skin : 0;
-      const skinFrames = at(model.skins, skin, "MDL skin");
-      const pixels = sampleTimedFrame(skinFrames, context.timeSeconds, options.syncBase ?? 0);
-      const skinFrame = skinFrames.kind === "single" ? 0 : skinFrames.frames.findIndex(item => item.frame === pixels);
-      append("alias", options.indexedSkin === undefined ? { kind: "indexed", name: `${entity.resource.id}:skin:${skin}:${skinFrame}`, width: model.skinWidth,
-        height: model.skinHeight, pixels, transparentIndex: null, fullbright: true }
-        : { kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true }, geometry.vertices, geometry.indices, false, false, geometry.vertices);
-      break;
-    }
-    case "q2-md2": {
-      const vertices = interpolateSceneMd2(model, entity, frame, previousFrame, backLerp, shell !== null);
-      const image = shell === null ? selectedShader("alias", model.skins, entity, options) : { kind: "white" } satisfies ModelImageSelection;
-      if (context.purpose !== "shadow") preparedLighting ??= context.prepareVertexLighting?.(entity, options);
-      const geometry = mapMd2Geometry(model, vertices, (vertex, texCoord, corner) => localVertex(vertex, texCoord, corner, shell !== null));
-      appendGeometry("alias", image, geometry, shell !== null, false, vertices);
-      break;
-    }
-    case "q3-md3": {
-      const choices = options.q3Lods ?? [model];
-      lod = lodIndex(entity, choices.length, radiusFromBounds(at(model.frames, frame, "MD3 frame").bounds), context, options);
-      const selected = at(choices, lod, "MD3 LOD");
-      if (selected === null) throw new RangeError(`Missing source MD3 LOD slot ${lod}`);
-      const fogFrame = at(selected.frames, frame, "MD3 fog frame");
-      fogSphere = { localOrigin: fogFrame.localOrigin, radius: fogFrame.radius };
-      if (context.noCull !== true && context.frustum !== undefined && sourceCull !== "in" && Number.isInteger(entity.skin) && entity.skin >= 0) {
-        const envelope = md3WorldEnvelope(selected, frame, previousFrame, backLerp, entity.transform);
-        if (envelope !== null && cullGeometry(envelope, context) === "out") { bounds = envelope; break; }
-      }
-      const md3Cache = poseCaches(context)?.md3;
-      for (const surface of selected.surfaces) {
-        const current = at(surface.frames, frame, "MD3 frame");
-        let vertices: typeof current | ReturnType<typeof interpolateMd3Frames> = current;
-        if (backLerp !== 0) {
-          const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
-          const poseKey = md3Cache?.key([surface], key);
-          vertices = (poseKey === undefined ? undefined : md3Cache?.get(poseKey)) ?? interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
-          if (md3Cache !== undefined && poseKey !== undefined) md3Cache.set(poseKey, vertices);
+  } else if (sourceCull !== "out")
+    switch (model.kind) {
+      case "q1-mdl": {
+        const current = sampleTimedFrame(at(model.frames, frame, "MDL frame"), context.timeSeconds, options.syncBase ?? 0);
+        const previous = sampleTimedFrame(at(model.frames, previousFrame, "MDL old frame"), context.timeSeconds, options.syncBase ?? 0);
+        const mdlCache = poseCaches(context)?.mdl;
+        const mdlKey = mdlCache?.key([current, previous], lerpKey(backLerp));
+        let geometry = mdlKey === undefined ? undefined : mdlCache?.get(mdlKey);
+        if (geometry === undefined) {
+          geometry = buildMdlGeometry(model, interpolateAliasFrames(current, previous, backLerp));
+          if (mdlCache !== undefined && mdlKey !== undefined) mdlCache.set(mdlKey, geometry);
         }
-        append(surface.name, selectedShader(surface.name, surface.shaders, entity, options),
-          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })), surface.indices, false, false, vertices);
+        const skin = entity.skin >= 0 && entity.skin < model.skins.length ? entity.skin : 0;
+        const skinFrames = at(model.skins, skin, "MDL skin");
+        const pixels = sampleTimedFrame(skinFrames, context.timeSeconds, options.syncBase ?? 0);
+        const skinFrame = skinFrames.kind === "single" ? 0 : skinFrames.frames.findIndex(item => item.frame === pixels);
+        append(
+          "alias",
+          options.indexedSkin === undefined
+            ? {
+                kind: "indexed",
+                name: `${entity.resource.id}:skin:${skin}:${skinFrame}`,
+                width: model.skinWidth,
+                height: model.skinHeight,
+                pixels,
+                transparentIndex: null,
+                fullbright: true,
+              }
+            : { kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true },
+          geometry.vertices,
+          geometry.indices,
+          false,
+          false,
+          geometry.vertices,
+        );
+        break;
       }
-      break;
-    }
-    case "q3-md4": {
-      lod = lodIndex(entity, model.lods.length, at(model.frames, frame, "MD4 frame").radius, context, options);
-      const md4Cache = poseCaches(context)?.md4;
-      for (const surface of at(model.lods, lod, "MD4 LOD").surfaces) {
-        const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
-        const poseKey = md4Cache?.key([surface], key);
-        let vertices = poseKey === undefined ? undefined : md4Cache?.get(poseKey);
-        if (vertices === undefined) {
-          vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
-          if (md4Cache !== undefined && poseKey !== undefined) md4Cache.set(poseKey, vertices);
-        }
-        append(surface.name, selectedShader(surface.name, [surface.shader], entity, options),
-          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })), surface.triangles.flatMap(triangle => triangle.indices), false, false, vertices);
+      case "q2-md2": {
+        const vertices = interpolateSceneMd2(model, entity, frame, previousFrame, backLerp, shell !== null);
+        const image = shell === null ? selectedShader("alias", model.skins, entity, options) : ({ kind: "white" } satisfies ModelImageSelection);
+        if (context.purpose !== "shadow") preparedLighting ??= context.prepareVertexLighting?.(entity, options);
+        const geometry = mapMd2Geometry(model, vertices, (vertex, texCoord, corner) => localVertex(vertex, texCoord, corner, shell !== null));
+        appendGeometry("alias", image, geometry, shell !== null, false, vertices);
+        break;
       }
-      break;
-    }
-    case "md5": {
-      const selection = model.skinSelection;
-      const elapsed = selection.kind === "q1-mdl-replacement" && selection.timing.kind === "elapsed-time"
-        ? Math.floor((context.timeSeconds + (options.syncBase ?? 0)) * selection.timing.frameRate) : null;
-      const elapsedFrame = elapsed === null ? null : ((elapsed % model.frames.length) + model.frames.length) % model.frames.length;
-      const poseFrame = elapsedFrame ?? frame, posePrevious = elapsedFrame ?? previousFrame, poseLerp = elapsedFrame === null ? backLerp : 0;
-      const frameKey = Object.is(poseFrame, -0) ? "-0" : poseFrame;
-      const previousKey = Object.is(posePrevious, -0) ? "-0" : posePrevious;
-      const lerpKey = Object.is(poseLerp, -0) ? "-0" : poseLerp;
-      let frames = context.skinningFrame?.poses.get(model), previous = frames?.get(frameKey), lerps = previous?.get(previousKey);
-      const cachedPose = entity.pose.kind === "skeleton" ? undefined : lerps?.get(lerpKey);
-      const joints = entity.pose.kind === "skeleton" ? entity.pose.joints
-        : cachedPose ?? sampleMd5Pose(model, poseFrame, posePrevious, poseLerp);
-      if (entity.pose.kind !== "skeleton" && cachedPose === undefined && context.skinningFrame !== undefined) {
-        if (frames === undefined) { frames = new Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>(); context.skinningFrame.poses.set(model, frames); }
-        if (previous === undefined) { previous = new Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>(); frames.set(frameKey, previous); }
-        if (lerps === undefined) { lerps = new Map<number | "-0", ReturnType<typeof sampleMd5Pose>>(); previous.set(previousKey, lerps); }
-        lerps.set(lerpKey, joints);
-      }
-      const images = model.meshes.map((mesh, index): ModelImageSelection => {
-        let shaders: readonly string[];
-        if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
-        else if (selection.kind === "q1-mdl-replacement") {
-          const groups = at(selection.meshSkinGroups, index, "Q1 replacement mesh skin");
-          shaders = groups.map(group => `${sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0)}.lmp`);
-        } else shaders = [mesh.shader];
-        return shell === null ? selectedShader(`mesh${index}`, shaders, entity, options) : { kind: "white" };
-      });
-      if (context.retainShadowBody !== undefined && context.purpose === "shadow" && shell === null && options.modelBeam === undefined) {
-        const envelope = md5ShadowEnvelope(model.meshes, joints, entity.transform);
-        if (envelope !== null && !context.retainShadowBody(entity, envelope, images, options)) break;
-      }
-      for (const [index, mesh] of model.meshes.entries()) {
-        let poses = context.skinningFrame?.meshes.get(mesh);
-        let skinned = poses?.get(joints);
-        if (skinned === undefined) {
-          skinned = skinMd5Mesh(mesh, joints).map((vertex, index) => ({ ...vertex,
-            texCoord: at(mesh.vertices, index, "MD5 UV").texCoord }));
-          if (context.skinningFrame !== undefined) {
-            if (poses === undefined) { poses = new WeakMap(); context.skinningFrame.meshes.set(mesh, poses); }
-            poses.set(joints, skinned);
+      case "q3-md3": {
+        const choices = options.q3Lods ?? [model];
+        lod = lodIndex(entity, choices.length, radiusFromBounds(at(model.frames, frame, "MD3 frame").bounds), context, options);
+        const selected = at(choices, lod, "MD3 LOD");
+        if (selected === null) throw new RangeError(`Missing source MD3 LOD slot ${lod}`);
+        const fogFrame = at(selected.frames, frame, "MD3 fog frame");
+        fogSphere = { localOrigin: fogFrame.localOrigin, radius: fogFrame.radius };
+        if (context.noCull !== true && context.frustum !== undefined && sourceCull !== "in" && Number.isInteger(entity.skin) && entity.skin >= 0) {
+          const envelope = md3WorldEnvelope(selected, frame, previousFrame, backLerp, entity.transform);
+          if (envelope !== null && cullGeometry(envelope, context) === "out") {
+            bounds = envelope;
+            break;
           }
         }
-        const vertices = shell === null ? skinned : skinned.map(vertex => ({ ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) }));
-        append(`mesh${index}`, at(images, index, "MD5 material"), vertices, mesh.indices, shell !== null, false, shell === null ? vertices : undefined);
+        const md3Cache = poseCaches(context)?.md3;
+        for (const surface of selected.surfaces) {
+          const current = at(surface.frames, frame, "MD3 frame");
+          let vertices: typeof current | ReturnType<typeof interpolateMd3Frames> = current;
+          if (backLerp !== 0) {
+            const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
+            const poseKey = md3Cache?.key([surface], key);
+            vertices =
+              (poseKey === undefined ? undefined : md3Cache?.get(poseKey)) ??
+              interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
+            if (md3Cache !== undefined && poseKey !== undefined) md3Cache.set(poseKey, vertices);
+          }
+          append(
+            surface.name,
+            selectedShader(surface.name, surface.shaders, entity, options),
+            vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })),
+            surface.indices,
+            false,
+            false,
+            vertices,
+          );
+        }
+        break;
       }
-      break;
+      case "q3-md4": {
+        lod = lodIndex(entity, model.lods.length, at(model.frames, frame, "MD4 frame").radius, context, options);
+        const md4Cache = poseCaches(context)?.md4;
+        for (const surface of at(model.lods, lod, "MD4 LOD").surfaces) {
+          const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
+          const poseKey = md4Cache?.key([surface], key);
+          let vertices = poseKey === undefined ? undefined : md4Cache?.get(poseKey);
+          if (vertices === undefined) {
+            vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
+            if (md4Cache !== undefined && poseKey !== undefined) md4Cache.set(poseKey, vertices);
+          }
+          append(
+            surface.name,
+            selectedShader(surface.name, [surface.shader], entity, options),
+            vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })),
+            surface.triangles.flatMap(triangle => triangle.indices),
+            false,
+            false,
+            vertices,
+          );
+        }
+        break;
+      }
+      case "md5": {
+        const selection = model.skinSelection;
+        const elapsed =
+          selection.kind === "q1-mdl-replacement" && selection.timing.kind === "elapsed-time"
+            ? Math.floor((context.timeSeconds + (options.syncBase ?? 0)) * selection.timing.frameRate)
+            : null;
+        const elapsedFrame = elapsed === null ? null : ((elapsed % model.frames.length) + model.frames.length) % model.frames.length;
+        const poseFrame = elapsedFrame ?? frame,
+          posePrevious = elapsedFrame ?? previousFrame,
+          poseLerp = elapsedFrame === null ? backLerp : 0;
+        const frameKey = Object.is(poseFrame, -0) ? "-0" : poseFrame;
+        const previousKey = Object.is(posePrevious, -0) ? "-0" : posePrevious;
+        const lerpKey = Object.is(poseLerp, -0) ? "-0" : poseLerp;
+        let frames = context.skinningFrame?.poses.get(model),
+          previous = frames?.get(frameKey),
+          lerps = previous?.get(previousKey);
+        const cachedPose = entity.pose.kind === "skeleton" ? undefined : lerps?.get(lerpKey);
+        const joints = entity.pose.kind === "skeleton" ? entity.pose.joints : (cachedPose ?? sampleMd5Pose(model, poseFrame, posePrevious, poseLerp));
+        if (entity.pose.kind !== "skeleton" && cachedPose === undefined && context.skinningFrame !== undefined) {
+          if (frames === undefined) {
+            frames = new Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>();
+            context.skinningFrame.poses.set(model, frames);
+          }
+          if (previous === undefined) {
+            previous = new Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>();
+            frames.set(frameKey, previous);
+          }
+          if (lerps === undefined) {
+            lerps = new Map<number | "-0", ReturnType<typeof sampleMd5Pose>>();
+            previous.set(previousKey, lerps);
+          }
+          lerps.set(lerpKey, joints);
+        }
+        const images = model.meshes.map((mesh, index): ModelImageSelection => {
+          let shaders: readonly string[];
+          if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
+          else if (selection.kind === "q1-mdl-replacement") {
+            const groups = at(selection.meshSkinGroups, index, "Q1 replacement mesh skin");
+            shaders = groups.map(group => `${sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0)}.lmp`);
+          } else shaders = [mesh.shader];
+          return shell === null ? selectedShader(`mesh${index}`, shaders, entity, options) : { kind: "white" };
+        });
+        if (context.retainShadowBody !== undefined && context.purpose === "shadow" && shell === null && options.modelBeam === undefined) {
+          const envelope = md5ShadowEnvelope(model.meshes, joints, entity.transform);
+          if (envelope !== null && !context.retainShadowBody(entity, envelope, images, options)) break;
+        }
+        for (const [index, mesh] of model.meshes.entries()) {
+          let poses = context.skinningFrame?.meshes.get(mesh);
+          let skinned = poses?.get(joints);
+          if (skinned === undefined) {
+            skinned = skinMd5Mesh(mesh, joints).map((vertex, index) => ({ ...vertex, texCoord: at(mesh.vertices, index, "MD5 UV").texCoord }));
+            if (context.skinningFrame !== undefined) {
+              if (poses === undefined) {
+                poses = new WeakMap();
+                context.skinningFrame.meshes.set(mesh, poses);
+              }
+              poses.set(joints, skinned);
+            }
+          }
+          const vertices = shell === null ? skinned : skinned.map(vertex => ({ ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) }));
+          append(`mesh${index}`, at(images, index, "MD5 material"), vertices, mesh.indices, shell !== null, false, shell === null ? vertices : undefined);
+        }
+        break;
+      }
+      case "q1-spr": {
+        const frames = at(model.frames, frame, "SPR frame");
+        const selected = sampleTimedFrame(frames, context.timeSeconds, options.syncBase ?? 0);
+        const subframe = frames.kind === "single" ? 0 : frames.frames.findIndex(item => item.frame === selected);
+        const geometry = q1SpriteGeometry(model, selected, entity.transform, context.camera, color, options.spriteRoll ?? 0);
+        append(
+          "sprite",
+          {
+            kind: "indexed",
+            name: `${entity.resource.id}:frame:${frame}:${subframe}`,
+            width: selected.width,
+            height: selected.height,
+            pixels: selected.pixels,
+            transparentIndex: 255,
+            fullbright: true,
+          },
+          geometry.vertices,
+          geometry.indices,
+          true,
+          true,
+        );
+        break;
+      }
+      case "q2-sp2": {
+        const selected = at(model.frames, frame, "SP2 frame");
+        const geometry = spriteQuad(
+          entity.transform.origin,
+          context.camera.axis,
+          {
+            left: -selected.originX * entity.transform.scale.x,
+            right: (selected.width - selected.originX) * entity.transform.scale.x,
+            top: (selected.height - selected.originY) * entity.transform.scale.z,
+            bottom: -selected.originY * entity.transform.scale.z,
+          },
+          color,
+          portal && context.camera.clip.kind === "portal" && context.camera.clip.mirror,
+        );
+        append("sprite", { kind: "external", name: selected.image }, geometry.vertices, geometry.indices, true, true);
+        break;
+      }
+      case "brush-model":
+        break;
     }
-    case "q1-spr": {
-      const frames = at(model.frames, frame, "SPR frame");
-      const selected = sampleTimedFrame(frames, context.timeSeconds, options.syncBase ?? 0);
-      const subframe = frames.kind === "single" ? 0 : frames.frames.findIndex(item => item.frame === selected);
-      const geometry = q1SpriteGeometry(model, selected, entity.transform, context.camera, color, options.spriteRoll ?? 0);
-      append("sprite", { kind: "indexed", name: `${entity.resource.id}:frame:${frame}:${subframe}`, width: selected.width, height: selected.height,
-        pixels: selected.pixels, transparentIndex: 255, fullbright: true }, geometry.vertices, geometry.indices, true, true);
-      break;
-    }
-    case "q2-sp2": {
-      const selected = at(model.frames, frame, "SP2 frame");
-      const geometry = spriteQuad(entity.transform.origin, context.camera.axis, {
-        left: -selected.originX * entity.transform.scale.x, right: (selected.width - selected.originX) * entity.transform.scale.x,
-        top: (selected.height - selected.originY) * entity.transform.scale.z, bottom: -selected.originY * entity.transform.scale.z,
-      }, color, portal && context.camera.clip.kind === "portal" && context.camera.clip.mirror);
-      append("sprite", { kind: "external", name: selected.image }, geometry.vertices, geometry.indices, true, true);
-      break;
-    }
-    case "brush-model": break;
-  }
-  if (bounds === null) for (const surface of surfaces) for (const vertex of surface.geometry.vertices)
-    bounds = addPointToBounds(bounds ?? emptyBounds(), vertex.position);
+  if (bounds === null)
+    for (const surface of surfaces) for (const vertex of surface.geometry.vertices) bounds = addPointToBounds(bounds ?? emptyBounds(), vertex.position);
   const cull = sourceCull ?? cullGeometry(bounds, context);
-  const attachments: PreparedModelEntity[] = [], missingAttachments: string[] = [];
+  const attachments: PreparedModelEntity[] = [],
+    missingAttachments: string[] = [];
   const repaired = entity.pose.kind === "frame" ? { ...entity, pose: { ...entity.pose, frame, previousFrame, backLerp } } : entity;
   for (const attachment of entity.attachments) {
     const tag = modelAttachmentTag(repaired, attachment.tag);
     if (tag === null) missingAttachments.push(attachment.tag);
     else attachments.push(prepareEntityAtTransform(attachSceneEntity(repaired, attachment.entity, tag), attachment.entity, context));
   }
-  return { entity, frame, previousFrame, frameFallback: pose.fallback, lod, bounds, cull, personalModel,
-    surfaces, attachments, missingAttachments, modelEffectFlags: model.kind === "q1-mdl" ? model.flags
-      : model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? model.skinSelection.flags : 0 };
+  return {
+    entity,
+    frame,
+    previousFrame,
+    frameFallback: pose.fallback,
+    lod,
+    bounds,
+    cull,
+    personalModel,
+    surfaces,
+    attachments,
+    missingAttachments,
+    modelEffectFlags:
+      model.kind === "q1-mdl" ? model.flags : model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? model.skinSelection.flags : 0,
+  };
 }
 
-export function prepareSceneEntityGroups(entity: SceneEntity, context: ModelPreparationContext, material: ModelGroupContext): readonly (SceneModelGroup | SceneShadowGroup)[] {
+export function prepareSceneEntityGroups(
+  entity: SceneEntity,
+  context: ModelPreparationContext,
+  material: ModelGroupContext,
+): readonly (SceneModelGroup | SceneShadowGroup)[] {
   return preparedModelGroups(prepareSceneEntity(entity, context), material);
 }
 

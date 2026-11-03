@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { openApplicationTransport, parseIpxRemote, resolveApplicationAddress } from "../../src/app/bootstrap/network/transport.ts";
@@ -13,19 +14,32 @@ class MemorySocket<TAddress extends NetworkAddress> implements DatagramTransport
   readonly sent: { readonly to: TAddress; readonly payload: Uint8Array }[] = [];
   closed = false;
   constructor(readonly address: TAddress) {}
-  send(to: TAddress, payload: Uint8Array): boolean { this.sent.push({ to, payload: payload.slice() }); return true; }
-  poll(): ReceiveEvent<TAddress> | null { return this.queue.poll(); }
-  subscribeReadable(listener: () => void): () => void { return this.queue.subscribe(listener); }
-  close(): void { if (this.closed) return; this.closed = true; this.queue.close(); }
+  send(to: TAddress, payload: Uint8Array): boolean {
+    this.sent.push({ to, payload: payload.slice() });
+    return true;
+  }
+  poll(): ReceiveEvent<TAddress> | null {
+    return this.queue.poll();
+  }
+  subscribeReadable(listener: () => void): () => void {
+    return this.queue.subscribe(listener);
+  }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.queue.close();
+  }
 }
 class MemoryUdp extends MemorySocket<IpAddress> implements ApplicationUdpSocket {
   socks = 0;
   registration = false;
-  async connectSocks(): Promise<void> { this.socks++; }
+  async connectSocks(): Promise<void> {
+    this.socks++;
+  }
   override send(to: IpAddress, payload: Uint8Array): boolean {
     super.send(to, payload);
-    if (this.registration && this.sent.length === 1) this.queue.accept(to,
-      Uint8Array.from([255, 255, 0, 30, 0, 0, 0, 0, 0, 0, 127, 0, 0, 1, 160, 1, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 213, 0, 2]));
+    if (this.registration && this.sent.length === 1)
+      this.queue.accept(to, Uint8Array.from([255, 255, 0, 30, 0, 0, 0, 0, 0, 0, 127, 0, 0, 1, 160, 1, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 213, 0, 2]));
     return true;
   }
 }
@@ -57,11 +71,20 @@ test("source IPX addresses preserve network/node/socket and never resolve as UDP
 
 test("application DOSBox transport sends source payloads and owns the relay through close", async () => {
   for (const family of ["q1", "q2", "q3"] satisfies readonly ("q1" | "q2" | "q3")[]) {
-    const udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 40961)); udp.registration = true;
-    const capabilities: ApplicationTransportCapabilities = { nativeIpx: { kind: "unavailable", reason: "test host" }, bindUdp: async options => {
-      expect(options.port).toBe(0); expect(options.limits?.maxBytes).toBe(1424); return udp;
-    } };
-    const transport = await openApplicationTransport({ selection: { kind: "ipx-dosbox", relay: "127.0.0.1:213" }, family, host: "0.0.0.0", port: 26000, limits }, capabilities);
+    const udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 40961));
+    udp.registration = true;
+    const capabilities: ApplicationTransportCapabilities = {
+      nativeIpx: { kind: "unavailable", reason: "test host" },
+      bindUdp: async options => {
+        expect(options.port).toBe(0);
+        expect(options.limits?.maxBytes).toBe(1424);
+        return udp;
+      },
+    };
+    const transport = await openApplicationTransport(
+      { selection: { kind: "ipx-dosbox", relay: "127.0.0.1:213" }, family, host: "0.0.0.0", port: 26000, limits },
+      capabilities,
+    );
     const remote = parseIpxRemote("00000000:7f000001a002:26000", 26000);
     transport.send(remote, Uint8Array.of(1, 2));
     const sent = udp.sent.at(-1);
@@ -71,50 +94,83 @@ test("application DOSBox transport sends source payloads and owns the relay thro
     await expect(transport.connectSocks(proxy)).rejects.toThrow("SOCKS");
     expect(() => transport.udpSocket()).toThrow("requires a UDP");
     expect(() => transport.send(ipv4Address([127, 0, 0, 1], 26000), new Uint8Array())).toThrow("IPX destination");
-    transport.close(); transport.close(); expect(udp.closed).toBe(true);
+    transport.close();
+    transport.close();
+    expect(udp.closed).toBe(true);
   }
 });
 
 test("application UDP keeps SOCKS and native IPX never falls back to UDP", async () => {
   const udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 27000));
   let binds = 0;
-  const capabilities: ApplicationTransportCapabilities = { nativeIpx: { kind: "unavailable", reason: "no AF_IPX" }, bindUdp: async () => { binds++; return udp; } };
-  await expect(openApplicationTransport({ selection: { kind: "ipx-native" }, family: "q2", host: "0.0.0.0", port: 27910, limits }, capabilities)).rejects.toThrow("no AF_IPX");
+  const capabilities: ApplicationTransportCapabilities = {
+    nativeIpx: { kind: "unavailable", reason: "no AF_IPX" },
+    bindUdp: async () => {
+      binds++;
+      return udp;
+    },
+  };
+  await expect(
+    openApplicationTransport({ selection: { kind: "ipx-native" }, family: "q2", host: "0.0.0.0", port: 27910, limits }, capabilities),
+  ).rejects.toThrow("no AF_IPX");
   expect(binds).toBe(0);
   const transport = await openApplicationTransport({ selection: { kind: "udp" }, family: "q2", host: "0.0.0.0", port: 27910, limits }, capabilities);
-  await transport.connectSocks(proxy); expect(udp.socks).toBe(1);
+  await transport.connectSocks(proxy);
+  expect(udp.socks).toBe(1);
   expect(transport.udpSocket()).toBe(udp);
   expect(() => transport.send(parseIpxRemote("00000000:001122334455", 27910), new Uint8Array())).toThrow("explicitly selected");
-  transport.close(); expect(udp.closed).toBe(true);
-});
-
-test("application cancellation closes a socket allocated while cancellation arrived", async () => {
-  const controller = new AbortController(), udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 27000));
-  const capabilities: ApplicationTransportCapabilities = { nativeIpx: { kind: "unavailable", reason: "no AF_IPX" }, bindUdp: async () => { controller.abort(); return udp; } };
-  await expect(openApplicationTransport({ selection: { kind: "udp" }, family: "q1", host: "0.0.0.0", port: 26000, limits, signal: controller.signal }, capabilities)).rejects.toThrow("The operation was aborted.");
+  transport.close();
   expect(udp.closed).toBe(true);
 });
 
+test("application cancellation closes a socket allocated while cancellation arrived", async () => {
+  const controller = new AbortController(),
+    udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 27000));
+  const capabilities: ApplicationTransportCapabilities = {
+    nativeIpx: { kind: "unavailable", reason: "no AF_IPX" },
+    bindUdp: async () => {
+      controller.abort();
+      return udp;
+    },
+  };
+  await expect(
+    openApplicationTransport({ selection: { kind: "udp" }, family: "q1", host: "0.0.0.0", port: 26000, limits, signal: controller.signal }, capabilities),
+  ).rejects.toThrow("The operation was aborted.");
+  expect(udp.closed).toBe(true);
+});
 
 test("native NetQuake client preserves IPX identity when the accept changes its socket", async () => {
   const { Q1ClientNetwork } = await import("../../src/app/bootstrap/network/q1-client.ts");
   const { encodeNetQuakeControl, decodeNetQuakeControl } = await import("../../src/network/q1/handshake.ts");
   const remote = parseIpxRemote("12345678.001122334455:26000", 26000);
   const socket = new MemorySocket<IpAddress | IpxAddress>(ipxAddress(0x12345678, [0, 1, 2, 3, 4, 5], 16386));
-  const client = new Q1ClientNetwork({ transport: socket, remote,
+  const client = new Q1ClientNetwork({
+    transport: socket,
+    remote,
     seat: { name: "IPX fixture", color: 0, spawnParameters: "", extensionFlags: null },
-    host: { receive: async () => {}, command: () => { throw new Error("No movement before signon"); }, disconnected: () => {} } });
+    host: {
+      receive: async () => {},
+      command: () => {
+        throw new Error("No movement before signon");
+      },
+      disconnected: () => {},
+    },
+  });
   try {
     await client.poll(0);
-    const request = socket.sent[0]; if (request === undefined) throw new Error("Missing native connect");
+    const request = socket.sent[0];
+    if (request === undefined) throw new Error("Missing native connect");
     expect(request.to).toEqual(remote);
     expect(decodeNetQuakeControl(request.payload)).toEqual({ kind: "connect-request", game: "QUAKE", version: 3 });
     socket.queue.accept(remote, encodeNetQuakeControl({ kind: "accept", port: 26001 }));
     await client.poll(1);
     expect(client.serverAddress).toEqual({ ...remote, port: 26001 });
     expect(client.phase).toBe("loading");
-    client.command("prespawn"); await client.poll(2);
+    client.command("prespawn");
+    await client.poll(2);
     expect(socket.sent.at(-1)?.to).toEqual({ ...remote, port: 26001 });
-  } finally { client.close(); }
+  } finally {
+    client.close();
+  }
   expect(socket.closed).toBe(true);
 });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { q3ShotgunEndpoints } from "../base/game/ballistics-math.ts";
 import { q3GrappleCable } from "../base/game/grapple.ts";
 import type { Q3ShotgunEvent } from "../base/game/hitscan.ts";
@@ -7,11 +8,25 @@ import type { PcmSound } from "../../../audio/wav.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { modelBounds } from "./model-access.ts";
 import { add3, dot3, length3, normalize3, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
-import { qvmAngleMod as angleMod, qvmAngleVectors as angleVectors, qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/math.ts";
+import {
+  qvmAngleMod as angleMod,
+  qvmAngleVectors as angleVectors,
+  qvmAnglesToAxis as anglesToAxis,
+  qvmRotatePointAroundVector as rotatePointAroundVector,
+} from "../../../core/math.ts";
 import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { GameRandom } from "../base/game/numeric.ts";
-import { DEFAULT_MODEL, createModelEntity, createSpriteEntity, createLightningEntity, createRailCoreEntity, RF_DEPTHHACK, RF_FIRST_PERSON, RF_MINLIGHT } from "./ref-entity.ts";
+import {
+  DEFAULT_MODEL,
+  createModelEntity,
+  createSpriteEntity,
+  createLightningEntity,
+  createRailCoreEntity,
+  RF_DEPTHHACK,
+  RF_FIRST_PERSON,
+  RF_MINLIGHT,
+} from "./ref-entity.ts";
 import type { RefModelEntity, RefPoly, SceneModel, SceneShader } from "./ref-entity.ts";
 import type { RendererResources } from "./resources.ts";
 import { EntityType, ItemType, MoveType, PersistentIndex, Powerup, Team, Weapon, WeaponState, statSchema } from "../base/shared/definitions.ts";
@@ -33,7 +48,11 @@ import type { ImpactMarkSystem } from "./marks.ts";
 import type { ParticleSystem } from "../../../render/scene/particles/q3-system.ts";
 
 const f = Math.fround;
-export enum ImpactSound { DEFAULT = 0, METAL = 1, FLESH = 2 }
+export enum ImpactSound {
+  DEFAULT = 0,
+  METAL = 1,
+  FLESH = 2,
+}
 export interface ShotgunPresentationHost<Target> {
   readonly smokeEnabled: boolean;
   trace(start: Vec3, end: Vec3): { readonly end: Vec3; readonly normal: Vec3; readonly surfaceFlags: number; readonly target: Target | null };
@@ -46,10 +65,11 @@ export interface ShotgunPresentationHost<Target> {
   smoke(origin: Vec3): void;
 }
 export function emitShotgunPresentation<Target>(host: ShotgunPresentationHost<Target>, shot: Q3ShotgunEvent): void {
-  if (host.smokeEnabled && (host.contents(shot.muzzle) & CONTENTS_WATER) === 0)
-    host.smoke(ma(shot.muzzle, 32, normalize3(sub3(shot.direction, shot.muzzle))));
+  if (host.smokeEnabled && (host.contents(shot.muzzle) & CONTENTS_WATER) === 0) host.smoke(ma(shot.muzzle, 32, normalize3(sub3(shot.direction, shot.muzzle))));
   for (const end of q3ShotgunEndpoints(shot.muzzle, shot.direction, shot.seed)) {
-    const trace = host.trace(shot.muzzle, end), sourceContents = host.contents(shot.muzzle), destinationContents = host.contents(trace.end);
+    const trace = host.trace(shot.muzzle, end),
+      sourceContents = host.contents(shot.muzzle),
+      destinationContents = host.contents(trace.end);
     if (sourceContents === destinationContents) {
       if ((sourceContents & CONTENTS_WATER) !== 0) host.bubbles(shot.muzzle, trace.end);
     } else if ((sourceContents & CONTENTS_WATER) !== 0) host.bubbles(shot.muzzle, host.water(end, shot.muzzle));
@@ -60,7 +80,11 @@ export function emitShotgunPresentation<Target>(host: ShotgunPresentationHost<Ta
   }
 }
 export type BulletHit = { readonly kind: "wall"; readonly normal: Vec3 } | { readonly kind: "flesh"; readonly entityNum: number };
-export interface MutableVec3 { x: number; y: number; z: number }
+export interface MutableVec3 {
+  x: number;
+  y: number;
+  z: number;
+}
 export interface ClientWeaponInfo extends PacketWeaponInfo {
   readonly item: ItemDefinition | null;
   readonly handsModel: SceneModel;
@@ -77,14 +101,21 @@ export interface ClientWeaponInfo extends PacketWeaponInfo {
 }
 
 export class ClientWeaponSelection {
-  constructor(readonly state: ClientGameState, private readonly selected?: (weapon: number) => void) {}
+  constructor(
+    readonly state: ClientGameState,
+    private readonly selected?: (weapon: number) => void,
+  ) {}
   private selectable(number: number): boolean {
     const snap = this.state.snap;
     if (snap === null) throw new Error("CG_WeaponSelectable: cg.snap == NULL");
     return snap.playerState.ammo.get(number) !== 0 && (snap.playerState.stats.get(statSchema(this.state.product).weapons) & (1 << number)) !== 0;
   }
-  nextWeapon(): void { this.cycleWeapon(1); }
-  previousWeapon(): void { this.cycleWeapon(-1); }
+  nextWeapon(): void {
+    this.cycleWeapon(1);
+  }
+  previousWeapon(): void {
+    this.cycleWeapon(-1);
+  }
   private cycleWeapon(direction: 1 | -1): void {
     const snap = this.state.snap;
     if (snap === null || (snap.playerState.pmFlags & MoveFlags.FOLLOW) !== 0) return;
@@ -92,7 +123,10 @@ export class ClientWeaponSelection {
     const original = this.state.weaponSelect;
     for (let i = 0; i < 16; i++) {
       this.state.weaponSelect = (this.state.weaponSelect + direction + 16) % 16;
-      if (this.state.weaponSelect !== Weapon.WP_GAUNTLET && this.selectable(this.state.weaponSelect)) { this.selected?.(this.state.weaponSelect); return; }
+      if (this.state.weaponSelect !== Weapon.WP_GAUNTLET && this.selectable(this.state.weaponSelect)) {
+        this.selected?.(this.state.weaponSelect);
+        return;
+      }
     }
     this.state.weaponSelect = original;
   }
@@ -101,31 +135,73 @@ export class ClientWeaponSelection {
     if (snap === null || (snap.playerState.pmFlags & MoveFlags.FOLLOW) !== 0 || number < 1 || number > 15) return;
     this.state.weaponSelectTime = this.state.time;
     if ((snap.playerState.stats.get(statSchema(this.state.product).weapons) & (1 << number)) !== 0) {
-      this.state.weaponSelect = number; this.selected?.(number);
+      this.state.weaponSelect = number;
+      this.selected?.(number);
     }
   }
   outOfAmmoChange(): void {
     this.state.weaponSelectTime = this.state.time;
-    for (let i = 15; i > 0; i--) if (this.selectable(i)) { this.state.weaponSelect = i; return; }
+    for (let i = 15; i > 0; i--)
+      if (this.selectable(i)) {
+        this.state.weaponSelect = i;
+        return;
+      }
   }
 }
 
 type WeaponModelName = "machinegunBrass" | "shotgunBrass" | "dishFlash" | "ringFlash" | "bulletFlash";
-type WeaponShaderName = "smokePuff" | "nailPuff" | "shotgunSmokePuff" | "invis" | "battleWeapon" | "quadWeapon"
-  | "select" | "noammo" | "holeMark" | "burnMark" | "energyMark" | "bulletMark" | "tracer";
-type WeaponSoundName = "quad" | "nailHitFlesh" | "nailHitMetal" | "nailHit" | "proxExplosion"
-  | "rocketExplosion" | "plasmaExplosion" | "chaingunHitFlesh" | "chaingunHitMetal" | "chaingunHit"
-  | "ricochet1" | "ricochet2" | "ricochet3" | "tracer";
+type WeaponShaderName =
+  | "smokePuff"
+  | "nailPuff"
+  | "shotgunSmokePuff"
+  | "invis"
+  | "battleWeapon"
+  | "quadWeapon"
+  | "select"
+  | "noammo"
+  | "holeMark"
+  | "burnMark"
+  | "energyMark"
+  | "bulletMark"
+  | "tracer";
+type WeaponSoundName =
+  | "quad"
+  | "nailHitFlesh"
+  | "nailHitMetal"
+  | "nailHit"
+  | "proxExplosion"
+  | "rocketExplosion"
+  | "plasmaExplosion"
+  | "chaingunHitFlesh"
+  | "chaingunHitMetal"
+  | "chaingunHit"
+  | "ricochet1"
+  | "ricochet2"
+  | "ricochet3"
+  | "tracer";
 export interface WeaponPresentationMedia {
   readonly models: Readonly<Record<WeaponModelName, SceneModel>>;
   readonly shaders: Readonly<Record<WeaponShaderName, SceneShader | null>>;
   readonly sounds: Readonly<Record<WeaponSoundName, PcmSound | null>>;
 }
 export interface WeaponPresentationSettings {
-  readonly brassTime: number; readonly railTrailTime: number; readonly oldRail: boolean; readonly noProjectileTrail: boolean;
-  readonly oldPlasma: boolean; readonly oldRocket: boolean; readonly trueLightning: number;
-  readonly drawGun: boolean; readonly fov: number; readonly gunX: number; readonly gunY: number; readonly gunZ: number; readonly gunFrame: number;
-  readonly tracerLength: number; readonly tracerWidth: number; readonly tracerChance: number; readonly hardware: "generic" | "ragepro";
+  readonly brassTime: number;
+  readonly railTrailTime: number;
+  readonly oldRail: boolean;
+  readonly noProjectileTrail: boolean;
+  readonly oldPlasma: boolean;
+  readonly oldRocket: boolean;
+  readonly trueLightning: number;
+  readonly drawGun: boolean;
+  readonly fov: number;
+  readonly gunX: number;
+  readonly gunY: number;
+  readonly gunZ: number;
+  readonly gunFrame: number;
+  readonly tracerLength: number;
+  readonly tracerWidth: number;
+  readonly tracerChance: number;
+  readonly hardware: "generic" | "ragepro";
 }
 export interface WeaponSelectionDrawing {
   fadeColor(start: number, duration: number): Vec4 | null;
@@ -149,20 +225,36 @@ export interface ClientWeaponHost extends Pick<PacketEntityImports, "addRefEntit
   sound(path: string, compressed: false): PcmSound | null;
   addPoly(poly: RefPoly): void;
 }
-function identity(): Axis { return [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]; }
-function ma(origin: Vec3, scale: number, direction: Vec3): Vec3 { return add3(origin, scale3(direction, scale)); }
+function identity(): Axis {
+  return [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
+}
+function ma(origin: Vec3, scale: number, direction: Vec3): Vec3 {
+  return add3(origin, scale3(direction, scale));
+}
 function transform(value: Vec3, axis: Axis): Vec3 {
-  return vec3(dot3(value, vec3(axis[0].x, axis[1].x, axis[2].x)), dot3(value, vec3(axis[0].y, axis[1].y, axis[2].y)), dot3(value, vec3(axis[0].z, axis[1].z, axis[2].z)));
+  return vec3(
+    dot3(value, vec3(axis[0].x, axis[1].x, axis[2].x)),
+    dot3(value, vec3(axis[0].y, axis[1].y, axis[2].y)),
+    dot3(value, vec3(axis[0].z, axis[1].z, axis[2].z)),
+  );
 }
 function bytes(color: Vec3, scale: number, alpha: number): Vec4 {
   return vec4(qvmFloatToInt(f(color.x * scale)) & 255, qvmFloatToInt(f(color.y * scale)) & 255, qvmFloatToInt(f(color.z * scale)) & 255, alpha);
 }
-const WHITE_BYTES = vec4(255, 255, 255, 255), ZERO = vec3(0, 0, 0);
+const WHITE_BYTES = vec4(255, 255, 255, 255),
+  ZERO = vec3(0, 0, 0);
 const POINT_BOUNDS = { min: ZERO, max: ZERO };
-const CONTENTS_WATER = 32, MASK_SHOT = 1 | 0x2000000 | 0x4000000, SURF_NOIMPACT = 16, SURF_METALSTEPS = 4096;
+const CONTENTS_WATER = 32,
+  MASK_SHOT = 1 | 0x2000000 | 0x4000000,
+  SURF_NOIMPACT = 16,
+  SURF_METALSTEPS = 4096;
 
 export class ClientWeaponRuntime extends ClientWeaponSelection {
-  constructor(state: ClientGameState, readonly registry: ClientWeaponMediaRegistry, readonly host: ClientWeaponHost) {
+  constructor(
+    state: ClientGameState,
+    readonly registry: ClientWeaponMediaRegistry,
+    readonly host: ClientWeaponHost,
+  ) {
     super(state);
     if (state.product !== registry.product) throw new Error("Weapon media product differs from cgame state");
   }
@@ -184,11 +276,23 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     if (weapon.ejectBrass !== null && this.host.settings().brassTime > 0) this.ejectBrass(cent, weapon.ejectBrass);
   }
   private ejectBrass(cent: ClientEntity, kind: "machinegun" | "shotgun" | "nailgun"): void {
-    const axis = anglesToAxis(cent.lerpAngles), time = this.state.time, random = this.host.random;
+    const axis = anglesToAxis(cent.lerpAngles),
+      time = this.state.time,
+      random = this.host.random;
     if (kind === "nailgun") {
-      const smoke = this.host.effects.smokePuff({ origin: add3(cent.lerpOrigin, transform(vec3(0, -12, 24), axis)), velocity: vec3(0, 0, 64),
-        radius: 32, color: vec4(1, 1, 1, 0.33), duration: 700, startTime: time, fadeInTime: 0, flags: 0, shader: this.host.media.shaders.smokePuff });
-      smoke.leType = "scale-fade"; return;
+      const smoke = this.host.effects.smokePuff({
+        origin: add3(cent.lerpOrigin, transform(vec3(0, -12, 24), axis)),
+        velocity: vec3(0, 0, 64),
+        radius: 32,
+        color: vec4(1, 1, 1, 0.33),
+        duration: 700,
+        startTime: time,
+        fadeInTime: 0,
+        flags: 0,
+        shader: this.host.media.shaders.smokePuff,
+      });
+      smoke.leType = "scale-fade";
+      return;
     }
     const brassTime = this.host.settings().brassTime;
     if (brassTime <= 0) return;
@@ -196,77 +300,149 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     for (let i = 0; i < (shotgun ? 2 : 1); i++) {
       const ref = createModelEntity(this.host.media.models[shotgun ? "shotgunBrass" : "machinegunBrass"]);
       const le = this.host.localEntities.allocate("fragment", ref);
-      const velocity = shotgun ? vec3(f(60 + f(60 * random.crandom())), f((i === 0 ? 40 : -40) + f(10 * random.crandom())), f(100 + f(50 * random.crandom())))
+      const velocity = shotgun
+        ? vec3(f(60 + f(60 * random.crandom())), f((i === 0 ? 40 : -40) + f(10 * random.crandom())), f(100 + f(50 * random.crandom())))
         : vec3(0, f(-50 + f(40 * random.crandom())), f(100 + f(50 * random.crandom())));
       le.startTime = time;
-      le.endTime = qvmFloatToInt(f(f((time + Math.imul(brassTime, shotgun ? 3 : 1)) | 0) + f(f(shotgun ? brassTime : Math.trunc(brassTime / 4)) * random.random())));
+      le.endTime = qvmFloatToInt(
+        f(f((time + Math.imul(brassTime, shotgun ? 3 : 1)) | 0) + f(f(shotgun ? brassTime : Math.trunc(brassTime / 4)) * random.random())),
+      );
       const posTime = shotgun ? time : (time - (random.rand() & 15)) | 0;
       ref.origin = add3(cent.lerpOrigin, transform(vec3(8, shotgun ? 0 : -4, 24), axis));
       const water = (this.host.prediction.pointContents(ref.origin, -1) & CONTENTS_WATER) !== 0 ? f(0.1) : 1;
       le.pos = { type: TrajectoryType.TR_GRAVITY, time: posTime, duration: 0, base: { ...ref.origin }, delta: scale3(transform(velocity, axis), water) };
-      ref.axis = identity(); le.bounceFactor = shotgun ? f(0.3) : f(f(0.4) * water);
-      le.angles = { type: TrajectoryType.TR_LINEAR, time, duration: 0, base: vec3(random.rand() & 31, random.rand() & 31, random.rand() & 31), delta: shotgun ? vec3(1, 0.5, 0) : vec3(2, 1, 0) };
-      le.leFlags = LocalEntityFlags.TUMBLE; le.leBounceSoundType = "brass"; le.leMarkType = "none";
+      ref.axis = identity();
+      le.bounceFactor = shotgun ? f(0.3) : f(f(0.4) * water);
+      le.angles = {
+        type: TrajectoryType.TR_LINEAR,
+        time,
+        duration: 0,
+        base: vec3(random.rand() & 31, random.rand() & 31, random.rand() & 31),
+        delta: shotgun ? vec3(1, 0.5, 0) : vec3(2, 1, 0),
+      };
+      le.leFlags = LocalEntityFlags.TUMBLE;
+      le.leBounceSoundType = "brass";
+      le.leMarkType = "none";
     }
   }
   railTrail(clientNum: number, start: MutableVec3, end: Vec3): void {
     emitRailTrail(this.state.time, this.registry, this.host, clientNum, start, end);
   }
   missileTrail(kind: MissileTrail, cent: ClientEntity, weapon: PacketWeaponInfo): void {
-    if (kind === "grapple") { this.grappleTrail(cent, weapon); return; }
-    if (kind === "plasma") { this.plasmaTrail(cent, weapon); return; }
+    if (kind === "grapple") {
+      this.grappleTrail(cent, weapon);
+      return;
+    }
+    if (kind === "plasma") {
+      this.plasmaTrail(cent, weapon);
+      return;
+    }
     if (this.host.settings().noProjectileTrail) return;
-    const es = cent.currentState, time = this.state.time;
+    const es = cent.currentState,
+      time = this.state.time;
     let t = Math.imul(50, Math.trunc(((cent.trailTime + 50) | 0) / 50));
-    const origin = evaluateTrajectory(es.pos, time), contents = this.host.prediction.pointContents(origin, -1);
-    if (es.pos.type === TrajectoryType.TR_STATIONARY) { cent.trailTime = time; return; }
-    const previous = evaluateTrajectory(es.pos, cent.trailTime), lastContents = this.host.prediction.pointContents(previous, -1);
+    const origin = evaluateTrajectory(es.pos, time),
+      contents = this.host.prediction.pointContents(origin, -1);
+    if (es.pos.type === TrajectoryType.TR_STATIONARY) {
+      cent.trailTime = time;
+      return;
+    }
+    const previous = evaluateTrajectory(es.pos, cent.trailTime),
+      lastContents = this.host.prediction.pointContents(previous, -1);
     cent.trailTime = time;
     if ((contents & (32 | 16 | 8)) !== 0) {
       if ((contents & lastContents & CONTENTS_WATER) !== 0) this.host.effects.bubbleTrail(previous, origin, 8);
       return;
     }
     for (; t <= time; t = (t + 50) | 0) {
-      const smoke = this.host.effects.smokePuff({ origin: evaluateTrajectory(es.pos, t), velocity: ZERO, radius: weapon.trailRadius,
-        color: vec4(1, 1, 1, 0.33), duration: weapon.trailTime, startTime: t, fadeInTime: 0, flags: 0,
-        shader: this.host.media.shaders[kind === "nail" ? "nailPuff" : "smokePuff"] });
+      const smoke = this.host.effects.smokePuff({
+        origin: evaluateTrajectory(es.pos, t),
+        velocity: ZERO,
+        radius: weapon.trailRadius,
+        color: vec4(1, 1, 1, 0.33),
+        duration: weapon.trailTime,
+        startTime: t,
+        fadeInTime: 0,
+        flags: 0,
+        shader: this.host.media.shaders[kind === "nail" ? "nailPuff" : "smokePuff"],
+      });
       smoke.leType = "scale-fade";
     }
   }
   private plasmaTrail(cent: ClientEntity, _weapon: PacketWeaponInfo): void {
-    emitPlasmaTrail(this.state.time, evaluateTrajectory(cent.currentState.pos, this.state.time), cent.lerpAngles, cent.currentState.weapon, this.registry, this.host);
+    emitPlasmaTrail(
+      this.state.time,
+      evaluateTrajectory(cent.currentState.pos, this.state.time),
+      cent.lerpAngles,
+      cent.currentState.weapon,
+      this.registry,
+      this.host,
+    );
   }
   grappleTrail(cent: ClientEntity, _weapon: PacketWeaponInfo): void {
-    const origin = evaluateTrajectory(cent.currentState.pos, this.state.time); cent.trailTime = this.state.time;
-    const owner = this.state.entityAt(cent.currentState.otherEntityNum), cable = q3GrappleCable(owner.lerpOrigin, angleVectors(owner.lerpAngles).up, origin);
+    const origin = evaluateTrajectory(cent.currentState.pos, this.state.time);
+    cent.trailTime = this.state.time;
+    const owner = this.state.entityAt(cent.currentState.otherEntityNum),
+      cable = q3GrappleCable(owner.lerpOrigin, angleVectors(owner.lerpAngles).up, origin);
     if (cable === null) return;
-    const beam = createLightningEntity(); beam.origin = cable.start; beam.oldOrigin = cable.end;
-    beam.customShader = this.registry.effects.lightningShader; beam.shaderRGBA = WHITE_BYTES; this.host.addRefEntity(beam);
+    const beam = createLightningEntity();
+    beam.origin = cable.start;
+    beam.oldOrigin = cable.end;
+    beam.customShader = this.registry.effects.lightningShader;
+    beam.shaderRGBA = WHITE_BYTES;
+    this.host.addRefEntity(beam);
   }
   missileHitWall(weapon: Weapon, clientNum: number, origin: Vec3, direction: Vec3, soundType: ImpactSound): void {
     emitWeaponImpact(this.state.product, this.registry, this.host, weapon, clientNum, origin, direction, soundType);
   }
   missileHitPlayer(weapon: Weapon, origin: Vec3, direction: Vec3, entityNum: number): void {
     this.host.effects.bleed(origin, entityNum);
-    if (weapon === Weapon.WP_GRENADE_LAUNCHER || weapon === Weapon.WP_ROCKET_LAUNCHER || (this.state.product === "missionpack"
-      && (weapon === Weapon.WP_NAILGUN || weapon === Weapon.WP_CHAINGUN || weapon === Weapon.WP_PROX_LAUNCHER))) {
+    if (
+      weapon === Weapon.WP_GRENADE_LAUNCHER ||
+      weapon === Weapon.WP_ROCKET_LAUNCHER ||
+      (this.state.product === "missionpack" && (weapon === Weapon.WP_NAILGUN || weapon === Weapon.WP_CHAINGUN || weapon === Weapon.WP_PROX_LAUNCHER))
+    ) {
       this.missileHitWall(weapon, 0, origin, direction, ImpactSound.FLESH);
     }
   }
   shotgunFire(es: import("../base/shared/entity-state.ts").EntityState): void {
     const prediction = this.host.prediction;
-    emitShotgunPresentation({ smokeEnabled: this.host.settings().hardware !== "ragepro",
-      trace: (start, end) => { const trace = prediction.trace(start, end, POINT_BOUNDS, es.otherEntityNum, MASK_SHOT);
-        return { end: trace.end, normal: trace.contact.kind === "plane" ? trace.contact.plane.normal : ZERO, surfaceFlags: trace.surfaceFlags, target: trace.entityNum }; },
-      water: (start, end) => prediction.collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER }).end,
-      contents: point => prediction.collision.pointContents(point),
-      isPlayer: target => this.state.entityAt(target).currentState.eType === EntityType.ET_PLAYER,
-      blood: (point, normal, target) => this.missileHitPlayer(Weapon.WP_SHOTGUN, point, normal, target),
-      wall: (point, normal, sound) => this.missileHitWall(Weapon.WP_SHOTGUN, 0, point, normal, sound),
-      bubbles: (start, end) => { this.host.effects.bubbleTrail(start, end, 32); },
-      smoke: origin => { this.host.effects.smokePuff({ origin, velocity: vec3(0, 0, 8), radius: 32, color: vec4(1, 1, 1, 0.33), duration: 900,
-        startTime: this.state.time, fadeInTime: 0, flags: LocalEntityFlags.PUFF_DONT_SCALE, shader: this.host.media.shaders.shotgunSmokePuff }); },
-    }, { muzzle: es.pos.base, direction: es.origin2, seed: es.eventParm });
+    emitShotgunPresentation(
+      {
+        smokeEnabled: this.host.settings().hardware !== "ragepro",
+        trace: (start, end) => {
+          const trace = prediction.trace(start, end, POINT_BOUNDS, es.otherEntityNum, MASK_SHOT);
+          return {
+            end: trace.end,
+            normal: trace.contact.kind === "plane" ? trace.contact.plane.normal : ZERO,
+            surfaceFlags: trace.surfaceFlags,
+            target: trace.entityNum,
+          };
+        },
+        water: (start, end) => prediction.collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER }).end,
+        contents: point => prediction.collision.pointContents(point),
+        isPlayer: target => this.state.entityAt(target).currentState.eType === EntityType.ET_PLAYER,
+        blood: (point, normal, target) => this.missileHitPlayer(Weapon.WP_SHOTGUN, point, normal, target),
+        wall: (point, normal, sound) => this.missileHitWall(Weapon.WP_SHOTGUN, 0, point, normal, sound),
+        bubbles: (start, end) => {
+          this.host.effects.bubbleTrail(start, end, 32);
+        },
+        smoke: origin => {
+          this.host.effects.smokePuff({
+            origin,
+            velocity: vec3(0, 0, 8),
+            radius: 32,
+            color: vec4(1, 1, 1, 0.33),
+            duration: 900,
+            startTime: this.state.time,
+            fadeInTime: 0,
+            flags: LocalEntityFlags.PUFF_DONT_SCALE,
+            shader: this.host.media.shaders.shotgunSmokePuff,
+          });
+        },
+      },
+      { muzzle: es.pos.base, direction: es.origin2, seed: es.eventParm },
+    );
   }
   private muzzlePoint(entityNum: number): Vec3 | null {
     const snap = this.state.snap;
@@ -276,19 +452,28 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     }
     const cent = this.state.entityAt(entityNum);
     if (!cent.currentValid) return null;
-    const es = cent.currentState, anim = es.legsAnim & ~128;
-    return ma(add3(es.pos.base, vec3(0, 0, anim === PlayerAnimation.LEGS_WALKCR || anim === PlayerAnimation.LEGS_IDLECR ? 12 : 26)), 14, angleVectors(es.apos.base).forward);
+    const es = cent.currentState,
+      anim = es.legsAnim & ~128;
+    return ma(
+      add3(es.pos.base, vec3(0, 0, anim === PlayerAnimation.LEGS_WALKCR || anim === PlayerAnimation.LEGS_IDLECR ? 12 : 26)),
+      14,
+      angleVectors(es.apos.base).forward,
+    );
   }
   bullet(end: Vec3, source: number, hit: BulletHit): void {
     if (source >= 0 && this.host.settings().tracerChance > 0) {
       const start = this.muzzlePoint(source);
       if (start !== null) {
-        const collision = this.host.prediction.collision, a = collision.pointContents(start), b = collision.pointContents(end);
+        const collision = this.host.prediction.collision,
+          a = collision.pointContents(start),
+          b = collision.pointContents(end);
         if (a === b && (a & CONTENTS_WATER) !== 0) this.host.effects.bubbleTrail(start, end, 32);
         else if ((a & CONTENTS_WATER) !== 0) {
-          const water = collision.trace({ start: end, end: start, shape: { kind: "point" }, mask: CONTENTS_WATER }); this.host.effects.bubbleTrail(start, water.end, 32);
+          const water = collision.trace({ start: end, end: start, shape: { kind: "point" }, mask: CONTENTS_WATER });
+          this.host.effects.bubbleTrail(start, water.end, 32);
         } else if ((b & CONTENTS_WATER) !== 0) {
-          const water = collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER }); this.host.effects.bubbleTrail(water.end, end, 32);
+          const water = collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER });
+          this.host.effects.bubbleTrail(water.end, end, 32);
         }
         if (this.host.random.random() < this.host.settings().tracerChance) this.tracer(start, end);
       }
@@ -297,18 +482,26 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     else this.missileHitWall(Weapon.WP_MACHINEGUN, 0, end, hit.normal, ImpactSound.DEFAULT);
   }
   tracer(source: Vec3, destination: Vec3): void {
-    const delta = sub3(destination, source), length = length3(delta), forward = normalize3(delta);
+    const delta = sub3(destination, source),
+      length = length3(delta),
+      forward = normalize3(delta);
     if (length < 100) return;
-    const settings = this.host.settings(), begin = f(50 + f(this.host.random.random() * f(length - 60)));
-    const end = Math.min(f(begin + settings.tracerLength), length), start = ma(source, begin, forward), finish = ma(source, end, forward);
+    const settings = this.host.settings(),
+      begin = f(50 + f(this.host.random.random() * f(length - 60)));
+    const end = Math.min(f(begin + settings.tracerLength), length),
+      start = ma(source, begin, forward),
+      finish = ma(source, end, forward);
     const axis = this.state.refdef.viewAxis;
     const right = normalize3(ma(scale3(axis[1], dot3(forward, axis[2])), -dot3(forward, axis[1]), axis[2]));
-    this.host.addPoly({ shader: this.host.media.shaders.tracer, vertices: [
-      { position: ma(finish, settings.tracerWidth, right), texCoord: { x: 0, y: 1 }, color: WHITE_BYTES },
-      { position: ma(finish, -settings.tracerWidth, right), texCoord: { x: 1, y: 0 }, color: WHITE_BYTES },
-      { position: ma(start, -settings.tracerWidth, right), texCoord: { x: 1, y: 1 }, color: WHITE_BYTES },
-      { position: ma(start, settings.tracerWidth, right), texCoord: { x: 0, y: 0 }, color: WHITE_BYTES },
-    ] });
+    this.host.addPoly({
+      shader: this.host.media.shaders.tracer,
+      vertices: [
+        { position: ma(finish, settings.tracerWidth, right), texCoord: { x: 0, y: 1 }, color: WHITE_BYTES },
+        { position: ma(finish, -settings.tracerWidth, right), texCoord: { x: 1, y: 0 }, color: WHITE_BYTES },
+        { position: ma(start, -settings.tracerWidth, right), texCoord: { x: 1, y: 1 }, color: WHITE_BYTES },
+        { position: ma(start, settings.tracerWidth, right), texCoord: { x: 0, y: 0 }, color: WHITE_BYTES },
+      ],
+    });
     this.host.startSound(scale3(add3(start, finish), 0.5), 1022, 0, this.host.media.sounds.tracer);
   }
   private lightningBolt(cent: ClientEntity, origin: Vec3): void {
@@ -317,15 +510,25 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     const trueLightning = this.host.settings().trueLightning;
     if (cent.currentState.number === this.state.predictedPlayerState.clientNum && trueLightning !== 0) {
       const blend = (actual: number, view: number): number => {
-        let a = f(actual - view); if (a > 180) a = f(a - 360); if (a < -180) a = f(a + 360);
-        let angle = f(view + f(a * f(1 - trueLightning))); if (angle < 0) angle = f(angle + 360); if (angle > 360) angle = f(angle - 360); return angle;
+        let a = f(actual - view);
+        if (a > 180) a = f(a - 360);
+        if (a < -180) a = f(a + 360);
+        let angle = f(view + f(a * f(1 - trueLightning)));
+        if (angle < 0) angle = f(angle + 360);
+        if (angle > 360) angle = f(angle - 360);
+        return angle;
       };
-      const view = this.state.refdefViewAngles; angles = vec3(blend(angles.x, view.x), blend(angles.y, view.y), blend(angles.z, view.z));
+      const view = this.state.refdefViewAngles;
+      angles = vec3(blend(angles.x, view.x), blend(angles.y, view.y), blend(angles.z, view.z));
     }
-    const forward = angleVectors(angles).forward, muzzle = ma(add3(cent.lerpOrigin, vec3(0, 0, 26)), 14, forward);
+    const forward = angleVectors(angles).forward,
+      muzzle = ma(add3(cent.lerpOrigin, vec3(0, 0, 26)), 14, forward);
     const trace = this.host.prediction.trace(muzzle, ma(muzzle, 768, forward), POINT_BOUNDS, cent.currentState.number, MASK_SHOT);
-    const beam = createLightningEntity(); beam.origin = { ...origin }; beam.oldOrigin = { ...trace.end };
-    beam.customShader = this.registry.effects.lightningShader; this.host.addRefEntity(beam);
+    const beam = createLightningEntity();
+    beam.origin = { ...origin };
+    beam.oldOrigin = { ...trace.end };
+    beam.customShader = this.registry.effects.lightningShader;
+    this.host.addRefEntity(beam);
     if (trace.fraction < 1) {
       const ref = createModelEntity(this.registry.effects.lightningExplosionModel);
       ref.origin = ma(trace.end, -16, normalize3(sub3(beam.oldOrigin, beam.origin)));
@@ -335,7 +538,8 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
   }
   private spinAngle(cent: ClientEntity): number {
     const player = cent.player;
-    let delta = (this.state.time - player.barrelTime) | 0, angle: number;
+    let delta = (this.state.time - player.barrelTime) | 0,
+      angle: number;
     if (player.barrelSpinning) angle = f(player.barrelAngle + f(f(delta) * f(0.9)));
     else {
       if (delta > 1000) delta = 1000;
@@ -344,7 +548,9 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     }
     const firing = (cent.currentState.eFlags & 256) !== 0;
     if (player.barrelSpinning !== firing) {
-      player.barrelTime = this.state.time; player.barrelAngle = angleMod(angle); player.barrelSpinning = firing;
+      player.barrelTime = this.state.time;
+      player.barrelAngle = angleMod(angle);
+      player.barrelSpinning = firing;
       if (this.state.product === "missionpack" && cent.currentState.weapon === Weapon.WP_CHAINGUN && !firing) {
         this.host.startSound(null, cent.currentState.number, 2, this.host.sound("sound/weapons/vulcan/wvulwind.wav", false));
       }
@@ -353,20 +559,37 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
   }
   private addWeaponWithPowerups(gun: RefModelEntity, powerups: number): void {
     const shaders = this.host.media.shaders;
-    if ((powerups & (1 << Powerup.PW_INVIS)) !== 0) { gun.customShader = shaders.invis; this.host.addRefEntity(gun); return; }
+    if ((powerups & (1 << Powerup.PW_INVIS)) !== 0) {
+      gun.customShader = shaders.invis;
+      this.host.addRefEntity(gun);
+      return;
+    }
     this.host.addRefEntity(gun);
-    if ((powerups & (1 << Powerup.PW_BATTLESUIT)) !== 0) { gun.customShader = shaders.battleWeapon; this.host.addRefEntity(gun); }
-    if ((powerups & (1 << Powerup.PW_QUAD)) !== 0) { gun.customShader = shaders.quadWeapon; this.host.addRefEntity(gun); }
+    if ((powerups & (1 << Powerup.PW_BATTLESUIT)) !== 0) {
+      gun.customShader = shaders.battleWeapon;
+      this.host.addRefEntity(gun);
+    }
+    if ((powerups & (1 << Powerup.PW_QUAD)) !== 0) {
+      gun.customShader = shaders.quadWeapon;
+      this.host.addRefEntity(gun);
+    }
   }
   addPlayerWeapon(parent: RefModelEntity, ps: SourcePlayerState | null, cent: ClientEntity, _team: Team): void {
-    const weaponNum = cent.currentState.weapon, weapon = this.registry.requireWeapon(weaponNum), state = this.state;
+    const weaponNum = cent.currentState.weapon,
+      weapon = this.registry.requireWeapon(weaponNum),
+      state = this.state;
     const attached = (model: SceneModel): RefModelEntity => {
-      const ref = createModelEntity(model); ref.lightingOrigin = { ...parent.lightingOrigin }; ref.shadowPlane = parent.shadowPlane; ref.renderFlags = parent.renderFlags; return ref;
+      const ref = createModelEntity(model);
+      ref.lightingOrigin = { ...parent.lightingOrigin };
+      ref.shadowPlane = parent.shadowPlane;
+      ref.renderFlags = parent.renderFlags;
+      return ref;
     };
     const gun = attached(weapon.weaponModel);
     if (ps !== null) {
       if (state.predictedPlayerState.weapon === Weapon.WP_RAILGUN && state.predictedPlayerState.weaponState === WeaponState.WEAPON_FIRING) {
-        const fraction = f(f(state.predictedPlayerState.weaponTime) / 1500), color = qvmFloatToInt(f(255 * f(1 - fraction))) & 255;
+        const fraction = f(f(state.predictedPlayerState.weaponTime) / 1500),
+          color = qvmFloatToInt(f(255 * f(1 - fraction))) & 255;
         gun.shaderRGBA = vec4(color, 0, color, 0);
       } else gun.shaderRGBA = WHITE_BYTES;
     }
@@ -374,24 +597,33 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     if (ps === null) {
       cent.player.lightningFiring = 0;
       if ((cent.currentState.eFlags & 256) !== 0 && weapon.firingSound !== null) {
-        this.host.addLoopSound(cent.currentState.number, cent.lerpOrigin, ZERO, weapon.firingSound, false); cent.player.lightningFiring = 1;
+        this.host.addLoopSound(cent.currentState.number, cent.lerpOrigin, ZERO, weapon.firingSound, false);
+        cent.player.lightningFiring = 1;
       } else if (weapon.readySound !== null) this.host.addLoopSound(cent.currentState.number, cent.lerpOrigin, ZERO, weapon.readySound, false);
     }
-    positionEntityOnTag(gun, parent, parent.model, "tag_weapon"); this.addWeaponWithPowerups(gun, cent.currentState.powerups);
+    positionEntityOnTag(gun, parent, parent.model, "tag_weapon");
+    this.addWeaponWithPowerups(gun, cent.currentState.powerups);
     if (weapon.barrelModel !== null) {
-      const barrel = attached(weapon.barrelModel); barrel.axis = anglesToAxis(vec3(0, 0, this.spinAngle(cent)));
-      positionRotatedEntityOnTag(barrel, gun, weapon.weaponModel, "tag_barrel"); this.addWeaponWithPowerups(barrel, cent.currentState.powerups);
+      const barrel = attached(weapon.barrelModel);
+      barrel.axis = anglesToAxis(vec3(0, 0, this.spinAngle(cent)));
+      positionRotatedEntityOnTag(barrel, gun, weapon.weaponModel, "tag_barrel");
+      this.addWeaponWithPowerups(barrel, cent.currentState.powerups);
     }
     const nonPredicted = state.entityAt(cent.currentState.clientNum);
-    if (!((weaponNum === Weapon.WP_LIGHTNING || weaponNum === Weapon.WP_GAUNTLET || weaponNum === Weapon.WP_GRAPPLING_HOOK)
-      && (nonPredicted.currentState.eFlags & 256) !== 0)) {
+    if (
+      !(
+        (weaponNum === Weapon.WP_LIGHTNING || weaponNum === Weapon.WP_GAUNTLET || weaponNum === Weapon.WP_GRAPPLING_HOOK) &&
+        (nonPredicted.currentState.eFlags & 256) !== 0
+      )
+    ) {
       if (((state.time - cent.muzzleFlashTime) | 0) > 20 && !cent.player.railgunFlash) return;
     }
     const flash = attached(weapon.flashModel);
     if (flash.model.kind === "default") return;
     flash.axis = anglesToAxis(vec3(0, 0, f(this.host.random.crandom() * 10)));
     if (weaponNum === Weapon.WP_RAILGUN) flash.shaderRGBA = bytes(this.host.clientInfo(cent.currentState.clientNum).color1, 255, 0);
-    positionRotatedEntityOnTag(flash, gun, weapon.weaponModel, "tag_flash"); this.host.addRefEntity(flash);
+    positionRotatedEntityOnTag(flash, gun, weapon.weaponModel, "tag_flash");
+    this.host.addRefEntity(flash);
     if (ps !== null || state.renderingThirdPerson || cent.currentState.number !== state.predictedPlayerState.clientNum) {
       this.lightningBolt(nonPredicted, flash.origin);
       if (weaponNum === Weapon.WP_RAILGUN && cent.player.railgunFlash) {
@@ -403,15 +635,19 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     }
   }
   private weaponPosition(): { readonly origin: Vec3; readonly angles: Vec3 } {
-    const state = this.state, scale = (state.bobCycle & 1) !== 0 ? -state.xyspeed : state.xyspeed;
-    const roll = f(f(scale * state.bobFracSin) * f(0.005)), yaw = f(f(scale * state.bobFracSin) * f(0.01));
+    const state = this.state,
+      scale = (state.bobCycle & 1) !== 0 ? -state.xyspeed : state.xyspeed;
+    const roll = f(f(scale * state.bobFracSin) * f(0.005)),
+      yaw = f(f(scale * state.bobFracSin) * f(0.01));
     const pitch = f(f(state.xyspeed * state.bobFracSin) * f(0.005));
-    let origin = { ...state.refdef.viewOrigin }, angles = add3(state.refdefViewAngles, vec3(pitch, yaw, roll));
+    let origin = { ...state.refdef.viewOrigin },
+      angles = add3(state.refdefViewAngles, vec3(pitch, yaw, roll));
     const delta = (state.time - state.landTime) | 0;
     if (delta < 150) origin = add3(origin, vec3(0, 0, f(f(f(state.landChange * f(0.25)) * f(delta)) / 150)));
     else if (delta < 450) origin = add3(origin, vec3(0, 0, f(f(f(state.landChange * f(0.25)) * f((450 - delta) | 0)) / 300)));
     const drift = f(f(f(state.xyspeed + 40) * f(Math.sin(f(f(state.time) * f(0.001))))) * f(0.01));
-    angles = add3(angles, vec3(drift, drift, drift)); return { origin, angles };
+    angles = add3(angles, vec3(drift, drift, drift));
+    return { origin, angles };
   }
   private mapTorsoFrame(clientNum: number, frame: number): number {
     const animations = this.host.clientInfo(clientNum).animations;
@@ -429,18 +665,30 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     if (ps.persistant.get(PersistentIndex.PERS_TEAM) === Team.TEAM_SPECTATOR || ps.pmType === MoveType.PM_INTERMISSION || state.renderingThirdPerson) return;
     const settings = this.host.settings();
     if (!settings.drawGun) {
-      if ((state.predictedPlayerState.eFlags & 256) !== 0) this.lightningBolt(state.entityAt(ps.clientNum), ma(state.refdef.viewOrigin, -8, state.refdef.viewAxis[2]));
+      if ((state.predictedPlayerState.eFlags & 256) !== 0)
+        this.lightningBolt(state.entityAt(ps.clientNum), ma(state.refdef.viewOrigin, -8, state.refdef.viewAxis[2]));
       return;
     }
     if (state.testGun) return;
     const offset = settings.fov > 90 ? f(f(-0.2) * f((settings.fov - 90) | 0)) : 0;
-    const cent = state.predictedPlayerEntity, weapon = this.registry.requireWeapon(ps.weapon), hand = createModelEntity(weapon.handsModel), position = this.weaponPosition();
-    hand.origin = ma(ma(ma(position.origin, settings.gunX, state.refdef.viewAxis[0]), settings.gunY, state.refdef.viewAxis[1]), f(settings.gunZ + offset), state.refdef.viewAxis[2]);
+    const cent = state.predictedPlayerEntity,
+      weapon = this.registry.requireWeapon(ps.weapon),
+      hand = createModelEntity(weapon.handsModel),
+      position = this.weaponPosition();
+    hand.origin = ma(
+      ma(ma(position.origin, settings.gunX, state.refdef.viewAxis[0]), settings.gunY, state.refdef.viewAxis[1]),
+      f(settings.gunZ + offset),
+      state.refdef.viewAxis[2],
+    );
     hand.axis = anglesToAxis(position.angles);
-    if (settings.gunFrame !== 0) { hand.frame = settings.gunFrame; hand.oldFrame = settings.gunFrame; hand.backLerp = 0; }
-    else {
+    if (settings.gunFrame !== 0) {
+      hand.frame = settings.gunFrame;
+      hand.oldFrame = settings.gunFrame;
+      hand.backLerp = 0;
+    } else {
       hand.frame = this.mapTorsoFrame(cent.currentState.clientNum, cent.player.torso.frame);
-      hand.oldFrame = this.mapTorsoFrame(cent.currentState.clientNum, cent.player.torso.oldFrame); hand.backLerp = cent.player.torso.backLerp;
+      hand.oldFrame = this.mapTorsoFrame(cent.currentState.clientNum, cent.player.torso.oldFrame);
+      hand.backLerp = cent.player.torso.backLerp;
     }
     hand.renderFlags = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
     const team = ps.persistant.get(PersistentIndex.PERS_TEAM);
@@ -448,13 +696,16 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
   }
   drawWeaponSelect(): void {
     if (this.state.predictedPlayerState.health <= 0) return;
-    const drawing = this.host.drawing, color = drawing.fadeColor(this.state.weaponSelectTime, 1400);
+    const drawing = this.host.drawing,
+      color = drawing.fadeColor(this.state.weaponSelectTime, 1400);
     if (color === null) return;
-    drawing.setColor(color); this.state.itemPickupTime = 0;
+    drawing.setColor(color);
+    this.state.itemPickupTime = 0;
     const snap = this.state.snap;
     if (snap === null) throw new Error("CG_DrawWeaponSelect: cg.snap == NULL");
     const bits = snap.playerState.stats.get(statSchema(this.state.product).weapons);
-    let count = 0; for (let i = 1; i < 16; i++) if ((bits & (1 << i)) !== 0) count++;
+    let count = 0;
+    for (let i = 1; i < 16; i++) if ((bits & (1 << i)) !== 0) count++;
     let x = 320 - count * 20;
     for (let i = 1; i < 16; i++) {
       if ((bits & (1 << i)) === 0) continue;
@@ -474,11 +725,31 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
 type MutableWeaponInfo = { -readonly [K in keyof ClientWeaponInfo]: ClientWeaponInfo[K] };
 
 function emptyWeapon(): MutableWeaponInfo {
-  return { item: null, weaponModel: DEFAULT_MODEL, weaponMidpoint: vec3(0, 0, 0), barrelModel: null,
-    missileModel: DEFAULT_MODEL, missileRenderfx: 0, missileSound: null, missileDlight: 0, missileDlightColor: vec3(0, 0, 0),
-    missileTrail: null, trailRadius: 0, trailTime: 0, handsModel: DEFAULT_MODEL, flashModel: DEFAULT_MODEL,
-    ammoModel: DEFAULT_MODEL, weaponIcon: null, ammoIcon: null, flashDlightColor: vec3(0, 0, 0),
-    flashSounds: [null, null, null, null], ejectBrass: null, readySound: null, firingSound: null, loopFireSound: false };
+  return {
+    item: null,
+    weaponModel: DEFAULT_MODEL,
+    weaponMidpoint: vec3(0, 0, 0),
+    barrelModel: null,
+    missileModel: DEFAULT_MODEL,
+    missileRenderfx: 0,
+    missileSound: null,
+    missileDlight: 0,
+    missileDlightColor: vec3(0, 0, 0),
+    missileTrail: null,
+    trailRadius: 0,
+    trailTime: 0,
+    handsModel: DEFAULT_MODEL,
+    flashModel: DEFAULT_MODEL,
+    ammoModel: DEFAULT_MODEL,
+    weaponIcon: null,
+    ammoIcon: null,
+    flashDlightColor: vec3(0, 0, 0),
+    flashSounds: [null, null, null, null],
+    ejectBrass: null,
+    readySound: null,
+    firingSound: null,
+    loopFireSound: false,
+  };
 }
 
 /** Only handles registered by CG_RegisterWeapon; other cgs.media belongs to its loading owner. */
@@ -510,18 +781,28 @@ export class ClientWeaponMediaRegistry {
   private registration: Promise<void> = Promise.resolve();
   readonly effects = new RegisteredWeaponEffects();
 
-  constructor(readonly product: Product, readonly resources: Pick<RendererResources, "registerModel" | "registerShader">, readonly audio: WeaponRegistrationAudio) {
+  constructor(
+    readonly product: Product,
+    readonly resources: Pick<RendererResources, "registerModel" | "registerShader">,
+    readonly audio: WeaponRegistrationAudio,
+  ) {
     this.itemRecords = itemList(product).map(() => ({ models: [DEFAULT_MODEL, null], icon: null }));
   }
-  get weapons(): readonly ClientWeaponInfo[] { return this.weaponRecords; }
-  get items(): readonly PacketItemVisual[] { return this.itemRecords; }
+  get weapons(): readonly ClientWeaponInfo[] {
+    return this.weaponRecords;
+  }
+  get items(): readonly PacketItemVisual[] {
+    return this.itemRecords;
+  }
   weapon(number: number): ClientWeaponInfo {
     const weapon = this.weaponRecords[number];
     if (weapon === undefined) throw new RangeError(`Invalid weapon media index ${number}`);
     return weapon;
   }
   /** Server-supplied weapon numbers may be out of range; cgame reads a neighboring record, so this falls back to the empty one. */
-  weaponOrEmpty(number: number): ClientWeaponInfo { return this.weaponRecords[number] ?? this.weaponRecords[0] ?? emptyWeapon(); }
+  weaponOrEmpty(number: number): ClientWeaponInfo {
+    return this.weaponRecords[number] ?? this.weaponRecords[0] ?? emptyWeapon();
+  }
   requireWeapon(number: number): ClientWeaponInfo {
     if (number !== 0 && !this.readyWeapons.has(number)) throw new Error(`Weapon ${number} must finish registration before synchronous presentation`);
     return this.weapon(number);
@@ -547,15 +828,22 @@ export class ClientWeaponMediaRegistry {
     const item = itemAt(this.product, number);
     if (this.registeredItems.has(number)) return;
     this.registeredItems.add(number);
-    try { await this.loadItemVisuals(number, item); } catch (error) { this.registeredItems.delete(number); throw error; }
+    try {
+      await this.loadItemVisuals(number, item);
+    } catch (error) {
+      this.registeredItems.delete(number);
+      throw error;
+    }
   }
   private async loadItemVisuals(number: number, item: ReturnType<typeof itemAt>): Promise<void> {
     const model = item.worldModels[0] === null ? DEFAULT_MODEL : await this.resources.registerModel(item.worldModels[0]);
     const icon = item.icon === null ? null : await this.resources.registerShader(item.icon);
     this.itemRecords[number] = { models: [model, null], icon };
     if (item.type === ItemType.IT_WEAPON) await this.registerWeaponNow(item.tag);
-    if ((item.type === ItemType.IT_POWERUP || item.type === ItemType.IT_HEALTH || item.type === ItemType.IT_ARMOR
-      || item.type === ItemType.IT_HOLDABLE) && item.worldModels[1] !== null) {
+    if (
+      (item.type === ItemType.IT_POWERUP || item.type === ItemType.IT_HEALTH || item.type === ItemType.IT_ARMOR || item.type === ItemType.IT_HOLDABLE) &&
+      item.worldModels[1] !== null
+    ) {
       this.itemRecords[number] = { models: [model, await this.resources.registerModel(item.worldModels[1])], icon };
     }
   }
@@ -563,7 +851,12 @@ export class ClientWeaponMediaRegistry {
     this.weapon(number);
     if (number === 0 || this.registeredWeapons.has(number)) return;
     this.registeredWeapons.add(number);
-    try { await this.loadWeapon(number); } catch (error) { this.registeredWeapons.delete(number); throw error; }
+    try {
+      await this.loadWeapon(number);
+    } catch (error) {
+      this.registeredWeapons.delete(number);
+      throw error;
+    }
   }
   private async loadWeapon(number: number): Promise<void> {
     const items = itemList(this.product);
@@ -579,13 +872,17 @@ export class ClientWeaponMediaRegistry {
     weapon.weaponModel = await this.resources.registerModel(path);
     const model = weapon.weaponModel;
     const bounds = modelBounds(model);
-    weapon.weaponMidpoint = vec3(f(bounds.min.x + f(0.5 * f(bounds.max.x - bounds.min.x))),
-      f(bounds.min.y + f(0.5 * f(bounds.max.y - bounds.min.y))), f(bounds.min.z + f(0.5 * f(bounds.max.z - bounds.min.z))));
+    weapon.weaponMidpoint = vec3(
+      f(bounds.min.x + f(0.5 * f(bounds.max.x - bounds.min.x))),
+      f(bounds.min.y + f(0.5 * f(bounds.max.y - bounds.min.y))),
+      f(bounds.min.z + f(0.5 * f(bounds.max.z - bounds.min.z))),
+    );
     weapon.weaponIcon = await this.resources.registerShader(item.icon);
     weapon.ammoIcon = await this.resources.registerShader(item.icon);
     const ammo = items.find(candidate => candidate.type === ItemType.IT_AMMO && candidate.tag === number);
     if (ammo !== undefined && ammo.worldModels[0] !== null) weapon.ammoModel = await this.resources.registerModel(ammo.worldModels[0]);
-    const dot = path.indexOf("."), stem = dot < 0 ? path : path.slice(0, dot);
+    const dot = path.indexOf("."),
+      stem = dot < 0 ? path : path.slice(0, dot);
     weapon.flashModel = await this.resources.registerModel(`${stem}_flash.md3`);
     const barrel = await this.resources.registerModel(`${stem}_barrel.md3`);
     weapon.barrelModel = barrel.kind === "default" ? null : barrel;
@@ -598,197 +895,406 @@ export class ClientWeaponMediaRegistry {
     const sound = (path: string) => this.audio.registerSound(path, false);
     const shader = (name: string) => this.resources.registerShader(name);
     const model = (name: string) => this.resources.registerModel(name);
-    const flash = async (path: string): Promise<void> => { weapon.flashSounds = [await sound(path), null, null, null]; };
+    const flash = async (path: string): Promise<void> => {
+      weapon.flashSounds = [await sound(path), null, null, null];
+    };
     switch (number) {
       case Weapon.WP_GAUNTLET:
-        weapon.flashDlightColor = vec3(0.6, 0.6, 1); weapon.firingSound = await sound("sound/weapons/melee/fstrun.wav");
-        await flash("sound/weapons/melee/fstatck.wav"); break;
+        weapon.flashDlightColor = vec3(0.6, 0.6, 1);
+        weapon.firingSound = await sound("sound/weapons/melee/fstrun.wav");
+        await flash("sound/weapons/melee/fstatck.wav");
+        break;
       case Weapon.WP_LIGHTNING:
-        weapon.flashDlightColor = vec3(0.6, 0.6, 1); weapon.readySound = await sound("sound/weapons/melee/fsthum.wav");
-        weapon.firingSound = await sound("sound/weapons/lightning/lg_hum.wav"); await flash("sound/weapons/lightning/lg_fire.wav");
+        weapon.flashDlightColor = vec3(0.6, 0.6, 1);
+        weapon.readySound = await sound("sound/weapons/melee/fsthum.wav");
+        weapon.firingSound = await sound("sound/weapons/lightning/lg_hum.wav");
+        await flash("sound/weapons/lightning/lg_fire.wav");
         this.effects.lightningShader = await shader("lightningBoltNew");
         this.effects.lightningExplosionModel = await model("models/weaphits/crackle.md3");
-        this.effects.lightningHitSounds = [await sound("sound/weapons/lightning/lg_hit.wav"), await sound("sound/weapons/lightning/lg_hit2.wav"), await sound("sound/weapons/lightning/lg_hit3.wav")]; break;
+        this.effects.lightningHitSounds = [
+          await sound("sound/weapons/lightning/lg_hit.wav"),
+          await sound("sound/weapons/lightning/lg_hit2.wav"),
+          await sound("sound/weapons/lightning/lg_hit3.wav"),
+        ];
+        break;
       case Weapon.WP_GRAPPLING_HOOK:
         this.effects.lightningShader = await shader("lightningBoltNew");
-        weapon.flashDlightColor = vec3(0.6, 0.6, 1); weapon.missileModel = await model("models/ammo/rocket/rocket.md3");
-        weapon.missileTrail = "grapple"; weapon.missileDlight = 200; weapon.trailTime = 2000; weapon.trailRadius = 64;
-        weapon.missileDlightColor = vec3(1, 0.75, 0); weapon.readySound = await sound("sound/weapons/melee/fsthum.wav");
-        weapon.firingSound = await sound("sound/weapons/melee/fstrun.wav"); break;
+        weapon.flashDlightColor = vec3(0.6, 0.6, 1);
+        weapon.missileModel = await model("models/ammo/rocket/rocket.md3");
+        weapon.missileTrail = "grapple";
+        weapon.missileDlight = 200;
+        weapon.trailTime = 2000;
+        weapon.trailRadius = 64;
+        weapon.missileDlightColor = vec3(1, 0.75, 0);
+        weapon.readySound = await sound("sound/weapons/melee/fsthum.wav");
+        weapon.firingSound = await sound("sound/weapons/melee/fstrun.wav");
+        break;
       case Weapon.WP_CHAINGUN:
-        weapon.firingSound = await sound("sound/weapons/vulcan/wvulfire.wav"); weapon.loopFireSound = true;
+        weapon.firingSound = await sound("sound/weapons/vulcan/wvulfire.wav");
+        weapon.loopFireSound = true;
         weapon.flashDlightColor = vec3(1, 1, 0);
-        weapon.flashSounds = [await sound("sound/weapons/vulcan/vulcanf1b.wav"), await sound("sound/weapons/vulcan/vulcanf2b.wav"), await sound("sound/weapons/vulcan/vulcanf3b.wav"), await sound("sound/weapons/vulcan/vulcanf4b.wav")];
-        weapon.ejectBrass = "machinegun"; this.effects.bulletExplosionShader = await shader("bulletExplosion"); break;
+        weapon.flashSounds = [
+          await sound("sound/weapons/vulcan/vulcanf1b.wav"),
+          await sound("sound/weapons/vulcan/vulcanf2b.wav"),
+          await sound("sound/weapons/vulcan/vulcanf3b.wav"),
+          await sound("sound/weapons/vulcan/vulcanf4b.wav"),
+        ];
+        weapon.ejectBrass = "machinegun";
+        this.effects.bulletExplosionShader = await shader("bulletExplosion");
+        break;
       case Weapon.WP_MACHINEGUN:
         weapon.flashDlightColor = vec3(1, 1, 0);
-        weapon.flashSounds = [await sound("sound/weapons/machinegun/machgf1b.wav"), await sound("sound/weapons/machinegun/machgf2b.wav"), await sound("sound/weapons/machinegun/machgf3b.wav"), await sound("sound/weapons/machinegun/machgf4b.wav")];
-        weapon.ejectBrass = "machinegun"; this.effects.bulletExplosionShader = await shader("bulletExplosion"); break;
+        weapon.flashSounds = [
+          await sound("sound/weapons/machinegun/machgf1b.wav"),
+          await sound("sound/weapons/machinegun/machgf2b.wav"),
+          await sound("sound/weapons/machinegun/machgf3b.wav"),
+          await sound("sound/weapons/machinegun/machgf4b.wav"),
+        ];
+        weapon.ejectBrass = "machinegun";
+        this.effects.bulletExplosionShader = await shader("bulletExplosion");
+        break;
       case Weapon.WP_SHOTGUN:
-        weapon.flashDlightColor = vec3(1, 1, 0); await flash("sound/weapons/shotgun/sshotf1b.wav"); weapon.ejectBrass = "shotgun"; break;
+        weapon.flashDlightColor = vec3(1, 1, 0);
+        await flash("sound/weapons/shotgun/sshotf1b.wav");
+        weapon.ejectBrass = "shotgun";
+        break;
       case Weapon.WP_ROCKET_LAUNCHER:
-        weapon.missileModel = await model("models/ammo/rocket/rocket.md3"); weapon.missileSound = await sound("sound/weapons/rocket/rockfly.wav");
-        weapon.missileTrail = "rocket"; weapon.missileDlight = 200; weapon.trailTime = 2000; weapon.trailRadius = 64;
-        weapon.missileDlightColor = vec3(1, 0.75, 0); weapon.flashDlightColor = vec3(1, 0.75, 0);
-        await flash("sound/weapons/rocket/rocklf1a.wav"); this.effects.rocketExplosionShader = await shader("rocketExplosion"); break;
+        weapon.missileModel = await model("models/ammo/rocket/rocket.md3");
+        weapon.missileSound = await sound("sound/weapons/rocket/rockfly.wav");
+        weapon.missileTrail = "rocket";
+        weapon.missileDlight = 200;
+        weapon.trailTime = 2000;
+        weapon.trailRadius = 64;
+        weapon.missileDlightColor = vec3(1, 0.75, 0);
+        weapon.flashDlightColor = vec3(1, 0.75, 0);
+        await flash("sound/weapons/rocket/rocklf1a.wav");
+        this.effects.rocketExplosionShader = await shader("rocketExplosion");
+        break;
       case Weapon.WP_PROX_LAUNCHER:
       case Weapon.WP_GRENADE_LAUNCHER:
         weapon.missileModel = await model(number === Weapon.WP_PROX_LAUNCHER ? "models/weaphits/proxmine.md3" : "models/ammo/grenade1.md3");
-        weapon.missileTrail = "grenade"; weapon.trailTime = 700; weapon.trailRadius = 32; weapon.flashDlightColor = vec3(1, 0.7, 0);
+        weapon.missileTrail = "grenade";
+        weapon.trailTime = 700;
+        weapon.trailRadius = 32;
+        weapon.flashDlightColor = vec3(1, 0.7, 0);
         await flash(number === Weapon.WP_PROX_LAUNCHER ? "sound/weapons/proxmine/wstbfire.wav" : "sound/weapons/grenade/grenlf1a.wav");
-        this.effects.grenadeExplosionShader = await shader("grenadeExplosion"); break;
+        this.effects.grenadeExplosionShader = await shader("grenadeExplosion");
+        break;
       case Weapon.WP_NAILGUN:
-        weapon.ejectBrass = "nailgun"; weapon.missileTrail = "nail"; weapon.trailRadius = 16; weapon.trailTime = 250;
-        weapon.missileModel = await model("models/weaphits/nail.md3"); weapon.flashDlightColor = vec3(1, 0.75, 0);
-        await flash("sound/weapons/nailgun/wnalfire.wav"); break;
+        weapon.ejectBrass = "nailgun";
+        weapon.missileTrail = "nail";
+        weapon.trailRadius = 16;
+        weapon.trailTime = 250;
+        weapon.missileModel = await model("models/weaphits/nail.md3");
+        weapon.flashDlightColor = vec3(1, 0.75, 0);
+        await flash("sound/weapons/nailgun/wnalfire.wav");
+        break;
       case Weapon.WP_PLASMAGUN:
-        weapon.missileTrail = "plasma"; weapon.missileSound = await sound("sound/weapons/plasma/lasfly.wav");
-        weapon.flashDlightColor = vec3(0.6, 0.6, 1); await flash("sound/weapons/plasma/hyprbf1a.wav");
-        this.effects.plasmaExplosionShader = await shader("plasmaExplosion"); this.effects.railRingsShader = await shader("railDisc"); break;
+        weapon.missileTrail = "plasma";
+        weapon.missileSound = await sound("sound/weapons/plasma/lasfly.wav");
+        weapon.flashDlightColor = vec3(0.6, 0.6, 1);
+        await flash("sound/weapons/plasma/hyprbf1a.wav");
+        this.effects.plasmaExplosionShader = await shader("plasmaExplosion");
+        this.effects.railRingsShader = await shader("railDisc");
+        break;
       case Weapon.WP_RAILGUN:
-        weapon.readySound = await sound("sound/weapons/railgun/rg_hum.wav"); weapon.flashDlightColor = vec3(1, 0.5, 0);
-        await flash("sound/weapons/railgun/railgf1a.wav"); this.effects.railExplosionShader = await shader("railExplosion");
-        this.effects.railRingsShader = await shader("railDisc"); this.effects.railCoreShader = await shader("railCore"); break;
+        weapon.readySound = await sound("sound/weapons/railgun/rg_hum.wav");
+        weapon.flashDlightColor = vec3(1, 0.5, 0);
+        await flash("sound/weapons/railgun/railgf1a.wav");
+        this.effects.railExplosionShader = await shader("railExplosion");
+        this.effects.railRingsShader = await shader("railDisc");
+        this.effects.railCoreShader = await shader("railCore");
+        break;
       case Weapon.WP_BFG:
-        weapon.readySound = await sound("sound/weapons/bfg/bfg_hum.wav"); weapon.flashDlightColor = vec3(1, 0.7, 1);
-        await flash("sound/weapons/bfg/bfg_fire.wav"); this.effects.bfgExplosionShader = await shader("bfgExplosion");
-        weapon.missileModel = await model("models/weaphits/bfg.md3"); weapon.missileSound = await sound("sound/weapons/rocket/rockfly.wav"); break;
+        weapon.readySound = await sound("sound/weapons/bfg/bfg_hum.wav");
+        weapon.flashDlightColor = vec3(1, 0.7, 1);
+        await flash("sound/weapons/bfg/bfg_fire.wav");
+        this.effects.bfgExplosionShader = await shader("bfgExplosion");
+        weapon.missileModel = await model("models/weaphits/bfg.md3");
+        weapon.missileSound = await sound("sound/weapons/rocket/rockfly.wav");
+        break;
       default:
-        weapon.flashDlightColor = vec3(1, 1, 1); await flash("sound/weapons/rocket/rocklf1a.wav"); break;
+        weapon.flashDlightColor = vec3(1, 1, 1);
+        await flash("sound/weapons/rocket/rocklf1a.wav");
+        break;
     }
   }
 }
 
-export function emitWeaponImpact(product: Product, registry: ClientWeaponMediaRegistry,
+export function emitWeaponImpact(
+  product: Product,
+  registry: ClientWeaponMediaRegistry,
   host: Pick<ClientWeaponHost, "random" | "effects" | "marks" | "particles" | "startSound"> & {
     readonly media: {
       readonly models: Pick<WeaponPresentationMedia["models"], "dishFlash" | "ringFlash" | "bulletFlash">;
       readonly shaders: Pick<WeaponPresentationMedia["shaders"], "holeMark" | "burnMark" | "energyMark" | "bulletMark">;
-      readonly sounds: Pick<WeaponPresentationMedia["sounds"], "nailHitFlesh" | "nailHitMetal" | "nailHit" | "proxExplosion" | "rocketExplosion" | "plasmaExplosion" | "chaingunHitFlesh" | "chaingunHitMetal" | "chaingunHit" | "ricochet1" | "ricochet2" | "ricochet3">;
+      readonly sounds: Pick<
+        WeaponPresentationMedia["sounds"],
+        | "nailHitFlesh"
+        | "nailHitMetal"
+        | "nailHit"
+        | "proxExplosion"
+        | "rocketExplosion"
+        | "plasmaExplosion"
+        | "chaingunHitFlesh"
+        | "chaingunHitMetal"
+        | "chaingunHit"
+        | "ricochet1"
+        | "ricochet2"
+        | "ricochet3"
+      >;
     };
     settings(): Pick<WeaponPresentationSettings, "oldRocket">;
     clientInfo(number: number): Pick<ClientInfo, "color1" | "color2">;
-  }, weapon: Weapon, clientNum: number, origin: Vec3, direction: Vec3, soundType: ImpactSound): void {
-
-    const media = host.media, effects = registry.effects;
-    let mark: SceneShader | null = null, shader: SceneShader | null = null, model: SceneModel = DEFAULT_MODEL, sound: PcmSound | null = null;
-    let radius = 32, light = 0, lightColor = vec3(1, 1, 0), sprite = false, duration = 600;
-    const impactWeapon = product === "baseq3" && (weapon === Weapon.WP_PROX_LAUNCHER || weapon === Weapon.WP_CHAINGUN)
-      ? Weapon.WP_NONE : weapon;
-    switch (impactWeapon) {
-      default:
-      case Weapon.WP_NAILGUN:
-        if (product === "missionpack") {
-          sound = media.sounds[soundType === ImpactSound.FLESH ? "nailHitFlesh" : soundType === ImpactSound.METAL ? "nailHitMetal" : "nailHit"];
-          mark = media.shaders.holeMark; radius = 12; break;
-        }
-        { const r = host.random.rand() & 3; sound = effects.lightningHitSounds[r < 2 ? 1 : r === 2 ? 0 : 2]; }
-        mark = media.shaders.holeMark; radius = 12; break;
-      case Weapon.WP_LIGHTNING: {
-        const r = host.random.rand() & 3;
-        sound = effects.lightningHitSounds[r < 2 ? 1 : r === 2 ? 0 : 2]; mark = media.shaders.holeMark; radius = 12; break;
-      }
-      case Weapon.WP_PROX_LAUNCHER:
-        model = media.models.dishFlash; shader = effects.grenadeExplosionShader; sound = media.sounds.proxExplosion;
-        mark = media.shaders.burnMark; radius = 64; light = 300; sprite = true; break;
-      case Weapon.WP_GRENADE_LAUNCHER:
-        model = media.models.dishFlash; shader = effects.grenadeExplosionShader; sound = media.sounds.rocketExplosion;
-        mark = media.shaders.burnMark; radius = 64; light = 300; sprite = true; break;
-      case Weapon.WP_ROCKET_LAUNCHER:
-        model = media.models.dishFlash; shader = effects.rocketExplosionShader; sound = media.sounds.rocketExplosion;
-        mark = media.shaders.burnMark; radius = 64; light = 300; sprite = true; duration = 1000; lightColor = vec3(1, 0.75, 0);
-        if (!host.settings().oldRocket) host.particles.explosion({ animation: "explode1", origin: ma(origin, 24, direction), velocity: scale3(direction, 64), duration: 1400, sizeStart: 20, sizeEnd: 30 });
+  },
+  weapon: Weapon,
+  clientNum: number,
+  origin: Vec3,
+  direction: Vec3,
+  soundType: ImpactSound,
+): void {
+  const media = host.media,
+    effects = registry.effects;
+  let mark: SceneShader | null = null,
+    shader: SceneShader | null = null,
+    model: SceneModel = DEFAULT_MODEL,
+    sound: PcmSound | null = null;
+  let radius = 32,
+    light = 0,
+    lightColor = vec3(1, 1, 0),
+    sprite = false,
+    duration = 600;
+  const impactWeapon = product === "baseq3" && (weapon === Weapon.WP_PROX_LAUNCHER || weapon === Weapon.WP_CHAINGUN) ? Weapon.WP_NONE : weapon;
+  switch (impactWeapon) {
+    default:
+    case Weapon.WP_NAILGUN:
+      if (product === "missionpack") {
+        sound = media.sounds[soundType === ImpactSound.FLESH ? "nailHitFlesh" : soundType === ImpactSound.METAL ? "nailHitMetal" : "nailHit"];
+        mark = media.shaders.holeMark;
+        radius = 12;
         break;
-      case Weapon.WP_RAILGUN:
-        model = media.models.ringFlash; shader = effects.railExplosionShader; sound = media.sounds.plasmaExplosion;
-        mark = media.shaders.energyMark; radius = 24; break;
-      case Weapon.WP_PLASMAGUN:
-        model = media.models.ringFlash; shader = effects.plasmaExplosionShader; sound = media.sounds.plasmaExplosion;
-        mark = media.shaders.energyMark; radius = 16; break;
-      case Weapon.WP_BFG:
-        model = media.models.dishFlash; shader = effects.bfgExplosionShader; sound = media.sounds.rocketExplosion;
-        mark = media.shaders.burnMark; radius = 32; sprite = true; break;
-      case Weapon.WP_SHOTGUN:
-        model = media.models.bulletFlash; shader = effects.bulletExplosionShader; mark = media.shaders.bulletMark; radius = 4; break;
-      case Weapon.WP_CHAINGUN: {
-        model = media.models.bulletFlash;
-        sound = media.sounds[soundType === ImpactSound.FLESH ? "chaingunHitFlesh" : soundType === ImpactSound.METAL ? "chaingunHitMetal" : "chaingunHit"];
-        mark = media.shaders.bulletMark;
+      }
+      {
         const r = host.random.rand() & 3;
-        sound = media.sounds[r < 2 ? "ricochet1" : r === 2 ? "ricochet2" : "ricochet3"]; radius = 8; break;
+        sound = effects.lightningHitSounds[r < 2 ? 1 : r === 2 ? 0 : 2];
       }
-      case Weapon.WP_MACHINEGUN: {
-        model = media.models.bulletFlash; shader = effects.bulletExplosionShader; mark = media.shaders.bulletMark;
-        const r = host.random.rand() & 3;
-        sound = media.sounds[r === 0 ? "ricochet1" : r === 1 ? "ricochet2" : "ricochet3"]; radius = 8; break;
-      }
+      mark = media.shaders.holeMark;
+      radius = 12;
+      break;
+    case Weapon.WP_LIGHTNING: {
+      const r = host.random.rand() & 3;
+      sound = effects.lightningHitSounds[r < 2 ? 1 : r === 2 ? 0 : 2];
+      mark = media.shaders.holeMark;
+      radius = 12;
+      break;
     }
-    if (sound !== null) host.startSound(origin, 1022, 0, sound);
-    if (model.kind !== "default") {
-      const le = host.effects.makeExplosion({ origin, direction, model, shader, duration, sprite });
-      le.light = light; le.lightColor = lightColor;
-      if (weapon === Weapon.WP_RAILGUN) {
-        const color = host.clientInfo(clientNum).color1; le.color = vec4(color.x, color.y, color.z, le.color.w);
-      }
+    case Weapon.WP_PROX_LAUNCHER:
+      model = media.models.dishFlash;
+      shader = effects.grenadeExplosionShader;
+      sound = media.sounds.proxExplosion;
+      mark = media.shaders.burnMark;
+      radius = 64;
+      light = 300;
+      sprite = true;
+      break;
+    case Weapon.WP_GRENADE_LAUNCHER:
+      model = media.models.dishFlash;
+      shader = effects.grenadeExplosionShader;
+      sound = media.sounds.rocketExplosion;
+      mark = media.shaders.burnMark;
+      radius = 64;
+      light = 300;
+      sprite = true;
+      break;
+    case Weapon.WP_ROCKET_LAUNCHER:
+      model = media.models.dishFlash;
+      shader = effects.rocketExplosionShader;
+      sound = media.sounds.rocketExplosion;
+      mark = media.shaders.burnMark;
+      radius = 64;
+      light = 300;
+      sprite = true;
+      duration = 1000;
+      lightColor = vec3(1, 0.75, 0);
+      if (!host.settings().oldRocket)
+        host.particles.explosion({
+          animation: "explode1",
+          origin: ma(origin, 24, direction),
+          velocity: scale3(direction, 64),
+          duration: 1400,
+          sizeStart: 20,
+          sizeEnd: 30,
+        });
+      break;
+    case Weapon.WP_RAILGUN:
+      model = media.models.ringFlash;
+      shader = effects.railExplosionShader;
+      sound = media.sounds.plasmaExplosion;
+      mark = media.shaders.energyMark;
+      radius = 24;
+      break;
+    case Weapon.WP_PLASMAGUN:
+      model = media.models.ringFlash;
+      shader = effects.plasmaExplosionShader;
+      sound = media.sounds.plasmaExplosion;
+      mark = media.shaders.energyMark;
+      radius = 16;
+      break;
+    case Weapon.WP_BFG:
+      model = media.models.dishFlash;
+      shader = effects.bfgExplosionShader;
+      sound = media.sounds.rocketExplosion;
+      mark = media.shaders.burnMark;
+      radius = 32;
+      sprite = true;
+      break;
+    case Weapon.WP_SHOTGUN:
+      model = media.models.bulletFlash;
+      shader = effects.bulletExplosionShader;
+      mark = media.shaders.bulletMark;
+      radius = 4;
+      break;
+    case Weapon.WP_CHAINGUN: {
+      model = media.models.bulletFlash;
+      sound = media.sounds[soundType === ImpactSound.FLESH ? "chaingunHitFlesh" : soundType === ImpactSound.METAL ? "chaingunHitMetal" : "chaingunHit"];
+      mark = media.shaders.bulletMark;
+      const r = host.random.rand() & 3;
+      sound = media.sounds[r < 2 ? "ricochet1" : r === 2 ? "ricochet2" : "ricochet3"];
+      radius = 8;
+      break;
     }
-    const color = weapon === Weapon.WP_RAILGUN ? host.clientInfo(clientNum).color2 : vec3(1, 1, 1);
-    host.marks.impactMark({ shader: mark, origin, direction, orientation: f(host.random.random() * 360), color: vec4(color.x, color.y, color.z, 1),
-      alphaFade: mark === media.shaders.energyMark, radius, temporary: false });
+    case Weapon.WP_MACHINEGUN: {
+      model = media.models.bulletFlash;
+      shader = effects.bulletExplosionShader;
+      mark = media.shaders.bulletMark;
+      const r = host.random.rand() & 3;
+      sound = media.sounds[r === 0 ? "ricochet1" : r === 1 ? "ricochet2" : "ricochet3"];
+      radius = 8;
+      break;
+    }
   }
+  if (sound !== null) host.startSound(origin, 1022, 0, sound);
+  if (model.kind !== "default") {
+    const le = host.effects.makeExplosion({ origin, direction, model, shader, duration, sprite });
+    le.light = light;
+    le.lightColor = lightColor;
+    if (weapon === Weapon.WP_RAILGUN) {
+      const color = host.clientInfo(clientNum).color1;
+      le.color = vec4(color.x, color.y, color.z, le.color.w);
+    }
+  }
+  const color = weapon === Weapon.WP_RAILGUN ? host.clientInfo(clientNum).color2 : vec3(1, 1, 1);
+  host.marks.impactMark({
+    shader: mark,
+    origin,
+    direction,
+    orientation: f(host.random.random() * 360),
+    color: vec4(color.x, color.y, color.z, 1),
+    alphaFade: mark === media.shaders.energyMark,
+    radius,
+    temporary: false,
+  });
+}
 
-export function emitRailTrail(time: number, registry: ClientWeaponMediaRegistry,
+export function emitRailTrail(
+  time: number,
+  registry: ClientWeaponMediaRegistry,
   host: Pick<ClientWeaponHost, "localEntities"> & {
     settings(): Pick<WeaponPresentationSettings, "oldRail" | "railTrailTime">;
     clientInfo(number: number): Pick<ClientInfo, "color1" | "color2">;
-  }, clientNum: number, start: MutableVec3, end: Vec3): void {
-
-    const ci = host.clientInfo(clientNum), settings = host.settings();
-    start.z = f(start.z - 4);
-    let move: Vec3 = { ...start };
-    const delta = sub3(end, start), length = length3(delta), direction = normalize3(delta), temp = perpendicularVector(direction);
-    const axis = Array.from({ length: 36 }, (_, i) => rotatePointAroundVector(direction, temp, i * 10));
-    const ref = createRailCoreEntity(), le = host.localEntities.allocate("fade-rgb", ref);
-    le.startTime = time; le.endTime = qvmFloatToInt(f(f(time) + settings.railTrailTime)); le.lifeRate = f(1 / f((le.endTime - time) | 0));
-    ref.shaderTime = f(f(time) / 1000); ref.customShader = registry.effects.railCoreShader;
-    ref.origin = { ...start }; ref.oldOrigin = { ...end }; ref.shaderRGBA = bytes(ci.color1, 255, 255);
-    le.color = vec4(f(ci.color1.x * f(0.75)), f(ci.color1.y * f(0.75)), f(ci.color1.z * f(0.75)), 1);
-    move = ma(move, 20, direction); const step = scale3(direction, 5);
-    if (settings.oldRail) { ref.origin = add3(ref.origin, vec3(0, 0, -8)); ref.oldOrigin = add3(ref.oldOrigin, vec3(0, 0, -8)); return; }
-    let skip = -1, j = 18;
-    for (let i = 0; i < length; i += 5) {
-      if (i !== skip) {
-        skip = i + 5;
-        const ref = createSpriteEntity(), le = host.localEntities.allocate("move-scale-fade", ref), side = axis[j];
-        if (side === undefined) throw new Error("Missing rail spiral axis");
-        le.leFlags = LocalEntityFlags.PUFF_DONT_SCALE; le.startTime = time; le.endTime = (time + (i >> 1) + 600) | 0;
-        le.lifeRate = f(1 / f((le.endTime - time) | 0)); ref.shaderTime = f(f(time) / 1000); ref.radius = f(1.1);
-        ref.customShader = registry.effects.railRingsShader; ref.shaderRGBA = bytes(ci.color2, 255, 255);
-        le.color = vec4(f(ci.color2.x * f(0.75)), f(ci.color2.y * f(0.75)), f(ci.color2.z * f(0.75)), 1);
-        le.pos = { type: TrajectoryType.TR_LINEAR, time, duration: 0, base: ma(move, 4, side), delta: scale3(side, 6) };
-      }
-      move = add3(move, step); j = (j + 1) % 36;
-    }
+  },
+  clientNum: number,
+  start: MutableVec3,
+  end: Vec3,
+): void {
+  const ci = host.clientInfo(clientNum),
+    settings = host.settings();
+  start.z = f(start.z - 4);
+  let move: Vec3 = { ...start };
+  const delta = sub3(end, start),
+    length = length3(delta),
+    direction = normalize3(delta),
+    temp = perpendicularVector(direction);
+  const axis = Array.from({ length: 36 }, (_, i) => rotatePointAroundVector(direction, temp, i * 10));
+  const ref = createRailCoreEntity(),
+    le = host.localEntities.allocate("fade-rgb", ref);
+  le.startTime = time;
+  le.endTime = qvmFloatToInt(f(f(time) + settings.railTrailTime));
+  le.lifeRate = f(1 / f((le.endTime - time) | 0));
+  ref.shaderTime = f(f(time) / 1000);
+  ref.customShader = registry.effects.railCoreShader;
+  ref.origin = { ...start };
+  ref.oldOrigin = { ...end };
+  ref.shaderRGBA = bytes(ci.color1, 255, 255);
+  le.color = vec4(f(ci.color1.x * f(0.75)), f(ci.color1.y * f(0.75)), f(ci.color1.z * f(0.75)), 1);
+  move = ma(move, 20, direction);
+  const step = scale3(direction, 5);
+  if (settings.oldRail) {
+    ref.origin = add3(ref.origin, vec3(0, 0, -8));
+    ref.oldOrigin = add3(ref.oldOrigin, vec3(0, 0, -8));
+    return;
   }
+  let skip = -1,
+    j = 18;
+  for (let i = 0; i < length; i += 5) {
+    if (i !== skip) {
+      skip = i + 5;
+      const ref = createSpriteEntity(),
+        le = host.localEntities.allocate("move-scale-fade", ref),
+        side = axis[j];
+      if (side === undefined) throw new Error("Missing rail spiral axis");
+      le.leFlags = LocalEntityFlags.PUFF_DONT_SCALE;
+      le.startTime = time;
+      le.endTime = (time + (i >> 1) + 600) | 0;
+      le.lifeRate = f(1 / f((le.endTime - time) | 0));
+      ref.shaderTime = f(f(time) / 1000);
+      ref.radius = f(1.1);
+      ref.customShader = registry.effects.railRingsShader;
+      ref.shaderRGBA = bytes(ci.color2, 255, 255);
+      le.color = vec4(f(ci.color2.x * f(0.75)), f(ci.color2.y * f(0.75)), f(ci.color2.z * f(0.75)), 1);
+      le.pos = { type: TrajectoryType.TR_LINEAR, time, duration: 0, base: ma(move, 4, side), delta: scale3(side, 6) };
+    }
+    move = add3(move, step);
+    j = (j + 1) % 36;
+  }
+}
 
-export function emitPlasmaTrail(time: number, origin: Vec3, angles: Vec3, weapon: number, registry: ClientWeaponMediaRegistry,
+export function emitPlasmaTrail(
+  time: number,
+  origin: Vec3,
+  angles: Vec3,
+  weapon: number,
+  registry: ClientWeaponMediaRegistry,
   host: Pick<ClientWeaponHost, "random" | "localEntities"> & {
     settings(): Pick<WeaponPresentationSettings, "noProjectileTrail" | "oldPlasma">;
     readonly prediction: Pick<ClientWeaponHost["prediction"], "pointContents">;
-  }): void {
-
-    const settings = host.settings();
-    if (settings.noProjectileTrail || settings.oldPlasma) return;
-    const random = host.random;
-    const ref = createSpriteEntity(), le = host.localEntities.allocate("move-scale-fade", ref);
-    const velocity = vec3(f(60 - f(120 * random.crandom())), f(40 - f(80 * random.crandom())), f(100 - f(200 * random.crandom())));
-    le.leFlags = LocalEntityFlags.TUMBLE; le.startTime = time; le.endTime = (time + 600) | 0;
-    const axis = anglesToAxis(angles);
-    ref.origin = add3(origin, transform(vec3(2, 2, 2), axis));
-    const water = (host.prediction.pointContents(ref.origin, -1) & CONTENTS_WATER) !== 0 ? f(0.1) : 1;
-    le.pos = { type: TrajectoryType.TR_GRAVITY, time, duration: 0, base: { ...ref.origin }, delta: scale3(transform(velocity, axis), water) };
-    ref.shaderTime = f(f(time) / 1000); ref.radius = f(0.25); ref.customShader = registry.effects.railRingsShader;
-    le.bounceFactor = f(0.3);
-    const color = registry.weapon(weapon).flashDlightColor;
-    ref.shaderRGBA = bytes(color, 63, 63); le.color = vec4(f(color.x * f(0.2)), f(color.y * f(0.2)), f(color.z * f(0.2)), f(0.25));
-    le.angles = { type: TrajectoryType.TR_LINEAR, time, duration: 0, base: vec3(random.rand() & 31, random.rand() & 31, random.rand() & 31), delta: vec3(1, 0.5, 0) };
-  }
+  },
+): void {
+  const settings = host.settings();
+  if (settings.noProjectileTrail || settings.oldPlasma) return;
+  const random = host.random;
+  const ref = createSpriteEntity(),
+    le = host.localEntities.allocate("move-scale-fade", ref);
+  const velocity = vec3(f(60 - f(120 * random.crandom())), f(40 - f(80 * random.crandom())), f(100 - f(200 * random.crandom())));
+  le.leFlags = LocalEntityFlags.TUMBLE;
+  le.startTime = time;
+  le.endTime = (time + 600) | 0;
+  const axis = anglesToAxis(angles);
+  ref.origin = add3(origin, transform(vec3(2, 2, 2), axis));
+  const water = (host.prediction.pointContents(ref.origin, -1) & CONTENTS_WATER) !== 0 ? f(0.1) : 1;
+  le.pos = { type: TrajectoryType.TR_GRAVITY, time, duration: 0, base: { ...ref.origin }, delta: scale3(transform(velocity, axis), water) };
+  ref.shaderTime = f(f(time) / 1000);
+  ref.radius = f(0.25);
+  ref.customShader = registry.effects.railRingsShader;
+  le.bounceFactor = f(0.3);
+  const color = registry.weapon(weapon).flashDlightColor;
+  ref.shaderRGBA = bytes(color, 63, 63);
+  le.color = vec4(f(color.x * f(0.2)), f(color.y * f(0.2)), f(color.z * f(0.2)), f(0.25));
+  le.angles = {
+    type: TrajectoryType.TR_LINEAR,
+    time,
+    duration: 0,
+    base: vec3(random.rand() & 31, random.rand() & 31, random.rand() & 31),
+    delta: vec3(1, 0.5, 0),
+  };
+}

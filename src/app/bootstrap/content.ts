@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
 import { cacheEvictingRejection } from "./cached-promise.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
@@ -8,7 +9,10 @@ import { sourceProgramImplementation, sourceProgramProduct } from "../../content
 import type { PreparedClassicGuest } from "./simulation/classic-guest-source.ts";
 import { prepareQ2Guest } from "./simulation/q2-native-world.ts";
 import type { DemoFamily } from "./demo-playback.ts";
-export interface ApplicationContentSource { readonly kind: "recorded" | "unified"; readonly family: DemoFamily; }
+export interface ApplicationContentSource {
+  readonly kind: "recorded" | "unified";
+  readonly family: DemoFamily;
+}
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
@@ -19,10 +23,28 @@ import { assertQ3GuestRecipe, prepareQ3Game, prepareQ3NativeGame } from "./simul
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource, prepareLaunchMountPlan } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
-import type { ContentId, ContentMount, ResolvedResourceReference, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, LaunchChoice, ProviderTiming } from "../../contracts/content.ts";
+import type {
+  ContentId,
+  ContentMount,
+  ResolvedResourceReference,
+  ExecutableRecipe,
+  ExecutionSelection,
+  GameFamily,
+  ProviderReference,
+  LaunchChoice,
+  ProviderTiming,
+} from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
-import { discoverInstalledContent, remoteContentProduct, remoteContentSelection, expectedProducts, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import {
+  discoverInstalledContent,
+  remoteContentProduct,
+  remoteContentSelection,
+  expectedProducts,
+  nativeEquipment,
+  presetChoice,
+  resolveLaunch,
+} from "../../content/catalog/index.ts";
 import type { InstalledCatalog, LaunchPreset, CatalogProduct, RemoteContentSelection } from "../../content/catalog/index.ts";
 import { prepareQ3ApplicationProduct } from "./q3-product.ts";
 import type { Q3ApplicationProduct } from "../../core/q3-product-policy.ts";
@@ -37,7 +59,11 @@ import { classifyBsp } from "../../formats/bsp-kind.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export type ApplicationWorld = Q1Map | Q2DecodedMap | Q3WorldGeometry;
-export interface ApplicationMapSidecar { readonly content: ContentId; readonly path: string; readonly resource: ResolvedResourceReference | null; }
+export interface ApplicationMapSidecar {
+  readonly content: ContentId;
+  readonly path: string;
+  readonly resource: ResolvedResourceReference | null;
+}
 
 export interface RemoteContentMounts {
   readonly selection: RemoteContentSelection;
@@ -49,79 +75,142 @@ export interface RemoteContentMounts {
   readonly q3Product: Q3ApplicationProduct | null;
 }
 
-export async function openRemoteContent(roots: Pick<ApplicationOptions, "corpusRoot" | "userContentRoot" | "q3Product" | "startupCommands">,
-  requested: RemoteContentSelection, assertCurrent: () => void, generation = 0): Promise<RemoteContentMounts> {
+export async function openRemoteContent(
+  roots: Pick<ApplicationOptions, "corpusRoot" | "userContentRoot" | "q3Product" | "startupCommands">,
+  requested: RemoteContentSelection,
+  assertCurrent: () => void,
+  generation = 0,
+): Promise<RemoteContentMounts> {
   assertCurrent();
   const selection = remoteContentSelection(requested.base, requested.directory);
   const base = expectedProducts.find(product => product.id === selection.base);
   if (base === undefined) throw new Error(`Missing remote base product ${selection.base}`);
   const userRoot = roots.userContentRoot ?? defaultUserContentRoot();
-  const familyRoot = await findContentPath(userRoot, dirname(base.contentDirectory)) ?? userProductDirectory(userRoot, dirname(base.contentDirectory));
+  const familyRoot = (await findContentPath(userRoot, dirname(base.contentDirectory))) ?? userProductDirectory(userRoot, dirname(base.contentDirectory));
   assertCurrent();
-  const baseWriteRoot = await findContentPath(familyRoot, basename(base.contentDirectory)) ?? join(familyRoot, basename(base.contentDirectory));
+  const baseWriteRoot = (await findContentPath(familyRoot, basename(base.contentDirectory))) ?? join(familyRoot, basename(base.contentDirectory));
   assertCurrent();
-  const writeRoot = selection.directory === basename(base.contentDirectory).toLowerCase() ? baseWriteRoot
-    : await findContentPath(familyRoot, selection.directory) ?? join(familyRoot, selection.directory);
+  const writeRoot =
+    selection.directory === basename(base.contentDirectory).toLowerCase()
+      ? baseWriteRoot
+      : ((await findContentPath(familyRoot, selection.directory)) ?? join(familyRoot, selection.directory));
   assertCurrent();
-  await mkdir(writeRoot, { recursive: true }); assertCurrent();
-  await mkdir(baseWriteRoot, { recursive: true }); assertCurrent();
+  await mkdir(writeRoot, { recursive: true });
+  assertCurrent();
+  await mkdir(baseWriteRoot, { recursive: true });
+  assertCurrent();
   let catalog = await discoverInstalledContent({ ...roots, userContentRoot: userRoot, discoverMods: false, remoteContent: selection, generation });
   assertCurrent();
   catalog.require(selection.base);
   let product = catalog.require(remoteContentProduct(selection));
   if ((product.userContent?.root ?? product.looseRoot) !== writeRoot) throw new Error("Remote download directory does not match its content owner");
-  const policy = await prepareQ3ApplicationProduct(catalog, product.id, roots); assertCurrent();
-  catalog = policy.catalog; product = catalog.require(remoteContentProduct(selection));
-  const mounts = await catalog.mountsFor(product.id); assertCurrent();
-  const opened = await openMountPlan({ id: createMountPlanId("remote-server", String(generation)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, policy.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
-  try { assertCurrent(); }
-  catch (error) { opened.close(); throw error; }
+  const policy = await prepareQ3ApplicationProduct(catalog, product.id, roots);
+  assertCurrent();
+  catalog = policy.catalog;
+  product = catalog.require(remoteContentProduct(selection));
+  const mounts = await catalog.mountsFor(product.id);
+  assertCurrent();
+  const opened = await openMountPlan(
+    { id: createMountPlanId("remote-server", String(generation)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] },
+    policy.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {},
+  );
+  try {
+    assertCurrent();
+  } catch (error) {
+    opened.close();
+    throw error;
+  }
   return { selection, catalog, product, mounts: opened, writeRoot, baseWriteRoot, q3Product: policy.q3Product };
 }
 
 export type MountedApplicationContent = Pick<LoadedApplicationContent, "catalog" | "mounts" | "close" | "q3Product">;
 
 export async function openRemoteApplicationContent(options: ApplicationOptions): Promise<MountedApplicationContent> {
-  const selection = options.remoteContent ?? (options.network.kind === "qw-client" ? remoteContentSelection("q1-quakeworld", "qw")
-    : options.network.kind === "q3-client" ? remoteContentSelection("q3-baseq3", "baseq3")
-    : options.network.kind === "q2-client" ? remoteContentSelection("q2-classic-baseq2", "baseq2") : undefined);
+  const selection =
+    options.remoteContent ??
+    (options.network.kind === "qw-client"
+      ? remoteContentSelection("q1-quakeworld", "qw")
+      : options.network.kind === "q3-client"
+        ? remoteContentSelection("q3-baseq3", "baseq3")
+        : options.network.kind === "q2-client"
+          ? remoteContentSelection("q2-classic-baseq2", "baseq2")
+          : undefined);
   if (selection !== undefined) {
     const content = await openRemoteContent(options, selection, () => {});
-    return { catalog: content.catalog, mounts: content.mounts, q3Product: content.q3Product, close: async () => { content.mounts.close(); } };
+    return {
+      catalog: content.catalog,
+      mounts: content.mounts,
+      q3Product: content.q3Product,
+      close: async () => {
+        content.mounts.close();
+      },
+    };
   }
-  const discovered = await discoverInstalledContent({ corpusRoot: options.corpusRoot,
-    userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false });
-  const policy = await prepareQ3ApplicationProduct(discovered, options.product, options), catalog = policy.catalog;
-  const product = catalog.require(options.product), mounts = await catalog.mountsFor(product.id);
-  const opened = await openMountPlan({ id: createMountPlanId("remote-connection", options.product), mounts,
-    defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, policy.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
-  return { catalog, mounts: opened, q3Product: policy.q3Product, close: async () => { opened.close(); } };
+  const discovered = await discoverInstalledContent({
+    corpusRoot: options.corpusRoot,
+    userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+    discoverMods: false,
+  });
+  const policy = await prepareQ3ApplicationProduct(discovered, options.product, options),
+    catalog = policy.catalog;
+  const product = catalog.require(options.product),
+    mounts = await catalog.mountsFor(product.id);
+  const opened = await openMountPlan(
+    { id: createMountPlanId("remote-connection", options.product), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] },
+    policy.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {},
+  );
+  return {
+    catalog,
+    mounts: opened,
+    q3Product: policy.q3Product,
+    close: async () => {
+      opened.close();
+    },
+  };
 }
 
 export function remoteConfigurationContent(options: ApplicationOptions, content: MountedApplicationContent): ApplicationConfigurationContent {
   // A QuakeWorld connection configures as the QW product even on classic Q1
   // content: client cvars, userinfo propagation and timing follow the wire.
   const preset = applicationConfigurationPreset(content.catalog, options.network.kind === "qw-client" ? { ...options, product: "q1-quakeworld" } : options);
-  return { catalog: content.catalog, mounts: content.mounts, ...(content.q3Product === null ? {} : { q3Product: content.q3Product }), close: () => content.close(),
-    selection: { source: preset.map.entities, engineBehavior: preset.engineBehavior,
-    match: preset.match, combat: preset.combat, movement: preset.movement, timing: preset.timing } };
+  return {
+    catalog: content.catalog,
+    mounts: content.mounts,
+    ...(content.q3Product === null ? {} : { q3Product: content.q3Product }),
+    close: () => content.close(),
+    selection: {
+      source: preset.map.entities,
+      engineBehavior: preset.engineBehavior,
+      match: preset.match,
+      combat: preset.combat,
+      movement: preset.movement,
+      timing: preset.timing,
+    },
+  };
 }
 
 function baseProduct(family: GameFamily): string {
   switch (family) {
-    case "q1": return "q1-classic-id1";
-    case "q2": return "q2-classic-baseq2";
-    case "q3": return "q3-baseq3";
+    case "q1":
+      return "q1-classic-id1";
+    case "q2":
+      return "q2-classic-baseq2";
+    case "q3":
+      return "q3-baseq3";
   }
 }
 
-
 function execution(provider: ProviderReference, family: GameFamily, rerelease: boolean, implementation = provider.provider): ExecutionSelection {
-  const common = { kind: "typescript", owner: provider, implementation, role: "server-game" } satisfies Pick<ExecutionSelection, "kind" | "owner" | "role"> & { readonly implementation: ProviderReference["provider"] };
+  const common = { kind: "typescript", owner: provider, implementation, role: "server-game" } satisfies Pick<ExecutionSelection, "kind" | "owner" | "role"> & {
+    readonly implementation: ProviderReference["provider"];
+  };
   switch (family) {
-    case "q1": return { ...common, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } };
-    case "q2": return rerelease ? { ...common, api: { kind: "q2-rerelease-game", version: 2023 } } : { ...common, api: { kind: "q2-classic-game", version: 3 } };
-    case "q3": return { ...common, api: { kind: "q3-qagame", version: 8 } };
+    case "q1":
+      return { ...common, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } };
+    case "q2":
+      return rerelease ? { ...common, api: { kind: "q2-rerelease-game", version: 2023 } } : { ...common, api: { kind: "q2-classic-game", version: 3 } };
+    case "q3":
+      return { ...common, api: { kind: "q3-qagame", version: 8 } };
   }
 }
 
@@ -132,54 +221,83 @@ export interface ApplicationSourceSelection {
 }
 
 export function applicationSourceSelection(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "rules">): ApplicationSourceSelection {
-  const product = catalog.require(options.product), family = product.expectation.family;
+  const product = catalog.require(options.product),
+    family = product.expectation.family;
   const source: ProviderReference = { provider: `${family}:official`, content: product.id };
   const program = sourceProgramProduct(catalog, product.id).expectation;
   const rerelease = program.edition === "rerelease";
-  const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
-    : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
-  if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
+  const rules =
+    options.rules ??
+    (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf")
+      ? program.campaign
+      : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf")
+        ? "ctf"
+        : "standard");
+  if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3")
+    throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
   // match role mounts the same-edition Rogue product on any Q2 program.
   // A discovered Q3 guest mod owns its match through its own qagame; only the
   // built-in Q3 source takes the shared q3:ctf match role.
   const guestMod = family === "q3" && !expectedProducts.some(builtin => builtin.id === program.id);
-  const match: ProviderReference = rules === "standard" || guestMod ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" && family === "q1" ? { provider: "q1:ctf", content: catalog.require(`q1-${rerelease ? "rerelease" : "classic"}-ctf`).id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
-    : rules === "tag" || rules === "deathball" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-rogue`).id }
-    : { provider: `${family}:${rules}`, content: product.id };
+  const match: ProviderReference =
+    rules === "standard" || guestMod
+      ? source
+      : rules === "ctf" && family === "q3"
+        ? { provider: "q3:ctf", content: product.id }
+        : rules === "ctf" && family === "q1"
+          ? { provider: "q1:ctf", content: catalog.require(`q1-${rerelease ? "rerelease" : "classic"}-ctf`).id }
+          : rules === "ctf" || rules === "lmctf"
+            ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
+            : rules === "tag" || rules === "deathball"
+              ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-rogue`).id }
+              : { provider: `${family}:${rules}`, content: product.id };
   return { source, match, rules };
 }
 
 export function applicationDiscoversMods(options: ApplicationOptions, recipe?: ExecutableRecipe): boolean {
   const product = expectedProducts.find(product => product.id === options.product);
-  return options.weaponBehavior !== undefined || (options.mods?.length ?? 0) > 0 || options.dedicated || options.network.kind === "offline"
-    && (recipe !== undefined || product === undefined || product.family === "q3");
+  return (
+    options.weaponBehavior !== undefined ||
+    (options.mods?.length ?? 0) > 0 ||
+    options.dedicated ||
+    (options.network.kind === "offline" && (recipe !== undefined || product === undefined || product.family === "q3"))
+  );
 }
 
 function selectedQ2GameLibrary(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "q2GameLibrary">): string | undefined {
   if (options.q2GameLibrary !== undefined) return options.q2GameLibrary;
   const product = sourceProgramProduct(catalog, options.product);
   const library = product.expectation.edition === "rerelease" ? "game_x64.dll" : "gamex86.dll";
-  return product.expectation.family === "q2" && !expectedProducts.some(builtin => builtin.id === product.expectation.id)
-    && product.expectation.requiredPrograms.includes(library) ? library : undefined;
+  return product.expectation.family === "q2" &&
+    !expectedProducts.some(builtin => builtin.id === product.expectation.id) &&
+    product.expectation.requiredPrograms.includes(library)
+    ? library
+    : undefined;
 }
 
 /** vm_game 0 and a native qagame in the mod's directory select the native module; every other case runs the bytecode. */
-function selectedQ3NativeGame(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "vmGame">):
-  { readonly path: string; readonly profile: Extract<ExecutionSelection, { readonly kind: "native" }>["profile"] } | undefined {
+function selectedQ3NativeGame(
+  catalog: InstalledCatalog,
+  options: Pick<ApplicationOptions, "product" | "vmGame">,
+): { readonly path: string; readonly profile: Extract<ExecutionSelection, { readonly kind: "native" }>["profile"] } | undefined {
   if (options.vmGame !== 0) return undefined;
   const path = catalog.require(options.product).expectation.nativePrograms?.[0];
   if (path === undefined) return undefined;
-  return path.endsWith(".dll") ? { path, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }
+  return path.endsWith(".dll")
+    ? { path, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }
     : { path, profile: { kind: "linux-i386", image: "elf32", pointerBytes: 4, call: "system-v-i386" } };
 }
 
 function selectedQuakeCProgram(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "quakeCProgram">): string | undefined {
   if (options.quakeCProgram !== undefined) return options.quakeCProgram;
   const product = sourceProgramProduct(catalog, options.product);
-  return product.expectation.family === "q1" && product.expectation.edition !== "quakeworld"
-    && !expectedProducts.some(builtin => builtin.id === product.expectation.id)
-    && product.expectation.requiredPrograms.includes("progs.dat") ? "progs.dat" : undefined;
+  return product.expectation.family === "q1" &&
+    product.expectation.edition !== "quakeworld" &&
+    !expectedProducts.some(builtin => builtin.id === product.expectation.id) &&
+    product.expectation.requiredPrograms.includes("progs.dat")
+    ? "progs.dat"
+    : undefined;
 }
 
 /**
@@ -201,54 +319,95 @@ export function resolveApplicationMovement(catalog: InstalledCatalog, options: A
   return { ...options, movement: product.expectation.family, movementProduct: product.expectation.id };
 }
 
-export function applicationPlayerProducts(catalog: InstalledCatalog,
+export function applicationPlayerProducts(
+  catalog: InstalledCatalog,
   options: Pick<ApplicationOptions, "product" | "movement" | "movementProduct" | "character" | "network">,
-  nativeSource?: boolean): { readonly movement: string; readonly character: string } {
-  const product = catalog.product(options.product), family = product.expectation.family;
-  const ownPlayer = nativeSource ?? (product.availability.kind === "installed" && (product.expectation.edition === "quakeworld" && options.network.kind !== "qw-client"
-    || family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id)));
+  nativeSource?: boolean,
+): { readonly movement: string; readonly character: string } {
+  const product = catalog.product(options.product),
+    family = product.expectation.family;
+  const ownPlayer =
+    nativeSource ??
+    (product.availability.kind === "installed" &&
+      ((product.expectation.edition === "quakeworld" && options.network.kind !== "qw-client") ||
+        (family === "q3" &&
+          options.network.kind !== "q3-client" &&
+          !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id))));
   return {
-    movement: options.movementProduct !== undefined ? movementContentProduct(catalog, options.movementProduct).expectation.id
-      : ownPlayer && options.movement === family ? product.expectation.id : baseProduct(options.movement),
+    movement:
+      options.movementProduct !== undefined
+        ? movementContentProduct(catalog, options.movementProduct).expectation.id
+        : ownPlayer && options.movement === family
+          ? product.expectation.id
+          : baseProduct(options.movement),
     character: ownPlayer && options.character === family ? product.expectation.id : baseProduct(options.character),
   };
 }
 
-export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }, presentationSource?: ApplicationContentSource): LaunchPreset {
+export function applicationPreset(
+  catalog: InstalledCatalog,
+  options: ApplicationOptions,
+  nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference },
+  presentationSource?: ApplicationContentSource,
+): LaunchPreset {
   options = resolveApplicationMovement(catalog, options);
-  const product = catalog.require(options.product), family = product.expectation.family;
-  const q3Guest = family === "q3" && presentationSource?.family !== "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
+  const product = catalog.require(options.product),
+    family = product.expectation.family;
+  const q3Guest =
+    family === "q3" &&
+    presentationSource?.family !== "q3" &&
+    options.network.kind !== "q3-client" &&
+    !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
   if (q3Guest && options.network.kind !== "native-server" && options.network.kind !== "offline")
     throw new Error("Selected Q3 mods require an offline local or dedicated server");
   const quakeworld = product.expectation.edition === "quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = selectedQuakeCProgram(catalog, options);
-  if (selectedQ2GameLibrary(catalog, options) !== undefined && (options.quakeCProgram !== undefined || options.botSkill !== undefined
-    || options.network.kind !== "offline" && options.network.kind !== "native-server" && options.network.kind !== "q2-server"))
+  if (
+    selectedQ2GameLibrary(catalog, options) !== undefined &&
+    (options.quakeCProgram !== undefined ||
+      options.botSkill !== undefined ||
+      (options.network.kind !== "offline" && options.network.kind !== "native-server" && options.network.kind !== "q2-server"))
+  )
     throw new Error("--q2-game requires native offline/server operation without a second guest program");
-  if (nativeProgram !== undefined && (product.expectation.edition === "quakeworld"
-    || options.network.kind !== "offline" && options.network.kind !== "native-server"
-    || options.network.kind === "native-server" && options.character !== "q1"))
+  if (
+    nativeProgram !== undefined &&
+    (product.expectation.edition === "quakeworld" ||
+      (options.network.kind !== "offline" && options.network.kind !== "native-server") ||
+      (options.network.kind === "native-server" && options.character !== "q1"))
+  )
     throw new Error("--progs requires an offline/server NetQuake source world; native wire servers require Q1 character presentation");
   // Serving real QuakeWorld wire clients keeps the native presentation
   // requirements; local play runs the same program in the shared simulation.
-  if (quakeworld && options.network.kind === "native-server" && (!options.dedicated || options.mode !== "deathmatch" || options.character !== "q1"
-    || options.q1Protocol !== undefined))
+  if (
+    quakeworld &&
+    options.network.kind === "native-server" &&
+    (!options.dedicated || options.mode !== "deathmatch" || options.character !== "q1" || options.q1Protocol !== undefined)
+  )
     throw new Error("Native QuakeWorld requires dedicated deathmatch with Q1 character presentation and its native protocol");
   return selectedApplicationPreset(catalog, options, nativeSources, { quakeworld, q3Guest });
 }
 
-export function applicationConfigurationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
+export function applicationConfigurationPreset(
+  catalog: InstalledCatalog,
+  options: ApplicationOptions,
+  nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference },
+): LaunchPreset {
   options = resolveApplicationMovement(catalog, options);
-  const product = catalog.require(options.product), family = product.expectation.family;
+  const product = catalog.require(options.product),
+    family = product.expectation.family;
   const q3Guest = family === "q3" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
   const quakeworld = product.expectation.edition === "quakeworld";
   return selectedApplicationPreset(catalog, options, nativeSources, { quakeworld, q3Guest });
 }
 
-function selectedApplicationPreset(catalog: InstalledCatalog, options: ApplicationOptions,
+function selectedApplicationPreset(
+  catalog: InstalledCatalog,
+  options: ApplicationOptions,
   nativeSources: { readonly movement: ProviderReference; readonly character: ProviderReference } | undefined,
-  source: { readonly quakeworld: boolean; readonly q3Guest: boolean }): LaunchPreset {
-  const product = catalog.require(options.product), family = product.expectation.family;
+  source: { readonly quakeworld: boolean; readonly q3Guest: boolean },
+): LaunchPreset {
+  const product = catalog.require(options.product),
+    family = product.expectation.family;
   const { quakeworld, q3Guest } = source;
   const nativeProgram = selectedQuakeCProgram(catalog, options);
   const q2GameLibrary = selectedQ2GameLibrary(catalog, options);
@@ -259,11 +418,17 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   // follows it too. QuakeWorld programs keep their own execution; the
   // shared flag layer runs over them instead.
   const programProduct = rules === "ctf" && family === "q1" && !quakeworld ? catalog.require(match.content) : sourceProgramProduct(catalog, product.id);
-  const equipmentSource = nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld
-    ? { ...provider, content: programProduct.id } : provider;
+  const equipmentSource =
+    nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld ? { ...provider, content: programProduct.id } : provider;
   const playerProducts = applicationPlayerProducts(catalog, options, quakeworld || q3Guest);
-  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: catalog.require(playerProducts.movement).id };
-  const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: catalog.require(playerProducts.character).id };
+  const movement: ProviderReference = nativeSources?.movement ?? {
+    provider: `${options.movement}:movement`,
+    content: catalog.require(playerProducts.movement).id,
+  };
+  const character: ProviderReference = nativeSources?.character ?? {
+    provider: `${options.character}:character`,
+    content: catalog.require(playerProducts.character).id,
+  };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   // A Q2 guest DLL hosted by another family's product carries its edition
   // in the artifact; the filename picks the recipe claim and preparation
@@ -271,24 +436,112 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const rerelease = q2GameLibrary !== undefined && family !== "q2" ? q2GameLibrary.toLowerCase().includes("x64") : product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean, movementRole = false) => {
     const native = nativeProviderTiming(reference, source, edition);
-    return source === "q1" && (catalog.product(reference.content).expectation.edition === "quakeworld" || movementRole && options.movementProduct === "q1-quakeworld") ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50 } satisfies typeof native.clock } : native;
+    return source === "q1" &&
+      (catalog.product(reference.content).expectation.edition === "quakeworld" || (movementRole && options.movementProduct === "q1-quakeworld"))
+      ? {
+          ...native,
+          clock: {
+            kind: "q1-quakeworld",
+            maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50,
+          } satisfies typeof native.clock,
+        }
+      : native;
   };
   const providerTiming = timing(provider, family, rerelease);
-  return { id: createRecipeId("mixed", `${options.product}-${options.movementProduct ?? options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
-    map: { geometry: { content: options.mapProduct === undefined ? product.id : catalog.require(options.mapProduct).id, path: options.map }, entities: provider },
-    campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
-    character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, equipmentSource, match), enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider },
-    engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
-    execution: [q2GameLibrary !== undefined ? { kind: "native", owner: provider, role: "server-game", artifact: { content: product.id, path: q2GameLibrary },
-      ...(rerelease ? { api: { kind: "q2-rerelease-game", version: 2023 }, profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } } : { api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }) } : q3Guest ? (q3NativeGame !== undefined ? { kind: "native", owner: provider, role: "server-game", artifact: { content: product.id, path: q3NativeGame.path },
-      api: { kind: "q3-qagame", version: 8 }, profile: q3NativeGame.profile } : { kind: "qvm", owner: provider, role: "server-game", artifact: { content: product.id, path: "vm/qagame.qvm" },
-      api: { kind: "q3-qagame", version: 8 } }) : quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
-      api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : nativeProgram !== undefined
-        ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: nativeProgram },
-          api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } : execution(provider, family, rerelease, programProduct.id === product.id ? provider.provider : sourceProgramImplementation(programProduct.expectation))],
-    timing: [providerTiming, timing(movement, options.movement, catalog.product(movement.content).expectation.edition === "rerelease", true), timing(character, options.character, catalog.product(character.content).expectation.edition === "rerelease")],
-    ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
+  return {
+    id: createRecipeId(
+      "mixed",
+      `${options.product}-${options.movementProduct ?? options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`,
+    ),
+    map: {
+      geometry: { content: options.mapProduct === undefined ? product.id : catalog.require(options.mapProduct).id, path: options.map },
+      entities: provider,
+    },
+    campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider },
+    movement,
+    character: { definition: character, appearance },
+    weapons: [provider],
+    equipment: nativeEquipment(catalog, equipmentSource, match),
+    enemies: { kind: "map-defined" },
+    presentation: {
+      doppler: { kind: "source" },
+      environment: { kind: "audio-content" },
+      assets: product.id,
+      hud: provider,
+      effects: provider,
+      audio: provider,
+    },
+    engineBehavior: provider,
+    combat: provider,
+    inventory: provider,
+    match,
+    transition: provider,
+    execution: [
+      q2GameLibrary !== undefined
+        ? {
+            kind: "native",
+            owner: provider,
+            role: "server-game",
+            artifact: { content: product.id, path: q2GameLibrary },
+            ...(rerelease
+              ? {
+                  api: { kind: "q2-rerelease-game", version: 2023 },
+                  profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
+                }
+              : { api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }),
+          }
+        : q3Guest
+          ? q3NativeGame !== undefined
+            ? {
+                kind: "native",
+                owner: provider,
+                role: "server-game",
+                artifact: { content: product.id, path: q3NativeGame.path },
+                api: { kind: "q3-qagame", version: 8 },
+                profile: q3NativeGame.profile,
+              }
+            : {
+                kind: "qvm",
+                owner: provider,
+                role: "server-game",
+                artifact: { content: product.id, path: "vm/qagame.qvm" },
+                api: { kind: "q3-qagame", version: 8 },
+              }
+          : quakeworld
+            ? {
+                kind: "quakec",
+                owner: provider,
+                role: "server-game",
+                artifact: { content: product.id, path: "qwprogs.dat" },
+                api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 },
+              }
+            : nativeProgram !== undefined
+              ? {
+                  kind: "quakec",
+                  owner: provider,
+                  role: "server-game",
+                  artifact: { content: product.id, path: nativeProgram },
+                  api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 },
+                }
+              : execution(
+                  provider,
+                  family,
+                  rerelease,
+                  programProduct.id === product.id ? provider.provider : sourceProgramImplementation(programProduct.expectation),
+                ),
+    ],
+    timing: [
+      providerTiming,
+      timing(movement, options.movement, catalog.product(movement.content).expectation.edition === "rerelease", true),
+      timing(character, options.character, catalog.product(character.content).expectation.edition === "rerelease"),
+    ],
+    ordering: {
+      kind: "mixed",
+      providers: [provider.provider, movement.provider, character.provider],
+      entityOrder: "source-slot-order",
+      ties: "provider-entity-invocation",
+    },
+  };
 }
 
 export interface ApplicationConfigurationSelection {
@@ -308,56 +561,102 @@ export interface ApplicationConfigurationContent {
   close(): Promise<void>;
 }
 
-export type ApplicationConfigurationRequest = { readonly kind: "launch"; readonly preset: LaunchPreset; readonly choice: LaunchChoice }
+export type ApplicationConfigurationRequest =
+  | { readonly kind: "launch"; readonly preset: LaunchPreset; readonly choice: LaunchChoice }
   | { readonly kind: "recipe"; readonly recipe: ExecutableRecipe };
 
 /** Owns configuration mounts independently of any loaded world. */
-export async function openApplicationConfigurationContent(catalog: InstalledCatalog, request: ApplicationConfigurationRequest, q3Product?: Q3ApplicationProduct): Promise<ApplicationConfigurationContent> {
-  const product = await prepareQ3ApplicationProduct(catalog, request.kind === "recipe" ? request.recipe.map.entities.content : request.preset.map.entities.content, q3Product === undefined ? {} : { q3Product });
+export async function openApplicationConfigurationContent(
+  catalog: InstalledCatalog,
+  request: ApplicationConfigurationRequest,
+  q3Product?: Q3ApplicationProduct,
+): Promise<ApplicationConfigurationContent> {
+  const product = await prepareQ3ApplicationProduct(
+    catalog,
+    request.kind === "recipe" ? request.recipe.map.entities.content : request.preset.map.entities.content,
+    q3Product === undefined ? {} : { q3Product },
+  );
   catalog = product.catalog;
-  const prepared = request.kind === "recipe" ? { selected: request.recipe, plan: request.recipe.mounts }
-    : await prepareLaunchMountPlan({ catalog, preset: request.preset, choice: request.choice });
+  const prepared =
+    request.kind === "recipe"
+      ? { selected: request.recipe, plan: request.recipe.mounts }
+      : await prepareLaunchMountPlan({ catalog, preset: request.preset, choice: request.choice });
   const selected = prepared.selected;
-  const selection: ApplicationConfigurationSelection = { source: selected.map.entities, engineBehavior: selected.engineBehavior,
-    match: selected.match, combat: selected.combat, movement: selected.movement, timing: selected.timing };
+  const selection: ApplicationConfigurationSelection = {
+    source: selected.map.entities,
+    engineBehavior: selected.engineBehavior,
+    match: selected.match,
+    combat: selected.combat,
+    movement: selected.movement,
+    timing: selected.timing,
+  };
   const mounts = await openMountPlan(prepared.plan, product.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
-  return { catalog, selection, mounts, ...(product.q3Product === null ? {} : { q3Product: product.q3Product }), close: async () => { mounts.close(); } };
+  return {
+    catalog,
+    selection,
+    mounts,
+    ...(product.q3Product === null ? {} : { q3Product: product.q3Product }),
+    close: async () => {
+      mounts.close();
+    },
+  };
 }
 
 /** A map and every resolved reference retain their original archive identity. */
 export class LoadedApplicationContent {
   private modOwners: readonly import("../../world/session/mods.ts").PreparedMod[] = [];
-  get preparedMods(): readonly import("../../world/session/mods.ts").PreparedMod[] { return this.modOwners; }
+  get preparedMods(): readonly import("../../world/session/mods.ts").PreparedMod[] {
+    return this.modOwners;
+  }
   async prepareMods(purpose: "gameplay" | "presentation" = "gameplay"): Promise<void> {
     this.modOwners = await prepareApplicationMods(this.catalog, this.recipe, id => this.forContent(id), purpose);
   }
   private grappleOwner: PreparedQvmGrapple | null = null;
-  get preparedQvmGrapple(): PreparedQvmGrapple | null { return this.grappleOwner; }
+  get preparedQvmGrapple(): PreparedQvmGrapple | null {
+    return this.grappleOwner;
+  }
   async prepareQvmGrapple(): Promise<void> {
     const selection = this.recipe.equipment.grapple;
-    if (selection.kind === "enabled" && selection.mechanic === "q3-qvm") this.grappleOwner = await prepareApplicationQvmGrapple(selection, id => this.forContent(id));
+    if (selection.kind === "enabled" && selection.mechanic === "q3-qvm")
+      this.grappleOwner = await prepareApplicationQvmGrapple(selection, id => this.forContent(id));
   }
   private readonly weaponBehaviorOwners: PreparedWeaponBehavior[] = [];
-  get preparedWeaponBehaviors(): readonly PreparedWeaponBehavior[] { return this.weaponBehaviorOwners; }
+  get preparedWeaponBehaviors(): readonly PreparedWeaponBehavior[] {
+    return this.weaponBehaviorOwners;
+  }
   async prepareWeaponBehaviors(): Promise<void> {
     const selections = this.recipe.weaponBehaviors ?? [];
     if (selections.length !== 0 && this.recipe.execution.some(module => module.role === "server-game" && module.kind !== "typescript"))
       throw new Error("Selected native or bytecode game has no shared projectile behavior hook");
-    if (new Set(selections.map(value => value.definition.role)).size !== selections.length) throw new Error("Conflicting trajectory behaviors for one projectile role");
-    for (const selection of selections) this.weaponBehaviorOwners.push(await prepareApplicationWeaponBehavior(this.catalog, selection, id => this.forContent(id)));
+    if (new Set(selections.map(value => value.definition.role)).size !== selections.length)
+      throw new Error("Conflicting trajectory behaviors for one projectile role");
+    for (const selection of selections)
+      this.weaponBehaviorOwners.push(await prepareApplicationWeaponBehavior(this.catalog, selection, id => this.forContent(id)));
   }
   private readonly scoped = new Map<ContentId, Promise<MountedContent>>();
   private readonly lifecycle = { closed: false, mainMountLeases: 0 };
-  private get closed(): boolean { return this.lifecycle.closed; }
+  private get closed(): boolean {
+    return this.lifecycle.closed;
+  }
   private readonly opened = new Set<MountedContent>();
 
-  constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
-    readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null,
-    private readonly pure?: PureMountPolicy, readonly preparedQ3Game: PreparedQ3Game | null = null, readonly preparedQ2Game: PreparedClassicGuest | PreparedRereleaseGuest | null = null, readonly q3Product: Q3ApplicationProduct | null = null, readonly mapSidecars: readonly ApplicationMapSidecar[] = []) {}
+  constructor(
+    readonly catalog: InstalledCatalog,
+    readonly recipe: ExecutableRecipe,
+    readonly world: ApplicationWorld,
+    readonly mounts: MountedContent,
+    readonly preparedQuakeC: PreparedQuakeCSource | null = null,
+    private readonly pure?: PureMountPolicy,
+    readonly preparedQ3Game: PreparedQ3Game | null = null,
+    readonly preparedQ2Game: PreparedClassicGuest | PreparedRereleaseGuest | null = null,
+    readonly q3Product: Q3ApplicationProduct | null = null,
+    readonly mapSidecars: readonly ApplicationMapSidecar[] = [],
+  ) {}
 
   retainMainMounts(): () => void {
     if (this.closed) throw new Error("Application content is closed");
-    const lifecycle = this.lifecycle, mounts = this.mounts;
+    const lifecycle = this.lifecycle,
+      mounts = this.mounts;
     lifecycle.mainMountLeases++;
     let released = false;
     return () => {
@@ -368,7 +667,9 @@ export class LoadedApplicationContent {
     };
   }
 
-  openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
+  openedMounts(): readonly MountedContent[] {
+    return this.closed ? [] : [this.mounts, ...this.opened];
+  }
 
   forContent(content: ContentId): Promise<MountedContent> {
     if (this.closed) throw new Error("Application content is closed");
@@ -376,18 +677,28 @@ export class LoadedApplicationContent {
     if (existing !== undefined) return existing;
     const pending = (async (): Promise<MountedContent> => {
       const primary = await this.catalog.mountsFor(content);
-      const rules = content === this.recipe.map.entities.content && this.recipe.match.content !== content
-        ? await this.catalog.mountsFor(this.recipe.match.content) : [];
+      const rules =
+        content === this.recipe.map.entities.content && this.recipe.match.content !== content ? await this.catalog.mountsFor(this.recipe.match.content) : [];
       const mounts = [...new Map([...primary, ...rules].map(mount => [mount.identity.id, mount])).values()];
-      const digests = new Set(mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
+      const digests = new Set(mounts.flatMap(mount => (mount.kind === "archive" ? [mount.archiveDigest] : [])));
       const pure = this.pure === undefined ? undefined : { archives: this.pure.archives.filter(digest => digests.has(digest)) };
       if (this.pure !== undefined && this.pure.archives.length > 0 && pure?.archives.length === 0)
         throw new Error(`No server-approved archives provide ${content}`);
-      const plan = { id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
-        mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
-      const options: OpenMountOptions = { ...(pure === undefined ? {} : { pure }), ...(this.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {}) };
-      const opened = this.mounts.borrowMountPlan(plan, options) ?? await openMountPlan(plan, options);
-      if (this.closed) { opened.close(); throw new Error("Application content closed during mount"); }
+      const plan = {
+        id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
+        mounts,
+        defaultOrder: mounts.map(mount => mount.identity.id),
+        prefixOrders: [],
+      };
+      const options: OpenMountOptions = {
+        ...(pure === undefined ? {} : { pure }),
+        ...(this.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {}),
+      };
+      const opened = this.mounts.borrowMountPlan(plan, options) ?? (await openMountPlan(plan, options));
+      if (this.closed) {
+        opened.close();
+        throw new Error("Application content closed during mount");
+      }
       this.opened.add(opened);
       return opened;
     })();
@@ -414,29 +725,58 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
     if (prefix === "q1" || prefix === "q2" || prefix === "q3") return prefix;
     throw new Error(`Application input has no adapter for ${provider.provider}`);
   };
-  const character = family(recipe.character.definition), prefix = `${character}:model/`;
-  if (!recipe.character.appearance.provider.startsWith(prefix)) throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
+  const character = family(recipe.character.definition),
+    prefix = `${character}:model/`;
+  if (!recipe.character.appearance.provider.startsWith(prefix))
+    throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
   const quakeworldMovement = recipe.timing.find(profile => profile.provider === recipe.movement.provider)?.clock.kind === "q1-quakeworld";
-  return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
-    map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: quakeworldMovement ? "q1-quakeworld" : content.catalog.product(recipe.movement.content).expectation.id, character,
+  return {
+    ...options,
+    product: content.catalog.product(recipe.map.entities.content).expectation.id,
+    map: recipe.map.geometry.requestedPath,
+    mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id,
+    movement: family(recipe.movement),
+    movementProduct: quakeworldMovement ? "q1-quakeworld" : content.catalog.product(recipe.movement.content).expectation.id,
+    character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
-    rules: recipe.match.provider === "q1:ctf" || recipe.match.provider === "q2:ctf" || recipe.match.provider === "q3:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider.endsWith(":horde") ? "horde" : "standard" };
+    rules:
+      recipe.match.provider === "q1:ctf" || recipe.match.provider === "q2:ctf" || recipe.match.provider === "q3:ctf"
+        ? "ctf"
+        : recipe.match.provider === "q2:lmctf"
+          ? "lmctf"
+          : recipe.match.provider === "q2:tag"
+            ? "tag"
+            : recipe.match.provider === "q2:deathball"
+              ? "deathball"
+              : recipe.match.provider.endsWith(":horde")
+                ? "horde"
+                : "standard",
+  };
 }
 
 export async function resolveApplicationTravel(content: LoadedApplicationContent, path: string): Promise<ExecutableRecipe> {
   const recipe = content.recipe;
   const geometry = await resolveLaunchResource(content.catalog, content.mounts, { content: recipe.map.geometryContent, path }, "map");
-  const resources = new Map(recipe.resources.map(resource => {
-    const current = resource.id === recipe.map.geometry.id ? geometry : resource;
-    return [current.id, current];
-  }));
+  const resources = new Map(
+    recipe.resources.map(resource => {
+      const current = resource.id === recipe.map.geometry.id ? geometry : resource;
+      return [current.id, current];
+    }),
+  );
   return { ...recipe, map: { ...recipe.map, geometry }, resources: [...resources.values()] };
 }
 
 async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecipe, q3Product: Q3ApplicationProduct | null): Promise<MountedContent> {
   const mounts = await catalog.mountsFor(recipe.map.geometryContent);
-  return openMountPlan({ id: createMountPlanId("map-sidecars", Buffer.from(recipe.map.geometryContent).toString("hex")),
-    mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
+  return openMountPlan(
+    {
+      id: createMountPlanId("map-sidecars", Buffer.from(recipe.map.geometryContent).toString("hex")),
+      mounts,
+      defaultOrder: mounts.map(mount => mount.identity.id),
+      prefixOrders: [],
+    },
+    q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {},
+  );
 }
 
 /** A restored recipe may only mount what the installed catalog offers; saved host paths and digests are never trusted on their own. */
@@ -449,8 +789,11 @@ async function assertRecipeInstalled(catalog: InstalledCatalog, recipe: Executab
     offered.set(content, mounts);
     return mounts;
   };
-  const same = (saved: ContentMount, installed: ContentMount): boolean => saved.identity.id === installed.identity.id && saved.kind === installed.kind
-    && (saved.kind === "loose" ? installed.kind === "loose" && resolve(saved.rootPath) === resolve(installed.rootPath)
+  const same = (saved: ContentMount, installed: ContentMount): boolean =>
+    saved.identity.id === installed.identity.id &&
+    saved.kind === installed.kind &&
+    (saved.kind === "loose"
+      ? installed.kind === "loose" && resolve(saved.rootPath) === resolve(installed.rootPath)
       : installed.kind === "archive" && resolve(saved.archivePath) === resolve(installed.archivePath) && saved.archiveDigest === installed.archiveDigest);
   for (const mount of recipe.mounts.mounts)
     if (!(await known(mount.identity.content)).some(installed => same(mount, installed)))
@@ -461,30 +804,53 @@ async function assertRecipeInstalled(catalog: InstalledCatalog, recipe: Executab
       throw new Error(`Saved execution module ${module.owner.provider} uses a mount outside the restored content`);
 }
 
-export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy, installedCatalog?: InstalledCatalog, presentationSource?: ApplicationContentSource): Promise<LoadedApplicationContent> {
+export async function loadApplicationContent(
+  options: ApplicationOptions,
+  restoredRecipe?: ExecutableRecipe,
+  pure?: PureMountPolicy,
+  installedCatalog?: InstalledCatalog,
+  presentationSource?: ApplicationContentSource,
+): Promise<LoadedApplicationContent> {
   const remote = options.remoteContent;
   if (remote !== undefined) {
     const network = remote.base === "q1-quakeworld" ? "qw-client" : remote.base === "q2-classic-baseq2" ? "q2-client" : "q3-client";
     const recordedFamily = remote.base === "q1-quakeworld" ? "qw" : remote.base === "q2-classic-baseq2" ? "q2" : "q3";
-    if ((presentationSource === undefined ? options.network.kind !== network : presentationSource.family !== recordedFamily) || options.product !== remoteContentProduct(remote))
+    if (
+      (presentationSource === undefined ? options.network.kind !== network : presentationSource.family !== recordedFamily) ||
+      options.product !== remoteContentProduct(remote)
+    )
       throw new Error("Remote content context requires its matching remote client product");
   }
-  let catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: applicationDiscoversMods(options, restoredRecipe),
-    addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), ...(remote === undefined ? {} : { remoteContent: remote }) });
+  let catalog =
+    installedCatalog ??
+    (await discoverInstalledContent({
+      corpusRoot: options.corpusRoot,
+      userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+      discoverMods: applicationDiscoversMods(options, restoredRecipe),
+      addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(),
+      ...(remote === undefined ? {} : { remoteContent: remote }),
+    }));
   const product = await prepareQ3ApplicationProduct(catalog, restoredRecipe?.map.entities.content ?? options.product, options);
   catalog = product.catalog;
   if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };
-  const mountOptions: OpenMountOptions = { ...(pure === undefined ? {} : { pure }), ...(product.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {}) };
-  if (presentationSource !== undefined && catalog.require(options.product).expectation.family !== (presentationSource.family === "qw" ? "q1" : presentationSource.family))
+  const mountOptions: OpenMountOptions = {
+    ...(pure === undefined ? {} : { pure }),
+    ...(product.q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {}),
+  };
+  if (
+    presentationSource !== undefined &&
+    catalog.require(options.product).expectation.family !== (presentationSource.family === "qw" ? "q1" : presentationSource.family)
+  )
     throw new Error("Recorded content family differs from the selected product");
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options, undefined, presentationSource);
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), mounts: mountOptions });
   };
-  let recipe = restoredRecipe ?? await resolveRecipe();
+  let recipe = restoredRecipe ?? (await resolveRecipe());
   if (restoredRecipe === undefined && presentationSource === undefined) {
     const configured = await prepareConfiguredApplicationRecipe(catalog, options, recipe);
-    catalog = configured.catalog; recipe = configured.recipe;
+    catalog = configured.catalog;
+    recipe = configured.recipe;
   }
   for (const module of recipe.execution) {
     if (presentationSource?.kind === "unified") continue;
@@ -496,13 +862,26 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     }
     if (module.kind === "quakec") {
       const product = catalog.product(recipe.map.entities.content).expectation;
-      const nativeQw = product.edition === "quakeworld" && module.api.kind === "q1-quakeworld" && options.mode === "deathmatch"
-        && (options.network.kind === "offline" || options.network.kind === "native-server") && options.q1Protocol === undefined;
-      const nativeNq = catalog.product(recipe.map.entities.content).expectation.family === "q1" && module.api.kind === "q1-netquake" && (options.network.kind === "offline" || options.network.kind === "native-server");
-      if (!nativeQw && !nativeNq
-        || options.network.kind !== "offline" && recipe.map.geometryContent !== recipe.map.entities.content || module.owner.provider !== recipe.map.entities.provider
-        || module.owner.content !== recipe.map.entities.content || recipe.execution.length !== 1)
-        throw new Error("QuakeC requires matching source actors and validated artifact; native network maps must belong to the source content and QuakeWorld requires dedicated operation");
+      const nativeQw =
+        product.edition === "quakeworld" &&
+        module.api.kind === "q1-quakeworld" &&
+        options.mode === "deathmatch" &&
+        (options.network.kind === "offline" || options.network.kind === "native-server") &&
+        options.q1Protocol === undefined;
+      const nativeNq =
+        catalog.product(recipe.map.entities.content).expectation.family === "q1" &&
+        module.api.kind === "q1-netquake" &&
+        (options.network.kind === "offline" || options.network.kind === "native-server");
+      if (
+        (!nativeQw && !nativeNq) ||
+        (options.network.kind !== "offline" && recipe.map.geometryContent !== recipe.map.entities.content) ||
+        module.owner.provider !== recipe.map.entities.provider ||
+        module.owner.content !== recipe.map.entities.content ||
+        recipe.execution.length !== 1
+      )
+        throw new Error(
+          "QuakeC requires matching source actors and validated artifact; native network maps must belong to the source content and QuakeWorld requires dedicated operation",
+        );
       continue;
     }
     if (module.kind === "native" && module.role === "server-game" && module.api.kind === "q3-qagame") {
@@ -511,14 +890,27 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       assertQ3GuestRecipe(recipe, module);
       continue;
     }
-    if (module.kind === "native" && module.role === "server-game" && (module.api.kind === "q2-classic-game" && module.profile.kind === "windows-i386" || module.api.kind === "q2-rerelease-game" && module.profile.kind === "windows-x86-64")) {
+    if (
+      module.kind === "native" &&
+      module.role === "server-game" &&
+      ((module.api.kind === "q2-classic-game" && module.profile.kind === "windows-i386") ||
+        (module.api.kind === "q2-rerelease-game" && module.profile.kind === "windows-x86-64"))
+    ) {
       const product = catalog.product(recipe.map.entities.content);
-      if (product.expectation.family !== "q2" || (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") || recipe.execution.length !== 1
-        || module.owner.provider !== recipe.map.entities.provider || module.owner.content !== recipe.map.entities.content)
+      if (
+        product.expectation.family !== "q2" ||
+        (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") ||
+        recipe.execution.length !== 1 ||
+        module.owner.provider !== recipe.map.entities.provider ||
+        module.owner.content !== recipe.map.entities.content
+      )
         throw new Error("Native Quake II requires edition-matching source actors");
       continue;
     }
-    if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
+    if (module.kind !== "typescript")
+      throw new Error(
+        `Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`,
+      );
   }
   if (restoredRecipe !== undefined && pure === undefined) await assertRecipeInstalled(catalog, recipe);
   const mounts = await openMountPlan(recipe.mounts, mountOptions);
@@ -526,8 +918,12 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (pure !== undefined) {
       const geometry = await resolveLaunchResource(catalog, mounts, { content: recipe.map.geometryContent, path: recipe.map.geometry.requestedPath }, "map");
       const oldGeometry = recipe.map.geometry;
-      recipe = { ...recipe, mounts: mounts.plan, map: { ...recipe.map, geometry },
-        resources: recipe.resources.map(resource => resource.id === oldGeometry.id ? geometry : resource) };
+      recipe = {
+        ...recipe,
+        mounts: mounts.plan,
+        map: { ...recipe.map, geometry },
+        resources: recipe.resources.map(resource => (resource.id === oldGeometry.id ? geometry : resource)),
+      };
     }
     const bytes = await mounts.read(recipe.map.geometry);
     const map = recipe.map.geometry.requestedPath;
@@ -537,18 +933,22 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (family === "q1") {
       using mapContent = await openMapContent(catalog, recipe, product.q3Product);
       const [entities, lit] = await Promise.all([mapContent.open(map.replace(/\.bsp$/, ".ent")), mapContent.open(map.replace(/\.bsp$/, ".lit"))]);
-      mapSidecars.push({ content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".ent"), resource: entities?.reference ?? null },
-        { content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".lit"), resource: lit?.reference ?? null });
+      mapSidecars.push(
+        { content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".ent"), resource: entities?.reference ?? null },
+        { content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".lit"), resource: lit?.reference ?? null },
+      );
       world = readQ1Bsp(bytes, { source: map, ...(entities === null ? {} : { entities: entities.bytes }), ...(lit === null ? {} : { lit: lit.bytes }) });
     } else if (family === "q2") {
       using mapContent = await openMapContent(catalog, recipe, product.q3Product);
       const raw = readQ2Bsp(bytes, map);
       const materials = new Map<string, Uint8Array>();
-      await Promise.all([...new Set(raw.textureInfo.map(texture => `textures/${texture.name}.mat`))].map(async path => {
-        const asset = await mapContent.open(path);
-        mapSidecars.push({ content: recipe.map.geometryContent, path, resource: asset?.reference ?? null });
-        if (asset !== null) materials.set(path, asset.bytes);
-      }));
+      await Promise.all(
+        [...new Set(raw.textureInfo.map(texture => `textures/${texture.name}.mat`))].map(async path => {
+          const asset = await mapContent.open(path);
+          mapSidecars.push({ content: recipe.map.geometryContent, path, resource: asset?.reference ?? null });
+          if (asset !== null) materials.set(path, asset.bytes);
+        }),
+      );
       world = toQ2WorldGeometry(raw, { readMaterial: path => materials.get(path) ?? null });
     } else world = decodeQ3World(bytes, map);
     const execution = recipe.execution.find(module => module.kind === "quakec");
@@ -557,21 +957,51 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     let prepared: PreparedQuakeCSource | null = null;
     if (presentationSource?.kind !== "unified" && execution?.kind === "quakec" && recipe.map.geometryContent !== execution.owner.content) {
       const sourceMounts = await catalog.mountsFor(execution.owner.content);
-      const plan = { id: createMountPlanId("quakec-source", Buffer.from(execution.owner.content).toString("hex")),
-        mounts: sourceMounts, defaultOrder: sourceMounts.map(mount => mount.identity.id), prefixOrders: [] };
-      using sourceContent = mounts.borrowMountPlan(plan) ?? await openMountPlan(plan);
+      const plan = {
+        id: createMountPlanId("quakec-source", Buffer.from(execution.owner.content).toString("hex")),
+        mounts: sourceMounts,
+        defaultOrder: sourceMounts.map(mount => mount.identity.id),
+        prefixOrders: [],
+      };
+      using sourceContent = mounts.borrowMountPlan(plan) ?? (await openMountPlan(plan));
       prepared = await prepareQuakeCSource(execution, mounts, world.entities, sourceContent);
     } else if (presentationSource?.kind !== "unified" && execution?.kind === "quakec") prepared = await prepareQuakeCSource(execution, mounts, world.entities);
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3NativeExecution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game" && module.api.kind === "q3-qagame");
-    const q3Prepared = presentationSource?.kind === "unified" ? null : q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts)
-      : q3NativeExecution?.kind === "native" && q3NativeExecution.role === "server-game" ? await prepareQ3NativeGame(q3NativeExecution, mounts) : null;
+    const q3Prepared =
+      presentationSource?.kind === "unified"
+        ? null
+        : q3Execution?.kind === "qvm" && q3Execution.role === "server-game"
+          ? await prepareQ3Game(q3Execution, mounts)
+          : q3NativeExecution?.kind === "native" && q3NativeExecution.role === "server-game"
+            ? await prepareQ3NativeGame(q3NativeExecution, mounts)
+            : null;
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game" && module.api.kind !== "q3-qagame");
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? await prepareQ2Guest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
-    const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation"); return loaded; }
-    catch (error) { await loaded.close(); throw error; }
+    const loaded = new LoadedApplicationContent(
+      catalog,
+      recipe,
+      world,
+      mounts,
+      prepared,
+      pure,
+      q3Prepared,
+      q2Prepared,
+      product.q3Product,
+      mapSidecars.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    );
+    try {
+      if (presentationSource === undefined) {
+        await loaded.prepareWeaponBehaviors();
+        await loaded.prepareMods();
+        await loaded.prepareQvmGrapple();
+      } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation");
+      return loaded;
+    } catch (error) {
+      await loaded.close();
+      throw error;
+    }
   } catch (error) {
     mounts.close();
     throw error;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir, open, unlink } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -26,7 +27,9 @@ export type DemoRecordingIdentity =
   | { readonly kind: "q2"; readonly protocol: Q2ProtocolIdentity }
   | { readonly kind: "q3"; readonly protocol: 68 };
 
-export interface DemoRecordingSink { append(packet: DemoRecordingPacket): Promise<void>; }
+export interface DemoRecordingSink {
+  append(packet: DemoRecordingPacket): Promise<void>;
+}
 export interface DemoRecordingSeed {
   readonly identity: DemoRecordingIdentity;
   /** Complete signon/gamestate and baselines; the producer then admits a non-delta first frame. */
@@ -35,9 +38,22 @@ export interface DemoRecordingSeed {
 
 export function recordingPath(root: string, name: string, identity: DemoRecordingIdentity): string {
   const normalized = normalizeResourcePath(name);
-  const extension = identity.kind === "mvd" ? ".mvd" : identity.kind === "q1" ? ".dem" : identity.kind === "qw" ? ".qwd" : identity.kind === "q2" || identity.kind === "q2-server" ? ".dm2" : ".dm_68";
+  const extension =
+    identity.kind === "mvd"
+      ? ".mvd"
+      : identity.kind === "q1"
+        ? ".dem"
+        : identity.kind === "qw"
+          ? ".qwd"
+          : identity.kind === "q2" || identity.kind === "q2-server"
+            ? ".dm2"
+            : ".dm_68";
   const filename = normalized.toLowerCase().endsWith(extension) ? normalized : `${normalized}${extension}`;
-  const prefix = (identity.kind === "mvd" || identity.kind === "q2-server" || identity.kind === "q2" || identity.kind === "q3") && !filename.toLowerCase().startsWith("demos/") ? "demos" : "";
+  const prefix =
+    (identity.kind === "mvd" || identity.kind === "q2-server" || identity.kind === "q2" || identity.kind === "q3") &&
+    !filename.toLowerCase().startsWith("demos/")
+      ? "demos"
+      : "";
   return join(root, prefix, filename);
 }
 
@@ -49,10 +65,15 @@ export class DemoRecording implements DemoRecordingSink {
   private accepting = true;
   private angles: Vec3 = { x: 0, y: 0, z: 0 };
   private seconds = 0;
-  private constructor(readonly path: string, readonly identity: DemoRecordingIdentity, private readonly file: FileHandle) {}
+  private constructor(
+    readonly path: string,
+    readonly identity: DemoRecordingIdentity,
+    private readonly file: FileHandle,
+  ) {}
 
   static async open(root: string, name: string, seed: DemoRecordingSeed, replace = false): Promise<DemoRecording> {
-    if (seed.packets.length === 0 || seed.packets.some(packet => packet.kind !== seed.identity.kind)) throw new Error("Recording requires matching initial source state");
+    if (seed.packets.length === 0 || seed.packets.some(packet => packet.kind !== seed.identity.kind))
+      throw new Error("Recording requires matching initial source state");
     const path = recordingPath(root, name, seed.identity);
     await mkdir(dirname(path), { recursive: true });
     // A name the user typed replaces an existing demo like the original clients; generated names must not collide.
@@ -65,7 +86,11 @@ export class DemoRecording implements DemoRecordingSink {
     } catch (error) {
       await recording.abort();
       // A recording that never got its seed is a truncated file, not a demo.
-      try { await unlink(path); } catch { /* The write failure is the error worth reporting. */ }
+      try {
+        await unlink(path);
+      } catch {
+        /* The write failure is the error worth reporting. */
+      }
       throw error;
     }
   }
@@ -75,12 +100,24 @@ export class DemoRecording implements DemoRecordingSink {
     if (packet.kind !== this.identity.kind) return Promise.reject(new Error("Recording source protocol changed"));
     let bytes: Uint8Array;
     switch (packet.kind) {
-      case "mvd": bytes = frameMvdMessage(packet.message); break;
-      case "q1": this.angles = { ...packet.viewAngles }; bytes = writeNetQuakeDemoRecord(packet); break;
-      case "qw": this.seconds = packet.record.seconds; bytes = writeQuakeWorldDemoRecord(packet.record); break;
+      case "mvd":
+        bytes = frameMvdMessage(packet.message);
+        break;
+      case "q1":
+        this.angles = { ...packet.viewAngles };
+        bytes = writeNetQuakeDemoRecord(packet);
+        break;
+      case "qw":
+        this.seconds = packet.record.seconds;
+        bytes = writeQuakeWorldDemoRecord(packet.record);
+        break;
       case "q2-server":
-      case "q2": bytes = writeQ2DemoRecord(packet.message); break;
-      case "q3": bytes = encodeDemoMessage({ kind: "message", sequence: packet.sequence, payload: packet.message }); break;
+      case "q2":
+        bytes = writeQ2DemoRecord(packet.message);
+        break;
+      case "q3":
+        bytes = encodeDemoMessage({ kind: "message", sequence: packet.sequence, payload: packet.message });
+        break;
     }
     return this.write(bytes);
   }
@@ -88,26 +125,44 @@ export class DemoRecording implements DemoRecordingSink {
   private write(bytes: Uint8Array): Promise<void> {
     const operation = this.writes.then(async () => {
       if (this.failure !== null) throw this.failure.error;
-      for (let offset = 0; offset < bytes.length;) {
+      for (let offset = 0; offset < bytes.length; ) {
         const result = await this.file.write(bytes, offset, bytes.length - offset);
         if (result.bytesWritten === 0) throw new Error("Recording write made no progress");
         offset += result.bytesWritten;
       }
     });
-    this.writes = operation.catch((error: unknown) => { this.failure ??= { error }; });
+    this.writes = operation.catch((error: unknown) => {
+      this.failure ??= { error };
+    });
     return operation;
   }
 
   stop(): Promise<void> {
     if (this.finishing !== null) return this.finishing;
     this.accepting = false;
-    const footer = this.identity.kind === "q2-server" ? new Uint8Array(0) : this.identity.kind === "mvd" ? new Uint8Array(2) : this.identity.kind === "q1" ? writeNetQuakeDemoRecord({ viewAngles: this.angles, message: new Uint8Array([2]) })
-      : this.identity.kind === "qw" ? writeQuakeWorldDemoRecord({ kind: "packet", seconds: this.seconds,
-        message: new Uint8Array([255, 255, 255, 255, 2, ...new TextEncoder().encode("EndOfDemo"), 0]) })
-      : this.identity.kind === "q2" ? finishQ2Demo() : finishDemo();
+    const footer =
+      this.identity.kind === "q2-server"
+        ? new Uint8Array(0)
+        : this.identity.kind === "mvd"
+          ? new Uint8Array(2)
+          : this.identity.kind === "q1"
+            ? writeNetQuakeDemoRecord({ viewAngles: this.angles, message: new Uint8Array([2]) })
+            : this.identity.kind === "qw"
+              ? writeQuakeWorldDemoRecord({
+                  kind: "packet",
+                  seconds: this.seconds,
+                  message: new Uint8Array([255, 255, 255, 255, 2, ...new TextEncoder().encode("EndOfDemo"), 0]),
+                })
+              : this.identity.kind === "q2"
+                ? finishQ2Demo()
+                : finishDemo();
     this.finishing = (async () => {
-      try { await this.write(footer); await this.file.sync(); }
-      finally { await this.file.close(); }
+      try {
+        await this.write(footer);
+        await this.file.sync();
+      } finally {
+        await this.file.close();
+      }
     })();
     return this.finishing;
   }
@@ -115,7 +170,10 @@ export class DemoRecording implements DemoRecordingSink {
   abort(): Promise<void> {
     if (this.finishing !== null) return this.finishing;
     this.accepting = false;
-    this.finishing = (async () => { await this.writes; await this.file.close(); })();
+    this.finishing = (async () => {
+      await this.writes;
+      await this.file.close();
+    })();
     return this.finishing;
   }
 }

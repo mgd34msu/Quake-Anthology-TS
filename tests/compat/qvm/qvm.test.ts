@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { testCorpusRoot, corpusTest, corpusDescribe } from "../../support/corpus.ts";
 
@@ -30,43 +31,82 @@ function bytes(operations: readonly Operation[], words: readonly number[] = []):
       else code.i32(operand);
     }
   }
-  const instructions = code.finish(), output = new BinaryWriter(32 + instructions.length + words.length * 4);
-  for (const word of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, words.length * 4, 0, 4096 - words.length * 4]) output.i32(word);
+  const instructions = code.finish(),
+    output = new BinaryWriter(32 + instructions.length + words.length * 4);
+  for (const word of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, words.length * 4, 0, 4096 - words.length * 4])
+    output.i32(word);
   output.bytes(instructions);
   for (const word of words) output.i32(word);
   return output.finish();
 }
 function identity(data: Uint8Array, role: QvmRole): ModuleIdentity {
-  return { id: `test:${role}`, artifactPath: `vm/${role}.qvm`, revision: "test",
-    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(data).digest("hex")) };
+  return {
+    id: `test:${role}`,
+    artifactPath: `vm/${role}.qvm`,
+    revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(data).digest("hex")),
+  };
 }
-function noTrap(): never { throw new Error("Unexpected syscall"); }
+function noTrap(): never {
+  throw new Error("Unexpected syscall");
+}
 
 const recursiveProgram: readonly Operation[] = [
-  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_EQ, 7],
-  [QvmOpcode.OP_CONST, 77], [QvmOpcode.OP_LEAVE, 16],
-  [QvmOpcode.OP_LOCAL, 28], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 8], [QvmOpcode.OP_CONST, -6], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 16],
+  [QvmOpcode.OP_LOCAL, 24],
+  [QvmOpcode.OP_LOAD4],
+  [QvmOpcode.OP_CONST, 0],
+  [QvmOpcode.OP_EQ, 7],
+  [QvmOpcode.OP_CONST, 77],
+  [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_LOCAL, 28],
+  [QvmOpcode.OP_LOAD4],
+  [QvmOpcode.OP_ARG, 8],
+  [QvmOpcode.OP_CONST, -6],
+  [QvmOpcode.OP_CALL],
+  [QvmOpcode.OP_LEAVE, 16],
 ];
 
 describe("QVM execution", () => {
   test("interpreted block copies retain source alignment checks", () => {
-    const source = bytes([[QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 101],
-      [QvmOpcode.OP_BLOCK_COPY, 4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 0]]);
-    const vm = new QvmInterpreter(parseQvm(source), () => { throw new Error("Unexpected syscall"); });
+    const source = bytes([
+      [QvmOpcode.OP_ENTER, 0],
+      [QvmOpcode.OP_CONST, 64],
+      [QvmOpcode.OP_CONST, 101],
+      [QvmOpcode.OP_BLOCK_COPY, 4],
+      [QvmOpcode.OP_CONST, 0],
+      [QvmOpcode.OP_LEAVE, 0],
+    ]);
+    const vm = new QvmInterpreter(parseQvm(source), () => {
+      throw new Error("Unexpected syscall");
+    });
     expect(() => vm.invoke(qvmArguments([]))).toThrow("OP_BLOCK_COPY not dword aligned");
   });
 
   test("compiled block copies move whole words forward and refuse out-of-range blocks", () => {
     const copy = (destination: number, source: number, count: number, words: readonly number[]): Uint32Array => {
-      const source_ = bytes([[QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, destination], [QvmOpcode.OP_CONST, source],
-        [QvmOpcode.OP_BLOCK_COPY, count], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 0]], words);
+      const source_ = bytes(
+        [
+          [QvmOpcode.OP_ENTER, 0],
+          [QvmOpcode.OP_CONST, destination],
+          [QvmOpcode.OP_CONST, source],
+          [QvmOpcode.OP_BLOCK_COPY, count],
+          [QvmOpcode.OP_CONST, 0],
+          [QvmOpcode.OP_LEAVE, 0],
+        ],
+        words,
+      );
       const artifact = resolveQvmArtifact({ module: identity(source_, "qagame"), role: "qagame", bytes: source_ });
       if (artifact.kind !== "bytecode") throw new Error("Expected original bytecode");
       const module = new QvmModule({ artifact, host: rejectQvmSyscall });
       try {
         module.call([]);
-        return new Uint32Array(module.interpreter.memory.buffer.slice(module.interpreter.memory.byteOffset, module.interpreter.memory.byteOffset + words.length * 4));
-      } finally { module.retire(); }
+        return new Uint32Array(
+          module.interpreter.memory.buffer.slice(module.interpreter.memory.byteOffset, module.interpreter.memory.byteOffset + words.length * 4),
+        );
+      } finally {
+        module.retire();
+      }
     };
     expect([...copy(16, 0, 14, [1, 2, 3, 4, 9, 9, 9, 9])]).toEqual([1, 2, 3, 4, 1, 2, 3, 9]);
     expect([...copy(4, 0, 12, [1, 2, 3, 4])]).toEqual([1, 1, 1, 1]);
@@ -75,10 +115,19 @@ describe("QVM execution", () => {
 
   test("production modules retain compiled return control when guest buffers overwrite frame padding", () => {
     const source = bytes([
-      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 6], [QvmOpcode.OP_CALL],
-      [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
-      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_LOCAL, 16], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_STORE4],
-      [QvmOpcode.OP_CONST, 240], [QvmOpcode.OP_BCOM], [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_ENTER, 16],
+      [QvmOpcode.OP_CONST, 6],
+      [QvmOpcode.OP_CALL],
+      [QvmOpcode.OP_CONST, 1],
+      [QvmOpcode.OP_ADD],
+      [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_ENTER, 16],
+      [QvmOpcode.OP_LOCAL, 16],
+      [QvmOpcode.OP_CONST, 0],
+      [QvmOpcode.OP_STORE4],
+      [QvmOpcode.OP_CONST, 240],
+      [QvmOpcode.OP_BCOM],
+      [QvmOpcode.OP_LEAVE, 16],
     ]);
     const artifact = resolveQvmArtifact({ module: identity(source, "qagame"), role: "qagame", bytes: source });
     if (artifact.kind !== "bytecode") throw new Error("Expected original bytecode");
@@ -87,7 +136,9 @@ describe("QVM execution", () => {
       expect(module.call([])).toBe(-240);
       expect(module.interpreter.stackPointer).toBe(module.interpreter.memory.length);
       expect(module.call([])).toBe(-240);
-    } finally { module.retire(); }
+    } finally {
+      module.retire();
+    }
   });
 
   test("nested host entry finishes synchronously and expired syscall scopes reject", () => {
@@ -105,7 +156,10 @@ describe("QVM execution", () => {
     });
     expect(vm.invoke(qvmArguments([0, 123]))).toBe(78);
     expect(order).toEqual(["before", "after"]);
-    const getEscaped = (): QvmSyscall => { if (escaped === null) throw new Error("No syscall"); return escaped; };
+    const getEscaped = (): QvmSyscall => {
+      if (escaped === null) throw new Error("No syscall");
+      return escaped;
+    };
     expect(() => getEscaped().invoke(qvmArguments([1]))).toThrow("active syscall");
     expect(vm.isActive).toBe(false);
   });
@@ -124,7 +178,8 @@ describe("QVM execution", () => {
   });
 
   test("raw game data respects custom strides, live aliases and the player-state tail", () => {
-    const memory = new QvmMemory(new Uint8Array(8192)), table = new QvmGameData(memory);
+    const memory = new QvmMemory(new Uint8Array(8192)),
+      table = new QvmGameData(memory);
     table.locate(64, 2, 700, 4096, 600);
     const entity = table.entity(1);
     entity.r.currentOrigin = { x: 1, y: 2, z: 3 };
@@ -142,18 +197,29 @@ describe("QVM execution", () => {
   });
 
   test("module checkpoints retain private data and require matching artifact identity", () => {
-    const source = bytes([[QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_LEAVE, 0]]);
+    const source = bytes([
+      [QvmOpcode.OP_ENTER, 0],
+      [QvmOpcode.OP_CONST, 7],
+      [QvmOpcode.OP_LEAVE, 0],
+    ]);
     const moduleIdentity = identity(source, "qagame");
     const artifact = resolveQvmArtifact({ module: moduleIdentity, role: "qagame", bytes: source });
     if (artifact.kind !== "bytecode") throw new Error("Unexpected replacement");
     let external = 4;
-    const vm = new QvmModule({ artifact, host: rejectQvmSyscall, hostState: {
-      checkpoint: () => ({ state: { module: moduleIdentity, format: "test:counter", bytes: Uint8Array.of(external) }, random: [], callbacks: [] }),
-      restore: state => { external = state.state.bytes[0] ?? 0; },
-    } });
+    const vm = new QvmModule({
+      artifact,
+      host: rejectQvmSyscall,
+      hostState: {
+        checkpoint: () => ({ state: { module: moduleIdentity, format: "test:counter", bytes: Uint8Array.of(external) }, random: [], callbacks: [] }),
+        restore: state => {
+          external = state.state.bytes[0] ?? 0;
+        },
+      },
+    });
     vm.memory.bytes[256] = 77;
     const snapshot = vm.checkpoint();
-    vm.memory.bytes[256] = 10; external = 20;
+    vm.memory.bytes[256] = 10;
+    external = 20;
     vm.restore(snapshot);
     expect(vm.memory.bytes[256]).toBe(77);
     expect(external).toBe(4);
@@ -162,7 +228,10 @@ describe("QVM execution", () => {
   });
 
   test("unknown engine traps fail instead of reporting successful zero", () => {
-    const vm = new QvmInterpreter(parseQvm(bytes([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, -9001], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16]])), createQvmSystemCall("cgame"));
+    const vm = new QvmInterpreter(
+      parseQvm(bytes([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, -9001], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16]])),
+      createQvmSystemCall("cgame"),
+    );
     expect(() => vm.invoke(qvmArguments([]))).toThrow(QvmUnboundSyscallError);
   });
 });
@@ -180,43 +249,66 @@ for (const pack of retailPacks) {
         const artifact = resolveQvmArtifact({ module: identity(source, role), role, bytes: source });
         expect(artifact.known?.role).toBe(role);
         if (artifact.kind !== "bytecode") throw new Error("No replacement was registered");
-        const host: QvmHost = call => { throw new Error(`Unexpected ${call.role} syscall ${call.code}`); };
+        const host: QvmHost = call => {
+          throw new Error(`Unexpected ${call.role} syscall ${call.code}`);
+        };
         const vm = new QvmInterpreter(artifact.image, createQvmSystemCall(role, host));
         const args: QvmArguments = qvmArguments([role === "ui" ? 0 : role === "cgame" ? 5 : 999]);
-        expect(vm.invoke(args)).toBe(role === "ui" ? pack.startsWith("baseq3/") ? 4 : 6 : -1);
-        expect(await vm.invokeAsync(args)).toBe(role === "ui" ? pack.startsWith("baseq3/") ? 4 : 6 : -1);
+        expect(vm.invoke(args)).toBe(role === "ui" ? (pack.startsWith("baseq3/") ? 4 : 6) : -1);
+        expect(await vm.invokeAsync(args)).toBe(role === "ui" ? (pack.startsWith("baseq3/") ? 4 : 6) : -1);
         if (role === "ui") {
           const module = new QvmModule({ artifact, host });
           expect(module.profile.api).toEqual({ kind: "q3-ui", version: pack.startsWith("baseq3/") ? 4 : 6 });
           expect((await QvmModule.create({ artifact, host })).profile.api).toEqual(module.profile.api);
         }
       }
-    } finally { archive.close(); }
+    } finally {
+      archive.close();
+    }
   });
 }
 
 function deferredWord() {
-  let resolve: (value: number) => void = () => { throw new Error("Deferred word not initialized"); };
-  let reject: (error: unknown) => void = () => { throw new Error("Deferred word not initialized"); };
-  const promise = new Promise<number>((success, failure) => { resolve = success; reject = failure; });
+  let resolve: (value: number) => void = () => {
+    throw new Error("Deferred word not initialized");
+  };
+  let reject: (error: unknown) => void = () => {
+    throw new Error("Deferred word not initialized");
+  };
+  const promise = new Promise<number>((success, failure) => {
+    resolve = success;
+    reject = failure;
+  });
   return { promise, resolve, reject };
 }
 
 describe("QVM asynchronous traps", () => {
   test("one opcode continuation resumes after each trap and excludes unrelated entry", async () => {
-    const first = deferredWord(), second = deferredWord();
+    const first = deferredWord(),
+      second = deferredWord();
     let calls = 0;
-    const vm = new QvmInterpreter(parseQvm(bytes([
-      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, -1], [QvmOpcode.OP_CALL],
-      [QvmOpcode.OP_CONST, -2], [QvmOpcode.OP_CALL], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
-    ])), () => ++calls === 1 ? first.promise : second.promise);
+    const vm = new QvmInterpreter(
+      parseQvm(
+        bytes([
+          [QvmOpcode.OP_ENTER, 16],
+          [QvmOpcode.OP_CONST, -1],
+          [QvmOpcode.OP_CALL],
+          [QvmOpcode.OP_CONST, -2],
+          [QvmOpcode.OP_CALL],
+          [QvmOpcode.OP_ADD],
+          [QvmOpcode.OP_LEAVE, 16],
+        ]),
+      ),
+      () => (++calls === 1 ? first.promise : second.promise),
+    );
     const pending = vm.invokeAsync(qvmArguments([]));
     expect(vm.isActive).toBe(true);
     expect(() => vm.invoke(qvmArguments([]))).toThrow("already active");
     await expect(vm.invokeAsync(qvmArguments([]))).rejects.toThrow("already active");
     expect(() => vm.restoreData(vm.memory.slice())).toThrow("active QVM");
     first.resolve(12);
-    await Promise.resolve(); await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(calls).toBe(2);
     second.resolve(30);
     expect(await pending).toBe(42);
@@ -235,7 +327,10 @@ describe("QVM asynchronous traps", () => {
     });
     expect(await vm.invokeAsync(qvmArguments([0]))).toBe(90);
     expect(await children[0]).toBe(77);
-    const call = (): QvmSyscall => { if (escaped === null) throw new Error("Missing syscall"); return escaped; };
+    const call = (): QvmSyscall => {
+      if (escaped === null) throw new Error("Missing syscall");
+      return escaped;
+    };
     await expect(call().invokeAsync(qvmArguments([1]))).rejects.toThrow("active syscall");
     expect(vm.isActive).toBe(false);
   });
@@ -260,7 +355,9 @@ describe("QVM asynchronous traps", () => {
     expect(vm.invoke(qvmArguments([1]))).toBe(77);
     let current = true;
     const stale = new QvmInterpreter(parseQvm(bytes(recursiveProgram)), () => Promise.resolve(42));
-    const continuation = stale.invokeAsync(qvmArguments([0]), 0, () => { if (!current) throw new Error("Stale generation"); });
+    const continuation = stale.invokeAsync(qvmArguments([0]), 0, () => {
+      if (!current) throw new Error("Stale generation");
+    });
     current = false;
     await expect(continuation).rejects.toThrow("Stale generation");
     expect(stale.isActive).toBe(false);
@@ -270,10 +367,16 @@ describe("QVM asynchronous traps", () => {
   test("sync callers reject async traps and invalidate escaped capabilities", async () => {
     let escaped: QvmSyscall | null = null;
     const trap = deferredWord();
-    const vm = new QvmInterpreter(parseQvm(bytes(recursiveProgram)), call => { escaped = call; return trap.promise; });
+    const vm = new QvmInterpreter(parseQvm(bytes(recursiveProgram)), call => {
+      escaped = call;
+      return trap.promise;
+    });
     expect(() => vm.invoke(qvmArguments([0]))).toThrow("asynchronous syscall");
     expect(vm.isActive).toBe(false);
-    const call = (): QvmSyscall => { if (escaped === null) throw new Error("Missing syscall"); return escaped; };
+    const call = (): QvmSyscall => {
+      if (escaped === null) throw new Error("Missing syscall");
+      return escaped;
+    };
     await expect(call().invokeAsync(qvmArguments([1]))).rejects.toThrow("active syscall");
     trap.reject(new Error("Late async failure is consumed"));
     await Promise.resolve();
@@ -281,11 +384,19 @@ describe("QVM asynchronous traps", () => {
   });
 
   test("module commands retain arguments across awaits and retirement stops resume", async () => {
-    const source = bytes(recursiveProgram), artifact = resolveQvmArtifact({ module: identity(source, "cgame"), role: "cgame", bytes: source });
+    const source = bytes(recursiveProgram),
+      artifact = resolveQvmArtifact({ module: identity(source, "cgame"), role: "cgame", bytes: source });
     if (artifact.kind !== "bytecode") throw new Error("Unexpected replacement");
     const trap = deferredWord();
     const arguments_: (readonly string[] | null)[] = [];
-    const module = new QvmModule({ artifact, host: async call => { await trap.promise; arguments_.push(call.commandArguments); return 42; } });
+    const module = new QvmModule({
+      artifact,
+      host: async call => {
+        await trap.promise;
+        arguments_.push(call.commandArguments);
+        return 42;
+      },
+    });
     const pending = module.commandAsync([0], ["test", "argument"]);
     await expect(module.commandAsync([0], ["unrelated"])).rejects.toThrow("already active");
     module.retire();
@@ -295,7 +406,6 @@ describe("QVM asynchronous traps", () => {
     expect(module.interpreter.isActive).toBe(false);
   });
 });
-
 
 test("UI async factory validates a suspended API query before publishing the module", async () => {
   const source = bytes([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, -1], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16]]);
@@ -312,16 +422,25 @@ test("UI async factory validates a suspended API query before publishing the mod
 });
 
 test("cgame validates generation before resuming initialization and never primes stale state", async () => {
-  const source = bytes(recursiveProgram), artifact = resolveQvmArtifact({ module: identity(source, "cgame"), role: "cgame", bytes: source });
+  const source = bytes(recursiveProgram),
+    artifact = resolveQvmArtifact({ module: identity(source, "cgame"), role: "cgame", bytes: source });
   if (artifact.kind !== "bytecode") throw new Error("Unexpected replacement");
   const trap = deferredWord();
-  let generation = 1, primes = 0;
-  const cgame = new QvmCgame(createIdentityOwner("qvm-cgame").seat(0), { artifact, host: () => trap.promise }, {
-    assertCurrentOperation: () => undefined,
-    current: () => ({ generation, serverMessageNumber: 7, dropped: null }),
-    beginLoading: () => undefined,
-    prime: () => { primes++; return undefined; },
-  });
+  let generation = 1,
+    primes = 0;
+  const cgame = new QvmCgame(
+    createIdentityOwner("qvm-cgame").seat(0),
+    { artifact, host: () => trap.promise },
+    {
+      assertCurrentOperation: () => undefined,
+      current: () => ({ generation, serverMessageNumber: 7, dropped: null }),
+      beginLoading: () => undefined,
+      prime: () => {
+        primes++;
+        return undefined;
+      },
+    },
+  );
   const pending = cgame.init(7, 0, 0);
   generation++;
   trap.resolve(0);
@@ -332,11 +451,20 @@ test("cgame validates generation before resuming initialization and never primes
 });
 
 test("awaited host keeps only its syscall capability open and drains a suspended child", async () => {
-  const enter = deferredWord(), childTrap = deferredWord();
+  const enter = deferredWord(),
+    childTrap = deferredWord();
   const source = bytes([
-    [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_EQ, 8],
-    [QvmOpcode.OP_CONST, -7], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16],
-    [QvmOpcode.OP_CONST, -6], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16],
+    [QvmOpcode.OP_ENTER, 16],
+    [QvmOpcode.OP_LOCAL, 24],
+    [QvmOpcode.OP_LOAD4],
+    [QvmOpcode.OP_CONST, 0],
+    [QvmOpcode.OP_EQ, 8],
+    [QvmOpcode.OP_CONST, -7],
+    [QvmOpcode.OP_CALL],
+    [QvmOpcode.OP_LEAVE, 16],
+    [QvmOpcode.OP_CONST, -6],
+    [QvmOpcode.OP_CALL],
+    [QvmOpcode.OP_LEAVE, 16],
   ]);
   const children: Promise<number>[] = [];
   const vm = new QvmInterpreter(parseQvm(source), async call => {
@@ -346,7 +474,10 @@ test("awaited host keeps only its syscall capability open and drains a suspended
     return 90;
   });
   let completed = false;
-  const pending = vm.invokeAsync(qvmArguments([0])).then(value => { completed = true; return value; });
+  const pending = vm.invokeAsync(qvmArguments([0])).then(value => {
+    completed = true;
+    return value;
+  });
   enter.resolve(0);
   await Bun.sleep(0); // a macrotask: enough for a parent that did not drain its child to have settled
   expect(vm.isActive).toBe(true);
@@ -360,20 +491,41 @@ test("awaited host keeps only its syscall capability open and drains a suspended
 for (const staleOwner of ["parent", "child"]) {
   test(`nested calls preserve ${staleOwner} validation before resuming guest writes`, async () => {
     const gate = deferredWord();
-    let parentCurrent = true, childCurrent = true;
+    let parentCurrent = true,
+      childCurrent = true;
     const source = bytes([
-      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_EQ, 13],
-      [QvmOpcode.OP_CONST, -7], [QvmOpcode.OP_CALL], [QvmOpcode.OP_POP],
-      [QvmOpcode.OP_CONST, 256], [QvmOpcode.OP_CONST, 99], [QvmOpcode.OP_STORE4],
-      [QvmOpcode.OP_CONST, 77], [QvmOpcode.OP_LEAVE, 16],
-      [QvmOpcode.OP_CONST, -6], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_ENTER, 16],
+      [QvmOpcode.OP_LOCAL, 24],
+      [QvmOpcode.OP_LOAD4],
+      [QvmOpcode.OP_CONST, 0],
+      [QvmOpcode.OP_EQ, 13],
+      [QvmOpcode.OP_CONST, -7],
+      [QvmOpcode.OP_CALL],
+      [QvmOpcode.OP_POP],
+      [QvmOpcode.OP_CONST, 256],
+      [QvmOpcode.OP_CONST, 99],
+      [QvmOpcode.OP_STORE4],
+      [QvmOpcode.OP_CONST, 77],
+      [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_CONST, -6],
+      [QvmOpcode.OP_CALL],
+      [QvmOpcode.OP_LEAVE, 16],
     ]);
     const artifact = resolveQvmArtifact({ module: identity(source, "cgame"), role: "cgame", bytes: source });
     if (artifact.kind !== "bytecode") throw new Error("Unexpected replacement");
     let module: QvmModule;
-    module = new QvmModule({ artifact, host: call => call.code === 6 ? gate.promise
-      : module.callAsync([1], 0, () => { if (!childCurrent) throw new Error("child stale"); }) });
-    const pending = module.callAsync([0], 0, () => { if (!parentCurrent) throw new Error("parent stale"); });
+    module = new QvmModule({
+      artifact,
+      host: call =>
+        call.code === 6
+          ? gate.promise
+          : module.callAsync([1], 0, () => {
+              if (!childCurrent) throw new Error("child stale");
+            }),
+    });
+    const pending = module.callAsync([0], 0, () => {
+      if (!parentCurrent) throw new Error("parent stale");
+    });
     if (staleOwner === "parent") parentCurrent = false;
     else childCurrent = false;
     gate.resolve(0);
@@ -385,7 +537,8 @@ for (const staleOwner of ["parent", "child"]) {
 }
 
 test("throwing host drains its child before restart and restore", async () => {
-  const gate = deferredWord(), source = bytes(recursiveProgram);
+  const gate = deferredWord(),
+    source = bytes(recursiveProgram);
   let calls = 0;
   const vm = new QvmInterpreter(parseQvm(source), call => {
     if (++calls === 1) {

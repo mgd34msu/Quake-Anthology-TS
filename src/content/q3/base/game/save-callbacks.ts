@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { EntityThink, EntityBlocked, EntityTouch, EntityUse, EntityPain, EntityDie } from "./state.ts";
 
 export class Q3CallbackFamily<F> {

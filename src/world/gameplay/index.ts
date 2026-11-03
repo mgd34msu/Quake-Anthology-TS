@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { GameplayAuthority, copyArmor, copyCombat } from "./authority.ts";
 export type { CombatStateBinding, CombatTraits, GameplayHooks, PowerArmorCellBinding } from "./authority.ts";
 export { SharedInventoryTable } from "./inventory.ts";

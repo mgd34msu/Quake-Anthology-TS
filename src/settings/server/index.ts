@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export * from "./types.ts";
 export * from "./profile.ts";
 export * from "./common.ts";

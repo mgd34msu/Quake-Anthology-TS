@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
@@ -6,7 +7,10 @@ import ts from "typescript";
 export type LayerEdges = ReadonlyMap<string, ReadonlySet<string>>;
 
 /** The layer order and the grandfathered upward imports. */
-export interface LayerRules { readonly rank: ReadonlyMap<string, number>; readonly exceptions: LayerEdges; }
+export interface LayerRules {
+  readonly rank: ReadonlyMap<string, number>;
+  readonly exceptions: LayerEdges;
+}
 
 export const layerEdgesFile = "tools/layer-edges.json";
 export const layerOrderFile = "tools/layer-order.json";
@@ -14,7 +18,8 @@ export const layerOrderFile = "tools/layer-order.json";
 /** The src/ directory a project-relative path belongs to, or undefined for files directly under src/ and for paths outside it. */
 export function layerOf(projectPath: string): string | undefined {
   if (!projectPath.startsWith("src/")) return undefined;
-  const rest = projectPath.slice("src/".length), slash = rest.indexOf("/");
+  const rest = projectPath.slice("src/".length),
+    slash = rest.indexOf("/");
   return slash < 0 ? undefined : rest.slice(0, slash);
 }
 
@@ -24,7 +29,8 @@ function isLayerList(value: unknown): value is readonly string[] {
 
 /** Tiers from lowest to highest; a layer may import its own tier and any lower tier. Layers sharing a tier may import each other. */
 export function loadLayerOrder(root: string): ReadonlyMap<string, number> {
-  const path = resolve(root, layerOrderFile), rank = new Map<string, number>();
+  const path = resolve(root, layerOrderFile),
+    rank = new Map<string, number>();
   if (!existsSync(path)) return rank;
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(parsed)) throw new Error(`${layerOrderFile} must be an array of tiers, lowest first.`);
@@ -47,7 +53,8 @@ export function loadLayerEdges(root: string): LayerEdges | undefined {
   const path = resolve(root, layerEdgesFile);
   if (!existsSync(path)) return undefined;
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error(`${layerEdgesFile} must be an object of layer to imported layers.`);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    throw new Error(`${layerEdgesFile} must be an object of layer to imported layers.`);
   const edges = new Map<string, Set<string>>();
   for (const layer of Object.keys(parsed)) {
     const imported: unknown = Reflect.get(parsed, layer);
@@ -59,7 +66,8 @@ export function loadLayerEdges(root: string): LayerEdges | undefined {
 
 export function layerEdgeAllowed(rules: LayerRules, from: string, to: string): boolean {
   if (from === to) return true;
-  const fromRank = rules.rank.get(from), toRank = rules.rank.get(to);
+  const fromRank = rules.rank.get(from),
+    toRank = rules.rank.get(to);
   if (fromRank !== undefined && toRank !== undefined && toRank <= fromRank) return true;
   return rules.exceptions.get(from)?.has(to) === true;
 }
@@ -71,7 +79,7 @@ export function upwardLayerEdges(rank: ReadonlyMap<string, number>, scanned: Rea
     for (const to of imported) {
       if (layerEdgeAllowed({ rank, exceptions: new Map<string, ReadonlySet<string>>() }, from, to)) continue;
       let list = upward.get(from);
-      if (list === undefined) upward.set(from, list = new Set());
+      if (list === undefined) upward.set(from, (list = new Set()));
       list.add(to);
     }
   }
@@ -95,12 +103,12 @@ export function scanLayerEdges(root: string): Map<string, Set<string>> {
     if (from === undefined) continue;
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.ES2022);
     for (const statement of source.statements) {
-      const specifier = (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) ? statement.moduleSpecifier : undefined;
+      const specifier = ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement) ? statement.moduleSpecifier : undefined;
       if (specifier === undefined || !ts.isStringLiteralLike(specifier) || !specifier.text.startsWith(".")) continue;
       const to = layerOf(relative(root, resolve(dirname(file), specifier.text)).replaceAll("\\", "/"));
       if (to === undefined || to === from) continue;
       let imported = edges.get(from);
-      if (imported === undefined) edges.set(from, imported = new Set());
+      if (imported === undefined) edges.set(from, (imported = new Set()));
       imported.add(to);
     }
   }
@@ -113,7 +121,11 @@ if (import.meta.main) {
     process.stderr.write(`Usage: bun tools/layers.ts --write   (records the imports that go against ${layerOrderFile} as the exception list)\n`);
     process.exit(2);
   }
-  const sorted = Object.fromEntries([...upwardLayerEdges(loadLayerOrder(root), scanLayerEdges(root))].sort(([a], [b]) => a.localeCompare(b)).map(([layer, imported]) => [layer, [...imported].sort()]));
+  const sorted = Object.fromEntries(
+    [...upwardLayerEdges(loadLayerOrder(root), scanLayerEdges(root))]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([layer, imported]) => [layer, [...imported].sort()]),
+  );
   writeFileSync(resolve(root, layerEdgesFile), `${JSON.stringify(sorted, null, 2)}\n`);
   process.stdout.write(`Wrote ${layerEdgesFile}: ${Object.values(sorted).reduce((total, list) => total + list.length, 0)} edges.\n`);
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ProviderId } from "../../contracts/identity.ts";
 
 export interface ModRegistrationIdentity {
@@ -6,11 +7,12 @@ export interface ModRegistrationIdentity {
   readonly order: number;
 }
 
-export type ModOperationRegistration<Request, Result> = ModRegistrationIdentity & (
-  | { readonly kind: "transform"; transform(request: Request): Request }
-  | { readonly kind: "observe"; observe(request: Request, result: Result): undefined }
-  | { readonly kind: "replace"; replace(request: Request, next: (request: Request) => Result): Result }
-);
+export type ModOperationRegistration<Request, Result> = ModRegistrationIdentity &
+  (
+    | { readonly kind: "transform"; transform(request: Request): Request }
+    | { readonly kind: "observe"; observe(request: Request, result: Result): undefined }
+    | { readonly kind: "replace"; replace(request: Request, next: (request: Request) => Result): Result }
+  );
 
 interface Registration<Request, Result> {
   readonly contribution: ModOperationRegistration<Request, Result>;
@@ -18,7 +20,9 @@ interface Registration<Request, Result> {
   active: boolean;
 }
 
-function label(identity: ModRegistrationIdentity): string { return `${identity.provider}/${identity.id}`; }
+function label(identity: ModRegistrationIdentity): string {
+  return `${identity.provider}/${identity.id}`;
+}
 
 /** Registrations change between invocations; removing one takes effect even during a nested call. */
 export class ModOperation<Request, Result> {
@@ -27,7 +31,9 @@ export class ModOperation<Request, Result> {
 
   constructor(readonly name: string) {}
 
-  get active(): boolean { return this.entries.length !== 0; }
+  get active(): boolean {
+    return this.entries.length !== 0;
+  }
 
   register(contribution: ModOperationRegistration<Request, Result>): () => undefined {
     if (!Number.isSafeInteger(contribution.order)) throw new RangeError(`Invalid mod order for ${this.name}: ${label(contribution)}`);
@@ -41,20 +47,28 @@ export class ModOperation<Request, Result> {
     const entry = { contribution: Object.freeze({ ...contribution }), sequence: this.sequence++, active: true };
     this.entries = [...this.entries, entry].sort((a, b) => a.contribution.order - b.contribution.order || a.sequence - b.sequence);
     return () => {
-      if (entry.active) { entry.active = false; this.entries = this.entries.filter(candidate => candidate !== entry); }
+      if (entry.active) {
+        entry.active = false;
+        this.entries = this.entries.filter(candidate => candidate !== entry);
+      }
       return undefined;
     };
   }
 
   dispatch(input: Request, canonical: (request: Request) => Result, beforeObservers?: () => void): Result {
     const entries = this.entries;
-    if (entries.length === 0) { const result = canonical(input); beforeObservers?.(); return result; }
+    if (entries.length === 0) {
+      const result = canonical(input);
+      beforeObservers?.();
+      return result;
+    }
     let request = input;
     for (const entry of entries) if (entry.active && entry.contribution.kind === "transform") request = entry.contribution.transform(request);
     const replacement = entries.find(entry => entry.active && entry.contribution.kind === "replace")?.contribution;
     let result: Result;
     if (replacement?.kind === "replace") {
-      let open = true, called = false;
+      let open = true,
+        called = false;
       const failure: { value: { error: unknown } | null } = { value: null };
       try {
         result = replacement.replace(request, value => {
@@ -64,10 +78,15 @@ export class ModOperation<Request, Result> {
             called = true;
             request = value;
             return canonical(value);
-          } catch (error) { failure.value = { error }; throw error; }
+          } catch (error) {
+            failure.value = { error };
+            throw error;
+          }
         });
         if (failure.value !== null) throw failure.value.error;
-      } finally { open = false; }
+      } finally {
+        open = false;
+      }
     } else result = canonical(request);
     beforeObservers?.();
     for (const entry of entries) if (entry.active && entry.contribution.kind === "observe") entry.contribution.observe(request, result);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { resolve } from "node:path";
 import { resolveDefaultContentRoot } from "../../content/roots.ts";
 import type { ProjectileRole } from "../../contracts/weapon-behavior.ts";
@@ -10,9 +11,22 @@ interface ToolContent {
   readonly userContentRoot: string;
   readonly artifact?: string;
 }
-export type WeaponBehaviorToolCommand = { readonly action: "help" }
-  | ToolContent & ({ readonly action: "declare-qvm"; readonly profile: string } | { readonly action: "declare-native"; readonly profile: string } | { readonly action: "inspect" } | { readonly action: "declare"; readonly id: `${string}:${string}`;
-      readonly title: string; readonly role: ProjectileRole; readonly fire: string; readonly activate?: string });
+export type WeaponBehaviorToolCommand =
+  | { readonly action: "help" }
+  | (ToolContent &
+      (
+        | { readonly action: "declare-qvm"; readonly profile: string }
+        | { readonly action: "declare-native"; readonly profile: string }
+        | { readonly action: "inspect" }
+        | {
+            readonly action: "declare";
+            readonly id: `${string}:${string}`;
+            readonly title: string;
+            readonly role: ProjectileRole;
+            readonly fire: string;
+            readonly activate?: string;
+          }
+      ));
 export const weaponBehaviorToolHelp = `Usage:
   quake-typescript weapon-behavior inspect PRODUCT [options]
   quake-typescript weapon-behavior declare-qvm PRODUCT --profile MOUNTED_PROFILE_JSON [options]
@@ -32,43 +46,66 @@ Inspection reports actual bytecode callbacks and think assignments. It does not 
 projectile roles or activation gates. Declare only callbacks whose behavior you have
 established from the source. Declarations bind the exact current program digest.
 `;
-function behaviorId(value: string): value is `${string}:${string}` { return /^[^:\s]+:[^\s]+$/.test(value); }
+function behaviorId(value: string): value is `${string}:${string}` {
+  return /^[^:\s]+:[^\s]+$/.test(value);
+}
 function role(value: string): ProjectileRole {
   switch (value) {
-    case "rocket": case "grenade": case "nail": case "bolt": case "plasma": case "energy": case "grapple": return value;
-    default: throw new Error(`Invalid projectile role: ${value}`);
+    case "rocket":
+    case "grenade":
+    case "nail":
+    case "bolt":
+    case "plasma":
+    case "energy":
+    case "grapple":
+      return value;
+    default:
+      throw new Error(`Invalid projectile role: ${value}`);
   }
 }
 export function parseWeaponBehaviorTool(argv: readonly string[]): WeaponBehaviorToolCommand {
   if (argv.includes("--help") || argv.includes("-h")) return { action: "help" };
-  const action = argv[0], product = argv[1];
-  if ((action !== "inspect" && action !== "declare" && action !== "declare-qvm" && action !== "declare-native") || product === undefined || product.startsWith("--"))
+  const action = argv[0],
+    product = argv[1];
+  if (
+    (action !== "inspect" && action !== "declare" && action !== "declare-qvm" && action !== "declare-native") ||
+    product === undefined ||
+    product.startsWith("--")
+  )
     throw new Error(weaponBehaviorToolHelp);
   const flags = new Map<string, string>();
   for (let index = 2; index < argv.length; index += 2) {
-    const key = argv[index], value = argv[index + 1];
-    if (key === undefined || !["--content", "--user-content", "--artifact", "--id", "--title", "--role", "--fire", "--activate", "--profile"].includes(key)) throw new Error(`Unknown behavior option: ${key}`);
+    const key = argv[index],
+      value = argv[index + 1];
+    if (key === undefined || !["--content", "--user-content", "--artifact", "--id", "--title", "--role", "--fire", "--activate", "--profile"].includes(key))
+      throw new Error(`Unknown behavior option: ${key}`);
     if (value === undefined || value.startsWith("--") || value.length === 0 || value.includes("\0")) throw new Error(`Missing or invalid value for ${key}`);
     if (flags.has(key)) throw new Error(`Repeated behavior option: ${key}`);
     flags.set(key, value);
   }
-  const artifact = flags.get("--artifact"), content: ToolContent = { product,
-    corpusRoot: flags.get("--content") === undefined ? resolveDefaultContentRoot() : resolve(flags.get("--content") ?? ""),
-    userContentRoot: resolve(flags.get("--user-content") ?? defaultUserContentRoot()),
-    ...(artifact === undefined ? {} : { artifact: normalizeResourcePath(artifact) }) };
+  const artifact = flags.get("--artifact"),
+    content: ToolContent = {
+      product,
+      corpusRoot: flags.get("--content") === undefined ? resolveDefaultContentRoot() : resolve(flags.get("--content") ?? ""),
+      userContentRoot: resolve(flags.get("--user-content") ?? defaultUserContentRoot()),
+      ...(artifact === undefined ? {} : { artifact: normalizeResourcePath(artifact) }),
+    };
   if (action === "declare-qvm" || action === "declare-native") {
     const profile = flags.get("--profile");
-    if (profile === undefined || ["--id","--title","--role","--fire","--activate"].some(key=>flags.has(key)))
+    if (profile === undefined || ["--id", "--title", "--role", "--fire", "--activate"].some(key => flags.has(key)))
       throw new Error(`${action} requires --profile and takes identity, role and callbacks from that declaration`);
-    return {...content,action,profile:normalizeResourcePath(profile)};
+    return { ...content, action, profile: normalizeResourcePath(profile) };
   }
   if (flags.has("--profile")) throw new Error("--profile requires declare-qvm or declare-native");
   if (action === "inspect") {
     if (["--id", "--title", "--role", "--fire", "--activate"].some(key => flags.has(key))) throw new Error("Declaration options require the declare action");
     return { ...content, action };
   }
-  const id = flags.get("--id"), fire = flags.get("--fire"), selectedRole = flags.get("--role"), activate = flags.get("--activate");
-  if (id === undefined || !behaviorId(id) || fire === undefined || selectedRole === undefined) throw new Error("Declare requires --id NAMESPACE:ID, --role ROLE and --fire CALLBACK");
-  return { ...content, action, id, title: flags.get("--title") ?? id, role: role(selectedRole), fire,
-    ...(activate === undefined ? {} : { activate }) };
+  const id = flags.get("--id"),
+    fire = flags.get("--fire"),
+    selectedRole = flags.get("--role"),
+    activate = flags.get("--activate");
+  if (id === undefined || !behaviorId(id) || fire === undefined || selectedRole === undefined)
+    throw new Error("Declare requires --id NAMESPACE:ID, --role ROLE and --fire CALLBACK");
+  return { ...content, action, id, title: flags.get("--title") ?? id, role: role(selectedRole), fire, ...(activate === undefined ? {} : { activate }) };
 }

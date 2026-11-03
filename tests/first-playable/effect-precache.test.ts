@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -23,23 +24,35 @@ test("Q3 character preparation registers common effects while deferring unselect
   try {
     const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--dedicated", "--user-content-root", temporary]);
     if (command.kind !== "run") throw Error("Expected game");
-    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q3-character-precache");
+    const content = await loadApplicationContent(command.options),
+      identity = createIdentityOwner("q3-character-precache");
     const assets = new ApplicationAssets(content, { identity: Symbol("q3-character-precache"), session: identity.session, generation: 0 });
     try {
       await assets.loadWorld();
-      const models = spyOn(assets, "model"), source = content.recipe.map.entities.content;
+      const models = spyOn(assets, "model"),
+        source = content.recipe.map.entities.content;
       const effects = await Q3ApplicationEffects.create(assets, createSceneQueries(content.world), source, "character");
       try {
         expect(models.mock.calls.some(call => call[1] === "models/gibs/skull.md3")).toBe(true);
         expect(models.mock.calls.some(call => call[1].startsWith("models/weapons2/") && !call[1].startsWith("models/weapons2/shells/"))).toBe(false);
         expect(effects.drainSounds()).toHaveLength(0);
         const origin = { x: 0, y: 0, z: 0 };
-        expect(effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin)).toBe(true);
+        expect(
+          effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin),
+        ).toBe(true);
         await effects.prepare(1000, 16);
         expect(models.mock.calls.some(call => call[1].startsWith("models/weapons2/") && !call[1].startsWith("models/weapons2/shells/"))).toBe(false);
-      } finally { effects.close(); models.mockRestore(); }
-    } finally { assets.close(); await content.close(); }
-  } finally { await rm(temporary, { recursive: true, force: true }); }
+      } finally {
+        effects.close();
+        models.mockRestore();
+      }
+    } finally {
+      assets.close();
+      await content.close();
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }, 60000);
 
 test("cinematic metadata preserves normalized first definitions and replacements", async () => {
@@ -47,7 +60,10 @@ test("cinematic metadata preserves normalized first definitions and replacements
   const images = new SceneImageRegistry({ identity: Symbol("effect-cinematic"), session: identity.session, generation: 0 });
   const textures = new SceneTextureLoader(images, { read: async () => null });
   let plays = 0;
-  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"), undefined, async () => { plays++; return null; });
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"), undefined, async () => {
+    plays++;
+    return null;
+  });
   try {
     shaders.addScript("Fx/Movie { { videoMap intro.roq } }\nfx/still { { map $whiteimage } }");
     shaders.addScript("fx/movie { { map $whiteimage } }\nfx/still { { videoMap later.roq } }");
@@ -57,7 +73,10 @@ test("cinematic metadata preserves normalized first definitions and replacements
     expect(plays).toBe(0);
     await shaders.register("fx/movie");
     expect(plays).toBe(1);
-  } finally { textures.close(); images.close(); }
+  } finally {
+    textures.close();
+    images.close();
+  }
 });
 
 test("failed effect shader registration retries its image provider", async () => {
@@ -65,17 +84,25 @@ test("failed effect shader registration retries its image provider", async () =>
   const images = new SceneImageRegistry({ identity: Symbol("effect-shader-retry"), session: identity.session, generation: 0 });
   let fail = true;
   const bytes = encodePng(1, 1, new Uint8Array([255, 255, 255, 255]));
-  const textures = new SceneTextureLoader(images, { read: async path => {
-    if (fail) { fail = false; throw Error("effect image unavailable"); }
-    return { bytes, source: { kind: "generated", name: path } };
-  } });
+  const textures = new SceneTextureLoader(images, {
+    read: async path => {
+      if (fail) {
+        fail = false;
+        throw Error("effect image unavailable");
+      }
+      return { bytes, source: { kind: "generated", name: path } };
+    },
+  });
   const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
   try {
     shaders.addScript("fx/retry { { map retry.png } }");
     await expect(shaders.register("fx/retry")).rejects.toThrow("effect image unavailable");
     const material = await shaders.register("fx/retry");
     expect(await shaders.register("fx/retry")).toBe(material);
-  } finally { textures.close(); images.close(); }
+  } finally {
+    textures.close();
+    images.close();
+  }
 });
 
 test("Q3 loading media stays empty and retries a deferred cinematic at actual use", async () => {
@@ -83,37 +110,63 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
   try {
     const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--dedicated", "--user-content-root", temporary]);
     if (command.kind !== "run") throw Error("Expected game");
-    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q3-effect-precache");
+    const content = await loadApplicationContent(command.options),
+      identity = createIdentityOwner("q3-effect-precache");
     const assets = new ApplicationAssets(content, { identity: Symbol("q3-effect-precache"), session: identity.session, generation: 0 });
     try {
       await assets.loadWorld();
-      const source = content.recipe.map.entities.content, provider = await assets.provider(source), queries = createSceneQueries(content.world);
+      const source = content.recipe.map.entities.content,
+        provider = await assets.provider(source),
+        queries = createSceneQueries(content.world);
       const guard = spyOn(provider.shaders, "hasCinematic").mockImplementation(name => name === "waterBubble");
       const register = spyOn(provider.shaders, "register");
       try {
         await expect(Q3ApplicationEffects.create(assets, queries, source, "character")).rejects.toThrow("cinematic deferred");
         expect(register).not.toHaveBeenCalled();
-      } finally { guard.mockRestore(); register.mockRestore(); }
+      } finally {
+        guard.mockRestore();
+        register.mockRestore();
+      }
       const flash = await assets.model(source, "models/weapons2/machinegun/machinegun_flash.md3");
       if (flash.model.kind !== "q3-md3") throw Error("Expected source MD3 flash");
       const flashShader = flash.model.surfaces[0]?.shaders[0];
       if (flashShader === undefined) throw Error("Flash has no declared shader");
       provider.shaders.addScript("effect-precache/video { { videoMap intro.roq } }");
-      await provider.shaders.registrations.owner.remap({ original: flashShader, replacement: "effect-precache/video", timeOffset: 0, source: provider.shaders, current: () => true });
+      await provider.shaders.registrations.owner.remap({
+        original: flashShader,
+        replacement: "effect-precache/video",
+        timeOffset: 0,
+        source: provider.shaders,
+        current: () => true,
+      });
       const registered = spyOn(provider.shaders, "register");
       try {
         await expect(new SceneModelRenderer(provider, assets.world).preloadModel(flash, {}, false)).rejects.toThrow("Model cinematic deferred");
         expect(registered.mock.calls.some(call => call[0] === "effect-precache/video")).toBe(false);
-      } finally { registered.mockRestore(); await provider.shaders.registrations.owner.remap({ original: flashShader, replacement: flashShader, timeOffset: 0, source: provider.shaders, current: () => true }); }
+      } finally {
+        registered.mockRestore();
+        await provider.shaders.registrations.owner.remap({
+          original: flashShader,
+          replacement: flashShader,
+          timeOffset: 0,
+          source: provider.shaders,
+          current: () => true,
+        });
+      }
       const read = provider.textures.reader.read.bind(provider.textures.reader);
       let failedPath: string | null = null;
       const failedRead = spyOn(provider.textures.reader, "read").mockImplementation(async (...args) => {
-        if (failedPath === null) { failedPath = args[0]; throw Error("temporary effect image read"); }
+        if (failedPath === null) {
+          failedPath = args[0];
+          throw Error("temporary effect image read");
+        }
         return read(...args);
       });
       try {
         await expect(Q3ApplicationEffects.create(assets, queries, source, "character")).rejects.toThrow("temporary effect image read");
-      } finally { failedRead.mockRestore(); }
+      } finally {
+        failedRead.mockRestore();
+      }
       if (failedPath === null) throw Error("Character preparation read no effect image");
       const retriedPath: string = failedPath;
       const reads = spyOn(provider.textures.reader, "read");
@@ -124,11 +177,16 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
         expect(effects.state.time).toBe(0);
         expect(effects.drainSounds()).toHaveLength(0);
         const origin = { x: 0, y: 0, z: 0 };
-        expect(effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin)).toBe(true);
+        expect(
+          effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin),
+        ).toBe(true);
         expect(effects.state.time).toBe(1000);
         await effects.prepare(1000, 16);
         expect(retriedReads()).toBe(1);
-      } finally { effects.close(); reads.mockRestore(); }
+      } finally {
+        effects.close();
+        reads.mockRestore();
+      }
       const shared = new ApplicationEffects(assets, queries, () => false);
       const create = spyOn(Q3ApplicationEffects, "create");
       const frame = spyOn(Q3ApplicationEffects.prototype, "frame");
@@ -136,28 +194,50 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
       try {
         expect(await shared.preloadTransientResources()).toHaveLength(0);
         expect(create).not.toHaveBeenCalled();
-        shared.frame({ origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
-          projection: identityMat4(), viewport: { x: 0, y: 0, width: 64, height: 64 }, clip: { kind: "none" } }, createSourceSceneOrder(assets.materialRegistrations));
+        shared.frame(
+          {
+            origin: { x: 0, y: 0, z: 0 },
+            axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+            projection: identityMat4(),
+            viewport: { x: 0, y: 0, width: 64, height: 64 },
+            clip: { kind: "none" },
+          },
+          createSourceSceneOrder(assets.materialRegistrations),
+        );
         expect(frame).not.toHaveBeenCalled();
         expect(shared.drainSounds()).toHaveLength(0);
         shared.close();
         expect(close).not.toHaveBeenCalled();
         shared.close();
         expect(close).not.toHaveBeenCalled();
-      } finally { shared.close(); create.mockRestore(); frame.mockRestore(); close.mockRestore(); }
-    } finally { assets.close(); await content.close(); }
-  } finally { await rm(temporary, { recursive: true, force: true }); }
+      } finally {
+        shared.close();
+        create.mockRestore();
+        frame.mockRestore();
+        close.mockRestore();
+      }
+    } finally {
+      assets.close();
+      await content.close();
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }, 60000);
 
 test("texture rejection retries while absent null remains cached", async () => {
   const identity = createIdentityOwner("texture-retry");
   const images = new SceneImageRegistry({ identity: Symbol("texture-retry"), session: identity.session, generation: 0 });
-  let fail = true, reads = 0;
+  let fail = true,
+    reads = 0;
   const bytes = encodePng(1, 1, new Uint8Array([255, 100, 50, 255]));
   const textures = new SceneTextureLoader(images, {
     read: async path => {
       reads++;
-      if (fail) { fail = false; throw Error("temporary read"); }
+      if (fail) {
+        fail = false;
+        throw Error("temporary read");
+      }
       return path === "skin.png" ? { bytes, source: { kind: "generated", name: path } } : null;
     },
   });
@@ -168,39 +248,63 @@ test("texture rejection retries while absent null remains cached", async () => {
     const before = reads;
     await expect(textures.load("missing.png")).resolves.toBeNull();
     expect(reads).toBe(before);
-  } finally { textures.close(); images.close(); }
+  } finally {
+    textures.close();
+    images.close();
+  }
 });
 
 for (const mode of ["provider", "model", "texture"] satisfies readonly string[]) {
   test(`optional ${mode} failure permits later real explosion`, async () => {
     const temporary = await mkdtemp("/tmp/quake-effect-precache-");
     try {
-      const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2",
-        "--character", "q2", "--dedicated", "--user-content-root", temporary]);
+      const command = parseApplicationCommand([
+        "--game",
+        "q2-classic-baseq2",
+        "--map",
+        "base1",
+        "--movement",
+        "q2",
+        "--character",
+        "q2",
+        "--dedicated",
+        "--user-content-root",
+        temporary,
+      ]);
       if (command.kind !== "run") throw Error("Expected game");
-      const content = await loadApplicationContent(command.options), identity = createIdentityOwner(`effect-${mode}-retry`);
+      const content = await loadApplicationContent(command.options),
+        identity = createIdentityOwner(`effect-${mode}-retry`);
       const assets = new ApplicationAssets(content, { identity: Symbol(mode), session: identity.session, generation: 0 });
       try {
         if (mode === "provider") {
-          const failure = spyOn(content, "forContent").mockImplementation(async () => { throw Error("temporary provider mounts"); });
-          try { await expect(assets.provider(content.recipe.map.entities.content)).rejects.toThrow("temporary provider mounts"); }
-          finally { failure.mockRestore(); }
+          const failure = spyOn(content, "forContent").mockImplementation(async () => {
+            throw Error("temporary provider mounts");
+          });
+          try {
+            await expect(assets.provider(content.recipe.map.entities.content)).rejects.toThrow("temporary provider mounts");
+          } finally {
+            failure.mockRestore();
+          }
         }
         await assets.loadWorld();
-        const source = content.recipe.map.entities.content, provider = await assets.provider(source);
+        const source = content.recipe.map.entities.content,
+          provider = await assets.provider(source);
         const effects = new ApplicationEffects(assets, createSceneQueries(content.world), () => false);
         try {
           let failed = false;
-          const open = provider.mounts.open.bind(provider.mounts), read = provider.textures.reader.read.bind(provider.textures.reader);
+          const open = provider.mounts.open.bind(provider.mounts),
+            read = provider.textures.reader.read.bind(provider.textures.reader);
           const openSpy = spyOn(provider.mounts, "open").mockImplementation(async (...args) => {
             if (mode === "model" && !failed && args[0] === "models/objects/r_explode/tris.md2") {
-              failed = true; throw Error("temporary model read");
+              failed = true;
+              throw Error("temporary model read");
             }
             return open(...args);
           });
           const readSpy = spyOn(provider.textures.reader, "read").mockImplementation(async (...args) => {
             if (mode === "texture" && !failed && args[0] === "models/objects/r_explode/skin1.pcx") {
-              failed = true; throw Error("temporary skin read");
+              failed = true;
+              throw Error("temporary skin read");
             }
             return read(...args);
           });
@@ -211,25 +315,60 @@ for (const mode of ["provider", "model", "texture"] satisfies readonly string[])
               expect(failed).toBe(true);
               expect(failures.some(failure => failure.path === "models/objects/r_explode/tris.md2")).toBe(true);
             }
-          } finally { openSpy.mockRestore(); readSpy.mockRestore(); }
+          } finally {
+            openSpy.mockRestore();
+            readSpy.mockRestore();
+          }
           const snapshot: WorldSnapshot = {
             session: identity.session,
             frame: { frame: 10, time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
-            actors: [], bodies: [], inventories: [], configurations: [],
-            scene: { session: identity.session, time: { kind: "seconds", value: 1 }, world: null, entities: [],
-              lights: [], particles: [], lightStyles: [], areaBits: null },
+            actors: [],
+            bodies: [],
+            inventories: [],
+            configurations: [],
+            scene: {
+              session: identity.session,
+              time: { kind: "seconds", value: 1 },
+              world: null,
+              entities: [],
+              lights: [],
+              particles: [],
+              lightStyles: [],
+              areaBits: null,
+            },
           };
-          effects.receive([{ kind: "q2", content: source, seconds: 1, sequence: 1,
-            event: { kind: "effect", effect: "rocket-explosion", origin: { x: 80, y: 20, z: 0 },
-              direction: { x: -1, y: 0, z: 0 }, count: 0, color: 0 } }]);
+          effects.receive([
+            {
+              kind: "q2",
+              content: source,
+              seconds: 1,
+              sequence: 1,
+              event: { kind: "effect", effect: "rocket-explosion", origin: { x: 80, y: 20, z: 0 }, direction: { x: -1, y: 0, z: 0 }, count: 0, color: 0 },
+            },
+          ]);
           await effects.prepare(snapshot, []);
           expect(effects.drainUnhandled()).toHaveLength(0);
-          const output = effects.frame({ origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
-            projection: identityMat4(), viewport: { x: 0, y: 0, width: 640, height: 480 }, clip: { kind: "none" } }, createSourceSceneOrder(assets.materialRegistrations));
+          const output = effects.frame(
+            {
+              origin: { x: 0, y: 0, z: 0 },
+              axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+              projection: identityMat4(),
+              viewport: { x: 0, y: 0, width: 640, height: 480 },
+              clip: { kind: "none" },
+            },
+            createSourceSceneOrder(assets.materialRegistrations),
+          );
           expect(output.lights.some(light => light.radius > 0)).toBe(true);
-        } finally { effects.close(); }
-      } finally { assets.close(); await content.close(); }
-    } finally { await rm(temporary, { recursive: true, force: true }); }
+        } finally {
+          effects.close();
+        }
+      } finally {
+        assets.close();
+        await content.close();
+      }
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   }, 60000);
 }
 
@@ -239,29 +378,35 @@ test("late provider failure releases only its new texture loader before retry", 
     const scripts = join(temporary, "q2", "baseq2", "scripts");
     await mkdir(scripts, { recursive: true });
     await writeFile(join(scripts, "provider-retry.shader"), "textures/provider-retry { { map $whiteimage } }");
-    const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated",
-      "--user-content-root", temporary]);
+    const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated", "--user-content-root", temporary]);
     if (command.kind !== "run") throw Error("Expected game");
-    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("late-provider-retry");
+    const content = await loadApplicationContent(command.options),
+      identity = createIdentityOwner("late-provider-retry");
     const assets = new ApplicationAssets(content, { identity: Symbol("late-provider-retry"), session: identity.session, generation: 0 });
-    const closed: SceneTextureLoader[] = [], close = SceneTextureLoader.prototype.close;
+    const closed: SceneTextureLoader[] = [],
+      close = SceneTextureLoader.prototype.close;
     const closeSpy = spyOn(SceneTextureLoader.prototype, "close").mockImplementation(function (this: SceneTextureLoader, ...args) {
-      closed.push(this); return close.apply(this, args);
+      closed.push(this);
+      return close.apply(this, args);
     });
     try {
-      const source = content.recipe.map.entities.content, mounts = await content.forContent(source);
+      const source = content.recipe.map.entities.content,
+        mounts = await content.forContent(source);
       const open = mounts.open.bind(mounts);
       const failure = spyOn(mounts, "open").mockImplementation(async (...args) => {
         if (args[0] === "scripts/provider-retry.shader") throw Error("late shader read");
         return open(...args);
       });
-      try { await expect(assets.provider(source)).rejects.toThrow("late shader read"); }
-      finally { failure.mockRestore(); }
+      try {
+        await expect(assets.provider(source)).rejects.toThrow("late shader read");
+      } finally {
+        failure.mockRestore();
+      }
       expect(closed).toHaveLength(1);
       const failed = closed[0];
       if (failed === undefined) throw Error("Failed loader was not closed");
       const operations = assets.images.drainOperations();
-      const created = operations.flatMap(operation => operation.kind === "create-image" ? [operation.image] : []);
+      const created = operations.flatMap(operation => (operation.kind === "create-image" ? [operation.image] : []));
       expect(created).toHaveLength(2);
       expect(operations.filter(operation => operation.kind === "release-image")).toHaveLength(2);
       expect(created.every(image => !assets.images.isResident(image))).toBe(true);
@@ -271,7 +416,13 @@ test("late provider failure releases only its new texture loader before retry", 
       assets.close();
       expect(closed.filter(loader => loader === failed)).toHaveLength(1);
       expect(closed.filter(loader => loader === provider.textures)).toHaveLength(1);
-    } finally { assets.close(); closeSpy.mockRestore(); await content.close(); }
-  } finally { await rm(temporary, { recursive: true, force: true }); }
+    } finally {
+      assets.close();
+      closeSpy.mockRestore();
+      await content.close();
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }, 60000);
 import { createSourceSceneOrder } from "../../src/render/scene/submissions.ts";

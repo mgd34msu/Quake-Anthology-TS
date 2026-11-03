@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { Weapon } from "../../../../movement/q3/constants.ts";
 export { MoveType, WeaponState, Powerup, Holdable, Weapon, EntityEvent } from "../../../../movement/q3/constants.ts";
 // Ported from id Software's code/game/bg_public.h and q_shared.h.
@@ -24,12 +25,6 @@ export enum GameType {
   GT_HARVESTER = 7,
   GT_MAX_GAME_TYPE = 8,
 }
-
-
-
-
-
-
 
 export enum Team {
   TEAM_FREE = 0,

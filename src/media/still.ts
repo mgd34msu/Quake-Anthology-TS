@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { decodePcx } from "../formats/images/indexed.ts";
 import { cinRgba } from "./cin.ts";
 import type { CinematicSource } from "./playback.ts";

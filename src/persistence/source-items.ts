@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readSourceItemIcon } from "../content/item-icon.ts";
 import { readHeldWeaponDeclaration } from "../content/held-weapon.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -23,7 +24,8 @@ const key = (actor: SavedActorId): string => `${actor.slot}/${actor.generation}`
 export function captureSourceItems(actors: SessionActorRegistry, inventory: SharedInventoryTable): ProviderCheckpoint {
   const entries: SourceItems[] = [];
   for (const observation of actors.observations()) {
-    const actor = actors.resolveOwned(observation.id); if (actor === null) continue;
+    const actor = actors.resolveOwned(observation.id);
+    if (actor === null) continue;
     const source = inventory.sourceItems(actor);
     if (source !== null) entries.push({ actor: savedActorId(actor.id), owner: actor.owner, ...source });
   }
@@ -31,39 +33,69 @@ export function captureSourceItems(actors: SessionActorRegistry, inventory: Shar
 }
 function definition(reader: SaveReader): SourceItemDefinition {
   const source = readProvider(reader.field("source"));
-  const common = { item: namespaced(reader.field("item")), label: reader.field("label").string(), source,
-    ...(reader.field("icon").value === undefined ? {} : { icon: reader.field("icon").nullable(value => readSourceItemIcon(value, source.content)) }), ...(reader.field("actions").value === undefined ? {} : { actions: reader.field("actions").list(value => value.choice("use", "drop")) }) };
-  if (common.actions !== undefined && (common.actions.length === 0 || new Set(common.actions).size !== common.actions.length)) return reader.fail("Source item actions are empty or duplicated");
+  const common = {
+    item: namespaced(reader.field("item")),
+    label: reader.field("label").string(),
+    source,
+    ...(reader.field("icon").value === undefined ? {} : { icon: reader.field("icon").nullable(value => readSourceItemIcon(value, source.content)) }),
+    ...(reader.field("actions").value === undefined ? {} : { actions: reader.field("actions").list(value => value.choice("use", "drop")) }),
+  };
+  if (common.actions !== undefined && (common.actions.length === 0 || new Set(common.actions).size !== common.actions.length))
+    return reader.fail("Source item actions are empty or duplicated");
   if (common.label.length === 0) return reader.fail("source item label is empty");
   switch (reader.field("kind").choice("counter", "weapon")) {
-    case "counter": return { ...common, kind: "counter" };
-    case "weapon": return { ...common, kind: "weapon", ...(reader.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(reader.field("held")) }), ammo: reader.field("ammo").value === null ? null : namespaced(reader.field("ammo")) };
+    case "counter":
+      return { ...common, kind: "counter" };
+    case "weapon":
+      return {
+        ...common,
+        kind: "weapon",
+        ...(reader.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(reader.field("held")) }),
+        ammo: reader.field("ammo").value === null ? null : namespaced(reader.field("ammo")),
+      };
   }
 }
 export function readSourceItems(save: Pick<SaveImage, "providers" | "inventories">): readonly SourceItems[] {
-  const records = save.providers.filter(provider => provider.schema === schema), record = records[0];
-  if (records.length > 1 || record !== undefined && (record.provider !== "world:gameplay" || record.version !== 1)) throw new SaveFormatError(schema, "unsupported or duplicate source item checkpoint");
+  const records = save.providers.filter(provider => provider.schema === schema),
+    record = records[0];
+  if (records.length > 1 || (record !== undefined && (record.provider !== "world:gameplay" || record.version !== 1)))
+    throw new SaveFormatError(schema, "unsupported or duplicate source item checkpoint");
   if (record === undefined) return [];
   const actors = new Set<string>();
   return new SaveReader(decodeCheckpointValue(record.bytes), schema).list(reader => {
-    const actor = readSavedActor(reader.field("actor")), owner = namespaced(reader.field("owner")), primary = reader.field("primary").list(readInventoryEntry);
-    const primaryItems = new Set(primary.map(entry => entry.item)), items = new Set<string>();
-    if (actors.has(key(actor)) || primaryItems.size !== primary.length) return reader.fail("duplicate primary inventory or actor"); actors.add(key(actor));
+    const actor = readSavedActor(reader.field("actor")),
+      owner = namespaced(reader.field("owner")),
+      primary = reader.field("primary").list(readInventoryEntry);
+    const primaryItems = new Set(primary.map(entry => entry.item)),
+      items = new Set<string>();
+    if (actors.has(key(actor)) || primaryItems.size !== primary.length) return reader.fail("duplicate primary inventory or actor");
+    actors.add(key(actor));
     const groups = reader.field("groups").list(group => {
       const provider = namespaced(group.field("owner"));
       const admissions = group.field("items").list(entry => {
-        const item = definition(entry.field("definition")), admission = entry.field("admission").choice("add", "replace-primary");
-        if (item.source.provider !== provider || items.has(item.item) || (admission === "add" ? primaryItems.has(item.item) : !primaryItems.has(item.item))) return entry.fail("source item admission differs from primary ownership");
-        items.add(item.item); return { definition: item, admission };
+        const item = definition(entry.field("definition")),
+          admission = entry.field("admission").choice("add", "replace-primary");
+        if (item.source.provider !== provider || items.has(item.item) || (admission === "add" ? primaryItems.has(item.item) : !primaryItems.has(item.item)))
+          return entry.fail("source item admission differs from primary ownership");
+        items.add(item.item);
+        return { definition: item, admission };
       });
       if (admissions.length === 0) return group.fail("empty source item group");
       return { owner: provider, items: admissions };
     });
     const effective = save.inventories.filter(entry => key(entry.actor) === key(actor));
     if (groups.length === 0 || effective.length !== 1) return reader.fail("source items have no distinct effective inventory");
-    const rows = effective[0]?.entries; if (rows === undefined) return reader.fail("missing effective inventory");
-    if (new Set(rows.map(entry => entry.item)).size !== rows.length || [...items].some(item => !rows.some(entry => entry.item === item))
-      || !isDeepStrictEqual(rows.filter(entry => !items.has(entry.item)), primary.filter(entry => !items.has(entry.item)))) return reader.fail("source item coverage differs from effective inventory");
+    const rows = effective[0]?.entries;
+    if (rows === undefined) return reader.fail("missing effective inventory");
+    if (
+      new Set(rows.map(entry => entry.item)).size !== rows.length ||
+      [...items].some(item => !rows.some(entry => entry.item === item)) ||
+      !isDeepStrictEqual(
+        rows.filter(entry => !items.has(entry.item)),
+        primary.filter(entry => !items.has(entry.item)),
+      )
+    )
+      return reader.fail("source item coverage differs from effective inventory");
     return { actor, owner, primary, groups };
   });
 }
@@ -74,24 +106,39 @@ export function prepareSourceItemRestore(save: SaveImage): {
   effective(inventories: SaveImage["inventories"]): SaveImage["inventories"];
   finish(actors: SessionActorRegistry, inventory: SharedInventoryTable): undefined;
 } {
-  const records = readSourceItems(save), byActor = new Map(records.map(entry => [key(entry.actor), entry]));
+  const records = readSourceItems(save),
+    byActor = new Map(records.map(entry => [key(entry.actor), entry]));
   return {
-    primary: records.length === 0 ? save : { ...save, inventories: save.inventories.map(entry => ({ ...entry, entries: byActor.get(key(entry.actor))?.primary ?? entry.entries })) },
-    effective: inventories => records.length === 0 ? inventories : inventories.map(entry => {
-      if (!byActor.has(key(entry.actor))) return entry;
-      const original = save.inventories.find(value => key(value.actor) === key(entry.actor));
-      if (original === undefined) throw new SaveFormatError(schema, "missing saved effective inventory"); return original;
-    }),
+    primary:
+      records.length === 0
+        ? save
+        : { ...save, inventories: save.inventories.map(entry => ({ ...entry, entries: byActor.get(key(entry.actor))?.primary ?? entry.entries })) },
+    effective: inventories =>
+      records.length === 0
+        ? inventories
+        : inventories.map(entry => {
+            if (!byActor.has(key(entry.actor))) return entry;
+            const original = save.inventories.find(value => key(value.actor) === key(entry.actor));
+            if (original === undefined) throw new SaveFormatError(schema, "missing saved effective inventory");
+            return original;
+          }),
     finish: (actors, inventory) => {
       const restored = new Set<string>();
       for (const observation of actors.observations()) {
-        const actor = actors.resolveOwned(observation.id); if (actor === null) continue;
-        const source = inventory.sourceItems(actor), saved = records.find(entry => actors.resolveSaved(entry.actor) === actor);
-        if (source === null ? saved !== undefined : saved === undefined || saved.owner !== actor.owner || !isDeepStrictEqual(source, { primary: saved.primary, groups: saved.groups }))
+        const actor = actors.resolveOwned(observation.id);
+        if (actor === null) continue;
+        const source = inventory.sourceItems(actor),
+          saved = records.find(entry => actors.resolveSaved(entry.actor) === actor);
+        if (
+          source === null
+            ? saved !== undefined
+            : saved === undefined || saved.owner !== actor.owner || !isDeepStrictEqual(source, { primary: saved.primary, groups: saved.groups })
+        )
           throw new SaveFormatError(schema, "restored source item ownership or hidden inventory differs");
         if (saved !== undefined) {
           const effective = save.inventories.find(entry => key(entry.actor) === key(saved.actor));
-          if (effective === undefined || !isDeepStrictEqual(inventory.entries(actor.id), effective.entries)) throw new SaveFormatError(schema, "restored source inventory differs from its committed state");
+          if (effective === undefined || !isDeepStrictEqual(inventory.entries(actor.id), effective.entries))
+            throw new SaveFormatError(schema, "restored source inventory differs from its committed state");
           restored.add(key(saved.actor));
         }
       }

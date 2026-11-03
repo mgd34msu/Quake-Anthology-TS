@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { ModuleIdentity, NativeGuestCheckpoint, QvmCheckpoint } from '../../../../contracts/execution.ts';
-import type { QvmGameData } from '../../../../compat/qvm/game-data.ts';
+import type { ModuleIdentity, NativeGuestCheckpoint, QvmCheckpoint } from "../../../../contracts/execution.ts";
+import type { QvmGameData } from "../../../../compat/qvm/game-data.ts";
 
 /** A saved qagame: interpreted memory or a native process image. Both carry the server game's host record. */
 export type Q3GuestCheckpoint = QvmCheckpoint | NativeGuestCheckpoint;
@@ -10,7 +10,7 @@ export type Q3GuestCheckpoint = QvmCheckpoint | NativeGuestCheckpoint;
  * located entity and player tables, its saved image and its lifetime. Traps the module issues reach the server game's shared trap table.
  */
 export interface Q3GameEngine {
-  readonly kind: 'qvm' | 'native';
+  readonly kind: "qvm" | "native";
   readonly module: ModuleIdentity;
   readonly data: QvmGameData;
   /** True while a call into the module is running or waiting on a host operation. */

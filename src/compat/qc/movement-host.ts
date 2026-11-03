@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake WinQuake/pr_cmds.c PF_walkmove and world.c SV_TouchLinks. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { RandomSource } from "../../contracts/numeric.ts";
@@ -16,12 +17,15 @@ type QcMovementWorld = Pick<QcWorldHost, "actor" | "reference" | "link"> & {
   readonly options: Pick<QcWorldHost["options"], "actors" | "bodies" | "entities" | "slots" | "program" | "numeric">;
 };
 
-export function createQcMovementBindings(world: QcMovementWorld, services: {
-  readonly scene: Pick<SceneQueries, "trace" | "pointContents">;
-  readonly random: Pick<RandomSource, "nextInteger">;
-  readonly touchTriggers: (actor: OwnedActor) => undefined;
-  readonly actorReference?: (reference: number) => ActorId | null;
-}): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
+export function createQcMovementBindings(
+  world: QcMovementWorld,
+  services: {
+    readonly scene: Pick<SceneQueries, "trace" | "pointContents">;
+    readonly random: Pick<RandomSource, "nextInteger">;
+    readonly touchTriggers: (actor: OwnedActor) => undefined;
+    readonly actorReference?: (reference: number) => ActorId | null;
+  },
+): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
   const { actors, bodies, entities, slots, program } = world.options;
   const numeric = createNumericOperations(world.options.numeric);
   const field = (name: string): number => {
@@ -34,25 +38,42 @@ export function createQcMovementBindings(world: QcMovementWorld, services: {
     const source = actors.sourceOf(actor);
     return source?.provider === slots.options.provider ? source.slot : null;
   };
-  const movement = new Q1MonsterMovement({ scene: services.scene, numeric, random: services.random,
+  const movement = new Q1MonsterMovement({
+    scene: services.scene,
+    numeric,
+    random: services.random,
     read: actor => {
-      const slot = sourceSlot(actor), body = bodies.read(actor);
+      const slot = sourceSlot(actor),
+        body = bodies.read(actor);
       if (slot === null || body === null) return null;
-      const words = entities.at(slot), flags = Math.trunc(words.float(field("flags")));
+      const words = entities.at(slot),
+        flags = Math.trunc(words.float(field("flags")));
       const groundReference = words.int(field("groundentity"));
-      const referenced = (reference: number): ActorId | null => services.actorReference === undefined
-        ? slots.at(entities.slot(reference))?.id ?? null : services.actorReference(reference);
+      const referenced = (reference: number): ActorId | null =>
+        services.actorReference === undefined ? (slots.at(entities.slot(reference))?.id ?? null) : services.actorReference(reference);
       const groundActor = groundReference === 0 ? null : referenced(groundReference);
-      const ground: TraceHit = (flags & 512) === 0 ? { kind: "none" }
-        : groundReference === 0 ? { kind: "world", model: 0 }
-        : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor };
+      const ground: TraceHit =
+        (flags & 512) === 0
+          ? { kind: "none" }
+          : groundReference === 0
+            ? { kind: "world", model: 0 }
+            : groundActor === null
+              ? { kind: "none" }
+              : { kind: "actor", actor: groundActor };
       const enemyReference = words.int(field("enemy"));
-      return { ...body, absoluteBounds: bodies.linked(actor)?.absoluteBounds ?? qcLinkBounds(body, flags, numeric), flags, ground,
-        idealYaw: words.float(field("ideal_yaw")), yawSpeed: words.float(field("yaw_speed")),
-        enemy: enemyReference === 0 ? null : referenced(enemyReference) };
+      return {
+        ...body,
+        absoluteBounds: bodies.linked(actor)?.absoluteBounds ?? qcLinkBounds(body, flags, numeric),
+        flags,
+        ground,
+        idealYaw: words.float(field("ideal_yaw")),
+        yawSpeed: words.float(field("yaw_speed")),
+        enemy: enemyReference === 0 ? null : referenced(enemyReference),
+      };
     },
     readTarget: actor => {
-      const body = bodies.read(actor), slot = sourceSlot(actor);
+      const body = bodies.read(actor),
+        slot = sourceSlot(actor);
       if (body === null) return null;
       if (slot !== null) {
         const words = entities.at(slot);
@@ -62,15 +83,18 @@ export function createQcMovementBindings(world: QcMovementWorld, services: {
       return linked === null ? null : { origin: body.origin, absoluteBounds: linked.absoluteBounds };
     },
     write: (actor, state) => {
-      const slot = sourceSlot(actor.id), body = bodies.read(actor.id);
+      const slot = sourceSlot(actor.id),
+        body = bodies.read(actor.id);
       if (slot === null || body === null) return undefined;
       const words = entities.at(slot);
-      words.setVector(field("origin"), state.origin); words.setVector(field("angles"), state.angles);
+      words.setVector(field("origin"), state.origin);
+      words.setVector(field("angles"), state.angles);
       // SV_movestep retains the raw ground word until a landing supplies a contact.
       if (state.ground.kind === "actor") words.setInt(field("groundentity"), world.reference(state.ground.actor));
       else if (state.ground.kind === "world") words.setInt(field("groundentity"), 0);
       words.setFloat(field("flags"), state.flags);
-      words.setFloat(field("ideal_yaw"), state.idealYaw); words.setFloat(field("yaw_speed"), state.yawSpeed);
+      words.setFloat(field("ideal_yaw"), state.idealYaw);
+      words.setFloat(field("yaw_speed"), state.yawSpeed);
       return undefined;
     },
     link: (actor, touch) => {
@@ -83,16 +107,26 @@ export function createQcMovementBindings(world: QcMovementWorld, services: {
   });
   const walkmove: QcBuiltin = vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
-    const self = vm.globalOffset("self"), savedSelf = vm.globals.int(self);
-    try { vm.returnFloat(movement.walkMove(world.actor(entities.slot(savedSelf)), vm.argFloat(0), vm.argFloat(1)) ? 1 : 0); }
-    finally { vm.globals.setInt(self, savedSelf); }
+    const self = vm.globalOffset("self"),
+      savedSelf = vm.globals.int(self);
+    try {
+      vm.returnFloat(movement.walkMove(world.actor(entities.slot(savedSelf)), vm.argFloat(0), vm.argFloat(1)) ? 1 : 0);
+    } finally {
+      vm.globals.setInt(self, savedSelf);
+    }
   };
   const movetogoal: QcBuiltin = vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
-    const self = entities.slot(vm.globals.int(vm.globalOffset("self"))), words = entities.at(self);
-    if ((Math.trunc(words.float(field("flags"))) & (512 | 1 | 2)) === 0) { vm.returnFloat(0); return; }
+    const self = entities.slot(vm.globals.int(vm.globalOffset("self"))),
+      words = entities.at(self);
+    if ((Math.trunc(words.float(field("flags"))) & (512 | 1 | 2)) === 0) {
+      vm.returnFloat(0);
+      return;
+    }
     // SV_MoveToGoal dereferences a freed goal as a zeroed edict, which sits at the origin like the world entity.
-    const actor = world.actor(self), goalSlot = entities.slot(words.int(field("goalentity"))), goal = world.actor(world.isFreeEntity?.(goalSlot) === true ? 0 : goalSlot);
+    const actor = world.actor(self),
+      goalSlot = entities.slot(words.int(field("goalentity"))),
+      goal = world.actor(world.isFreeEntity?.(goalSlot) === true ? 0 : goalSlot);
     movement.moveToGoal(actor, goal.id, vm.argFloat(0));
   };
   const changeyaw: QcBuiltin = vm => {
@@ -103,26 +137,39 @@ export function createQcMovementBindings(world: QcMovementWorld, services: {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
     vm.returnFloat(Number(movement.checkBottom(world.actor(entities.slot(vm.argInt(0))).id)));
   };
-  return new Map<QcHostBuiltinName, QcBuiltin>([["walkmove", walkmove], ["movetogoal", movetogoal], ["changeyaw", changeyaw], ["checkbottom", checkbottom]]);
+  return new Map<QcHostBuiltinName, QcBuiltin>([
+    ["walkmove", walkmove],
+    ["movetogoal", movetogoal],
+    ["changeyaw", changeyaw],
+    ["checkbottom", checkbottom],
+  ]);
 }
 
 /** Resolve mutable source touch words at dispatch, including newly spawned edicts. */
 export function createQcTouchCallback(world: QcWorldHost, vm: QcMachine, serverTime: () => number): (contact: TouchContact) => undefined {
   if (vm.program !== world.options.program || vm.entities !== world.options.entities) throw new QcProgramError("touch callback belongs to another QC machine");
-  const solid = vm.fieldOffset("solid"), touch = vm.fieldOffset("touch");
+  const solid = vm.fieldOffset("solid"),
+    touch = vm.fieldOffset("touch");
   return contact => {
     if (!world.options.actors.isLive(contact.self.id) || !world.options.actors.isLive(contact.other)) return undefined;
     const source = world.options.actors.sourceOf(contact.self.id);
     if (source === null || source.provider !== world.options.slots.options.provider) return undefined;
-    const words = vm.entities.at(source.slot), callback = words.int(touch);
+    const words = vm.entities.at(source.slot),
+      callback = words.int(touch);
     if (words.float(solid) !== 1 || callback === 0) return undefined;
-    const self = vm.globalOffset("self"), other = vm.globalOffset("other");
-    const savedSelf = vm.globals.int(self), savedOther = vm.globals.int(other);
+    const self = vm.globalOffset("self"),
+      other = vm.globalOffset("other");
+    const savedSelf = vm.globals.int(self),
+      savedOther = vm.globals.int(other);
     try {
-      vm.globals.setInt(self, world.reference(contact.self.id)); vm.globals.setInt(other, world.reference(contact.other));
+      vm.globals.setInt(self, world.reference(contact.self.id));
+      vm.globals.setInt(other, world.reference(contact.other));
       vm.globals.setFloat(vm.globalOffset("time"), serverTime());
       vm.execute(callback);
-    } finally { vm.globals.setInt(self, savedSelf); vm.globals.setInt(other, savedOther); }
+    } finally {
+      vm.globals.setInt(self, savedSelf);
+      vm.globals.setInt(other, savedOther);
+    }
     return undefined;
   };
 }

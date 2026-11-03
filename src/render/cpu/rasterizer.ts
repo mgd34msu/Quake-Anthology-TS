@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createTextureResolver } from "../commands/dynamic-texture.ts";
 /* Quake III CPU backend adapted from the reference port
  * Fixed-function state follows id Software tr_backend.c and tr_shadows.c.
@@ -5,11 +6,36 @@ import { createTextureResolver } from "../commands/dynamic-texture.ts";
  * Clipping and rasterization algorithms are from the TypeScript donor. */
 import { outputGammaTable } from "../output-gamma.ts";
 import type { Mat4, Vec2, Vec3, Vec4 } from "../../contracts/math.ts";
-import type { DrawBatch, ImageLevel, ImageResourceOperation, PreparedBackendDraw,
-  Rect, RendererBackend, RendererDrawBuffer, RendererImage, RendererResourceOwner,
-  RenderOperation, RenderState, RenderViewState, TextureBinding, TextureRect } from "../../contracts/render.ts";
-import { blend, byte, sampleBound, clamp, colorWord, LITTLE_ENDIAN, passesAlpha, runTriangleRows,
-  sampleLineBound, stencilFragment, textureColor, textureHasAlpha } from "./triangle-kernel.ts";
+import type {
+  DrawBatch,
+  ImageLevel,
+  ImageResourceOperation,
+  PreparedBackendDraw,
+  Rect,
+  RendererBackend,
+  RendererDrawBuffer,
+  RendererImage,
+  RendererResourceOwner,
+  RenderOperation,
+  RenderState,
+  RenderViewState,
+  TextureBinding,
+  TextureRect,
+} from "../../contracts/render.ts";
+import {
+  blend,
+  byte,
+  sampleBound,
+  clamp,
+  colorWord,
+  LITTLE_ENDIAN,
+  passesAlpha,
+  runTriangleRows,
+  sampleLineBound,
+  stencilFragment,
+  textureColor,
+  textureHasAlpha,
+} from "./triangle-kernel.ts";
 import type { BoundTexture, Framebuffer, Sample, TexturePlaneDerivative, TriangleSetup } from "./triangle-kernel.ts";
 import { rasterizeAliasedLine } from "./lines.ts";
 import type { LineFragment } from "./lines.ts";
@@ -33,8 +59,13 @@ interface ClientTexCoordArray {
 }
 
 export const CPU_OPAQUE_STATE: RenderState = {
-  blend: { source: "one", destination: "zero" }, depthTest: "less-equal", depthWrite: true,
-  alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null,
+  blend: { source: "one", destination: "zero" },
+  depthTest: "less-equal",
+  depthWrite: true,
+  alphaTest: "none",
+  cull: "none",
+  depthRange: [0, 1],
+  polygonOffset: null,
 };
 
 interface ScreenVertex {
@@ -59,26 +90,32 @@ const CLIP_PLANES: readonly ClipPlane[] = ["left", "right", "bottom", "top", "ne
 export const CPU_OFFSET_DEPTH_BITS = 24;
 
 function finiteVector(value: Vec4): boolean {
-  return Number.isFinite(value.x) && Number.isFinite(value.y)
-    && Number.isFinite(value.z) && Number.isFinite(value.w);
+  return Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z) && Number.isFinite(value.w);
 }
 
 function validateDimensions(width: number, height: number): void {
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
-    || width <= 0 || height <= 0 || !Number.isSafeInteger(width * height * 8)) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || !Number.isSafeInteger(width * height * 8)) {
     throw new RangeError("Image dimensions must be positive integers with a safe storage size");
   }
 }
 
 function snapshotState(state: RenderState): RenderState {
-  return { ...state, blend: { ...state.blend },
+  return {
+    ...state,
+    blend: { ...state.blend },
     ...(state.depthRange === undefined ? {} : { depthRange: [state.depthRange[0], state.depthRange[1]] satisfies readonly [number, number] }),
-    polygonOffset: state.polygonOffset === null ? null : { ...state.polygonOffset } };
+    polygonOffset: state.polygonOffset === null ? null : { ...state.polygonOffset },
+  };
 }
 
 function snapshotSourceCells(scratch: readonly SourceStageCell[]): readonly SourceStageCell[] {
-  return scratch.map(cell => ({ color: { ...cell.color }, texCoord: { ...cell.texCoord }, texCoord2: { ...cell.texCoord2 },
-    rawTexCoord: { ...cell.rawTexCoord }, rawTexCoord2: { ...cell.rawTexCoord2 } }));
+  return scratch.map(cell => ({
+    color: { ...cell.color },
+    texCoord: { ...cell.texCoord },
+    texCoord2: { ...cell.texCoord2 },
+    rawTexCoord: { ...cell.rawTexCoord },
+    rawTexCoord2: { ...cell.rawTexCoord2 },
+  }));
 }
 
 /** Index arrays are immutable batch inputs (the same contract the GL
@@ -100,28 +137,71 @@ function snapshotBatch(batch: DrawBatch, viewProjection: Mat4 | null = null): Dr
   // Vertex attribute objects are never mutated downstream (clip/intersect
   // allocate replacements), and prepare/draw are adjacent, so the snapshot
   // shares them instead of copying four objects per vertex per frame.
-  if (batch.texturing === "pair") return { ...batch, state, indices: [...batch.indices],
-    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: vertex.color, texCoord: vertex.texCoord, texCoord2: vertex.texCoord2 })),
-    texture: { ...batch.texture }, secondTexture: { ...batch.secondTexture, binding: { ...batch.secondTexture.binding } } };
-  return { ...batch, state, indices: [...batch.indices], texture: { ...batch.texture },
-    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: vertex.color, texCoord: vertex.texCoord })) };
+  if (batch.texturing === "pair")
+    return {
+      ...batch,
+      state,
+      indices: [...batch.indices],
+      vertices: batch.vertices.map(vertex => ({
+        position: project(vertex.position),
+        color: vertex.color,
+        texCoord: vertex.texCoord,
+        texCoord2: vertex.texCoord2,
+      })),
+      texture: { ...batch.texture },
+      secondTexture: { ...batch.secondTexture, binding: { ...batch.secondTexture.binding } },
+    };
+  return {
+    ...batch,
+    state,
+    indices: [...batch.indices],
+    texture: { ...batch.texture },
+    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: vertex.color, texCoord: vertex.texCoord })),
+  };
 }
 
 function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState): DrawBatch {
   const indices = [...batch.indices];
-  if (batch.texturing === "pair") return { texturing: "pair", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
-    vertices: batch.vertices.map(vertex => ({ position: vertex.position, color: vertex.color, texCoord: vertex.texCoord, texCoord2: vertex.texCoord2 })),
-    get texture() { return batch.texture; },
-    secondTexture: {
-      get binding() { return batch.secondTexture.binding; },
-      get environment() { return batch.secondTexture.environment; },
-    } };
-  return { texturing: "single", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
+  if (batch.texturing === "pair")
+    return {
+      texturing: "pair",
+      primitive: "triangles",
+      state,
+      indices,
+      lighting: batch.lighting,
+      ...(batch.fog === undefined ? {} : { fog: batch.fog }),
+      vertices: batch.vertices.map(vertex => ({ position: vertex.position, color: vertex.color, texCoord: vertex.texCoord, texCoord2: vertex.texCoord2 })),
+      get texture() {
+        return batch.texture;
+      },
+      secondTexture: {
+        get binding() {
+          return batch.secondTexture.binding;
+        },
+        get environment() {
+          return batch.secondTexture.environment;
+        },
+      },
+    };
+  return {
+    texturing: "single",
+    primitive: "triangles",
+    state,
+    indices,
+    lighting: batch.lighting,
+    ...(batch.fog === undefined ? {} : { fog: batch.fog }),
     vertices: batch.vertices.map(vertex => ({ position: vertex.position, color: vertex.color, texCoord: vertex.texCoord })),
-    get texture() { return batch.texture; } };
+    get texture() {
+      return batch.texture;
+    },
+  };
 }
 
-const ZERO_WORLD_TRIPLE: readonly [Vec3, Vec3, Vec3] = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }];
+const ZERO_WORLD_TRIPLE: readonly [Vec3, Vec3, Vec3] = [
+  { x: 0, y: 0, z: 0 },
+  { x: 0, y: 0, z: 0 },
+  { x: 0, y: 0, z: 0 },
+];
 
 /** Setup derivations that cannot vary within one drawBatch. */
 interface BatchSetupConstants {
@@ -148,25 +228,43 @@ function indexedVertex(batch: DrawBatch, offset: number): CpuVertex {
   if (batch.texturing === "pair") {
     const vertex = batch.vertices[index];
     if (vertex === undefined) throw new RangeError("Missing triangle vertex");
-    return { position: vertex.position, color: vertex.color, texCoord: vertex.texCoord,
-      texCoord2: vertex.texCoord2, worldPosition: attributes.worldPosition, worldNormal: attributes.worldNormal };
+    return {
+      position: vertex.position,
+      color: vertex.color,
+      texCoord: vertex.texCoord,
+      texCoord2: vertex.texCoord2,
+      worldPosition: attributes.worldPosition,
+      worldNormal: attributes.worldNormal,
+    };
   }
   const vertex = batch.vertices[index];
   if (vertex === undefined) throw new RangeError("Missing triangle vertex");
-  return { position: vertex.position, color: vertex.color, texCoord: vertex.texCoord,
-    texCoord2: ZERO_TEXCOORD, worldPosition: attributes.worldPosition, worldNormal: attributes.worldNormal };
+  return {
+    position: vertex.position,
+    color: vertex.color,
+    texCoord: vertex.texCoord,
+    texCoord2: ZERO_TEXCOORD,
+    worldPosition: attributes.worldPosition,
+    worldNormal: attributes.worldNormal,
+  };
 }
 
 function planeDistance(vertex: CpuVertex, plane: ClipPlane): number {
   const p = vertex.position;
   if (typeof plane !== "string") return p.x * plane.x + p.y * plane.y + p.z * plane.z + p.w * plane.w;
   switch (plane) {
-    case "left": return p.w + p.x;
-    case "right": return p.w - p.x;
-    case "bottom": return p.w + p.y;
-    case "top": return p.w - p.y;
-    case "near": return p.w + p.z;
-    case "far": return p.w - p.z;
+    case "left":
+      return p.w + p.x;
+    case "right":
+      return p.w - p.x;
+    case "bottom":
+      return p.w + p.y;
+    case "top":
+      return p.w - p.y;
+    case "near":
+      return p.w + p.z;
+    case "far":
+      return p.w - p.z;
   }
 }
 
@@ -186,17 +284,37 @@ function intersect(a: CpuVertex, b: CpuVertex, da: number, db: number, plane: Cl
   let y = a.position.y * aw + b.position.y * bw;
   let z = a.position.z * aw + b.position.z * bw;
   switch (plane) {
-    case "left": x = -w; break;
-    case "right": x = w; break;
-    case "bottom": y = -w; break;
-    case "top": y = w; break;
-    case "near": z = -w; break;
-    case "far": z = w; break;
+    case "left":
+      x = -w;
+      break;
+    case "right":
+      x = w;
+      break;
+    case "bottom":
+      y = -w;
+      break;
+    case "top":
+      y = w;
+      break;
+    case "near":
+      z = -w;
+      break;
+    case "far":
+      z = w;
+      break;
   }
   return {
     position: { x, y, z, w },
-    worldPosition: { x: a.worldPosition.x * aw + b.worldPosition.x * bw, y: a.worldPosition.y * aw + b.worldPosition.y * bw, z: a.worldPosition.z * aw + b.worldPosition.z * bw },
-    worldNormal: { x: a.worldNormal.x * aw + b.worldNormal.x * bw, y: a.worldNormal.y * aw + b.worldNormal.y * bw, z: a.worldNormal.z * aw + b.worldNormal.z * bw },
+    worldPosition: {
+      x: a.worldPosition.x * aw + b.worldPosition.x * bw,
+      y: a.worldPosition.y * aw + b.worldPosition.y * bw,
+      z: a.worldPosition.z * aw + b.worldPosition.z * bw,
+    },
+    worldNormal: {
+      x: a.worldNormal.x * aw + b.worldNormal.x * bw,
+      y: a.worldNormal.y * aw + b.worldNormal.y * bw,
+      z: a.worldNormal.z * aw + b.worldNormal.z * bw,
+    },
     texCoord: { x: coordinate(a.texCoord.x, b.texCoord.x), y: coordinate(a.texCoord.y, b.texCoord.y) },
     texCoord2: { x: coordinate(a.texCoord2.x, b.texCoord2.x), y: coordinate(a.texCoord2.y, b.texCoord2.y) },
     color: {
@@ -218,10 +336,10 @@ function clipPolygon(vertices: readonly CpuVertex[], extraPlane: Vec4 | null): r
   if (magnitude > Number.MAX_VALUE / 4) {
     // Homogeneous coordinates admit a common scale. Bound the plane sums
     // without rejecting otherwise finite input or overflowing intersections.
-    polygon = polygon.map((vertex) => ({
-      position: { x: vertex.position.x / magnitude, y: vertex.position.y / magnitude,
-        z: vertex.position.z / magnitude, w: vertex.position.w / magnitude },
-      worldPosition: vertex.worldPosition, worldNormal: vertex.worldNormal,
+    polygon = polygon.map(vertex => ({
+      position: { x: vertex.position.x / magnitude, y: vertex.position.y / magnitude, z: vertex.position.z / magnitude, w: vertex.position.w / magnitude },
+      worldPosition: vertex.worldPosition,
+      worldNormal: vertex.worldNormal,
       color: vertex.color,
       texCoord: vertex.texCoord,
       texCoord2: vertex.texCoord2,
@@ -243,7 +361,7 @@ function clipPolygon(vertices: readonly CpuVertex[], extraPlane: Vec4 | null): r
     let previousDistance = distances[distances.length - 1] ?? 0;
     for (const [index, current] of polygon.entries()) {
       const distance = distances[index] ?? 0;
-      if ((distance >= 0) !== (previousDistance >= 0)) {
+      if (distance >= 0 !== previousDistance >= 0) {
         output.push(intersect(previous, current, previousDistance, distance, plane));
       }
       if (distance >= 0) output.push(current);
@@ -252,15 +370,20 @@ function clipPolygon(vertices: readonly CpuVertex[], extraPlane: Vec4 | null): r
     }
     polygon = output;
   };
-  for (const plane of CLIP_PLANES) { if (polygon.length === 0) return polygon; clipPlane(plane); }
+  for (const plane of CLIP_PLANES) {
+    if (polygon.length === 0) return polygon;
+    clipPlane(plane);
+  }
   if (extraPlane !== null && polygon.length !== 0) clipPlane(extraPlane);
   // All six planes permit w=0 only at the homogeneous origin. It has no
   // projected area; remove it before division instead of inventing an epsilon plane.
-  return polygon.some((vertex) => vertex.position.w <= 0) ? polygon.filter((vertex) => vertex.position.w > 0) : polygon;
+  return polygon.some(vertex => vertex.position.w <= 0) ? polygon.filter(vertex => vertex.position.w > 0) : polygon;
 }
 
 function subpixel(value: number, scale: number): number {
-  const scaled = Math.fround(value) * scale, lower = Math.floor(scaled), fraction = scaled - lower;
+  const scaled = Math.fround(value) * scale,
+    lower = Math.floor(scaled),
+    fraction = scaled - lower;
   return (fraction < 0.5 || (fraction === 0.5 && lower % 2 === 0) ? lower : lower + 1) / scale;
 }
 
@@ -272,8 +395,10 @@ function project(vertex: CpuVertex, viewport: Rect, wScale: number, subpixelScal
     x: subpixel(viewport.x + (p.x / p.w + 1) * viewport.width * 0.5, subpixelScale),
     y: subpixel(viewport.y + (1 - p.y / p.w) * viewport.height * 0.5, subpixelScale),
     z: p.z / p.w,
-    inverseW, fogDepthScale: wScale * fogScale,
-    worldPosition: vertex.worldPosition, worldNormal: vertex.worldNormal,
+    inverseW,
+    fogDepthScale: wScale * fogScale,
+    worldPosition: vertex.worldPosition,
+    worldNormal: vertex.worldNormal,
     texCoord: vertex.texCoord,
     texCoord2: vertex.texCoord2,
     r: vertex.color.x * inverseW,
@@ -291,7 +416,6 @@ function lowerLeft(a: ScreenVertex, b: ScreenVertex): boolean {
   return b.y < a.y || (b.y === a.y && b.x < a.x);
 }
 
-
 /** RGBA rows are top to bottom; positions are homogeneous clip coordinates. */
 export class SoftwareRenderer implements RendererBackend {
   private outputPixels: Uint8Array | null = null;
@@ -303,15 +427,25 @@ export class SoftwareRenderer implements RendererBackend {
   private rowPool: RowParallelPool | null | undefined;
   private rowPoolFailureValue: string | null = null;
   /** Why row-parallel drawing fell back to serial, when worker startup failed. */
-  get rowPoolFailure(): string | null { return this.rowPoolFailureValue; }
+  get rowPoolFailure(): string | null {
+    return this.rowPoolFailureValue;
+  }
   private pendingSetups: TriangleSetup[] | null = null;
   private pendingPixels = 0;
   private opacityFramebuffer: Framebuffer | null = null;
   private opacityActive = false;
-  private get drawPixels(): Uint8Array { return this.framebuffer.pixels; }
-  private get colorWords(): Int32Array { return this.framebuffer.colorWords; }
-  private get depth(): Float64Array { return this.framebuffer.depth; }
-  private get stencil(): Uint32Array | null { return this.framebuffer.stencil; }
+  private get drawPixels(): Uint8Array {
+    return this.framebuffer.pixels;
+  }
+  private get colorWords(): Int32Array {
+    return this.framebuffer.colorWords;
+  }
+  private get depth(): Float64Array {
+    return this.framebuffer.depth;
+  }
+  private get stencil(): Uint32Array | null {
+    return this.framebuffer.stencil;
+  }
   private readonly stencilMaximum: number;
   private readonly subpixelScale: number;
   private readonly images: CpuImages;
@@ -338,7 +472,8 @@ export class SoftwareRenderer implements RendererBackend {
   private readonly clientTexCoords: [ClientTexCoordArray | null, ClientTexCoordArray | null] = [null, null];
   private secondaryEnvironment: TextureEnvironment = "modulate";
   private readonly currentTexCoords: [CurrentTexCoord, CurrentTexCoord] = [
-    { kind: "known", value: { x: 0, y: 0 } }, { kind: "known", value: { x: 0, y: 0 } },
+    { kind: "known", value: { x: 0, y: 0 } },
+    { kind: "known", value: { x: 0, y: 0 } },
   ];
   private currentColor: CurrentColor = { kind: "known", value: { x: 1, y: 1, z: 1, w: 1 } };
   private polygonMode: "fill" | "line" = "fill";
@@ -354,19 +489,24 @@ export class SoftwareRenderer implements RendererBackend {
    * state, so reuse is observationally identical to a fresh target. */
   private atlasTarget: SoftwareRenderer | null = null;
 
-  constructor(readonly width: number, readonly height: number, readonly owner: RendererResourceOwner,
-    readonly subpixelBits = 8, readonly stencilBits = 8, readonly alphaBits: 0 | 8 = 8) {
+  constructor(
+    readonly width: number,
+    readonly height: number,
+    readonly owner: RendererResourceOwner,
+    readonly subpixelBits = 8,
+    readonly stencilBits = 8,
+    readonly alphaBits: 0 | 8 = 8,
+  ) {
     validateDimensions(width, height);
-    if (!Number.isInteger(subpixelBits) || subpixelBits < 4 || subpixelBits > 16)
-      throw new RangeError("CPU subpixel precision must be between 4 and 16 bits");
-    if (!Number.isInteger(stencilBits) || stencilBits < 0 || stencilBits > 32)
-      throw new RangeError("CPU stencil precision must be between 0 and 32 bits");
+    if (!Number.isInteger(subpixelBits) || subpixelBits < 4 || subpixelBits > 16) throw new RangeError("CPU subpixel precision must be between 4 and 16 bits");
+    if (!Number.isInteger(stencilBits) || stencilBits < 0 || stencilBits > 32) throw new RangeError("CPU stencil precision must be between 0 and 32 bits");
     this.subpixelScale = 2 ** subpixelBits;
     this.viewport = { x: 0, y: 0, width, height };
     // The draw framebuffer lives in shared memory so row-parallel workers
     // can rasterize disjoint row bands of it directly.
     const colorBuffer = new SharedArrayBuffer(width * height * 4);
-    const pixels = new Uint8Array(colorBuffer), colorWords = new Int32Array(colorBuffer);
+    const pixels = new Uint8Array(colorBuffer),
+      colorWords = new Int32Array(colorBuffer);
     if (alphaBits === 0) colorWords.fill(colorWord(0, 0, 0, 1));
     const depthBuffer = new SharedArrayBuffer(width * height * 8);
     const depth = new Float64Array(depthBuffer);
@@ -384,11 +524,17 @@ export class SoftwareRenderer implements RendererBackend {
     if (this.closed) throw new Error("CPU renderer is closed");
   }
 
-  get pixels(): Uint8Array { return this.outputPixels ?? this.drawPixels; }
+  get pixels(): Uint8Array {
+    return this.outputPixels ?? this.drawPixels;
+  }
 
   /** Completed row-parallel batch dispatches (diagnostics/tests). */
-  get rowParallelBatches(): number { return this.rowPool?.jobsRun ?? 0; }
-  get rowParallelLevelsSent(): number { return this.rowPool?.levelsSent ?? 0; }
+  get rowParallelBatches(): number {
+    return this.rowPool?.jobsRun ?? 0;
+  }
+  get rowParallelLevelsSent(): number {
+    return this.rowPool?.levelsSent ?? 0;
+  }
 
   withObjectOpacity(opacity: number, draw: () => undefined): undefined {
     this.assertOpen();
@@ -397,13 +543,22 @@ export class SoftwareRenderer implements RendererBackend {
     if (opacity === 0) return undefined;
     if (opacity === 1) {
       this.opacityActive = true;
-      try { return draw(); } finally { this.opacityActive = false; }
+      try {
+        return draw();
+      } finally {
+        this.opacityActive = false;
+      }
     }
     const parent = this.framebuffer;
     if (this.opacityFramebuffer === null) {
       const pixels = new Uint8Array(parent.pixels.length);
-      this.opacityFramebuffer = { ...parent, pixels, colorWords: new Int32Array(pixels.buffer),
-        depth: new Float64Array(parent.depth.length), stencil: parent.stencil === null ? null : new Uint32Array(parent.stencil.length) };
+      this.opacityFramebuffer = {
+        ...parent,
+        pixels,
+        colorWords: new Int32Array(pixels.buffer),
+        depth: new Float64Array(parent.depth.length),
+        stencil: parent.stencil === null ? null : new Uint32Array(parent.stencil.length),
+      };
     }
     const scratch = this.opacityFramebuffer;
     scratch.pixels.set(parent.pixels);
@@ -414,10 +569,12 @@ export class SoftwareRenderer implements RendererBackend {
     this.framebuffer = scratch;
     try {
       draw();
-      const left = Math.max(0, viewport.x), right = Math.min(this.width, viewport.x + viewport.width);
+      const left = Math.max(0, viewport.x),
+        right = Math.min(this.width, viewport.x + viewport.width);
       for (let y = Math.max(0, viewport.y); y < Math.min(this.height, viewport.y + viewport.height); y++) {
         for (let offset = (y * this.width + left) * 4; offset < (y * this.width + right) * 4; offset++) {
-          const backdrop = parent.pixels[offset] ?? 0, result = scratch.pixels[offset] ?? 0;
+          const backdrop = parent.pixels[offset] ?? 0,
+            result = scratch.pixels[offset] ?? 0;
           parent.pixels[offset] = this.alphaBits === 0 && offset % 4 === 3 ? 255 : Math.round(backdrop * (1 - opacity) + result * opacity);
         }
       }
@@ -440,7 +597,7 @@ export class SoftwareRenderer implements RendererBackend {
     if (this.gammaTable === null || this.outputPixels === null) return;
     for (let offset = 0; offset < this.drawPixels.length; offset++) {
       const value = this.drawPixels[offset] ?? 0;
-      this.outputPixels[offset] = offset % 4 === 3 ? value : this.gammaTable[value] ?? 0;
+      this.outputPixels[offset] = offset % 4 === 3 ? value : (this.gammaTable[value] ?? 0);
     }
   }
 
@@ -457,7 +614,10 @@ export class SoftwareRenderer implements RendererBackend {
     const cached = this.lightingByBatch.get(batch);
     if (cached !== undefined) return cached;
     const lighting = batch.lighting;
-    const resolved: CpuLighting = { parameters: lighting, depth: lighting.kind === "vertex" || lighting.atlas === null ? null : this.images.depthImage(lighting.atlas.image) };
+    const resolved: CpuLighting = {
+      parameters: lighting,
+      depth: lighting.kind === "vertex" || lighting.atlas === null ? null : this.images.depthImage(lighting.atlas.image),
+    };
     this.lightingByBatch.set(batch, resolved);
     return resolved;
   }
@@ -486,8 +646,7 @@ export class SoftwareRenderer implements RendererBackend {
   selectDrawBuffer(buffer: RendererDrawBuffer, clear: boolean): undefined {
     this.assertOpen();
     if (buffer !== "front" && buffer !== "back") throw new Error("CPU stereo draw buffers are unavailable");
-    if (clear) this.beginView({ viewport: this.viewport, clipPlane: this.clipPlane,
-      clear: { color: { x: 1, y: 0, z: 0.5, w: 1 }, depth: 1, stencil: false } });
+    if (clear) this.beginView({ viewport: this.viewport, clipPlane: this.clipPlane, clear: { color: { x: 1, y: 0, z: 0.5, w: 1 }, depth: 1, stencil: false } });
   }
 
   beginView(view: RenderViewState): undefined {
@@ -502,15 +661,15 @@ export class SoftwareRenderer implements RendererBackend {
     this.portalView = view.clipPlane !== null;
     if (view.clear === null) return;
     const clear = view.clear;
-    if (!Number.isFinite(clear.depth) || clear.color !== null && !finiteVector(clear.color))
-      throw new RangeError("CPU clear values must be finite");
+    if (!Number.isFinite(clear.depth) || (clear.color !== null && !finiteVector(clear.color))) throw new RangeError("CPU clear values must be finite");
     this.clearDepth = clamp(clear.depth);
     if (clear.color !== null) {
       this.clearColor = clear.color;
       this.clearColorBuffer();
     }
     for (let row = Math.max(0, y); row < Math.min(this.height, y + height); row++) {
-      const begin = row * this.width + Math.max(0, x), end = row * this.width + Math.min(this.width, x + width);
+      const begin = row * this.width + Math.max(0, x),
+        end = row * this.width + Math.min(this.width, x + width);
       if (begin >= end) continue;
       this.depth.fill(this.clearDepth, begin, end);
       if (clear.stencil && this.stencil !== null) this.stencil.fill(0, begin, end);
@@ -520,18 +679,19 @@ export class SoftwareRenderer implements RendererBackend {
   clearColorBuffer(): undefined {
     this.assertOpen();
     if (!this.colorWrite) return;
-    const { x, y, width, height } = this.viewport, color = this.clearColor;
+    const { x, y, width, height } = this.viewport,
+      color = this.clearColor;
     const word = colorWord(color.x, color.y, color.z, this.alphaBits === 0 ? 1 : color.w);
     for (let row = Math.max(0, y); row < Math.min(this.height, y + height); row++) {
-      const begin = row * this.width + Math.max(0, x), end = row * this.width + Math.min(this.width, x + width);
+      const begin = row * this.width + Math.max(0, x),
+        end = row * this.width + Math.min(this.width, x + width);
       if (begin < end) this.colorWords.fill(word, begin, end);
     }
   }
 
   readDepthPixel(windowX: number, windowY: number): number {
     this.assertOpen();
-    if (!Number.isInteger(windowX) || !Number.isInteger(windowY)
-      || windowX < 0 || windowX >= this.width || windowY < 0 || windowY >= this.height)
+    if (!Number.isInteger(windowX) || !Number.isInteger(windowY) || windowX < 0 || windowX >= this.width || windowY < 0 || windowY >= this.height)
       throw new RangeError("CPU depth readback coordinates must be inside the framebuffer");
     const value = this.depth[(this.height - 1 - windowY) * this.width + windowX];
     if (value === undefined) throw new RangeError("Missing CPU depth pixel");
@@ -555,11 +715,12 @@ export class SoftwareRenderer implements RendererBackend {
     // Rows are tightly packed, matching the GL backend's pack alignment of one.
     const stride = this.width;
     if (destination.length < stride * this.height) throw new RangeError("CPU stencil destination is too small");
-    for (let row = 0; row < this.height; row++) for (let x = 0; x < this.width; x++) {
-      const value = this.stencil[(this.height - 1 - row) * this.width + x];
-      if (value === undefined) throw new RangeError("Missing CPU stencil pixel");
-      destination[row * stride + x] = value & 255;
-    }
+    for (let row = 0; row < this.height; row++)
+      for (let x = 0; x < this.width; x++) {
+        const value = this.stencil[(this.height - 1 - row) * this.width + x];
+        if (value === undefined) throw new RangeError("Missing CPU stencil pixel");
+        destination[row * stride + x] = value & 255;
+      }
   }
 
   prepareGeometry(input: DrawBatch): PreparedBackendDraw {
@@ -581,32 +742,45 @@ export class SoftwareRenderer implements RendererBackend {
       if (byPositions?.get(lighting.worldPositions)?.has(normals) !== true) {
         for (const index of batch.indices) {
           const { worldPosition, worldNormal } = worldAttributes(batch.lighting, index);
-          if (!(Number.isFinite(worldPosition.x) && Number.isFinite(worldPosition.y) && Number.isFinite(worldPosition.z)
-            && Number.isFinite(worldNormal.x) && Number.isFinite(worldNormal.y) && Number.isFinite(worldNormal.z)))
+          if (
+            !(
+              Number.isFinite(worldPosition.x) &&
+              Number.isFinite(worldPosition.y) &&
+              Number.isFinite(worldPosition.z) &&
+              Number.isFinite(worldNormal.x) &&
+              Number.isFinite(worldNormal.y) &&
+              Number.isFinite(worldNormal.z)
+            )
+          )
             throw new RangeError("CPU fragment lighting attributes must be finite");
         }
-        if (byPositions === undefined) { byPositions = new WeakMap<readonly Vec3[], WeakSet<object>>(); validatedFragmentAttributes.set(keys.indices, byPositions); }
+        if (byPositions === undefined) {
+          byPositions = new WeakMap<readonly Vec3[], WeakSet<object>>();
+          validatedFragmentAttributes.set(keys.indices, byPositions);
+        }
         let byNormals = byPositions.get(lighting.worldPositions);
-        if (byNormals === undefined) { byNormals = new WeakSet<object>(); byPositions.set(lighting.worldPositions, byNormals); }
+        if (byNormals === undefined) {
+          byNormals = new WeakSet<object>();
+          byPositions.set(lighting.worldPositions, byNormals);
+        }
         byNormals.add(normals);
       }
       this.fragmentLighting(batch);
     }
     const step = batch.primitive === "lines" ? 2 : 3;
     if (batch.indices.length % step !== 0) throw new RangeError("Incomplete CPU primitive indices");
-    if (batch.primitive === "lines" && (!Number.isFinite(batch.lineWidth) || batch.lineWidth <= 0))
-      throw new RangeError("CPU line width must be positive");
+    if (batch.primitive === "lines" && (!Number.isFinite(batch.lineWidth) || batch.lineWidth <= 0)) throw new RangeError("CPU line width must be positive");
     if (validatedCpuIndices.get(keys.indices) !== batch.vertices.length) {
-      for (const index of batch.indices) if (!Number.isSafeInteger(index) || index < 0 || index >= batch.vertices.length)
-        throw new RangeError("CPU vertex index is outside its array");
+      for (const index of batch.indices)
+        if (!Number.isSafeInteger(index) || index < 0 || index >= batch.vertices.length) throw new RangeError("CPU vertex index is outside its array");
       validatedCpuIndices.set(keys.indices, batch.vertices.length);
     }
-    for (const vertex of batch.vertices) if (!finiteVector(vertex.position) || !finiteVector(vertex.color)
-      || !Number.isFinite(vertex.texCoord.x) || !Number.isFinite(vertex.texCoord.y))
-      throw new RangeError("CPU vertex attributes must be finite");
-    if (batch.texturing === "pair") for (const vertex of batch.vertices)
-      if (!Number.isFinite(vertex.texCoord2.x) || !Number.isFinite(vertex.texCoord2.y))
-        throw new RangeError("CPU secondary coordinates must be finite");
+    for (const vertex of batch.vertices)
+      if (!finiteVector(vertex.position) || !finiteVector(vertex.color) || !Number.isFinite(vertex.texCoord.x) || !Number.isFinite(vertex.texCoord.y))
+        throw new RangeError("CPU vertex attributes must be finite");
+    if (batch.texturing === "pair")
+      for (const vertex of batch.vertices)
+        if (!Number.isFinite(vertex.texCoord2.x) || !Number.isFinite(vertex.texCoord2.y)) throw new RangeError("CPU secondary coordinates must be finite");
     let phase: "prepared" | "begun" | "drawn" | "cleaned" = "prepared";
     let nextUnit = 0;
     return {
@@ -618,8 +792,8 @@ export class SoftwareRenderer implements RendererBackend {
       },
       applyTexture: (unit: number, operation: TextureBinding) => {
         this.assertOpen();
-        if (phase !== "begun" || unit !== nextUnit || unit !== 0 && unit !== 1
-          || unit === 1 && batch.texturing !== "pair") throw new Error("CPU texture slots must execute in order");
+        if (phase !== "begun" || unit !== nextUnit || (unit !== 0 && unit !== 1) || (unit === 1 && batch.texturing !== "pair"))
+          throw new Error("CPU texture slots must execute in order");
         this.images.bind(unit, resolveTexture(operation));
         this.currentUnit = unit;
         if (unit === 0) this.primaryEnabled = true;
@@ -628,8 +802,7 @@ export class SoftwareRenderer implements RendererBackend {
       },
       draw: () => {
         this.assertOpen();
-        if (phase !== "begun" || nextUnit !== (batch.texturing === "pair" ? 2 : 1))
-          throw new Error("CPU prepared draw has unapplied texture slots");
+        if (phase !== "begun" || nextUnit !== (batch.texturing === "pair" ? 2 : 1)) throw new Error("CPU prepared draw has unapplied texture slots");
         this.drawBatch(batch, this.images.bound(0), batch.texturing === "pair" ? this.images.bound(1) : { kind: "incomplete" });
         if (batch.indices.length !== 0) {
           this.currentColor = { kind: "source-indeterminate" };
@@ -659,99 +832,158 @@ export class SoftwareRenderer implements RendererBackend {
 
   drawStretchPic(image: RendererImage, rect: Rect, uv: TextureRect, color: Vec4): undefined {
     this.beginView({ viewport: { x: 0, y: 0, width: this.width, height: this.height }, clear: null, clipPlane: null });
-    const points = [{ x: rect.x, y: rect.y, s: uv.s1, t: uv.t1 },
+    const points = [
+      { x: rect.x, y: rect.y, s: uv.s1, t: uv.t1 },
       { x: rect.x + rect.width, y: rect.y, s: uv.s2, t: uv.t1 },
       { x: rect.x + rect.width, y: rect.y + rect.height, s: uv.s2, t: uv.t2 },
-      { x: rect.x, y: rect.y + rect.height, s: uv.s1, t: uv.t2 }];
-    this.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", indices: [0, 1, 2, 0, 2, 3],
-      texture: { kind: "bind-image", image }, state: { ...CPU_OPAQUE_STATE,
-        blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "always", depthWrite: false },
-      vertices: points.map(point => ({ position: { x: point.x * 2 / this.width - 1,
-        y: 1 - point.y * 2 / this.height, z: -1, w: 1 }, texCoord: { x: point.s, y: point.t }, color })) });
+      { x: rect.x, y: rect.y + rect.height, s: uv.s1, t: uv.t2 },
+    ];
+    this.draw({
+      lighting: { kind: "vertex" },
+      primitive: "triangles",
+      texturing: "single",
+      indices: [0, 1, 2, 0, 2, 3],
+      texture: { kind: "bind-image", image },
+      state: { ...CPU_OPAQUE_STATE, blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "always", depthWrite: false },
+      vertices: points.map(point => ({
+        position: { x: (point.x * 2) / this.width - 1, y: 1 - (point.y * 2) / this.height, z: -1, w: 1 },
+        texCoord: { x: point.s, y: point.t },
+        color,
+      })),
+    });
   }
 
   drawShowImage(image: RendererImage, rect: Rect, proportional: boolean): undefined {
     const width = rect.width * (proportional ? image.width / 512 : 1),
       height = rect.height * (proportional ? image.height / 512 : 1);
-    const points = [{ x: rect.x, y: rect.y, s: 0, t: 0 },
+    const points = [
+      { x: rect.x, y: rect.y, s: 0, t: 0 },
       { x: rect.x + width, y: rect.y, s: 1, t: 0 },
       { x: rect.x + width, y: rect.y + height, s: 1, t: 1 },
-      { x: rect.x, y: rect.y + height, s: 0, t: 1 }];
-    this.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", indices: [0, 1, 2, 0, 2, 3],
-      texture: { kind: "bind-image", image }, state: this.retainedState,
-      vertices: points.map(point => ({ position: { x: point.x * 2 / this.width - 1,
-        y: 1 - point.y * 2 / this.height, z: -1, w: 1 }, texCoord: { x: point.s, y: point.t },
-        color: { x: 1, y: 1, z: 1, w: 1 } })) });
+      { x: rect.x, y: rect.y + height, s: 0, t: 1 },
+    ];
+    this.draw({
+      lighting: { kind: "vertex" },
+      primitive: "triangles",
+      texturing: "single",
+      indices: [0, 1, 2, 0, 2, 3],
+      texture: { kind: "bind-image", image },
+      state: this.retainedState,
+      vertices: points.map(point => ({
+        position: { x: (point.x * 2) / this.width - 1, y: 1 - (point.y * 2) / this.height, z: -1, w: 1 },
+        texCoord: { x: point.s, y: point.t },
+        color: { x: 1, y: 1, z: 1, w: 1 },
+      })),
+    });
   }
 
   drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined {
     this.assertOpen();
     switch (operation.kind) {
-      case "q2-fog": applyQ2DepthFog(this.framebuffer, operation, this.alphaBits); return;
+      case "q2-fog":
+        applyQ2DepthFog(this.framebuffer, operation, this.alphaBits);
+        return;
       case "depth-atlas": {
         const image = this.images.depthImage(operation.image);
         if (this.atlasTarget !== null && (this.atlasTarget.width !== image.width || this.atlasTarget.height !== image.height)) {
           this.atlasTarget.close();
           this.atlasTarget = null;
         }
-        const target = this.atlasTarget ??= new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0);
+        const target = (this.atlasTarget ??= new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0));
         // Atlas passes are small; a second pool would double the worker threads.
         target.rowPool = null;
         target.colorWrite = false;
         // Atlas image row zero is V=0. Raster rows run from the top of the
         // target. Only pass rects are copied: cleared passes overwrite their
         // rect in beginView, and untouched regions round-trip identically.
-        const imageWidth = image.width, imageHeight = image.height;
+        const imageWidth = image.width,
+          imageHeight = image.height;
         const copyRect = (viewport: Rect, toTarget: boolean): void => {
-          const x0 = Math.max(0, viewport.x), x1 = Math.min(imageWidth, viewport.x + viewport.width);
-          const y0 = Math.max(0, viewport.y), y1 = Math.min(imageHeight, viewport.y + viewport.height);
+          const x0 = Math.max(0, viewport.x),
+            x1 = Math.min(imageWidth, viewport.x + viewport.width);
+          const y0 = Math.max(0, viewport.y),
+            y1 = Math.min(imageHeight, viewport.y + viewport.height);
           if (x0 >= x1) return;
           for (let y = y0; y < y1; y++) {
-            const imageRow = y * imageWidth, targetRow = (imageHeight - 1 - y) * imageWidth;
+            const imageRow = y * imageWidth,
+              targetRow = (imageHeight - 1 - y) * imageWidth;
             if (toTarget) target.depth.set(image.pixels.subarray(imageRow + x0, imageRow + x1), targetRow + x0);
             else image.pixels.set(target.depth.subarray(targetRow + x0, targetRow + x1), imageRow + x0);
           }
         };
         for (const pass of operation.passes) if (pass.clearDepth === null) copyRect(pass.viewport, true);
         for (const pass of operation.passes) {
-          target.beginView({ viewport: { ...pass.viewport, y: image.height - pass.viewport.y - pass.viewport.height },
-            clipPlane: null, clear: pass.clearDepth === null ? null : { depth: pass.clearDepth, color: null, stencil: false } });
+          target.beginView({
+            viewport: { ...pass.viewport, y: image.height - pass.viewport.y - pass.viewport.height },
+            clipPlane: null,
+            clear: pass.clearDepth === null ? null : { depth: pass.clearDepth, color: null, stencil: false },
+          });
           for (const draw of pass.draws) {
-            const vertices: { position: { x: number; y: number; z: number; w: number }; texCoord: { x: number; y: number }; color: { x: number; y: number; z: number; w: number } }[] = [];
+            const vertices: {
+              position: { x: number; y: number; z: number; w: number };
+              texCoord: { x: number; y: number };
+              color: { x: number; y: number; z: number; w: number };
+            }[] = [];
             for (let offset = 0; offset < draw.positions.length; offset += 4)
-              vertices.push({ position: { x: draw.positions[offset] ?? 0, y: draw.positions[offset + 1] ?? 0, z: draw.positions[offset + 2] ?? 0, w: draw.positions[offset + 3] ?? 0 },
-                texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } });
-            target.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
-              indices: draw.indices, texture: { kind: "retain-current-texture" },
-              state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset }, vertices });
+              vertices.push({
+                position: {
+                  x: draw.positions[offset] ?? 0,
+                  y: draw.positions[offset + 1] ?? 0,
+                  z: draw.positions[offset + 2] ?? 0,
+                  w: draw.positions[offset + 3] ?? 0,
+                },
+                texCoord: { x: 0, y: 0 },
+                color: { x: 1, y: 1, z: 1, w: 1 },
+              });
+            target.draw({
+              lighting: { kind: "vertex" },
+              primitive: "triangles",
+              texturing: "single",
+              indices: draw.indices,
+              texture: { kind: "retain-current-texture" },
+              state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset },
+              vertices,
+            });
           }
         }
         for (const pass of operation.passes) copyRect(pass.viewport, false);
         return;
       }
-      case "disable-portal-clip": this.clipPlane = null; return;
-      case "depth-range": this.retainedState = { ...this.retainedState, depthRange: operation.range }; return;
-      case "cull": this.retainedState = { ...this.retainedState, cull: operation.cull }; return;
-      case "polygon-offset": this.retainedState = { ...this.retainedState, polygonOffset: operation.value }; return;
+      case "disable-portal-clip":
+        this.clipPlane = null;
+        return;
+      case "depth-range":
+        this.retainedState = { ...this.retainedState, depthRange: operation.range };
+        return;
+      case "cull":
+        this.retainedState = { ...this.retainedState, cull: operation.cull };
+        return;
+      case "polygon-offset":
+        this.retainedState = { ...this.retainedState, polygonOffset: operation.value };
+        return;
       case "sky-side": {
         for (const strip of operation.strips) {
           if (strip.length < 2 || strip.length % 2 !== 0) throw new RangeError("CPU sky strips require paired row vertices");
           const indices: number[] = [];
-          for (let index = 0; index + 2 < strip.length; index++)
-            indices.push(index + index % 2, index + 1 - index % 2, index + 2);
-          this.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", indices,
+          for (let index = 0; index + 2 < strip.length; index++) indices.push(index + (index % 2), index + 1 - (index % 2), index + 2);
+          this.draw({
+            lighting: { kind: "vertex" },
+            primitive: "triangles",
+            texturing: "single",
+            indices,
             texture: { kind: "bind-image", image: operation.image },
             state: { ...this.retainedState, blend: { source: "one", destination: "zero" }, alphaTest: "none" },
-            vertices: strip.map(vertex => ({ ...vertex, color: operation.color })) });
+            vertices: strip.map(vertex => ({ ...vertex, color: operation.color })),
+          });
         }
         return;
       }
       case "shadow-volume":
       case "shadow-finish": {
         if (this.stencilBits < 4) return;
-        const finishing = operation.kind === "shadow-finish", shade = Math.fround(finishing ? 0.6 : 0.2);
-        const vertices = operation.positions.map(position => ({ position,
-          color: { x: shade, y: shade, z: shade, w: 1 }, texCoord: { x: 0, y: 0 } }));
+        const finishing = operation.kind === "shadow-finish",
+          shade = Math.fround(finishing ? 0.6 : 0.2);
+        const vertices = operation.positions.map(position => ({ position, color: { x: shade, y: shade, z: shade, w: 1 }, texCoord: { x: 0, y: 0 } }));
         this.stencilEnabled = true;
         this.stencilFunction = finishing ? "nonzero" : "always";
         this.stencilCompareMask = 255;
@@ -759,12 +991,23 @@ export class SoftwareRenderer implements RendererBackend {
         this.stencilDepthPass = finishing ? "keep" : "increment";
         this.colorWrite = finishing;
         if (finishing) this.clipPlane = null;
-        const state: RenderState = { ...this.retainedState, alphaTest: "none", depthTest: "less-equal", depthWrite: finishing,
+        const state: RenderState = {
+          ...this.retainedState,
+          alphaTest: "none",
+          depthTest: "less-equal",
+          depthWrite: finishing,
           blend: { source: finishing ? "dst-color" : "one", destination: "zero" },
-          cull: operation.kind === "shadow-volume" ? operation.mirror ? "front" : "back" : "none" };
-        const batch: DrawBatch = { lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", vertices,
+          cull: operation.kind === "shadow-volume" ? (operation.mirror ? "front" : "back") : "none",
+        };
+        const batch: DrawBatch = {
+          lighting: { kind: "vertex" },
+          primitive: "triangles",
+          texturing: "single",
+          vertices,
           indices: operation.kind === "shadow-volume" ? operation.indices : [0, 1, 2, 0, 2, 3],
-          texture: { kind: "bind-image", image: operation.whiteImage }, state };
+          texture: { kind: "bind-image", image: operation.whiteImage },
+          state,
+        };
         try {
           this.draw(batch);
           if (!finishing) {
@@ -786,16 +1029,25 @@ export class SoftwareRenderer implements RendererBackend {
   private applySourceState(bits: number): void {
     for (const change of sourceStateChanges(this.sourceBits, bits)) {
       switch (change.kind) {
-        case "depth-function": this.retainedState = { ...this.retainedState, depthTest: change.value }; break;
+        case "depth-function":
+          this.retainedState = { ...this.retainedState, depthTest: change.value };
+          break;
         case "blend":
           this.blendEnabled = change.enabled;
-          if (change.enabled) this.retainedState = { ...this.retainedState,
-            blend: { source: change.source, destination: change.destination } };
+          if (change.enabled) this.retainedState = { ...this.retainedState, blend: { source: change.source, destination: change.destination } };
           break;
-        case "depth-write": this.retainedState = { ...this.retainedState, depthWrite: change.value }; break;
-        case "polygon-mode": this.polygonMode = change.value; break;
-        case "depth-test": this.depthTestEnabled = change.enabled; break;
-        case "alpha-test": this.retainedState = { ...this.retainedState, alphaTest: change.value }; break;
+        case "depth-write":
+          this.retainedState = { ...this.retainedState, depthWrite: change.value };
+          break;
+        case "polygon-mode":
+          this.polygonMode = change.value;
+          break;
+        case "depth-test":
+          this.depthTestEnabled = change.enabled;
+          break;
+        case "alpha-test":
+          this.retainedState = { ...this.retainedState, alphaTest: change.value };
+          break;
         default: {
           const invalid: never = change;
           throw new Error(`Invalid source state operation ${invalid}`);
@@ -827,10 +1079,14 @@ export class SoftwareRenderer implements RendererBackend {
       const origin = array.origin;
       const values = scratch.map(cell => {
         switch (origin) {
-          case "svars0": return cell.texCoord;
-          case "svars1": return cell.texCoord2;
-          case "raw0": return cell.rawTexCoord;
-          case "raw1": return cell.rawTexCoord2;
+          case "svars0":
+            return cell.texCoord;
+          case "svars1":
+            return cell.texCoord2;
+          case "raw0":
+            return cell.rawTexCoord;
+          case "raw1":
+            return cell.rawTexCoord2;
         }
       });
       this.clientTexCoords[unit] = { origin, values };
@@ -852,7 +1108,8 @@ export class SoftwareRenderer implements RendererBackend {
   }
 
   private immediateTexture(unit: 0 | 1): BoundTexture {
-    const texture = this.enabledTexture(unit), coordinate = this.currentTexCoords[unit];
+    const texture = this.enabledTexture(unit),
+      coordinate = this.currentTexCoords[unit];
     if (texture.kind === "incomplete") return texture;
     if (texture.kind === "constant") return texture;
     // tr_shadows.c RB_ShadowTessEnd masks color and disables alpha testing.
@@ -867,12 +1124,23 @@ export class SoftwareRenderer implements RendererBackend {
     const alpha = textureHasAlpha(texture.internalFormat);
     // Unknown current coordinates require a proof across every reachable level,
     // including its actual storage conversion, and all possible border taps.
-    if (uniform !== null && texture.levels.every(level => level.uniform !== null
-      && level.uniform.r === uniform.r && level.uniform.g === uniform.g && level.uniform.b === uniform.b
-      && (!alpha || level.uniform.a === uniform.a))
-      && (texture.wrap === "repeat" || !texture.magnifyLinear
-        || Math.fround(texture.borderColor.x) === uniform.r && Math.fround(texture.borderColor.y) === uniform.g
-          && Math.fround(texture.borderColor.z) === uniform.b && (!alpha || Math.fround(texture.borderColor.w) === uniform.a))) {
+    if (
+      uniform !== null &&
+      texture.levels.every(
+        level =>
+          level.uniform !== null &&
+          level.uniform.r === uniform.r &&
+          level.uniform.g === uniform.g &&
+          level.uniform.b === uniform.b &&
+          (!alpha || level.uniform.a === uniform.a),
+      ) &&
+      (texture.wrap === "repeat" ||
+        !texture.magnifyLinear ||
+        (Math.fround(texture.borderColor.x) === uniform.r &&
+          Math.fround(texture.borderColor.y) === uniform.g &&
+          Math.fround(texture.borderColor.z) === uniform.b &&
+          (!alpha || Math.fround(texture.borderColor.w) === uniform.a)))
+    ) {
       return { kind: "constant", internalFormat: texture.internalFormat, sample: uniform };
     }
     // OpenGL 1.2.1 section 2.8 leaves enabled current attributes indeterminate
@@ -891,8 +1159,11 @@ export class SoftwareRenderer implements RendererBackend {
     this.colorClientEnabled = true;
     if (this.currentUnit === 0) this.primaryClientEnabled = true;
     else this.secondaryClientEnabled = true;
-    if (setArraysOnce) this.clientTexCoords[this.currentUnit] = { origin: "svars0",
-      values: scratch.length === 0 ? this.clientTexCoords[this.currentUnit]?.values ?? [] : scratch.map(cell => cell.texCoord) };
+    if (setArraysOnce)
+      this.clientTexCoords[this.currentUnit] = {
+        origin: "svars0",
+        values: scratch.length === 0 ? (this.clientTexCoords[this.currentUnit]?.values ?? []) : scratch.map(cell => cell.texCoord),
+      };
   }
 
   prepareSourceGeometry(stage: SourceStageData): PreparedSourceDraw {
@@ -909,23 +1180,38 @@ export class SoftwareRenderer implements RendererBackend {
     const scratch = source === null ? null : snapshotSourceCells(source.scratch);
     if (scratch !== null) {
       if (scratch.length !== batch.vertices.length) throw new RangeError("CPU source scratch must match published vertices");
-      for (const cell of scratch) if (!finiteVector(cell.color)
-        || ![cell.texCoord.x, cell.texCoord.y, cell.texCoord2.x, cell.texCoord2.y].every(value => Number.isFinite(Math.fround(value))))
-        throw new RangeError("CPU source scratch attributes must be finite float32 values");
+      for (const cell of scratch)
+        if (
+          !finiteVector(cell.color) ||
+          ![cell.texCoord.x, cell.texCoord.y, cell.texCoord2.x, cell.texCoord2.y].every(value => Number.isFinite(Math.fround(value)))
+        )
+          throw new RangeError("CPU source scratch attributes must be finite float32 values");
     }
-    if (source === null) for (const binding of batch.texturing === "pair" ? [batch.texture, batch.secondTexture.binding] : [batch.texture]) {
-      if (binding.kind === "bind-image") this.images.validate(binding.image);
-    }
-    let phase: "prepared" | "begun" | "textured" | "drawn" | "cleaned" = "prepared", nextUnit = 0;
+    if (source === null)
+      for (const binding of batch.texturing === "pair" ? [batch.texture, batch.secondTexture.binding] : [batch.texture]) {
+        if (binding.kind === "bind-image") this.images.validate(binding.image);
+      }
+    let phase: "prepared" | "begun" | "textured" | "drawn" | "cleaned" = "prepared",
+      nextUnit = 0;
     let pendingUnit: 0 | 1 | null = null;
     const sourceCoordinates = (secondary: boolean): void => {
-      const origin = sourceKind === null ? "direct" : secondary ? sourceKind === "lightmapped-pair" ? "raw1" : "svars1"
-        : sourceKind === "lightmapped-pair" || sourceKind === "vertex-lit" ? "raw0" : sourceKind === "dlight" ? "local" : "svars0";
+      const origin =
+        sourceKind === null
+          ? "direct"
+          : secondary
+            ? sourceKind === "lightmapped-pair"
+              ? "raw1"
+              : "svars1"
+            : sourceKind === "lightmapped-pair" || sourceKind === "vertex-lit"
+              ? "raw0"
+              : sourceKind === "dlight"
+                ? "local"
+                : "svars0";
       let values: readonly Vec2[];
       if (batch.vertices.length === 0) values = this.clientTexCoords[this.currentUnit]?.values ?? [];
       else if (origin === "raw0" || origin === "raw1") {
         if (scratch === null) throw new Error("CPU raw source coordinates require stage scratch");
-        values = scratch.map(cell => origin === "raw0" ? cell.rawTexCoord : cell.rawTexCoord2);
+        values = scratch.map(cell => (origin === "raw0" ? cell.rawTexCoord : cell.rawTexCoord2));
       } else if (secondary) {
         if (batch.texturing !== "pair") throw new Error("CPU secondary client coordinates require a paired batch");
         values = batch.vertices.map(vertex => vertex.texCoord2);
@@ -944,7 +1230,7 @@ export class SoftwareRenderer implements RendererBackend {
     };
     const prepareTexture = (unit: 0 | 1): undefined => {
       this.assertOpen();
-      if (phase !== "begun" || pendingUnit !== null || unit !== nextUnit || unit === 1 && batch.texturing !== "pair")
+      if (phase !== "begun" || pendingUnit !== null || unit !== nextUnit || (unit === 1 && batch.texturing !== "pair"))
         throw new Error("CPU prepared texture slot order is invalid");
       if (unit === 1 && sourceKind === "lightmapped-pair") sourceCoordinates(false);
       if (sourceKind === null || batch.texturing === "pair") this.currentUnit = unit;
@@ -967,7 +1253,7 @@ export class SoftwareRenderer implements RendererBackend {
         this.assertOpen();
         if (phase !== "prepared") throw new Error("CPU prepared draw has already begun");
         if (scratch !== null) this.refreshSourceCoordinates(scratch);
-        if (sourceKind !== "generic-single" && sourceKind !== "generic-pair" || !this.genericArraysOnce) this.colorClientEnabled = true;
+        if ((sourceKind !== "generic-single" && sourceKind !== "generic-pair") || !this.genericArraysOnce) this.colorClientEnabled = true;
         if (sourceKind === "vertex-lit" || sourceKind === "dlight" || sourceKind === "fog") {
           if (this.currentUnit === 0) this.primaryClientEnabled = true;
           else this.secondaryClientEnabled = true;
@@ -1000,7 +1286,8 @@ export class SoftwareRenderer implements RendererBackend {
         this.assertOpen();
         if (phase !== (sourceKind === null ? "begun" : "textured") || pendingUnit !== null || nextUnit !== (batch.texturing === "pair" ? 2 : 1))
           throw new Error("CPU prepared draw has unapplied texture slots");
-        const mode = sourcePrimitiveMode(primitives, false), discrete = mode === "discrete-strips";
+        const mode = sourcePrimitiveMode(primitives, false),
+          discrete = mode === "discrete-strips";
         const state = this.rasterState();
         let sourceVertices: readonly CpuVertex[] | null = null;
         if (sourceKind !== null) {
@@ -1017,51 +1304,88 @@ export class SoftwareRenderer implements RendererBackend {
             if (cell === undefined) throw new RangeError("CPU source scratch vertex is missing");
             // Only indexed vertices consume retained array slots. Unreferenced
             // allocation tails keep their unused coordinates.
-            return { position: vertex.position, ...worldAttributes(batch.lighting, index),
-              color: discrete ? { x: byte(cell.color.x) / 255, y: byte(cell.color.y) / 255, z: byte(cell.color.z) / 255, w: byte(cell.color.w) / 255 } : retainedColor ?? vertex.color,
-              texCoord: discrete ? { x: Math.fround(cell.texCoord.x), y: Math.fround(cell.texCoord.y) } : primary?.[index] ?? vertex.texCoord,
-              texCoord2: secondary?.[index] ?? cell.texCoord2 };
+            return {
+              position: vertex.position,
+              ...worldAttributes(batch.lighting, index),
+              color: discrete
+                ? { x: byte(cell.color.x) / 255, y: byte(cell.color.y) / 255, z: byte(cell.color.z) / 255, w: byte(cell.color.w) / 255 }
+                : (retainedColor ?? vertex.color),
+              texCoord: discrete ? { x: Math.fround(cell.texCoord.x), y: Math.fround(cell.texCoord.y) } : (primary?.[index] ?? vertex.texCoord),
+              texCoord2: secondary?.[index] ?? cell.texCoord2,
+            };
           });
           if (this.secondaryEnabled) {
-            batch = { texturing: "pair", primitive: "triangles", vertices: sourceVertices, indices: batch.indices,
-              lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }), texture: { kind: "retain-current-texture" }, secondTexture: {
-                binding: { kind: "retain-current-texture" }, environment: this.secondaryEnvironment,
-              }, state };
-          } else batch = { texturing: "single", primitive: "triangles", vertices: sourceVertices, indices: batch.indices,
-              lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }), texture: { kind: "retain-current-texture" }, state };
+            batch = {
+              texturing: "pair",
+              primitive: "triangles",
+              vertices: sourceVertices,
+              indices: batch.indices,
+              lighting: batch.lighting,
+              ...(batch.fog === undefined ? {} : { fog: batch.fog }),
+              texture: { kind: "retain-current-texture" },
+              secondTexture: {
+                binding: { kind: "retain-current-texture" },
+                environment: this.secondaryEnvironment,
+              },
+              state,
+            };
+          } else
+            batch = {
+              texturing: "single",
+              primitive: "triangles",
+              vertices: sourceVertices,
+              indices: batch.indices,
+              lighting: batch.lighting,
+              ...(batch.fog === undefined ? {} : { fog: batch.fog }),
+              texture: { kind: "retain-current-texture" },
+              state,
+            };
         } else batch = { ...batch, state };
         if (batch.indices.length !== 0 && mode !== "none") {
           {
             if (mode === "elements") {
               if (sourceKind === null) this.drawBatch(batch, this.enabledTexture(0), this.enabledTexture(1));
-              else this.drawBatch(batch, this.primaryClientEnabled ? this.enabledTexture(0) : this.immediateTexture(0),
-                this.secondaryClientEnabled ? this.enabledTexture(1) : this.immediateTexture(1));
+              else
+                this.drawBatch(
+                  batch,
+                  this.primaryClientEnabled ? this.enabledTexture(0) : this.immediateTexture(0),
+                  this.secondaryClientEnabled ? this.enabledTexture(1) : this.immediateTexture(1),
+                );
               if (sourceKind === null || this.colorClientEnabled) this.currentColor = { kind: "source-indeterminate" };
               if (sourceKind === null || this.primaryClientEnabled) this.currentTexCoords[0] = { kind: "source-indeterminate" };
-              if (sourceKind === null ? batch.texturing === "pair" : this.secondaryClientEnabled)
-                this.currentTexCoords[1] = { kind: "source-indeterminate" };
+              if (sourceKind === null ? batch.texturing === "pair" : this.secondaryClientEnabled) this.currentTexCoords[1] = { kind: "source-indeterminate" };
             } else {
               if (sourceVertices === null) throw new Error("CPU source strips require stage scratch");
               const vertices = sourceVertices;
-              const texture = this.enabledTexture(0), secondary = this.enabledTexture(1);
-              const uv0 = { x: 0, y: 0 }, uv1 = { x: 0, y: 0 };
-              const current0: CurrentTexCoord = { kind: "known", value: uv0 }, current1: CurrentTexCoord = { kind: "known", value: uv1 };
-              let first: CpuVertex | null = null, second: CpuVertex | null = null, even = true;
+              const texture = this.enabledTexture(0),
+                secondary = this.enabledTexture(1);
+              const uv0 = { x: 0, y: 0 },
+                uv1 = { x: 0, y: 0 };
+              const current0: CurrentTexCoord = { kind: "known", value: uv0 },
+                current1: CurrentTexCoord = { kind: "known", value: uv1 };
+              let first: CpuVertex | null = null,
+                second: CpuVertex | null = null,
+                even = true;
               let stripInvariants: BatchSetupConstants | null = null;
               emitSourceTriangleStrips(batch.indices, {
-                begin: () => { first = null; second = null; even = true; },
+                begin: () => {
+                  first = null;
+                  second = null;
+                  even = true;
+                },
                 element: index => {
                   const vertex = vertices[index];
                   if (vertex === undefined) throw new RangeError("CPU source strip vertex is missing");
                   if (discrete || this.colorClientEnabled) this.currentColor = { kind: "known", value: vertex.color };
-                  if (discrete && this.currentUnit !== 0)
-                    throw new Error("Unsupported source R_ArrayElementDiscrete multitexture targets 0 and 1");
+                  if (discrete && this.currentUnit !== 0) throw new Error("Unsupported source R_ArrayElementDiscrete multitexture targets 0 and 1");
                   if (discrete || this.primaryClientEnabled) {
-                    uv0.x = Math.fround(vertex.texCoord.x); uv0.y = Math.fround(vertex.texCoord.y);
+                    uv0.x = Math.fround(vertex.texCoord.x);
+                    uv0.y = Math.fround(vertex.texCoord.y);
                     this.currentTexCoords[0] = current0;
                   }
                   if (!discrete && this.secondaryClientEnabled) {
-                    uv1.x = Math.fround(vertex.texCoord2.x); uv1.y = Math.fround(vertex.texCoord2.y);
+                    uv1.x = Math.fround(vertex.texCoord2.x);
+                    uv1.y = Math.fround(vertex.texCoord2.y);
                     this.currentTexCoords[1] = current1;
                   }
                   if (first === null) first = vertex;
@@ -1073,7 +1397,9 @@ export class SoftwareRenderer implements RendererBackend {
                     const secondaryTexture = !discrete && this.secondaryClientEnabled ? secondary : this.immediateTexture(1);
                     stripInvariants ??= this.batchSetupConstants(batch, primaryTexture, secondaryTexture);
                     this.drawTriangle(even ? first : second, even ? second : first, vertex, batch, primaryTexture, secondaryTexture, stripInvariants);
-                    first = second; second = vertex; even = !even;
+                    first = second;
+                    second = vertex;
+                    even = !even;
                   }
                 },
                 end: () => {},
@@ -1110,13 +1436,14 @@ export class SoftwareRenderer implements RendererBackend {
     const first = polygon[0];
     if (first === undefined) return;
     const projected = polygon.map(vertex => project(vertex, this.viewport, 1, this.subpixelScale));
-    let area = 0, previous = projected[projected.length - 1];
+    let area = 0,
+      previous = projected[projected.length - 1];
     if (previous === undefined) return;
     for (const current of projected) {
       area += previous.x * current.y - previous.y * current.x;
       previous = current;
     }
-    if (!Number.isFinite(area) || batch.state.cull === "back" && area >= 0 || batch.state.cull === "front" && area < 0) return;
+    if (!Number.isFinite(area) || (batch.state.cull === "back" && area >= 0) || (batch.state.cull === "front" && area < 0)) return;
     // GL_POLYGON_OFFSET_FILL has no effect on polygon-line fragments.
     // Keep the clipping-created boundary and never draw triangulation spokes.
     let edgeStart = first;
@@ -1133,19 +1460,26 @@ export class SoftwareRenderer implements RendererBackend {
   private batchSetupConstants(batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): BatchSetupConstants {
     const state = batch.state;
     return {
-      depthNear: clamp(state.depthRange[0]), depthFar: clamp(state.depthRange[1]),
-      blending: state.blend.source === "one" && state.blend.destination === "zero" ? "opaque"
-        : state.blend.source === "src-alpha" && state.blend.destination === "one-minus-src-alpha" ? "alpha"
-        : state.blend.source === "one" && state.blend.destination === "one" ? "add"
-          : (state.blend.source === "dst-color" && state.blend.destination === "zero")
-            || (state.blend.source === "zero" && state.blend.destination === "src-color") ? "multiply"
-            : state.blend.source === "dst-color" && state.blend.destination === "one-minus-dst-alpha" ? "dst-color-inverse-dst-alpha" : "general",
+      depthNear: clamp(state.depthRange[0]),
+      depthFar: clamp(state.depthRange[1]),
+      blending:
+        state.blend.source === "one" && state.blend.destination === "zero"
+          ? "opaque"
+          : state.blend.source === "src-alpha" && state.blend.destination === "one-minus-src-alpha"
+            ? "alpha"
+            : state.blend.source === "one" && state.blend.destination === "one"
+              ? "add"
+              : (state.blend.source === "dst-color" && state.blend.destination === "zero") ||
+                  (state.blend.source === "zero" && state.blend.destination === "src-color")
+                ? "multiply"
+                : state.blend.source === "dst-color" && state.blend.destination === "one-minus-dst-alpha"
+                  ? "dst-color-inverse-dst-alpha"
+                  : "general",
       textureConsumed: this.colorWrite || state.alphaTest !== "none",
       primaryAlpha: texture.kind !== "incomplete" && textureHasAlpha(texture.internalFormat),
       secondaryAlpha: secondary.kind !== "incomplete" && textureHasAlpha(secondary.internalFormat),
       secondaryEnvironment: batch.texturing === "pair" ? batch.secondTexture.environment : null,
-      vertexLighting: batch.lighting.kind === "vertex"
-        ? { ...this.fragmentLighting(batch), positions: ZERO_WORLD_TRIPLE, normals: ZERO_WORLD_TRIPLE } : null,
+      vertexLighting: batch.lighting.kind === "vertex" ? { ...this.fragmentLighting(batch), positions: ZERO_WORLD_TRIPLE, normals: ZERO_WORLD_TRIPLE } : null,
     };
   }
 
@@ -1160,39 +1494,63 @@ export class SoftwareRenderer implements RendererBackend {
     const invariants = this.batchSetupConstants(batch, texture, secondary);
     const drawAll = (): void => {
       for (let offset = 0; offset < batch.indices.length; offset += 3) {
-        this.drawTriangle(indexedVertex(batch, offset), indexedVertex(batch, offset + 1), indexedVertex(batch, offset + 2), batch, texture, secondary, invariants);
+        this.drawTriangle(
+          indexedVertex(batch, offset),
+          indexedVertex(batch, offset + 1),
+          indexedVertex(batch, offset + 2),
+          batch,
+          texture,
+          secondary,
+          invariants,
+        );
       }
     };
     // Row-parallel dispatch collects this batch's setups and rasterizes
     // them by disjoint row bands on the worker pool. Draw order per pixel
     // is unchanged; the dispatch barrier is synchronous, so nothing outside
     // this call can observe a partially rasterized batch.
-    if (this.framebuffer !== this.mainFramebuffer || this.opacityActive || this.pendingSetups !== null) { drawAll(); return; }
-    if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared, reason => { this.rowPoolFailureValue = reason; });
+    if (this.framebuffer !== this.mainFramebuffer || this.opacityActive || this.pendingSetups !== null) {
+      drawAll();
+      return;
+    }
+    if (this.rowPool === undefined)
+      this.rowPool = RowParallelPool.tryCreate(this.mainShared, reason => {
+        this.rowPoolFailureValue = reason;
+      });
     // Without a worker pool the setups would run serially anyway; execute
     // them immediately instead of collecting the whole batch first.
-    if (this.rowPool === null) { drawAll(); return; }
+    if (this.rowPool === null) {
+      drawAll();
+      return;
+    }
     this.pendingSetups = [];
     this.pendingPixels = 0;
     let collected: TriangleSetup[];
     let collectedPixels: number;
-    try { drawAll(); collected = this.pendingSetups; collectedPixels = this.pendingPixels; }
-    catch (error) {
+    try {
+      drawAll();
+      collected = this.pendingSetups;
+      collectedPixels = this.pendingPixels;
+    } catch (error) {
       const setups = this.pendingSetups;
       this.pendingSetups = null;
       if (setups !== null) for (const setup of setups) runTriangleRows(setup, this.framebuffer, this.sampled);
       throw error;
     }
     this.pendingSetups = null;
-    if (collected.length >= 4 && collectedPixels >= 50_000) { this.rowPool.run(collected); return; }
+    if (collected.length >= 4 && collectedPixels >= 50_000) {
+      this.rowPool.run(collected);
+      return;
+    }
     for (const setup of collected) runTriangleRows(setup, this.framebuffer, this.sampled);
   }
 
-  private drawLine(first: CpuVertex, second: CpuVertex, width: number,
-    batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
-    let a = first, b = second;
+  private drawLine(first: CpuVertex, second: CpuVertex, width: number, batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
+    let a = first,
+      b = second;
     if (this.clipPlane !== null) {
-      const da = planeDistance(a, this.clipPlane), db = planeDistance(b, this.clipPlane);
+      const da = planeDistance(a, this.clipPlane),
+        db = planeDistance(b, this.clipPlane);
       if (da < 0 && db < 0) return;
       if (da < 0) a = intersect(a, b, da, db, this.clipPlane);
       else if (db < 0) b = intersect(a, b, da, db, this.clipPlane);
@@ -1200,22 +1558,33 @@ export class SoftwareRenderer implements RendererBackend {
     this.rasterizeLine(a, b, width, batch, texture, secondary);
   }
 
-  private rasterizeLine(a: CpuVertex, b: CpuVertex, width: number,
-    batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
-    const scissor = { minX: Math.max(0, -this.viewport.x), minY: Math.max(0, -this.viewport.y),
+  private rasterizeLine(a: CpuVertex, b: CpuVertex, width: number, batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
+    const scissor = {
+      minX: Math.max(0, -this.viewport.x),
+      minY: Math.max(0, -this.viewport.y),
       maxX: Math.min(this.viewport.width - 1, this.width - 1 - this.viewport.x),
-      maxY: Math.min(this.viewport.height - 1, this.height - 1 - this.viewport.y) };
+      maxY: Math.min(this.viewport.height - 1, this.height - 1 - this.viewport.y),
+    };
     rasterizeAliasedLine(a, b, this.viewport.width, this.viewport.height, width, scissor, fragment => {
-      const x = fragment.x + this.viewport.x, y = fragment.y + this.viewport.y;
+      const x = fragment.x + this.viewport.x,
+        y = fragment.y + this.viewport.y;
       if (x >= 0 && x < this.width && y >= 0 && y < this.height) this.lineFragment({ ...fragment, x, y }, batch, texture, secondary);
     });
   }
 
-  private drawTriangle(a: CpuVertex, b: CpuVertex, c: CpuVertex,
-    batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture, invariants: BatchSetupConstants): void {
+  private drawTriangle(
+    a: CpuVertex,
+    b: CpuVertex,
+    c: CpuVertex,
+    batch: DrawBatch,
+    texture: BoundTexture,
+    secondary: BoundTexture,
+    invariants: BatchSetupConstants,
+  ): void {
     const original: readonly [CpuVertex, CpuVertex, CpuVertex] = [a, b, c];
     let magnitude = 0;
-    if (batch.fog !== undefined) for (const { position: p } of original) magnitude = Math.max(magnitude, Math.abs(p.x), Math.abs(p.y), Math.abs(p.z), Math.abs(p.w));
+    if (batch.fog !== undefined)
+      for (const { position: p } of original) magnitude = Math.max(magnitude, Math.abs(p.x), Math.abs(p.y), Math.abs(p.z), Math.abs(p.w));
     const fogScale = magnitude > Number.MAX_VALUE / 4 ? magnitude : 1;
     const polygon = clipPolygon(original, this.clipPlane);
     const first = polygon[0];
@@ -1225,14 +1594,19 @@ export class SoftwareRenderer implements RendererBackend {
       return;
     }
     let interpolation: readonly [ScreenVertex, ScreenVertex, ScreenVertex] | null = null;
-    if (original.every(vertex => vertex.position.w > 0 && vertex.position.z >= -vertex.position.w && vertex.position.z <= vertex.position.w)
-      && original.some(vertex => Math.abs(vertex.position.x) > vertex.position.w || Math.abs(vertex.position.y) > vertex.position.w)) {
+    if (
+      original.every(vertex => vertex.position.w > 0 && vertex.position.z >= -vertex.position.w && vertex.position.z <= vertex.position.w) &&
+      original.some(vertex => Math.abs(vertex.position.x) > vertex.position.w || Math.abs(vertex.position.y) > vertex.position.w)
+    ) {
       // The measured GL profile retains the original snapped interpolation
       // plane. Rebuilding it from newly snapped clip vertices changes UVs on
       // thin triangles. Coverage still uses the bounded clipped polygon.
       const scale = Math.min(original[0].position.w, original[1].position.w, original[2].position.w);
-      const projected: readonly [ScreenVertex, ScreenVertex, ScreenVertex] = [project(original[0], this.viewport, scale, this.subpixelScale),
-        project(original[1], this.viewport, scale, this.subpixelScale), project(original[2], this.viewport, scale, this.subpixelScale)];
+      const projected: readonly [ScreenVertex, ScreenVertex, ScreenVertex] = [
+        project(original[0], this.viewport, scale, this.subpixelScale),
+        project(original[1], this.viewport, scale, this.subpixelScale),
+        project(original[2], this.viewport, scale, this.subpixelScale),
+      ];
       const area = edge(projected[0], projected[1], projected[2].x, projected[2].y);
       if (Number.isFinite(area)) {
         if (area === 0) return;
@@ -1244,57 +1618,110 @@ export class SoftwareRenderer implements RendererBackend {
       const third = polygon[index + 1];
       if (second === undefined || third === undefined) throw new RangeError("Missing clipped vertex");
       const wScale = Math.min(first.position.w, second.position.w, third.position.w);
-      this.triangle(project(first, this.viewport, wScale, this.subpixelScale, fogScale),
-        project(second, this.viewport, wScale, this.subpixelScale, fogScale), project(third, this.viewport, wScale, this.subpixelScale, fogScale), batch, texture, secondary, interpolation, invariants);
+      this.triangle(
+        project(first, this.viewport, wScale, this.subpixelScale, fogScale),
+        project(second, this.viewport, wScale, this.subpixelScale, fogScale),
+        project(third, this.viewport, wScale, this.subpixelScale, fogScale),
+        batch,
+        texture,
+        secondary,
+        interpolation,
+        invariants,
+      );
     }
   }
 
   private lineFragment(fragment: LineFragment, batch: DrawBatch, texture: BoundTexture, secondaryTexture: BoundTexture): void {
-    const index = fragment.y * this.width + fragment.x, previousDepth = this.depth[index];
+    const index = fragment.y * this.width + fragment.x,
+      previousDepth = this.depth[index];
     if (previousDepth === undefined) throw new RangeError("Line fragment outside framebuffer");
-    const state = batch.state, near = clamp(state.depthRange[0]), far = clamp(state.depthRange[1]);
+    const state = batch.state,
+      near = clamp(state.depthRange[0]),
+      far = clamp(state.depthRange[1]);
     const depth = clamp(fragment.depth) * (far - near) + near;
     const depthPassed = !((state.depthTest === "less-equal" && depth > previousDepth) || (state.depthTest === "equal" && depth !== previousDepth));
     if (!depthPassed && !this.stencilEnabled) return;
     const textureConsumed = this.colorWrite || state.alphaTest !== "none";
-    let r = clamp(fragment.color.x), g = clamp(fragment.color.y), b = clamp(fragment.color.z), alpha = clamp(fragment.color.w);
+    let r = clamp(fragment.color.x),
+      g = clamp(fragment.color.y),
+      b = clamp(fragment.color.z),
+      alpha = clamp(fragment.color.w);
     const vertexColor = { x: r, y: g, z: b, w: alpha };
     let texel: Sample = { r: 1, g: 1, b: 1, a: 1 };
     if (textureConsumed && texture.kind !== "incomplete") {
       sampleLineBound(texture, fragment.texCoord, fragment.texCoordDerivative, this.sampled);
       texel = { ...this.sampled, a: textureHasAlpha(texture.internalFormat) ? this.sampled.a : 1 };
       if (batch.textureEffect === "luminance-alpha") {
-        const modulation = (this.sampled.r + this.sampled.g + this.sampled.b) / 3 * alpha;
-        this.sampled.r *= modulation; this.sampled.g *= modulation; this.sampled.b *= modulation;
+        const modulation = ((this.sampled.r + this.sampled.g + this.sampled.b) / 3) * alpha;
+        this.sampled.r *= modulation;
+        this.sampled.g *= modulation;
+        this.sampled.b *= modulation;
         texel = { ...texel, r: this.sampled.r, g: this.sampled.g, b: this.sampled.b };
       }
-      r *= this.sampled.r; g *= this.sampled.g; b *= this.sampled.b;
+      r *= this.sampled.r;
+      g *= this.sampled.g;
+      b *= this.sampled.b;
       if (textureHasAlpha(texture.internalFormat)) alpha *= this.sampled.a;
     }
     if (textureConsumed && batch.lighting.kind !== "vertex") {
       const result = shadeQ2Fragment(this.fragmentLighting(batch), fragment.worldPosition, fragment.worldNormal, vertexColor, texel);
-      r = result.r; g = result.g; b = result.b; alpha = result.a;
+      r = result.r;
+      g = result.g;
+      b = result.b;
+      alpha = result.a;
     }
     if (textureConsumed && batch.texturing === "pair" && secondaryTexture.kind !== "incomplete") {
       const secondary = batch.secondTexture;
       sampleLineBound(secondaryTexture, fragment.texCoord2, fragment.texCoord2Derivative, this.sampled);
-      r = textureColor(r, this.sampled.r, secondary.environment); g = textureColor(g, this.sampled.g, secondary.environment);
+      r = textureColor(r, this.sampled.r, secondary.environment);
+      g = textureColor(g, this.sampled.g, secondary.environment);
       b = textureColor(b, this.sampled.b, secondary.environment);
       if (textureHasAlpha(secondaryTexture.internalFormat)) alpha = secondary.environment === "replace" ? this.sampled.a : alpha * this.sampled.a;
     }
     if (batch.fog !== undefined) {
-      const fog = batch.fog, d = fog.kind === "exp2" ? fog.density * fragment.eyeDepth / 64 : 0;
+      const fog = batch.fog,
+        d = fog.kind === "exp2" ? (fog.density * fragment.eyeDepth) / 64 : 0;
       const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
-      const effect = fog.kind === "constant" ? "color" : fog.effect ?? "color";
-        if (effect !== "none") { r = clamp(r); g = clamp(g); b = clamp(b); }
-        if (effect === "color") { r += (fog.color.x - r) * amount; g += (fog.color.y - g) * amount; b += (fog.color.z - b) * amount; }
-        if (effect === "rgb" || effect === "rgba") { r *= 1 - amount; g *= 1 - amount; b *= 1 - amount; }
-        if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
-        if (effect === "overlay") { r = fog.color.x; g = fog.color.y; b = fog.color.z; alpha *= amount; }
+      const effect = fog.kind === "constant" ? "color" : (fog.effect ?? "color");
+      if (effect !== "none") {
+        r = clamp(r);
+        g = clamp(g);
+        b = clamp(b);
+      }
+      if (effect === "color") {
+        r += (fog.color.x - r) * amount;
+        g += (fog.color.y - g) * amount;
+        b += (fog.color.z - b) * amount;
+      }
+      if (effect === "rgb" || effect === "rgba") {
+        r *= 1 - amount;
+        g *= 1 - amount;
+        b *= 1 - amount;
+      }
+      if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
+      if (effect === "overlay") {
+        r = fog.color.x;
+        g = fog.color.y;
+        b = fog.color.z;
+        alpha *= amount;
+      }
     }
     if (!passesAlpha(alpha, state.alphaTest)) return;
-    if (this.stencilEnabled && !stencilFragment(this.stencil, index, depthPassed, this.stencilFunction, this.stencilCompareMask,
-      this.stencilWriteMask, this.stencilMaximum, this.stencilDepthFail, this.stencilDepthPass)) return;
+    if (
+      this.stencilEnabled &&
+      !stencilFragment(
+        this.stencil,
+        index,
+        depthPassed,
+        this.stencilFunction,
+        this.stencilCompareMask,
+        this.stencilWriteMask,
+        this.stencilMaximum,
+        this.stencilDepthFail,
+        this.stencilDepthPass,
+      )
+    )
+      return;
     if (!this.colorWrite) return;
     const destination = this.colorWords[index];
     if (destination === undefined) throw new RangeError("Line fragment outside color buffer");
@@ -1302,7 +1729,10 @@ export class SoftwareRenderer implements RendererBackend {
     const dg = ((destination >>> (LITTLE_ENDIAN ? 8 : 16)) & 255) / 255;
     const db = ((destination >>> (LITTLE_ENDIAN ? 16 : 8)) & 255) / 255;
     const da = this.alphaBits === 0 ? 1 : (LITTLE_ENDIAN ? destination >>> 24 : destination & 255) / 255;
-    r = clamp(r); g = clamp(g); b = clamp(b); alpha = clamp(alpha);
+    r = clamp(r);
+    g = clamp(g);
+    b = clamp(b);
+    alpha = clamp(alpha);
     const offset = index * 4;
     this.drawPixels[offset] = blend(r, dr, alpha, da, state, false);
     this.drawPixels[offset + 1] = blend(g, dg, alpha, da, state, false);
@@ -1311,9 +1741,16 @@ export class SoftwareRenderer implements RendererBackend {
     if (state.depthWrite) this.depth[index] = depth;
   }
 
-  private triangle(a: ScreenVertex, b: ScreenVertex, c: ScreenVertex, batch: DrawBatch,
-    texture: BoundTexture, secondaryTexture: BoundTexture, interpolation: readonly [ScreenVertex, ScreenVertex, ScreenVertex] | null,
-    invariants: BatchSetupConstants): void {
+  private triangle(
+    a: ScreenVertex,
+    b: ScreenVertex,
+    c: ScreenVertex,
+    batch: DrawBatch,
+    texture: BoundTexture,
+    secondaryTexture: BoundTexture,
+    interpolation: readonly [ScreenVertex, ScreenVertex, ScreenVertex] | null,
+    invariants: BatchSetupConstants,
+  ): void {
     let area = edge(a, b, c.x, c.y);
     if (!Number.isFinite(area) || area === 0) return;
     if ((batch.state.cull === "back" && area > 0) || (batch.state.cull === "front" && area < 0)) return;
@@ -1334,79 +1771,213 @@ export class SoftwareRenderer implements RendererBackend {
     const [ia, ib, ic] = attributes;
     const inverseArea = 1 / (interpolation === null ? area : edge(ia, ib, ic.x, ic.y));
     const state = batch.state;
-    const depthNear = invariants.depthNear, depthFar = invariants.depthFar;
-    const white = ia.r === ia.inverseW && ia.g === ia.inverseW && ia.b === ia.inverseW && ia.a === ia.inverseW
-      && ib.r === ib.inverseW && ib.g === ib.inverseW && ib.b === ib.inverseW && ib.a === ib.inverseW
-      && ic.r === ic.inverseW && ic.g === ic.inverseW && ic.b === ic.inverseW && ic.a === ic.inverseW;
+    const depthNear = invariants.depthNear,
+      depthFar = invariants.depthFar;
+    const white =
+      ia.r === ia.inverseW &&
+      ia.g === ia.inverseW &&
+      ia.b === ia.inverseW &&
+      ia.a === ia.inverseW &&
+      ib.r === ib.inverseW &&
+      ib.g === ib.inverseW &&
+      ib.b === ib.inverseW &&
+      ib.a === ib.inverseW &&
+      ic.r === ic.inverseW &&
+      ic.g === ic.inverseW &&
+      ic.b === ic.inverseW &&
+      ic.a === ic.inverseW;
     const blending = invariants.blending;
-    const depthTest = state.depthTest, depthWrite = state.depthWrite, alphaTest = state.alphaTest;
-    const stencilEnabled = this.stencilEnabled, colorWrite = this.colorWrite;
+    const depthTest = state.depthTest,
+      depthWrite = state.depthWrite,
+      alphaTest = state.alphaTest;
+    const stencilEnabled = this.stencilEnabled,
+      colorWrite = this.colorWrite;
     const textureConsumed = invariants.textureConsumed;
     const primaryAlpha = invariants.primaryAlpha;
     const secondaryAlpha = invariants.secondaryAlpha;
     const secondaryEnvironment = invariants.secondaryEnvironment;
-    const edgeAX = b.y - c.y, edgeAY = c.x - b.x, edgeAC = b.x * c.y - b.y * c.x;
-    const edgeBX = c.y - a.y, edgeBY = a.x - c.x, edgeBC = c.x * a.y - c.y * a.x;
-    const edgeCX = a.y - b.y, edgeCY = b.x - a.x, edgeCC = a.x * b.y - a.y * b.x;
-    const attributeAX = ib.y - ic.y, attributeAY = ic.x - ib.x, attributeAC = ib.x * ic.y - ib.y * ic.x;
-    const attributeBX = ic.y - ia.y, attributeBY = ia.x - ic.x, attributeBC = ic.x * ia.y - ic.y * ia.x;
-    const attributeCX = ia.y - ib.y, attributeCY = ib.x - ia.x, attributeCC = ia.x * ib.y - ia.y * ib.x;
-    const az = ia.z, bz = ib.z, cz = ic.z;
+    const edgeAX = b.y - c.y,
+      edgeAY = c.x - b.x,
+      edgeAC = b.x * c.y - b.y * c.x;
+    const edgeBX = c.y - a.y,
+      edgeBY = a.x - c.x,
+      edgeBC = c.x * a.y - c.y * a.x;
+    const edgeCX = a.y - b.y,
+      edgeCY = b.x - a.x,
+      edgeCC = a.x * b.y - a.y * b.x;
+    const attributeAX = ib.y - ic.y,
+      attributeAY = ic.x - ib.x,
+      attributeAC = ib.x * ic.y - ib.y * ic.x;
+    const attributeBX = ic.y - ia.y,
+      attributeBY = ia.x - ic.x,
+      attributeBC = ic.x * ia.y - ic.y * ia.x;
+    const attributeCX = ia.y - ib.y,
+      attributeCY = ib.x - ia.x,
+      attributeCC = ia.x * ib.y - ia.y * ib.x;
+    const az = ia.z,
+      bz = ib.z,
+      cz = ic.z;
     const constantDepth = az === bz && bz === cz;
     // Fixed-point 24-bit depth resolution, matching the SDL GL depth buffer.
-    const polygonDepthOffset = state.polygonOffset === null ? 0
-      : Math.max(Math.abs(az * attributeAX + bz * attributeBX + cz * attributeCX), Math.abs(az * attributeAY + bz * attributeBY + cz * attributeCY))
-        * Math.abs(inverseArea) * 0.5 * Math.abs(depthFar - depthNear) * Math.fround(state.polygonOffset.factor) + 2 ** -CPU_OFFSET_DEPTH_BITS * Math.fround(state.polygonOffset.units);
+    const polygonDepthOffset =
+      state.polygonOffset === null
+        ? 0
+        : Math.max(Math.abs(az * attributeAX + bz * attributeBX + cz * attributeCX), Math.abs(az * attributeAY + bz * attributeBY + cz * attributeCY)) *
+            Math.abs(inverseArea) *
+            0.5 *
+            Math.abs(depthFar - depthNear) *
+            Math.fround(state.polygonOffset.factor) +
+          2 ** -CPU_OFFSET_DEPTH_BITS * Math.fround(state.polygonOffset.units);
     const planeDepth = clamp(clamp(az * 0.5 + 0.5) * (depthFar - depthNear) + depthNear + polygonDepthOffset);
-    const aiw = ia.inverseW, biw = ib.inverseW, ciw = ic.inverseW;
+    const aiw = ia.inverseW,
+      biw = ib.inverseW,
+      ciw = ic.inverseW;
     // Delay UV/W until a common anchor is known. Subtracting U' - s*Q' with
     // large absolute s can invent a nonzero LOD for a constant coordinate.
-    const uAnchor = ia.texCoord.x, vAnchor = ia.texCoord.y;
-    const au = (ia.texCoord.x - uAnchor) * aiw, bu = (ib.texCoord.x - uAnchor) * biw, cu = (ic.texCoord.x - uAnchor) * ciw;
-    const av = (ia.texCoord.y - vAnchor) * aiw, bv = (ib.texCoord.y - vAnchor) * biw, cv = (ic.texCoord.y - vAnchor) * ciw;
-    const u2Anchor = ia.texCoord2.x, v2Anchor = ia.texCoord2.y;
-    const au2 = (ia.texCoord2.x - u2Anchor) * aiw, bu2 = (ib.texCoord2.x - u2Anchor) * biw, cu2 = (ic.texCoord2.x - u2Anchor) * ciw;
-    const av2 = (ia.texCoord2.y - v2Anchor) * aiw, bv2 = (ib.texCoord2.y - v2Anchor) * biw, cv2 = (ic.texCoord2.y - v2Anchor) * ciw;
+    const uAnchor = ia.texCoord.x,
+      vAnchor = ia.texCoord.y;
+    const au = (ia.texCoord.x - uAnchor) * aiw,
+      bu = (ib.texCoord.x - uAnchor) * biw,
+      cu = (ic.texCoord.x - uAnchor) * ciw;
+    const av = (ia.texCoord.y - vAnchor) * aiw,
+      bv = (ib.texCoord.y - vAnchor) * biw,
+      cv = (ic.texCoord.y - vAnchor) * ciw;
+    const u2Anchor = ia.texCoord2.x,
+      v2Anchor = ia.texCoord2.y;
+    const au2 = (ia.texCoord2.x - u2Anchor) * aiw,
+      bu2 = (ib.texCoord2.x - u2Anchor) * biw,
+      cu2 = (ic.texCoord2.x - u2Anchor) * ciw;
+    const av2 = (ia.texCoord2.y - v2Anchor) * aiw,
+      bv2 = (ib.texCoord2.y - v2Anchor) * biw,
+      cv2 = (ic.texCoord2.y - v2Anchor) * ciw;
     const qDx = (aiw * attributeAX + biw * attributeBX + ciw * attributeCX) * inverseArea;
     const qDy = (aiw * attributeAY + biw * attributeBY + ciw * attributeCY) * inverseArea;
     const derivative: TexturePlaneDerivative = {
-      uAnchor, vAnchor,
+      uAnchor,
+      vAnchor,
       uDx: (au * attributeAX + bu * attributeBX + cu * attributeCX) * inverseArea,
-      vDx: (av * attributeAX + bv * attributeBX + cv * attributeCX) * inverseArea, qDx,
+      vDx: (av * attributeAX + bv * attributeBX + cv * attributeCX) * inverseArea,
+      qDx,
       uDy: (au * attributeAY + bu * attributeBY + cu * attributeCY) * inverseArea,
-      vDy: (av * attributeAY + bv * attributeBY + cv * attributeCY) * inverseArea, qDy,
+      vDy: (av * attributeAY + bv * attributeBY + cv * attributeCY) * inverseArea,
+      qDy,
     };
     const secondaryDerivative: TexturePlaneDerivative = {
-      uAnchor: u2Anchor, vAnchor: v2Anchor,
+      uAnchor: u2Anchor,
+      vAnchor: v2Anchor,
       uDx: (au2 * attributeAX + bu2 * attributeBX + cu2 * attributeCX) * inverseArea,
-      vDx: (av2 * attributeAX + bv2 * attributeBX + cv2 * attributeCX) * inverseArea, qDx,
+      vDx: (av2 * attributeAX + bv2 * attributeBX + cv2 * attributeCX) * inverseArea,
+      qDx,
       uDy: (au2 * attributeAY + bu2 * attributeBY + cu2 * attributeCY) * inverseArea,
-      vDy: (av2 * attributeAY + bv2 * attributeBY + cv2 * attributeCY) * inverseArea, qDy,
+      vDy: (av2 * attributeAY + bv2 * attributeBY + cv2 * attributeCY) * inverseArea,
+      qDy,
     };
-    const ar = ia.r, br = ib.r, cr = ic.r, ag = ia.g, bg = ib.g, cg = ic.g;
-    const ab = ia.b, bb = ib.b, cb = ic.b, aa = ia.a, ba = ib.a, ca = ic.a;
+    const ar = ia.r,
+      br = ib.r,
+      cr = ic.r,
+      ag = ia.g,
+      bg = ib.g,
+      cg = ic.g;
+    const ab = ia.b,
+      bb = ib.b,
+      cb = ic.b,
+      aa = ia.a,
+      ba = ib.a,
+      ca = ic.a;
     const setup: TriangleSetup = {
       ...(batch.fog === undefined ? {} : { fog: batch.fog, fogDepthScale: ia.fogDepthScale }),
       ...(batch.textureEffect === undefined ? {} : { textureEffect: batch.textureEffect }),
-      minX, maxX, minY, maxY, inverseArea, depthNear,
-      depthFar, edgeAX, edgeAY, edgeAC, edgeBX, edgeBY,
-      edgeBC, edgeCX, edgeCY, edgeCC, attributeAX, attributeAY,
-      attributeAC, attributeBX, attributeBY, attributeBC, attributeCX, attributeCY,
-      attributeCC, az, bz, cz, polygonDepthOffset, planeDepth,
-      aiw, biw, ciw, au, bu, cu,
-      av, bv, cv, au2, bu2, cu2,
-      av2, bv2, cv2, ar, br, cr,
-      ag, bg, cg, ab, bb, cb,
-      aa, ba, ca, edgeAInclusive, edgeBInclusive, edgeCInclusive,
-      white, depthWrite, stencilEnabled, colorWrite, textureConsumed, primaryAlpha,
-      secondaryAlpha, constantDepth, blending, depthTest, alphaTest, secondaryEnvironment,
-      texture, secondaryTexture, derivative, secondaryDerivative,
-      lighting: invariants.vertexLighting ?? { ...cullTriangleLights(this.fragmentLighting(batch), [ia.worldPosition, ib.worldPosition, ic.worldPosition]), positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
-        normals: [ia.worldNormal, ib.worldNormal, ic.worldNormal] },
-      width: this.width, height: this.height,
-      state: { blend: { ...state.blend } }, alphaBits: this.alphaBits,
-      stencilFunction: this.stencilFunction, stencilCompareMask: this.stencilCompareMask, stencilWriteMask: this.stencilWriteMask,
-      stencilMaximum: this.stencilMaximum, stencilDepthFail: this.stencilDepthFail, stencilDepthPass: this.stencilDepthPass,
+      minX,
+      maxX,
+      minY,
+      maxY,
+      inverseArea,
+      depthNear,
+      depthFar,
+      edgeAX,
+      edgeAY,
+      edgeAC,
+      edgeBX,
+      edgeBY,
+      edgeBC,
+      edgeCX,
+      edgeCY,
+      edgeCC,
+      attributeAX,
+      attributeAY,
+      attributeAC,
+      attributeBX,
+      attributeBY,
+      attributeBC,
+      attributeCX,
+      attributeCY,
+      attributeCC,
+      az,
+      bz,
+      cz,
+      polygonDepthOffset,
+      planeDepth,
+      aiw,
+      biw,
+      ciw,
+      au,
+      bu,
+      cu,
+      av,
+      bv,
+      cv,
+      au2,
+      bu2,
+      cu2,
+      av2,
+      bv2,
+      cv2,
+      ar,
+      br,
+      cr,
+      ag,
+      bg,
+      cg,
+      ab,
+      bb,
+      cb,
+      aa,
+      ba,
+      ca,
+      edgeAInclusive,
+      edgeBInclusive,
+      edgeCInclusive,
+      white,
+      depthWrite,
+      stencilEnabled,
+      colorWrite,
+      textureConsumed,
+      primaryAlpha,
+      secondaryAlpha,
+      constantDepth,
+      blending,
+      depthTest,
+      alphaTest,
+      secondaryEnvironment,
+      texture,
+      secondaryTexture,
+      derivative,
+      secondaryDerivative,
+      lighting: invariants.vertexLighting ?? {
+        ...cullTriangleLights(this.fragmentLighting(batch), [ia.worldPosition, ib.worldPosition, ic.worldPosition]),
+        positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
+        normals: [ia.worldNormal, ib.worldNormal, ic.worldNormal],
+      },
+      width: this.width,
+      height: this.height,
+      state: { blend: { ...state.blend } },
+      alphaBits: this.alphaBits,
+      stencilFunction: this.stencilFunction,
+      stencilCompareMask: this.stencilCompareMask,
+      stencilWriteMask: this.stencilWriteMask,
+      stencilMaximum: this.stencilMaximum,
+      stencilDepthFail: this.stencilDepthFail,
+      stencilDepthPass: this.stencilDepthPass,
     };
     if (this.pendingSetups !== null) {
       this.pendingSetups.push(setup);

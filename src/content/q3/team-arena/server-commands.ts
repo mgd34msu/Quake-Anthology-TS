@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 // Ported from id Software's code/game/g_svcmds.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -13,7 +14,10 @@ import type { GameClient, GameEntity } from "../base/game/state.ts";
 const MAX_IP_FILTERS = 1024;
 const MAX_BAN_STRING = 256;
 const FREE_FILTER = 0xffffffff;
-interface IpFilter { mask: number; compare: number }
+interface IpFilter {
+  mask: number;
+  compare: number;
+}
 
 export type ServerCommandCapability =
   | { readonly kind: "available"; readonly run: (argv: readonly string[]) => void }
@@ -37,8 +41,12 @@ function byteString(text: string): string {
   for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) > 255) throw new RangeError("Game console strings require source bytes");
   return value;
 }
-function lower(text: string): string { return text.replace(/[A-Z]/g, character => String.fromCharCode(character.charCodeAt(0) + 32)); }
-function digit(character: string): boolean { return character >= "0" && character <= "9"; }
+function lower(text: string): string {
+  return text.replace(/[A-Z]/g, character => String.fromCharCode(character.charCodeAt(0) + 32));
+}
+function digit(character: string): boolean {
+  return character >= "0" && character <= "9";
+}
 /** trap_Argv supplies an empty string for a missing argument and truncates its buffer. */
 function argument(argv: readonly string[], index: number): string {
   const value = argv[index];
@@ -46,7 +54,9 @@ function argument(argv: readonly string[], index: number): string {
 }
 
 function stringToFilter(text: string, print: GameServerCommandHost["print"]): IpFilter | null {
-  let offset = 0; let mask = 0; let compare = 0;
+  let offset = 0;
+  let mask = 0;
+  let compare = 0;
   for (let i = 0; i < 4; i++) {
     const first = text.charAt(offset);
     if (!digit(first)) {
@@ -76,23 +86,39 @@ export class GameServerCommandState {
 
 /** Source static filters belong to the loaded game module, not each INIT. */
 export class GameServerCommandRuntime {
-  captureSaveState() { return { filters: this.filters.map(filter => ({ mask: filter.mask, compare: filter.compare })), banVmString: this.banVmString === null ? null : { modificationCount: this.banVmString.modificationCount, value: this.banVmString.value } }; }
+  captureSaveState() {
+    return {
+      filters: this.filters.map(filter => ({ mask: filter.mask, compare: filter.compare })),
+      banVmString: this.banVmString === null ? null : { modificationCount: this.banVmString.modificationCount, value: this.banVmString.value },
+    };
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.serverCommands");
     const filters = reader.field("filters").list(entry => ({ mask: entry.field("mask").integer(0), compare: entry.field("compare").integer(0) }));
-    const ban = reader.field("banVmString").nullable(entry => ({ modificationCount: entry.field("modificationCount").integer(), value: entry.field("value").string() }));
+    const ban = reader
+      .field("banVmString")
+      .nullable(entry => ({ modificationCount: entry.field("modificationCount").integer(), value: entry.field("value").string() }));
     if (filters.length > MAX_IP_FILTERS || filters.some(filter => filter.mask > 0xffffffff || filter.compare > 0xffffffff)) reader.fail("too many IP filters");
-    this.filters.splice(0, this.filters.length, ...filters); this.banVmString = ban;
+    this.filters.splice(0, this.filters.length, ...filters);
+    this.banVmString = ban;
   }
 
   private banVmString: { modificationCount: number; value: string } | null = null;
 
-  constructor(readonly pool: EntityPool, readonly cvars: CvarRegistry, readonly host: GameServerCommandHost,
-    private readonly state = new GameServerCommandState()) {}
+  constructor(
+    readonly pool: EntityPool,
+    readonly cvars: CvarRegistry,
+    readonly host: GameServerCommandHost,
+    private readonly state = new GameServerCommandState(),
+  ) {}
 
-  private get filters(): IpFilter[] { return this.state.filters; }
+  private get filters(): IpFilter[] {
+    return this.state.filters;
+  }
 
-  private cvar(name: ServerCommandCvar): CvarSnapshot { return this.host.readVmCvar(name); }
+  private cvar(name: ServerCommandCvar): CvarSnapshot {
+    return this.host.readVmCvar(name);
+  }
 
   private updateIPBans(): void {
     let list = "";
@@ -115,14 +141,20 @@ export class GameServerCommandRuntime {
   private addIP(text: string): void {
     let index = this.filters.findIndex(filter => filter.compare === FREE_FILTER);
     if (index < 0) index = this.filters.length;
-    if (index === MAX_IP_FILTERS) { this.host.print("IP filter list is full\n"); return; }
+    if (index === MAX_IP_FILTERS) {
+      this.host.print("IP filter list is full\n");
+      return;
+    }
     // Undefined native scratch overflow rejects before changing the selected slot.
     const parsed = stringToFilter(text, this.host.print);
     if (index === this.filters.length) this.filters.push({ mask: 0, compare: FREE_FILTER });
     const selected = this.filters[index];
     if (selected === undefined) throw new Error("Missing selected IP filter slot");
     if (parsed === null) selected.compare = FREE_FILTER;
-    else { selected.mask = parsed.mask; selected.compare = parsed.compare; }
+    else {
+      selected.mask = parsed.mask;
+      selected.compare = parsed.compare;
+    }
     this.updateIPBans();
   }
 
@@ -151,10 +183,15 @@ export class GameServerCommandRuntime {
   filterPacket(from: string): boolean {
     const text = byteString(from);
     if (text.length > 1023) throw new RangeError("IP address exceeds the source userinfo bound");
-    let offset = 0; let initialized = 0; let incoming = 0;
+    let offset = 0;
+    let initialized = 0;
+    let incoming = 0;
     while (offset < text.length && initialized < 4) {
       let byte = 0;
-      while (digit(text.charAt(offset))) { byte = (byte * 10 + text.charCodeAt(offset) - 48) & 255; offset++; }
+      while (digit(text.charAt(offset))) {
+        byte = (byte * 10 + text.charCodeAt(offset) - 48) & 255;
+        offset++;
+      }
       incoming |= byte << (initialized * 8);
       initialized++;
       if (offset === text.length || text.charAt(offset) === ":") break;
@@ -163,16 +200,19 @@ export class GameServerCommandRuntime {
     const denyMatches = this.cvar("g_filterBan").integerValue !== 0;
     const initializedMask = initialized === 4 ? 0xffffffff : (2 ** (initialized * 8) - 1) >>> 0;
     for (const filter of this.filters) {
-      if (((incoming & filter.mask & initializedMask) >>> 0) !== ((filter.compare & initializedMask) >>> 0)) continue;
+      if ((incoming & filter.mask & initializedMask) >>> 0 !== (filter.compare & initializedMask) >>> 0) continue;
       // Bots have no IP epair, and C compares uninitialized octets here. A filter needing octets the address lacks doesn't match it.
       if ((filter.mask & ~initializedMask) !== 0) continue;
-      if (((incoming & filter.mask) >>> 0) === filter.compare) return denyMatches;
+      if ((incoming & filter.mask) >>> 0 === filter.compare) return denyMatches;
     }
     return !denyMatches;
   }
 
   private removeIP(argv: readonly string[]): void {
-    if (argv.length < 2) { this.host.print("Usage:  sv removeip <ip-mask>\n"); return; }
+    if (argv.length < 2) {
+      this.host.print("Usage:  sv removeip <ip-mask>\n");
+      return;
+    }
     const text = argument(argv, 1);
     const parsed = stringToFilter(text, this.host.print);
     if (parsed === null) return;
@@ -190,9 +230,15 @@ export class GameServerCommandRuntime {
     const text = byteString(value);
     if (digit(text.charAt(0))) {
       const slot = gameAtoi(text);
-      if (slot < 0 || slot >= this.pool.maxClients) { this.host.print(gameFormat("Bad client slot: %i\n", [slot])); return null; }
+      if (slot < 0 || slot >= this.pool.maxClients) {
+        this.host.print(gameFormat("Bad client slot: %i\n", [slot]));
+        return null;
+      }
       const client = this.pool.clientAt(slot);
-      if (client.pers.connected === ConnectionState.DISCONNECTED) { this.host.print(gameFormat("Client %i is not connected\n", [slot])); return null; }
+      if (client.pers.connected === ConnectionState.DISCONNECTED) {
+        this.host.print(gameFormat("Client %i is not connected\n", [slot]));
+        return null;
+      }
       return client;
     }
     for (let i = 0; i < this.pool.maxClients; i++) {
@@ -205,10 +251,18 @@ export class GameServerCommandRuntime {
 
   private entityList(): void {
     const labels = new Map<number, string>([
-      [EntityType.ET_GENERAL, "ET_GENERAL"], [EntityType.ET_PLAYER, "ET_PLAYER"], [EntityType.ET_ITEM, "ET_ITEM"],
-      [EntityType.ET_MISSILE, "ET_MISSILE"], [EntityType.ET_MOVER, "ET_MOVER"], [EntityType.ET_BEAM, "ET_BEAM"],
-      [EntityType.ET_PORTAL, "ET_PORTAL"], [EntityType.ET_SPEAKER, "ET_SPEAKER"], [EntityType.ET_PUSH_TRIGGER, "ET_PUSH_TRIGGER"],
-      [EntityType.ET_TELEPORT_TRIGGER, "ET_TELEPORT_TRIGGER"], [EntityType.ET_INVISIBLE, "ET_INVISIBLE"], [EntityType.ET_GRAPPLE, "ET_GRAPPLE"],
+      [EntityType.ET_GENERAL, "ET_GENERAL"],
+      [EntityType.ET_PLAYER, "ET_PLAYER"],
+      [EntityType.ET_ITEM, "ET_ITEM"],
+      [EntityType.ET_MISSILE, "ET_MISSILE"],
+      [EntityType.ET_MOVER, "ET_MOVER"],
+      [EntityType.ET_BEAM, "ET_BEAM"],
+      [EntityType.ET_PORTAL, "ET_PORTAL"],
+      [EntityType.ET_SPEAKER, "ET_SPEAKER"],
+      [EntityType.ET_PUSH_TRIGGER, "ET_PUSH_TRIGGER"],
+      [EntityType.ET_TELEPORT_TRIGGER, "ET_TELEPORT_TRIGGER"],
+      [EntityType.ET_INVISIBLE, "ET_INVISIBLE"],
+      [EntityType.ET_GRAPPLE, "ET_GRAPPLE"],
     ]);
     for (let i = 1; i < this.pool.numEntities; i++) {
       const entity = this.pool.at(i);
@@ -228,7 +282,9 @@ export class GameServerCommandRuntime {
 
   consoleCommand(argv: readonly string[]): boolean {
     switch (lower(argument(argv, 0))) {
-      case "entitylist": this.entityList(); return true;
+      case "entitylist":
+        this.entityList();
+        return true;
       case "forceteam": {
         const client = this.clientForString(argument(argv, 1));
         if (client !== null) {
@@ -238,15 +294,26 @@ export class GameServerCommandRuntime {
         }
         return true;
       }
-      case "game_memory": this.capability(this.host.memory, argv); return true;
-      case "addbot": case "botlist": this.capability(this.host.bots, argv); return true;
-      case "abort_podium": if (this.cvar("g_gametype").integerValue === 2) this.capability(this.host.podium, argv); return true;
+      case "game_memory":
+        this.capability(this.host.memory, argv);
+        return true;
+      case "addbot":
+      case "botlist":
+        this.capability(this.host.bots, argv);
+        return true;
+      case "abort_podium":
+        if (this.cvar("g_gametype").integerValue === 2) this.capability(this.host.podium, argv);
+        return true;
       case "addip":
         if (argv.length < 2) this.host.print("Usage:  addip <ip-mask>\n");
         else this.addIP(argument(argv, 1));
         return true;
-      case "removeip": this.removeIP(argv); return true;
-      case "listip": this.host.executeConsoleNow("g_banIPs\n"); return true;
+      case "removeip":
+        this.removeIP(argv);
+        return true;
+      case "listip":
+        this.host.executeConsoleNow("g_banIPs\n");
+        return true;
     }
     if (this.cvar("dedicated").integerValue === 0) return false;
     const start = lower(argument(argv, 0)) === "say" ? 1 : 0;

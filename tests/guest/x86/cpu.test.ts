@@ -17,8 +17,15 @@ function machine(code: readonly number[]) {
   memory.map({ base: 0x1000n, byteLength: code.length, permissions: "read-execute", bytes: new Uint8Array(code) });
   memory.map({ base: 0x3000n, byteLength: 0x1000, permissions: "read-write" });
   memory.map({ base: 0x8000n, byteLength: 0x2000, permissions: "read-write" });
-  const state = createGuestProcessorState({ architecture: "i386", instructionPointer: 0x1000n, stackPointer: 0x9000n,
-    flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "i386",
+    instructionPointer: 0x1000n,
+    stackPointer: 0x9000n,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   const returnAddress = guestAddress(memory, 0x7000n);
   memory.writeUint32(guestAddress(memory, 0x9000n), Number(returnAddress.byteOffset));
   const cpu = new I386Cpu({ state, memory });
@@ -70,8 +77,10 @@ test("rotate counts retain data but update carry, through-carry consumes it, and
 
 test("ModRM/SIB, 16-bit addressing, FS override and LEA preserve distinct address rules", () => {
   const run = machine([0x8b, 0x44, 0x8b, 0x10, 0x67, 0x66, 0x8b, 0x52, 0x04, 0x64, 0x8b, 0x35, 0x20, 0, 0, 0, 0xc3]);
-  run.state.registers.write("rbx", 32, 0x3000n); run.state.registers.write("rcx", 32, 3n);
-  run.state.registers.write("rbp", 32, 0x3000n); run.state.registers.write("rsi", 32, 0x40n);
+  run.state.registers.write("rbx", 32, 0x3000n);
+  run.state.registers.write("rcx", 32, 3n);
+  run.state.registers.write("rbp", 32, 0x3000n);
+  run.state.registers.write("rsi", 32, 0x40n);
   run.state.segments.fs.base = 0x3000n;
   run.memory.writeUint32(guestAddress(run.memory, 0x301cn), 0x11223344);
   run.memory.writeUint16(guestAddress(run.memory, 0x3044n), 0xabcd);
@@ -112,7 +121,9 @@ test("POP through ESP computes its memory destination after increment", () => {
 test("REP MOVSB is restartable at budget boundaries and supports overlapping memory", () => {
   const run = machine([0xf3, 0xa4, 0xc3]);
   run.memory.write(guestAddress(run.memory, 0x3000n), new Uint8Array([7, 8, 9, 10, 11]));
-  run.state.registers.write("rsi", 32, 0x3000n); run.state.registers.write("rdi", 32, 0x3001n); run.state.registers.write("rcx", 32, 4n);
+  run.state.registers.write("rsi", 32, 0x3000n);
+  run.state.registers.write("rdi", 32, 0x3001n);
+  run.state.registers.write("rcx", 32, 4n);
   expect(run.cpu.run({ instructionBudget: 2, returnAddress: run.returnAddress }).kind).toBe("budget");
   expect(run.state.instructionPointer).toBe(0x1000n);
   expect(run.state.registers.read("rcx", 32)).toBe(2n);
@@ -124,7 +135,9 @@ test("REPE CMPSB stops at the first mismatch and DF moves backwards", () => {
   const run = machine([0xfd, 0xf3, 0xa6, 0xc3]);
   run.memory.write(guestAddress(run.memory, 0x3000n), new Uint8Array([1, 2, 3]));
   run.memory.write(guestAddress(run.memory, 0x3010n), new Uint8Array([1, 9, 3]));
-  run.state.registers.write("rsi", 32, 0x3002n); run.state.registers.write("rdi", 32, 0x3012n); run.state.registers.write("rcx", 32, 3n);
+  run.state.registers.write("rsi", 32, 0x3002n);
+  run.state.registers.write("rdi", 32, 0x3012n);
+  run.state.registers.write("rcx", 32, 3n);
   expect(run.cpu.run({ instructionBudget: 10, returnAddress: run.returnAddress }).kind).toBe("return");
   expect(run.state.registers.read("rcx", 32)).toBe(1n);
   expect(run.state.registers.read("rsi", 32)).toBe(0x3000n);
@@ -133,8 +146,10 @@ test("REPE CMPSB stops at the first mismatch and DF moves backwards", () => {
 
 test("LOCK CMPXCHG and XADD modify one shared memory value", () => {
   const run = machine([0xf0, 0x0f, 0xb1, 0x0b, 0xf0, 0x0f, 0xc1, 0x13, 0xc3]);
-  run.state.registers.write("rbx", 32, 0x3000n); run.state.registers.write("rax", 32, 5n);
-  run.state.registers.write("rcx", 32, 20n); run.state.registers.write("rdx", 32, 3n);
+  run.state.registers.write("rbx", 32, 0x3000n);
+  run.state.registers.write("rax", 32, 5n);
+  run.state.registers.write("rcx", 32, 20n);
+  run.state.registers.write("rdx", 32, 3n);
   run.memory.writeUint32(guestAddress(run.memory, 0x3000n), 5);
   expect(run.cpu.run({ instructionBudget: 10, returnAddress: run.returnAddress }).kind).toBe("return");
   expect(run.memory.readUint32(guestAddress(run.memory, 0x3000n))).toBe(23);
@@ -170,7 +185,8 @@ test("faults and unsupported instructions report exact guest instruction bytes",
   expect([...result.instruction.bytes]).toEqual([0x0f, 0x05]);
   const fault = machine([0x83, 0x03, 0x01]);
   fault.state.registers.write("rbx", 32, 0x1000n);
-  const flags = fault.state.flags.value, before = fault.state.registers.checkpoint();
+  const flags = fault.state.flags.value,
+    before = fault.state.registers.checkpoint();
   expect(fault.cpu.run({ instructionBudget: 1, returnAddress: null }).kind).toBe("exception");
   expect(fault.state.registers.checkpoint()).toEqual(before);
   expect(fault.state.flags.value).toBe(flags);
@@ -187,7 +203,8 @@ test("decoded x87 instructions use the shared numeric state", () => {
 
 const retailPath = corpusFile("q2/lmctf/gamex86.dll");
 test.skipIf(!existsSync(retailPath))("actual LMCTF GetGameAPI executes from the PE image and returns its export table", async () => {
-  const bytes = await readFile(retailPath), hash = createHash("sha256").update(bytes).digest("hex");
+  const bytes = await readFile(retailPath),
+    hash = createHash("sha256").update(bytes).digest("hex");
   expect(hash).toBe("31cbb29f90429706986dbd855d0a3a2529b7fbd4340694901af5c5052cbdcbe6");
   const identity: ModuleIdentity = { id: "fixture:lmctf", artifactPath: retailPath, revision: "1999-03-22", digest: createContentDigest(hash) };
   const memory = new SparseGuestMemory({ module: identity, pointerBytes: 4 });
@@ -199,13 +216,22 @@ test.skipIf(!existsSync(retailPath))("actual LMCTF GetGameAPI executes from the 
   memory.map({ base: 0x10000n, byteLength: 0x1000, permissions: "read-write" });
   const importBytes = new Uint8Array(44 * 4);
   for (let index = 0; index < importBytes.length; index++) importBytes[index] = (index * 7 + 11) & 255;
-  const imports = memory.allocate({ byteLength: importBytes.length }); memory.write(imports, importBytes);
+  const imports = memory.allocate({ byteLength: importBytes.length });
+  memory.write(imports, importBytes);
   const returnAddress: GuestAddress = guestAddress(memory, 0x7000n);
-  const state = createGuestProcessorState({ architecture: "i386", instructionPointer: entry.byteOffset, stackPointer: 0x10800n,
-    flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "i386",
+    instructionPointer: entry.byteOffset,
+    stackPointer: 0x10800n,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   memory.writeUint32(guestAddress(memory, 0x10800n), Number(returnAddress.byteOffset));
   memory.writeUint32(guestAddress(memory, 0x10804n), Number(imports.byteOffset));
-  state.registers.write("rsi", 32, 0xabcdef01n); state.registers.write("rdi", 32, 0x12345678n);
+  state.registers.write("rsi", 32, 0xabcdef01n);
+  state.registers.write("rdi", 32, 0x12345678n);
   const cpu = new I386Cpu({ state, memory });
   expect(cpu.run({ instructionBudget: 1000, returnAddress }).kind).toBe("return");
   expect(state.registers.read("rax", 32)).toBe(0x20089820n);
@@ -220,8 +246,15 @@ test.skipIf(!existsSync(retailPath))("actual LMCTF GetGameAPI executes from the 
 test("retained decoded instructions are discarded when the guest rewrites the executable bytes", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
   memory.map({ base: 0x1000n, byteLength: 0x1000, permissions: "read-write-execute", bytes: new Uint8Array([0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3]) });
-  const state = createGuestProcessorState({ architecture: "i386", instructionPointer: 0x1000n, stackPointer: 0x9000n,
-    flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "i386",
+    instructionPointer: 0x1000n,
+    stackPointer: 0x9000n,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   const cpu = new I386Cpu({ state, memory });
   expect(cpu.run({ instructionBudget: 1, returnAddress: null }).kind).toBe("budget");
   expect(state.registers.read("rax", 32)).toBe(1n);

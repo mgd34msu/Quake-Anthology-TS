@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { ConsoleBuffer } from "../../src/console/buffer.ts";
 
@@ -22,7 +23,11 @@ test("console resizing retains partial-line insertion and alternate glyphs", () 
   buffer.resize(8);
   buffer.print("mn", 2);
   expect(buffer.dump()).toBe("abcdefgh\nijklmn\n");
-  expect(cells(buffer).slice(0, 12).every(cell => cell.alternate)).toBe(true);
+  expect(
+    cells(buffer)
+      .slice(0, 12)
+      .every(cell => cell.alternate),
+  ).toBe(true);
   buffer.resize(40);
   expect(buffer.dump()).toBe("abcdefghijklmn\n");
 });
@@ -43,7 +48,11 @@ test("resize preserves an overwrite cursor before the end of a wrapped line", ()
   buffer.print("abcdefghijkl\rXY", 1);
   buffer.resize(8);
   buffer.print("Z", 2);
-  expect(cells(buffer).map(cell => cell.character).join("")).toBe("XYZdefghijkl");
+  expect(
+    cells(buffer)
+      .map(cell => cell.character)
+      .join(""),
+  ).toBe("XYZdefghijkl");
   buffer.resize(40);
   buffer.print("!", 3);
   expect(buffer.dump()).toBe("XYZ!efghijkl\n");

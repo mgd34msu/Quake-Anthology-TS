@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../../../contracts/content.ts";
 /* CG_Player, CG_PlayerAnimation and player powerup pass selection.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -67,24 +68,52 @@ export class Q3CharacterPresenter {
 
   frame(view: Q3CharacterView, options: Q3CharacterRenderOptions): readonly Q3CharacterPass[] {
     if (view.sourceFlags & 0x80) return [];
-    const axes = calculatePlayerPose(this.pose, { entity: { eFlags: view.sourceFlags, velocity: view.velocity,
-      movementDirection: view.movementDirection, legsAnim: view.animation.legs, torsoAnim: view.animation.torso },
-      animationConfig: this.assets.animation, lerpAngles: view.angles, timeMs: options.timeMilliseconds,
-      frameTimeMs: options.frameMilliseconds, swingSpeed: options.swingSpeed });
+    const axes = calculatePlayerPose(this.pose, {
+      entity: {
+        eFlags: view.sourceFlags,
+        velocity: view.velocity,
+        movementDirection: view.movementDirection,
+        legsAnim: view.animation.legs,
+        torsoAnim: view.animation.torso,
+      },
+      animationConfig: this.assets.animation,
+      lerpAngles: view.angles,
+      timeMs: options.timeMilliseconds,
+      frameTimeMs: options.frameMilliseconds,
+      swingSpeed: options.swingSpeed,
+    });
     const speedScale = view.powerups & (1 << Powerup.PW_HASTE) ? 1.5 : 1;
-    const legsAnimation = this.pose.legs.yawing && (view.animation.legs & ~ANIMATION_TOGGLE_BIT) === PlayerAnimation.LEGS_IDLE
-      ? PlayerAnimation.LEGS_TURN : view.animation.legs;
-    runLerpFrame(this.assets.animation, this.pose.legs, { timeMs: options.timeMilliseconds, newAnimation: legsAnimation,
-      speedScale, noPlayerAnimations: options.noPlayerAnimations });
-    runLerpFrame(this.assets.animation, this.pose.torso, { timeMs: options.timeMilliseconds, newAnimation: view.animation.torso,
-      speedScale, noPlayerAnimations: options.noPlayerAnimations });
+    const legsAnimation =
+      this.pose.legs.yawing && (view.animation.legs & ~ANIMATION_TOGGLE_BIT) === PlayerAnimation.LEGS_IDLE ? PlayerAnimation.LEGS_TURN : view.animation.legs;
+    runLerpFrame(this.assets.animation, this.pose.legs, {
+      timeMs: options.timeMilliseconds,
+      newAnimation: legsAnimation,
+      speedScale,
+      noPlayerAnimations: options.noPlayerAnimations,
+    });
+    runLerpFrame(this.assets.animation, this.pose.torso, {
+      timeMs: options.timeMilliseconds,
+      newAnimation: view.animation.torso,
+      speedScale,
+      noPlayerAnimations: options.noPlayerAnimations,
+    });
     const flags = 0x80 | (options.personalModel ? 2 : 0) | (options.shadowPlane === null ? 0 : 0x40);
-    const part = (asset: Q3CharacterPart, axis: Axis, origin: Vec3, frame: LerpFrame | null,
-      attachments: SceneEntity["attachments"]): SceneEntity => ({ actor: view.actor, resource: asset.resource,
-      model: asset.model, opacity: view.opacity ?? 1, transform: { origin, axis, scale: asset === this.assets.lower ? { x: view.scale ?? 1, y: view.scale ?? 1, z: view.scale ?? 1 } : UNIT }, previousOrigin: origin,
+    const part = (asset: Q3CharacterPart, axis: Axis, origin: Vec3, frame: LerpFrame | null, attachments: SceneEntity["attachments"]): SceneEntity => ({
+      actor: view.actor,
+      resource: asset.resource,
+      model: asset.model,
+      opacity: view.opacity ?? 1,
+      transform: { origin, axis, scale: asset === this.assets.lower ? { x: view.scale ?? 1, y: view.scale ?? 1, z: view.scale ?? 1 } : UNIT },
+      previousOrigin: origin,
       pose: { kind: "frame", frame: frame?.frame ?? 0, previousFrame: frame?.oldFrame ?? 0, backLerp: frame?.backLerp ?? 0 },
-      skin: 0, color: view.color, shaderTime: options.shaderTime, flags: { kind: "q3", bits: flags },
-      lightingOrigin: view.origin, shadowPlane: options.shadowPlane ?? 0, attachments });
+      skin: 0,
+      color: view.color,
+      shaderTime: options.shaderTime,
+      flags: { kind: "q3", bits: flags },
+      lightingOrigin: view.origin,
+      shadowPlane: options.shadowPlane ?? 0,
+      attachments,
+    });
     const head = part(this.assets.head, axes.head, ZERO, null, []);
     const torso = part(this.assets.upper, axes.torso, ZERO, this.pose.torso, [{ tag: "tag_head", entity: head }]);
     const legs = part(this.assets.lower, axes.legs, view.origin, this.pose.legs, [{ tag: "tag_torso", entity: torso }]);
@@ -92,23 +121,27 @@ export class Q3CharacterPresenter {
       const asset = [this.assets.lower, this.assets.upper, this.assets.head].find(part => part.resource.id === entity.resource.id);
       return asset === undefined ? {} : { customSkin: asset.surfaces };
     };
-    const pass = (shader: string | null): Q3CharacterPass => ({ content: null, entity: legs, shader,
-      options: entity => shader === null ? skinOptions(entity) : { ...skinOptions(entity), customShader: shader } });
+    const pass = (shader: string | null): Q3CharacterPass => ({
+      content: null,
+      entity: legs,
+      shader,
+      options: entity => (shader === null ? skinOptions(entity) : { ...skinOptions(entity), customShader: shader }),
+    });
     const passes = view.powerups & (1 << Powerup.PW_INVIS) ? [pass("powerups/invisibility")] : [pass(null)];
     if (!(view.powerups & (1 << Powerup.PW_INVIS))) {
       if (view.powerups & (1 << Powerup.PW_QUAD)) passes.push(pass(view.team === "red" ? "powerups/blueflag" : "powerups/quad"));
-      if ((view.powerups & (1 << Powerup.PW_REGEN)) && Math.trunc(options.timeMilliseconds / 100) % 10 === 1) passes.push(pass("powerups/regen"));
+      if (view.powerups & (1 << Powerup.PW_REGEN) && Math.trunc(options.timeMilliseconds / 100) % 10 === 1) passes.push(pass("powerups/regen"));
       if (view.powerups & (1 << Powerup.PW_BATTLESUIT)) passes.push(pass("powerups/battleSuit"));
     }
     const torsoTag = modelAttachmentTag(legs, "tag_torso");
     if (torsoTag !== null) {
       const worldTorso = attachSceneEntity(legs, torso, torsoTag);
       const weaponTag = modelAttachmentTag(worldTorso, "tag_weapon");
-      if (weaponTag !== null) for (const weapon of options.weapon) {
-        passes.push({ ...weapon, entity: attachSceneEntity(worldTorso, weapon.entity, weaponTag) });
-      }
+      if (weaponTag !== null)
+        for (const weapon of options.weapon) {
+          passes.push({ ...weapon, entity: attachSceneEntity(worldTorso, weapon.entity, weaponTag) });
+        }
     }
     return passes;
   }
 }
-

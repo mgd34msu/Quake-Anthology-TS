@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * CPU implementation of the fixed-function state used by Quake III Arena
  * code/renderer/tr_backend.c GL_State/GL_Cull and tr_image.c R_CreateImage.
@@ -36,8 +37,7 @@ export function byte(value: number): number {
 }
 
 export function colorWord(r: number, g: number, b: number, a: number): number {
-  return LITTLE_ENDIAN ? byte(r) | (byte(g) << 8) | (byte(b) << 16) | (byte(a) << 24)
-    : (byte(r) << 24) | (byte(g) << 16) | (byte(b) << 8) | byte(a);
+  return LITTLE_ENDIAN ? byte(r) | (byte(g) << 8) | (byte(b) << 16) | (byte(a) << 24) : (byte(r) << 24) | (byte(g) << 16) | (byte(b) << 8) | byte(a);
 }
 
 function trimSpan(span: RowSpan, slope: number, row: number, constant: number, inclusive: boolean): void {
@@ -80,35 +80,57 @@ function trimSpan(span: RowSpan, slope: number, row: number, constant: number, i
   }
 }
 
-function factor(kind: BlendFactor, source: number, destination: number, sourceAlpha: number,
-  destinationAlpha: number, alphaChannel: boolean): number {
+function factor(kind: BlendFactor, source: number, destination: number, sourceAlpha: number, destinationAlpha: number, alphaChannel: boolean): number {
   switch (kind) {
-    case "zero": return 0;
-    case "one": return 1;
-    case "src-color": return source;
-    case "one-minus-src-color": return 1 - source;
-    case "dst-color": return destination;
-    case "one-minus-dst-color": return 1 - destination;
-    case "src-alpha": return sourceAlpha;
-    case "one-minus-src-alpha": return 1 - sourceAlpha;
-    case "dst-alpha": return destinationAlpha;
-    case "one-minus-dst-alpha": return 1 - destinationAlpha;
-    case "src-alpha-saturate": return alphaChannel ? 1 : Math.min(sourceAlpha, 1 - destinationAlpha);
+    case "zero":
+      return 0;
+    case "one":
+      return 1;
+    case "src-color":
+      return source;
+    case "one-minus-src-color":
+      return 1 - source;
+    case "dst-color":
+      return destination;
+    case "one-minus-dst-color":
+      return 1 - destination;
+    case "src-alpha":
+      return sourceAlpha;
+    case "one-minus-src-alpha":
+      return 1 - sourceAlpha;
+    case "dst-alpha":
+      return destinationAlpha;
+    case "one-minus-dst-alpha":
+      return 1 - destinationAlpha;
+    case "src-alpha-saturate":
+      return alphaChannel ? 1 : Math.min(sourceAlpha, 1 - destinationAlpha);
   }
 }
 
-export function blend(source: number, destination: number, sourceAlpha: number, destinationAlpha: number,
-  state: Pick<RenderState, "blend">, alphaChannel: boolean): number {
-  return byte(source * factor(state.blend.source, source, destination, sourceAlpha, destinationAlpha, alphaChannel)
-    + destination * factor(state.blend.destination, source, destination, sourceAlpha, destinationAlpha, alphaChannel));
+export function blend(
+  source: number,
+  destination: number,
+  sourceAlpha: number,
+  destinationAlpha: number,
+  state: Pick<RenderState, "blend">,
+  alphaChannel: boolean,
+): number {
+  return byte(
+    source * factor(state.blend.source, source, destination, sourceAlpha, destinationAlpha, alphaChannel) +
+      destination * factor(state.blend.destination, source, destination, sourceAlpha, destinationAlpha, alphaChannel),
+  );
 }
 
 export function passesAlpha(alpha: number, test: RenderState["alphaTest"]): boolean {
   switch (test) {
-    case "none": return true;
-    case "gt0": return alpha > 0;
-    case "lt128": return alpha < 0.5;
-    case "ge128": return alpha >= 0.5;
+    case "none":
+      return true;
+    case "gt0":
+      return alpha > 0;
+    case "lt128":
+      return alpha < 0.5;
+    case "ge128":
+      return alpha >= 0.5;
   }
 }
 
@@ -121,7 +143,10 @@ function wrapTexel(index: number, size: number): number {
  * and evaluation order are identical to the general sampler below; only
  * index wrapping differs (power-of-two masks replace conditional wraps). */
 function sampleLevelRepeat(texture: TextureStorage, u: number, v: number, linear: boolean, output: Sample): void {
-  const width = texture.width, height = texture.height, data = texture.pixels, maximum = texture.componentMaximum;
+  const width = texture.width,
+    height = texture.height,
+    data = texture.pixels,
+    maximum = texture.componentMaximum;
   u -= Math.floor(u);
   v -= Math.floor(v);
   if (!linear) {
@@ -140,29 +165,42 @@ function sampleLevelRepeat(texture: TextureStorage, u: number, v: number, linear
   let y0 = Math.floor(y);
   const fx = x - x0;
   const fy = y - y0;
-  let x1 = x0 + 1, y1 = y0 + 1;
+  let x1 = x0 + 1,
+    y1 = y0 + 1;
   if ((width & (width - 1)) === 0 && (height & (height - 1)) === 0) {
-    x0 &= width - 1; x1 &= width - 1;
-    y0 &= height - 1; y1 &= height - 1;
+    x0 &= width - 1;
+    x1 &= width - 1;
+    y0 &= height - 1;
+    y1 &= height - 1;
   } else {
-    x0 = wrapTexel(x0, width); x1 = wrapTexel(x1, width);
-    y0 = wrapTexel(y0, height); y1 = wrapTexel(y1, height);
+    x0 = wrapTexel(x0, width);
+    x1 = wrapTexel(x1, width);
+    y0 = wrapTexel(y0, height);
+    y1 = wrapTexel(y1, height);
   }
-  const w00 = (1 - fx) * (1 - fy) / maximum;
-  const w10 = fx * (1 - fy) / maximum;
-  const w01 = (1 - fx) * fy / maximum;
-  const w11 = fx * fy / maximum;
-  const p00 = (y0 * width + x0) * 4, p10 = (y0 * width + x1) * 4, p01 = (y1 * width + x0) * 4, p11 = (y1 * width + x1) * 4;
+  const w00 = ((1 - fx) * (1 - fy)) / maximum;
+  const w10 = (fx * (1 - fy)) / maximum;
+  const w01 = ((1 - fx) * fy) / maximum;
+  const w11 = (fx * fy) / maximum;
+  const p00 = (y0 * width + x0) * 4,
+    p10 = (y0 * width + x1) * 4,
+    p01 = (y1 * width + x0) * 4,
+    p11 = (y1 * width + x1) * 4;
   output.r = (data[p00] ?? 0) * w00 + (data[p10] ?? 0) * w10 + (data[p01] ?? 0) * w01 + (data[p11] ?? 0) * w11;
   output.g = (data[p00 + 1] ?? 0) * w00 + (data[p10 + 1] ?? 0) * w10 + (data[p01 + 1] ?? 0) * w01 + (data[p11 + 1] ?? 0) * w11;
   output.b = (data[p00 + 2] ?? 0) * w00 + (data[p10 + 2] ?? 0) * w10 + (data[p01 + 2] ?? 0) * w01 + (data[p11 + 2] ?? 0) * w11;
   output.a = texture.hasAlpha ? (data[p00 + 3] ?? 0) * w00 + (data[p10 + 3] ?? 0) * w10 + (data[p01 + 3] ?? 0) * w01 + (data[p11 + 3] ?? 0) * w11 : 1;
 }
 
-function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number,
-  wrap: TextureSampling["wrap"], linear: boolean, output: Sample): void {
-  if (wrap === "repeat") { sampleLevelRepeat(texture, u, v, linear, output); return; }
-  const width = texture.width, height = texture.height, data = texture.pixels, maximum = texture.componentMaximum;
+function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number, wrap: TextureSampling["wrap"], linear: boolean, output: Sample): void {
+  if (wrap === "repeat") {
+    sampleLevelRepeat(texture, u, v, linear, output);
+    return;
+  }
+  const width = texture.width,
+    height = texture.height,
+    data = texture.pixels,
+    maximum = texture.componentMaximum;
   u = clamp(u);
   v = clamp(v);
   if (!linear) {
@@ -181,11 +219,12 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
   let y0 = Math.floor(y);
   const fx = x - x0;
   const fy = y - y0;
-  const x1 = x0 + 1, y1 = y0 + 1;
-  const w00 = (1 - fx) * (1 - fy) / maximum;
-  const w10 = fx * (1 - fy) / maximum;
-  const w01 = (1 - fx) * fy / maximum;
-  const w11 = fx * fy / maximum;
+  const x1 = x0 + 1,
+    y1 = y0 + 1;
+  const w00 = ((1 - fx) * (1 - fy)) / maximum;
+  const w10 = (fx * (1 - fy)) / maximum;
+  const w01 = ((1 - fx) * fy) / maximum;
+  const w11 = (fx * fy) / maximum;
   const hasBorder = x0 < 0 || y0 < 0 || x1 >= width || y1 >= height;
   let borderWeight = 0;
   if (hasBorder) {
@@ -197,21 +236,32 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
       x1 >= width || y1 >= height ? -1 : (y1 * width + x1) * 4,
     ];
     const weights = [w00, w10, w01, w11];
-    let r = 0, g = 0, b = 0, a = 0;
+    let r = 0,
+      g = 0,
+      b = 0,
+      a = 0;
     for (const index of [0, 1, 2, 3]) {
-      const tapOffset = offsets[index] ?? -1, weight = weights[index] ?? 0;
+      const tapOffset = offsets[index] ?? -1,
+        weight = weights[index] ?? 0;
       if (tapOffset < 0) continue;
       r += (data[tapOffset] ?? 0) * weight;
       g += (data[tapOffset + 1] ?? 0) * weight;
       b += (data[tapOffset + 2] ?? 0) * weight;
       a += (data[tapOffset + 3] ?? 0) * weight;
     }
-    borderWeight = (((offsets[0] ?? -1) < 0 ? w00 : 0) + ((offsets[1] ?? -1) < 0 ? w10 : 0) + ((offsets[2] ?? -1) < 0 ? w01 : 0) + ((offsets[3] ?? -1) < 0 ? w11 : 0)) * maximum;
-    output.r = r; output.g = g; output.b = b;
+    borderWeight =
+      (((offsets[0] ?? -1) < 0 ? w00 : 0) + ((offsets[1] ?? -1) < 0 ? w10 : 0) + ((offsets[2] ?? -1) < 0 ? w01 : 0) + ((offsets[3] ?? -1) < 0 ? w11 : 0)) *
+      maximum;
+    output.r = r;
+    output.g = g;
+    output.b = b;
     // RGB storage contributes no alpha to any texture environment.
     output.a = texture.hasAlpha ? a : 1;
   } else {
-    const p00 = (y0 * width + x0) * 4, p10 = (y0 * width + x1) * 4, p01 = (y1 * width + x0) * 4, p11 = (y1 * width + x1) * 4;
+    const p00 = (y0 * width + x0) * 4,
+      p10 = (y0 * width + x1) * 4,
+      p01 = (y1 * width + x0) * 4,
+      p11 = (y1 * width + x1) * 4;
     output.r = (data[p00] ?? 0) * w00 + (data[p10] ?? 0) * w10 + (data[p01] ?? 0) * w01 + (data[p11] ?? 0) * w11;
     output.g = (data[p00 + 1] ?? 0) * w00 + (data[p10 + 1] ?? 0) * w10 + (data[p01 + 1] ?? 0) * w01 + (data[p11 + 1] ?? 0) * w11;
     output.b = (data[p00 + 2] ?? 0) * w00 + (data[p10 + 2] ?? 0) * w10 + (data[p01 + 2] ?? 0) * w01 + (data[p11 + 2] ?? 0) * w11;
@@ -230,9 +280,12 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
 // conversion. GL_ADD saturates RGB but modulates alpha, unlike additive blending.
 export function textureColor(previous: number, texel: number, environment: TextureEnvironment): number {
   switch (environment) {
-    case "modulate": return previous * texel;
-    case "add": return clamp(previous + texel);
-    case "replace": return texel;
+    case "modulate":
+      return previous * texel;
+    case "add":
+      return clamp(previous + texel);
+    case "replace":
+      return texel;
   }
 }
 
@@ -271,18 +324,29 @@ export function sampleBound(texture: UploadedTexture | ConstantTexture, u: numbe
   sampleBoundComponents(texture, u, v, rho, output, 0, 0, 0, 0);
 }
 
-function sampleBoundComponents(texture: UploadedTexture | ConstantTexture, u: number, v: number, rho: number | null,
-  output: Sample, xU: number, xV: number, yU: number, yV: number): void {
+function sampleBoundComponents(
+  texture: UploadedTexture | ConstantTexture,
+  u: number,
+  v: number,
+  rho: number | null,
+  output: Sample,
+  xU: number,
+  xV: number,
+  yU: number,
+  yV: number,
+): void {
   if (texture.kind === "constant") {
-    output.r = texture.sample.r; output.g = texture.sample.g; output.b = texture.sample.b; output.a = texture.sample.a;
+    output.r = texture.sample.r;
+    output.g = texture.sample.g;
+    output.b = texture.sample.b;
+    output.a = texture.sample.a;
     return;
   }
   const { levels, wrap, borderColor, minifyLinear, magnifyLinear, mipmapping, magnificationLimit } = texture;
   let estimated = false;
   if (rho === null) {
     const estimate = mipmapping === "nearest" ? nearestRhoEstimate(xU, xV, yU, yV) : 0;
-    if (estimate > 0 && (estimate * (1 + NEAREST_MIP_GUARD) <= magnificationLimit
-      || estimate * (1 - NEAREST_MIP_GUARD) > magnificationLimit)) {
+    if (estimate > 0 && (estimate * (1 + NEAREST_MIP_GUARD) <= magnificationLimit || estimate * (1 - NEAREST_MIP_GUARD) > magnificationLimit)) {
       rho = estimate;
       estimated = true;
     } else rho = Math.max(derivativeLength(xU, xV), derivativeLength(yU, yV));
@@ -300,9 +364,9 @@ function sampleBoundComponents(texture: UploadedTexture | ConstantTexture, u: nu
   const lastLevel = levels.length - 1;
   let lambda = Math.min(lastLevel, Math.log2(rho));
   if (estimated) {
-    const shifted = lambda + 0.5, fraction = shifted - Math.floor(shifted);
-    if (!Number.isInteger(lastLevel) || lastLevel < 0
-      || !(fraction > NEAREST_MIP_GUARD && 1 - fraction > NEAREST_MIP_GUARD)) {
+    const shifted = lambda + 0.5,
+      fraction = shifted - Math.floor(shifted);
+    if (!Number.isInteger(lastLevel) || lastLevel < 0 || !(fraction > NEAREST_MIP_GUARD && 1 - fraction > NEAREST_MIP_GUARD)) {
       rho = Math.max(derivativeLength(xU, xV), derivativeLength(yU, yV));
       lambda = Math.min(lastLevel, Math.log2(rho));
     }
@@ -325,9 +389,14 @@ function sampleBoundComponents(texture: UploadedTexture | ConstantTexture, u: nu
 }
 
 export interface TexturePlaneDerivative {
-  readonly uAnchor: number; readonly vAnchor: number;
-  readonly uDx: number; readonly vDx: number; readonly qDx: number;
-  readonly uDy: number; readonly vDy: number; readonly qDy: number;
+  readonly uAnchor: number;
+  readonly vAnchor: number;
+  readonly uDx: number;
+  readonly vDx: number;
+  readonly qDx: number;
+  readonly uDy: number;
+  readonly vDy: number;
+  readonly qDy: number;
 }
 
 function derivativeLength(x: number, y: number): number {
@@ -336,14 +405,22 @@ function derivativeLength(x: number, y: number): number {
   return Math.hypot(x, y);
 }
 
-function samplePerspectiveBound(texture: UploadedTexture | ConstantTexture, u: number, v: number, reciprocal: number,
-  derivative: TexturePlaneDerivative, output: Sample): void {
+function samplePerspectiveBound(
+  texture: UploadedTexture | ConstantTexture,
+  u: number,
+  v: number,
+  reciprocal: number,
+  derivative: TexturePlaneDerivative,
+  output: Sample,
+): void {
   let rho: number | null = 0;
-  let xU = 0, xV = 0, yU = 0, yV = 0;
+  let xU = 0,
+    xV = 0,
+    yU = 0,
+    yV = 0;
   if (texture.kind === "image") {
     if (texture.mipmapping === "none") {
-      sampleLevel(texture.levels[0], texture.borderColor, derivative.uAnchor + u, derivative.vAnchor + v,
-        texture.wrap, texture.magnifyLinear, output);
+      sampleLevel(texture.levels[0], texture.borderColor, derivative.uAnchor + u, derivative.vAnchor + v, texture.wrap, texture.magnifyLinear, output);
       return;
     }
     const { width, height } = texture.levels[0];
@@ -363,11 +440,16 @@ const MIN_NEAREST_COMPONENT = 2 ** -200;
 const MAX_NEAREST_COMPONENT = 2 ** 200;
 
 function nearestRhoEstimate(xU: number, xV: number, yU: number, yV: number): number {
-  const axU = Math.abs(xU), axV = Math.abs(xV), ayU = Math.abs(yU), ayV = Math.abs(yV);
-  if ((axU === 0 || axU >= MIN_NEAREST_COMPONENT && axU <= MAX_NEAREST_COMPONENT)
-    && (axV === 0 || axV >= MIN_NEAREST_COMPONENT && axV <= MAX_NEAREST_COMPONENT)
-    && (ayU === 0 || ayU >= MIN_NEAREST_COMPONENT && ayU <= MAX_NEAREST_COMPONENT)
-    && (ayV === 0 || ayV >= MIN_NEAREST_COMPONENT && ayV <= MAX_NEAREST_COMPONENT)) {
+  const axU = Math.abs(xU),
+    axV = Math.abs(xV),
+    ayU = Math.abs(yU),
+    ayV = Math.abs(yV);
+  if (
+    (axU === 0 || (axU >= MIN_NEAREST_COMPONENT && axU <= MAX_NEAREST_COMPONENT)) &&
+    (axV === 0 || (axV >= MIN_NEAREST_COMPONENT && axV <= MAX_NEAREST_COMPONENT)) &&
+    (ayU === 0 || (ayU >= MIN_NEAREST_COMPONENT && ayU <= MAX_NEAREST_COMPONENT)) &&
+    (ayV === 0 || (ayV >= MIN_NEAREST_COMPONENT && ayV <= MAX_NEAREST_COMPONENT))
+  ) {
     return Math.sqrt(Math.max(xU * xU + xV * xV, yU * yU + yV * yV));
   }
   return 0;
@@ -380,8 +462,7 @@ interface NearestMipCursor {
   upperSquared: number;
 }
 
-function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, reciprocal: number,
-  derivative: TexturePlaneDerivative, output: Sample): void {
+function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, reciprocal: number, derivative: TexturePlaneDerivative, output: Sample): void {
   const texture = cursor.texture;
   const { levels, wrap, borderColor, minifyLinear, magnifyLinear, magnificationLimit } = texture;
   const { width, height } = levels[0];
@@ -389,11 +470,16 @@ function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, rec
   const xV = (derivative.vDx - v * derivative.qDx) * reciprocal * height;
   const yU = (derivative.uDy - u * derivative.qDy) * reciprocal * width;
   const yV = (derivative.vDy - v * derivative.qDy) * reciprocal * height;
-  const axU = Math.abs(xU), axV = Math.abs(xV), ayU = Math.abs(yU), ayV = Math.abs(yV);
-  if ((axU === 0 || axU >= MIN_NEAREST_COMPONENT && axU <= MAX_NEAREST_COMPONENT)
-    && (axV === 0 || axV >= MIN_NEAREST_COMPONENT && axV <= MAX_NEAREST_COMPONENT)
-    && (ayU === 0 || ayU >= MIN_NEAREST_COMPONENT && ayU <= MAX_NEAREST_COMPONENT)
-    && (ayV === 0 || ayV >= MIN_NEAREST_COMPONENT && ayV <= MAX_NEAREST_COMPONENT)) {
+  const axU = Math.abs(xU),
+    axV = Math.abs(xV),
+    ayU = Math.abs(yU),
+    ayV = Math.abs(yV);
+  if (
+    (axU === 0 || (axU >= MIN_NEAREST_COMPONENT && axU <= MAX_NEAREST_COMPONENT)) &&
+    (axV === 0 || (axV >= MIN_NEAREST_COMPONENT && axV <= MAX_NEAREST_COMPONENT)) &&
+    (ayU === 0 || (ayU >= MIN_NEAREST_COMPONENT && ayU <= MAX_NEAREST_COMPONENT)) &&
+    (ayV === 0 || (ayV >= MIN_NEAREST_COMPONENT && ayV <= MAX_NEAREST_COMPONENT))
+  ) {
     const square = Math.max(xU * xU + xV * xV, yU * yU + yV * yV);
     if (square > cursor.lowerSquared && square < cursor.upperSquared) {
       const first = levels[cursor.selected];
@@ -404,7 +490,8 @@ function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, rec
     const estimate = Math.sqrt(square);
     if (estimate > 0) {
       // Reviewed Bun/Linux math bounds enclose the original hypot result here.
-      const lower = estimate * (1 - NEAREST_MIP_GUARD), upper = estimate * (1 + NEAREST_MIP_GUARD);
+      const lower = estimate * (1 - NEAREST_MIP_GUARD),
+        upper = estimate * (1 + NEAREST_MIP_GUARD);
       if (upper <= magnificationLimit) {
         sampleLevel(levels[0], borderColor, derivative.uAnchor + u, derivative.vAnchor + v, wrap, magnifyLinear, output);
         return;
@@ -419,10 +506,10 @@ function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, rec
           cursor.selected = selected;
           if (selected >= 0 && selected <= 30 && (magnificationLimit === 1 || magnificationLimit === Math.SQRT2)) {
             const boundary = Math.SQRT2 * (1 << selected);
-            const lowerBin = Math.max(magnificationLimit, selected === 0 ? 0 : (boundary * 0.5) * (1 + 2 * NEAREST_MIP_GUARD));
+            const lowerBin = Math.max(magnificationLimit, selected === 0 ? 0 : boundary * 0.5 * (1 + 2 * NEAREST_MIP_GUARD));
             const upperBin = selected === levels.length - 1 ? Infinity : boundary * (1 - 2 * NEAREST_MIP_GUARD);
-            cursor.lowerSquared = (lowerBin * lowerBin) * (1 + 4 * NEAREST_MIP_GUARD);
-            cursor.upperSquared = upperBin === Infinity ? Infinity : (upperBin * upperBin) * (1 - 4 * NEAREST_MIP_GUARD);
+            cursor.lowerSquared = lowerBin * lowerBin * (1 + 4 * NEAREST_MIP_GUARD);
+            cursor.upperSquared = upperBin === Infinity ? Infinity : upperBin * upperBin * (1 - 4 * NEAREST_MIP_GUARD);
           } else {
             cursor.lowerSquared = Infinity;
             cursor.upperSquared = -Infinity;
@@ -438,20 +525,25 @@ function sampleWorkerNearest(cursor: NearestMipCursor, u: number, v: number, rec
 }
 
 export function sampleLineBound(texture: UploadedTexture | ConstantTexture, coordinate: Vec2, derivative: LineTextureDerivative, output: Sample): void {
-  const rho = texture.kind === "image" && texture.mipmapping !== "none"
-    ? Math.hypot(derivative.dsPerPixel * texture.levels[0].width, derivative.dtPerPixel * texture.levels[0].height) : 0;
+  const rho =
+    texture.kind === "image" && texture.mipmapping !== "none"
+      ? Math.hypot(derivative.dsPerPixel * texture.levels[0].width, derivative.dtPerPixel * texture.levels[0].height)
+      : 0;
   sampleBound(texture, coordinate.x, coordinate.y, rho, output);
 }
 
 export interface Framebuffer {
   /** Original framebuffer dimensions, independent of packed region storage. */
-  readonly width: number; readonly height: number;
+  readonly width: number;
+  readonly height: number;
   readonly pixels: Uint8Array;
   readonly colorWords: Int32Array;
   readonly depth: Float64Array;
   readonly stencil: Uint32Array | null;
   /** Absolute origin of storage; stride is measured in pixels. */
-  readonly originX: number; readonly originY: number; readonly stride: number;
+  readonly originX: number;
+  readonly originY: number;
+  readonly stride: number;
 }
 
 export interface TriangleSetup {
@@ -527,77 +619,175 @@ export interface TriangleSetup {
   readonly primaryAlpha: boolean;
   readonly secondaryAlpha: boolean;
   readonly constantDepth: boolean;
-  readonly width: number; readonly height: number;
+  readonly width: number;
+  readonly height: number;
   readonly state: Pick<RenderState, "blend">;
   readonly alphaBits: 0 | 8;
   readonly blending: "opaque" | "alpha" | "add" | "multiply" | "dst-color-inverse-dst-alpha" | "general";
   readonly depthTest: RenderState["depthTest"];
   readonly alphaTest: RenderState["alphaTest"];
   readonly secondaryEnvironment: TextureEnvironment | null;
-  readonly texture: BoundTexture; readonly secondaryTexture: BoundTexture;
-  readonly derivative: TexturePlaneDerivative; readonly secondaryDerivative: TexturePlaneDerivative;
+  readonly texture: BoundTexture;
+  readonly secondaryTexture: BoundTexture;
+  readonly derivative: TexturePlaneDerivative;
+  readonly secondaryDerivative: TexturePlaneDerivative;
   readonly stencilFunction: "always" | "nonzero";
-  readonly stencilCompareMask: number; readonly stencilWriteMask: number; readonly stencilMaximum: number;
+  readonly stencilCompareMask: number;
+  readonly stencilWriteMask: number;
+  readonly stencilMaximum: number;
   readonly stencilDepthFail: "keep" | "increment" | "decrement";
   readonly stencilDepthPass: "keep" | "increment" | "decrement";
 }
 
 /** Limits restrict iteration only; coverage and interpolation retain absolute coordinates. */
-export function runTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
-  firstY = setup.minY, lastY = setup.maxY): boolean {
+export function runTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample, firstY = setup.minY, lastY = setup.maxY): boolean {
   return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY);
 }
 
 /** The fixed worker calls this only after decoding its native-cloned job. */
-export function runWorkerTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
-  firstY: number, lastY: number): boolean {
+export function runWorkerTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample, firstY: number, lastY: number): boolean {
   return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY);
 }
 
-function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
-  firstY: number, lastY: number): boolean {
+function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample, firstY: number, lastY: number): boolean {
   const {
-    minX, maxX, minY, maxY, inverseArea, depthNear, depthFar, edgeAX,
-    edgeAY, edgeAC, edgeBX, edgeBY, edgeBC, edgeCX, edgeCY, edgeCC,
-    attributeAX, attributeAY, attributeAC, attributeBX, attributeBY, attributeBC, attributeCX, attributeCY,
-    attributeCC, az, bz, cz, polygonDepthOffset, planeDepth, aiw, biw,
-    ciw, au, bu, cu, av, bv, cv, au2,
-    bu2, cu2, av2, bv2, cv2, ar, br, cr,
-    ag, bg, cg, ab, bb, cb, aa, ba,
-    ca, edgeAInclusive, edgeBInclusive, edgeCInclusive, white, depthWrite, stencilEnabled, colorWrite,
-    textureConsumed, primaryAlpha, secondaryAlpha, constantDepth, blending, depthTest, alphaTest, secondaryEnvironment,
-    texture, secondaryTexture, derivative, secondaryDerivative, stencilFunction, stencilCompareMask, stencilWriteMask, stencilMaximum,
-    stencilDepthFail, stencilDepthPass, state, alphaBits,
+    minX,
+    maxX,
+    minY,
+    maxY,
+    inverseArea,
+    depthNear,
+    depthFar,
+    edgeAX,
+    edgeAY,
+    edgeAC,
+    edgeBX,
+    edgeBY,
+    edgeBC,
+    edgeCX,
+    edgeCY,
+    edgeCC,
+    attributeAX,
+    attributeAY,
+    attributeAC,
+    attributeBX,
+    attributeBY,
+    attributeBC,
+    attributeCX,
+    attributeCY,
+    attributeCC,
+    az,
+    bz,
+    cz,
+    polygonDepthOffset,
+    planeDepth,
+    aiw,
+    biw,
+    ciw,
+    au,
+    bu,
+    cu,
+    av,
+    bv,
+    cv,
+    au2,
+    bu2,
+    cu2,
+    av2,
+    bv2,
+    cv2,
+    ar,
+    br,
+    cr,
+    ag,
+    bg,
+    cg,
+    ab,
+    bb,
+    cb,
+    aa,
+    ba,
+    ca,
+    edgeAInclusive,
+    edgeBInclusive,
+    edgeCInclusive,
+    white,
+    depthWrite,
+    stencilEnabled,
+    colorWrite,
+    textureConsumed,
+    primaryAlpha,
+    secondaryAlpha,
+    constantDepth,
+    blending,
+    depthTest,
+    alphaTest,
+    secondaryEnvironment,
+    texture,
+    secondaryTexture,
+    derivative,
+    secondaryDerivative,
+    stencilFunction,
+    stencilCompareMask,
+    stencilWriteMask,
+    stencilMaximum,
+    stencilDepthFail,
+    stencilDepthPass,
+    state,
+    alphaBits,
   } = setup;
-  const depths = framebuffer.depth, colors = framebuffer.colorWords;
+  const depths = framebuffer.depth,
+    colors = framebuffer.colorWords;
   const span: RowSpan = { min: minX, max: maxX };
-  const primaryCursor: NearestMipCursor | null = textureConsumed && texture.kind === "image" && texture.mipmapping === "nearest"
-    ? { texture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity } : null;
-  const secondaryCursor: NearestMipCursor | null = textureConsumed && secondaryEnvironment !== null
-    && secondaryTexture.kind === "image" && secondaryTexture.mipmapping === "nearest"
-    ? { texture: secondaryTexture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity } : null;
+  const primaryCursor: NearestMipCursor | null =
+    textureConsumed && texture.kind === "image" && texture.mipmapping === "nearest"
+      ? { texture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity }
+      : null;
+  const secondaryCursor: NearestMipCursor | null =
+    textureConsumed && secondaryEnvironment !== null && secondaryTexture.kind === "image" && secondaryTexture.mipmapping === "nearest"
+      ? { texture: secondaryTexture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity }
+      : null;
   let didSample = false;
   // Per-fragment scratch: shadeQ2Fragment reads fields synchronously and
   // retains nothing, so these replace four allocations per fragment.
-  const fragmentPosition = { x: 0, y: 0, z: 0 }, fragmentNormal = { x: 0, y: 0, z: 0 };
+  const fragmentPosition = { x: 0, y: 0, z: 0 },
+    fragmentNormal = { x: 0, y: 0, z: 0 };
   const fragmentVertexColor = { x: 0, y: 0, z: 0, w: 0 };
   const fragmentTexel: Sample = { r: 1, g: 1, b: 1, a: 1 };
   const fragmentShade: Sample = { r: 0, g: 0, b: 0, a: 0 };
   // Per-triangle invariants hoisted out of the fragment loop.
-  const lighting = setup.lighting, fragmentLit = textureConsumed && lighting.parameters.kind !== "vertex";
-  const lightPos0 = lighting.positions[0], lightPos1 = lighting.positions[1], lightPos2 = lighting.positions[2];
-  const lightNor0 = lighting.normals[0], lightNor1 = lighting.normals[1], lightNor2 = lighting.normals[2];
+  const lighting = setup.lighting,
+    fragmentLit = textureConsumed && lighting.parameters.kind !== "vertex";
+  const lightPos0 = lighting.positions[0],
+    lightPos1 = lighting.positions[1],
+    lightPos2 = lighting.positions[2];
+  const lightNor0 = lighting.normals[0],
+    lightNor1 = lighting.normals[1],
+    lightNor2 = lighting.normals[2];
   const luminanceAlpha = setup.textureEffect === "luminance-alpha";
   const depthRange = depthFar - depthNear;
-  const fog = setup.fog, fogDepthScale = setup.fogDepthScale ?? 1;
-  const fbOriginX = framebuffer.originX, fbOriginY = framebuffer.originY, fbStride = framebuffer.stride;
+  const fog = setup.fog,
+    fogDepthScale = setup.fogDepthScale ?? 1;
+  const fbOriginX = framebuffer.originX,
+    fbOriginY = framebuffer.originY,
+    fbStride = framebuffer.stride;
   // Opaque-span specialization: the dominant world/model case (single
   // textured surface, vertex lighting, opaque blending, no alpha test,
   // stencil or fog) runs the identical fragment arithmetic without the
   // per-fragment invariant branches of the general loop below.
-  const opaqueFast = textureConsumed && !white && !fragmentLit && secondaryEnvironment === null
-    && fog === undefined && !luminanceAlpha && alphaTest === "none" && !stencilEnabled
-    && blending === "opaque" && colorWrite && depthWrite && texture.kind !== "incomplete";
+  const opaqueFast =
+    textureConsumed &&
+    !white &&
+    !fragmentLit &&
+    secondaryEnvironment === null &&
+    fog === undefined &&
+    !luminanceAlpha &&
+    alphaTest === "none" &&
+    !stencilEnabled &&
+    blending === "opaque" &&
+    colorWrite &&
+    depthWrite &&
+    texture.kind !== "incomplete";
   // Depth-only specialization (shadow atlas casters): with no texture
   // consumed, no color write, no stencil and no alpha test, the general
   // loop's only observable effects are the depth test and depth write;
@@ -605,8 +795,13 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const depthOnly = !textureConsumed && !colorWrite && depthWrite && !stencilEnabled && alphaTest === "none";
   if (depthOnly) {
     for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
-      const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
-      const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
+      const sampleY = y + 0.5,
+        rowA = edgeAY * sampleY,
+        rowB = edgeBY * sampleY,
+        rowC = edgeCY * sampleY;
+      const attributeRowA = attributeAY * sampleY,
+        attributeRowB = attributeBY * sampleY,
+        attributeRowC = attributeCY * sampleY;
       const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
       span.min = minX;
       span.max = maxX;
@@ -630,8 +825,13 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   }
   if (opaqueFast) {
     for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
-      const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
-      const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
+      const sampleY = y + 0.5,
+        rowA = edgeAY * sampleY,
+        rowB = edgeBY * sampleY,
+        rowC = edgeCY * sampleY;
+      const attributeRowA = attributeAY * sampleY,
+        attributeRowB = attributeBY * sampleY,
+        attributeRowC = attributeCY * sampleY;
       const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
       span.min = minX;
       span.max = maxX;
@@ -670,8 +870,13 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
     return didSample;
   }
   for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
-    const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
-    const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
+    const sampleY = y + 0.5,
+      rowA = edgeAY * sampleY,
+      rowB = edgeBY * sampleY,
+      rowC = edgeCY * sampleY;
+    const attributeRowA = attributeAY * sampleY,
+      attributeRowB = attributeBY * sampleY,
+      attributeRowC = attributeCY * sampleY;
     const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
     span.min = minX;
     span.max = maxX;
@@ -699,77 +904,135 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
       // color term; alpha is only consumed by the alpha test below, which
       // is exactly when textureConsumed holds.
       if (textureConsumed) {
-      if (white) {
-        r = g = blue = alpha = clamp(inverseW * reciprocal);
-      } else {
-        r = clamp((ar * wa + br * wb + cr * wc) * reciprocal);
-        g = clamp((ag * wa + bg * wb + cg * wc) * reciprocal);
-        blue = clamp((ab * wa + bb * wb + cb * wc) * reciprocal);
-        alpha = clamp((aa * wa + ba * wb + ca * wc) * reciprocal);
-      }
-      fragmentVertexColor.x = r; fragmentVertexColor.y = g; fragmentVertexColor.z = blue; fragmentVertexColor.w = alpha;
-      const vertexColor = fragmentVertexColor;
-      let texelR = 1, texelG = 1, texelB = 1, texelA = 1;
-      if (texture.kind !== "incomplete") {
-        const u = (au * wa + bu * wb + cu * wc) * reciprocal;
-        const v = (av * wa + bv * wb + cv * wc) * reciprocal;
-        if (primaryCursor !== null) sampleWorkerNearest(primaryCursor, u, v, reciprocal, derivative, sampled);
-        else samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
-        didSample = true;
-        texelR = sampled.r; texelG = sampled.g; texelB = sampled.b; texelA = primaryAlpha ? sampled.a : 1;
-        if (luminanceAlpha) {
-          const modulation = (sampled.r + sampled.g + sampled.b) / 3 * alpha;
-          sampled.r *= modulation; sampled.g *= modulation; sampled.b *= modulation;
-          texelR = sampled.r; texelG = sampled.g; texelB = sampled.b;
+        if (white) {
+          r = g = blue = alpha = clamp(inverseW * reciprocal);
+        } else {
+          r = clamp((ar * wa + br * wb + cr * wc) * reciprocal);
+          g = clamp((ag * wa + bg * wb + cg * wc) * reciprocal);
+          blue = clamp((ab * wa + bb * wb + cb * wc) * reciprocal);
+          alpha = clamp((aa * wa + ba * wb + ca * wc) * reciprocal);
         }
-        r *= sampled.r;
-        g *= sampled.g;
-        blue *= sampled.b;
-        if (primaryAlpha) alpha *= sampled.a;
-      }
-      if (fragmentLit) {
-        const weightsA = aiw * wa * reciprocal, weightsB = biw * wb * reciprocal, weightsC = ciw * wc * reciprocal;
-        interpolateWorldInto(fragmentPosition, lightPos0, lightPos1, lightPos2, weightsA, weightsB, weightsC);
-        interpolateWorldInto(fragmentNormal, lightNor0, lightNor1, lightNor2, weightsA, weightsB, weightsC);
-        fragmentTexel.r = texelR; fragmentTexel.g = texelG; fragmentTexel.b = texelB; fragmentTexel.a = texelA;
-        shadeQ2FragmentInto(fragmentShade, lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
-        const result = fragmentShade;
-        r = result.r; g = result.g; blue = result.b; alpha = result.a;
-      }
-      if (secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {
-        const u = (au2 * wa + bu2 * wb + cu2 * wc) * reciprocal;
-        const v = (av2 * wa + bv2 * wb + cv2 * wc) * reciprocal;
-        if (secondaryCursor !== null) sampleWorkerNearest(secondaryCursor, u, v, reciprocal, secondaryDerivative, sampled);
-        else samplePerspectiveBound(secondaryTexture, u, v, reciprocal, secondaryDerivative, sampled);
-        didSample = true;
-        switch (secondaryEnvironment) {
-          case "modulate":
-            r *= sampled.r; g *= sampled.g; blue *= sampled.b;
-            if (secondaryAlpha) alpha *= sampled.a;
-            break;
-          case "add":
-            r = clamp(r + sampled.r); g = clamp(g + sampled.g); blue = clamp(blue + sampled.b);
-            if (secondaryAlpha) alpha *= sampled.a;
-            break;
-          case "replace":
-            r = sampled.r; g = sampled.g; blue = sampled.b;
-            if (secondaryAlpha) alpha = sampled.a;
-            break;
+        fragmentVertexColor.x = r;
+        fragmentVertexColor.y = g;
+        fragmentVertexColor.z = blue;
+        fragmentVertexColor.w = alpha;
+        const vertexColor = fragmentVertexColor;
+        let texelR = 1,
+          texelG = 1,
+          texelB = 1,
+          texelA = 1;
+        if (texture.kind !== "incomplete") {
+          const u = (au * wa + bu * wb + cu * wc) * reciprocal;
+          const v = (av * wa + bv * wb + cv * wc) * reciprocal;
+          if (primaryCursor !== null) sampleWorkerNearest(primaryCursor, u, v, reciprocal, derivative, sampled);
+          else samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
+          didSample = true;
+          texelR = sampled.r;
+          texelG = sampled.g;
+          texelB = sampled.b;
+          texelA = primaryAlpha ? sampled.a : 1;
+          if (luminanceAlpha) {
+            const modulation = ((sampled.r + sampled.g + sampled.b) / 3) * alpha;
+            sampled.r *= modulation;
+            sampled.g *= modulation;
+            sampled.b *= modulation;
+            texelR = sampled.r;
+            texelG = sampled.g;
+            texelB = sampled.b;
+          }
+          r *= sampled.r;
+          g *= sampled.g;
+          blue *= sampled.b;
+          if (primaryAlpha) alpha *= sampled.a;
         }
-      }
-      if (fog !== undefined) {
-        const d = fog.kind === "exp2" ? fog.density * fogDepthScale * reciprocal / 64 : 0;
-        const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
-        const effect = fog.kind === "constant" ? "color" : fog.effect ?? "color";
-        if (effect !== "none") { r = clamp(r); g = clamp(g); blue = clamp(blue); }
-        if (effect === "color") { r += (fog.color.x - r) * amount; g += (fog.color.y - g) * amount; blue += (fog.color.z - blue) * amount; }
-        if (effect === "rgb" || effect === "rgba") { r *= 1 - amount; g *= 1 - amount; blue *= 1 - amount; }
-        if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
-        if (effect === "overlay") { r = fog.color.x; g = fog.color.y; blue = fog.color.z; alpha *= amount; }
-      }
+        if (fragmentLit) {
+          const weightsA = aiw * wa * reciprocal,
+            weightsB = biw * wb * reciprocal,
+            weightsC = ciw * wc * reciprocal;
+          interpolateWorldInto(fragmentPosition, lightPos0, lightPos1, lightPos2, weightsA, weightsB, weightsC);
+          interpolateWorldInto(fragmentNormal, lightNor0, lightNor1, lightNor2, weightsA, weightsB, weightsC);
+          fragmentTexel.r = texelR;
+          fragmentTexel.g = texelG;
+          fragmentTexel.b = texelB;
+          fragmentTexel.a = texelA;
+          shadeQ2FragmentInto(fragmentShade, lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
+          const result = fragmentShade;
+          r = result.r;
+          g = result.g;
+          blue = result.b;
+          alpha = result.a;
+        }
+        if (secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {
+          const u = (au2 * wa + bu2 * wb + cu2 * wc) * reciprocal;
+          const v = (av2 * wa + bv2 * wb + cv2 * wc) * reciprocal;
+          if (secondaryCursor !== null) sampleWorkerNearest(secondaryCursor, u, v, reciprocal, secondaryDerivative, sampled);
+          else samplePerspectiveBound(secondaryTexture, u, v, reciprocal, secondaryDerivative, sampled);
+          didSample = true;
+          switch (secondaryEnvironment) {
+            case "modulate":
+              r *= sampled.r;
+              g *= sampled.g;
+              blue *= sampled.b;
+              if (secondaryAlpha) alpha *= sampled.a;
+              break;
+            case "add":
+              r = clamp(r + sampled.r);
+              g = clamp(g + sampled.g);
+              blue = clamp(blue + sampled.b);
+              if (secondaryAlpha) alpha *= sampled.a;
+              break;
+            case "replace":
+              r = sampled.r;
+              g = sampled.g;
+              blue = sampled.b;
+              if (secondaryAlpha) alpha = sampled.a;
+              break;
+          }
+        }
+        if (fog !== undefined) {
+          const d = fog.kind === "exp2" ? (fog.density * fogDepthScale * reciprocal) / 64 : 0;
+          const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
+          const effect = fog.kind === "constant" ? "color" : (fog.effect ?? "color");
+          if (effect !== "none") {
+            r = clamp(r);
+            g = clamp(g);
+            blue = clamp(blue);
+          }
+          if (effect === "color") {
+            r += (fog.color.x - r) * amount;
+            g += (fog.color.y - g) * amount;
+            blue += (fog.color.z - blue) * amount;
+          }
+          if (effect === "rgb" || effect === "rgba") {
+            r *= 1 - amount;
+            g *= 1 - amount;
+            blue *= 1 - amount;
+          }
+          if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
+          if (effect === "overlay") {
+            r = fog.color.x;
+            g = fog.color.y;
+            blue = fog.color.z;
+            alpha *= amount;
+          }
+        }
       }
       if (alphaTest !== "none" && !passesAlpha(alpha, alphaTest)) continue;
-      if (stencilEnabled && !stencilFragment(framebuffer.stencil, pixel, depthPassed, stencilFunction, stencilCompareMask, stencilWriteMask, stencilMaximum, stencilDepthFail, stencilDepthPass)) continue;
+      if (
+        stencilEnabled &&
+        !stencilFragment(
+          framebuffer.stencil,
+          pixel,
+          depthPassed,
+          stencilFunction,
+          stencilCompareMask,
+          stencilWriteMask,
+          stencilMaximum,
+          stencilDepthFail,
+          stencilDepthPass,
+        )
+      )
+        continue;
       if (colorWrite) {
         if (blending === "opaque") colors[pixel] = colorWord(r, g, blue, alphaBits === 0 ? 1 : alpha);
         else writeFragment(framebuffer, alphaBits, pixel, r, g, blue, alpha, state, blending);
@@ -780,9 +1043,21 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   return didSample;
 }
 
-function writeFragment(framebuffer: Framebuffer, alphaBits: 0 | 8, pixel: number, r: number, g: number, blue: number, alpha: number,
-  state: Pick<RenderState, "blend">, mode: "alpha" | "add" | "multiply" | "dst-color-inverse-dst-alpha" | "general"): void {
-  r = clamp(r); g = clamp(g); blue = clamp(blue); alpha = clamp(alpha);
+function writeFragment(
+  framebuffer: Framebuffer,
+  alphaBits: 0 | 8,
+  pixel: number,
+  r: number,
+  g: number,
+  blue: number,
+  alpha: number,
+  state: Pick<RenderState, "blend">,
+  mode: "alpha" | "add" | "multiply" | "dst-color-inverse-dst-alpha" | "general",
+): void {
+  r = clamp(r);
+  g = clamp(g);
+  blue = clamp(blue);
+  alpha = clamp(alpha);
   const colors = framebuffer.colorWords;
   const destination = colors[pixel];
   if (destination === undefined) throw new RangeError("Fragment is outside the color buffer");
@@ -792,18 +1067,27 @@ function writeFragment(framebuffer: Framebuffer, alphaBits: 0 | 8, pixel: number
   const da = alphaBits === 0 ? 1 : (LITTLE_ENDIAN ? destination >>> 24 : destination & 255) / 255;
   if (mode === "alpha") {
     const inverseAlpha = 1 - alpha;
-    colors[pixel] = colorWord(r * alpha + dr * inverseAlpha, g * alpha + dg * inverseAlpha,
-      blue * alpha + db * inverseAlpha, alphaBits === 0 ? 1 : alpha * alpha + da * inverseAlpha);
+    colors[pixel] = colorWord(
+      r * alpha + dr * inverseAlpha,
+      g * alpha + dg * inverseAlpha,
+      blue * alpha + db * inverseAlpha,
+      alphaBits === 0 ? 1 : alpha * alpha + da * inverseAlpha,
+    );
   } else if (mode === "add") {
     colors[pixel] = colorWord(r + dr, g + dg, blue + db, alphaBits === 0 ? 1 : alpha + da);
   } else if (mode === "multiply") {
     colors[pixel] = colorWord(r * dr, g * dg, blue * db, alphaBits === 0 ? 1 : alpha * da);
   } else if (mode === "dst-color-inverse-dst-alpha") {
     const inverseDestinationAlpha = 1 - da;
-    colors[pixel] = colorWord(r * dr + dr * inverseDestinationAlpha, g * dg + dg * inverseDestinationAlpha,
-      blue * db + db * inverseDestinationAlpha, alphaBits === 0 ? 1 : alpha * da + da * inverseDestinationAlpha);
+    colors[pixel] = colorWord(
+      r * dr + dr * inverseDestinationAlpha,
+      g * dg + dg * inverseDestinationAlpha,
+      blue * db + db * inverseDestinationAlpha,
+      alphaBits === 0 ? 1 : alpha * da + da * inverseDestinationAlpha,
+    );
   } else {
-    const pixels = framebuffer.pixels, offset = pixel * 4;
+    const pixels = framebuffer.pixels,
+      offset = pixel * 4;
     pixels[offset] = blend(r, dr, alpha, da, state, false);
     pixels[offset + 1] = blend(g, dg, alpha, da, state, false);
     pixels[offset + 2] = blend(blue, db, alpha, da, state, false);
@@ -811,16 +1095,23 @@ function writeFragment(framebuffer: Framebuffer, alphaBits: 0 | 8, pixel: number
   }
 }
 
-export function stencilFragment(stencil: Uint32Array | null, index: number, depthPassed: boolean,
-  stencilFunction: "always" | "nonzero", stencilCompareMask: number, stencilWriteMask: number, stencilMaximum: number,
-  stencilDepthFail: "keep" | "increment" | "decrement", stencilDepthPass: "keep" | "increment" | "decrement"): boolean {
+export function stencilFragment(
+  stencil: Uint32Array | null,
+  index: number,
+  depthPassed: boolean,
+  stencilFunction: "always" | "nonzero",
+  stencilCompareMask: number,
+  stencilWriteMask: number,
+  stencilMaximum: number,
+  stencilDepthFail: "keep" | "increment" | "decrement",
+  stencilDepthPass: "keep" | "increment" | "decrement",
+): boolean {
   if (stencil === null) throw new Error("Stencil test has no configured storage");
   const previous = stencil[index];
   if (previous === undefined) throw new RangeError("Fragment is outside the stencil buffer");
   if (stencilFunction === "nonzero" && (previous & stencilCompareMask) === 0) return false;
   const operation = depthPassed ? stencilDepthPass : stencilDepthFail;
-  const next = operation === "increment" ? Math.min(stencilMaximum, previous + 1)
-    : operation === "decrement" ? Math.max(0, previous - 1) : previous;
+  const next = operation === "increment" ? Math.min(stencilMaximum, previous + 1) : operation === "decrement" ? Math.max(0, previous - 1) : previous;
   stencil[index] = ((previous & ~stencilWriteMask) | (next & stencilWriteMask)) >>> 0;
   return depthPassed;
 }

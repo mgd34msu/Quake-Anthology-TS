@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
@@ -7,19 +8,10 @@ import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-import {
-  ScriptSourceReader,
-  type ScriptPreprocessorOptions,
-} from "../../../content/legacy-script/preprocessor.ts";
+import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../content/legacy-script/preprocessor.ts";
 import type { BotScriptReader } from "./script-sources.ts";
 import { allocationView, BotMemory, type BotMemoryAllocation } from "./memory.ts";
-import {
-  NumberFlag,
-  ScriptLanguageError,
-  type ScriptDiagnostic,
-  type ScriptToken,
-  type SourceLocation,
-} from "../../../content/legacy-script/lexer.ts";
+import { NumberFlag, ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
 
 export const MAX_FUZZY_WEIGHTS = 128;
 export const MAX_CACHED_WEIGHT_CONFIGS = 128;
@@ -65,13 +57,9 @@ export interface WeightConfig {
   interbreedFrom(parent1: WeightConfig, parent2: WeightConfig, report?: (message: string) => void): readonly string[];
 }
 
-type SeparatorDecision =
-  | { readonly kind: "leaf"; readonly leaf: FuzzySeparator }
-  | { readonly kind: "branch"; readonly children: FuzzySeparator };
+type SeparatorDecision = { readonly kind: "leaf"; readonly leaf: FuzzySeparator } | { readonly kind: "branch"; readonly children: FuzzySeparator };
 
-type WeightPointer =
-  | { readonly kind: "name"; readonly allocation: BotMemoryAllocation }
-  | { readonly kind: "separator"; readonly separator: FuzzySeparator };
+type WeightPointer = { readonly kind: "name"; readonly allocation: BotMemoryAllocation } | { readonly kind: "separator"; readonly separator: FuzzySeparator };
 
 function terminatedBytes(bytes: Uint8Array): Uint8Array {
   const end = bytes.indexOf(0);
@@ -79,7 +67,8 @@ function terminatedBytes(bytes: Uint8Array): Uint8Array {
 }
 
 function stringBytes(text: string): Uint8Array {
-  const end = text.indexOf("\0"), length = end < 0 ? text.length : end;
+  const end = text.indexOf("\0"),
+    length = end < 0 ? text.length : end;
   const bytes = new Uint8Array(length);
   for (let index = 0; index < length; index++) {
     const byte = text.charCodeAt(index);
@@ -97,15 +86,30 @@ class WeightHeap {
   constructor(readonly memory: BotMemory) {}
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { nextPointer: this.nextPointer, pointers: [...this.pointers].map(([pointer, record]) => ({ pointer,
-      kind: record.kind, allocation: memory.reference(record.kind === "name" ? record.allocation : record.separator.allocation) })) };
+    return {
+      nextPointer: this.nextPointer,
+      pointers: [...this.pointers].map(([pointer, record]) => ({
+        pointer,
+        kind: record.kind,
+        allocation: memory.reference(record.kind === "name" ? record.allocation : record.separator.allocation),
+      })),
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.weights.heap"), image = { nextPointer: reader.field("nextPointer").integer(1),
-      pointers: reader.field("pointers").list(entry => ({ pointer: entry.field("pointer").integer(1), kind: entry.field("kind").choice("name", "separator"), allocation: entry.field("allocation").integer(0) })) };
-    if (this.pointers.size !== 0 || !Number.isSafeInteger(image.nextPointer) || image.nextPointer < 1 || image.nextPointer > 0x100000000) throw new Error("Invalid fuzzy heap restoration");
+    const reader = new SaveReader(value, "bot.weights.heap"),
+      image = {
+        nextPointer: reader.field("nextPointer").integer(1),
+        pointers: reader.field("pointers").list(entry => ({
+          pointer: entry.field("pointer").integer(1),
+          kind: entry.field("kind").choice("name", "separator"),
+          allocation: entry.field("allocation").integer(0),
+        })),
+      };
+    if (this.pointers.size !== 0 || !Number.isSafeInteger(image.nextPointer) || image.nextPointer < 1 || image.nextPointer > 0x100000000)
+      throw new Error("Invalid fuzzy heap restoration");
     for (const entry of image.pointers) {
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.pointers.has(entry.pointer)) throw new Error("Invalid saved fuzzy pointer");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.pointers.has(entry.pointer))
+        throw new Error("Invalid saved fuzzy pointer");
       const allocation = memory.allocation(entry.allocation);
       if (entry.kind === "name") {
         if (!allocation.bytes.includes(0)) throw new Error("Saved fuzzy name is unterminated");
@@ -116,12 +120,16 @@ class WeightHeap {
       }
     }
     this.nextPointer = image.nextPointer;
-    const visited = new Set<number>(), pending = new Set<number>();
+    const visited = new Set<number>(),
+      pending = new Set<number>();
     const visit = (separator: FuzzySeparator | null): void => {
       if (separator === null || visited.has(separator.pointer)) return;
       if (pending.has(separator.pointer)) throw new Error("Saved fuzzy separator graph has a cycle");
-      pending.add(separator.pointer); visit(separator.child); visit(separator.next);
-      pending.delete(separator.pointer); visited.add(separator.pointer);
+      pending.add(separator.pointer);
+      visit(separator.child);
+      visit(separator.next);
+      pending.delete(separator.pointer);
+      visited.add(separator.pointer);
     };
     for (const record of this.pointers.values()) if (record.kind === "separator") visit(record.separator);
   }
@@ -182,29 +190,65 @@ class FuzzySeparator {
     readonly pointer: number,
   ) {}
 
-  private get view(): DataView { return allocationView(this.allocation); }
-  get inventoryIndex(): number { return this.view.getInt32(0, true); }
-  set inventoryIndex(value: number) { this.view.setInt32(0, value, true); }
-  get threshold(): number { return this.view.getInt32(4, true); }
-  set threshold(value: number) { this.view.setInt32(4, value, true); }
-  get balanced(): boolean { return this.view.getInt32(8, true) === 1; }
-  set balanced(value: boolean) { this.view.setInt32(8, value ? 1 : 0, true); }
-  get weight(): number { return this.view.getFloat32(12, true); }
-  set weight(value: number) { this.view.setFloat32(12, value, true); }
-  get minWeight(): number { return this.view.getFloat32(16, true); }
-  set minWeight(value: number) { this.view.setFloat32(16, value, true); }
-  get maxWeight(): number { return this.view.getFloat32(20, true); }
-  set maxWeight(value: number) { this.view.setFloat32(20, value, true); }
-  get child(): FuzzySeparator | null { return this.heap.separator(this.view.getUint32(24, true)); }
-  set child(value: FuzzySeparator | null) { this.view.setUint32(24, value?.pointer ?? 0, true); }
-  get next(): FuzzySeparator | null { return this.heap.separator(this.view.getUint32(28, true)); }
-  set next(value: FuzzySeparator | null) { this.view.setUint32(28, value?.pointer ?? 0, true); }
+  private get view(): DataView {
+    return allocationView(this.allocation);
+  }
+  get inventoryIndex(): number {
+    return this.view.getInt32(0, true);
+  }
+  set inventoryIndex(value: number) {
+    this.view.setInt32(0, value, true);
+  }
+  get threshold(): number {
+    return this.view.getInt32(4, true);
+  }
+  set threshold(value: number) {
+    this.view.setInt32(4, value, true);
+  }
+  get balanced(): boolean {
+    return this.view.getInt32(8, true) === 1;
+  }
+  set balanced(value: boolean) {
+    this.view.setInt32(8, value ? 1 : 0, true);
+  }
+  get weight(): number {
+    return this.view.getFloat32(12, true);
+  }
+  set weight(value: number) {
+    this.view.setFloat32(12, value, true);
+  }
+  get minWeight(): number {
+    return this.view.getFloat32(16, true);
+  }
+  set minWeight(value: number) {
+    this.view.setFloat32(16, value, true);
+  }
+  get maxWeight(): number {
+    return this.view.getFloat32(20, true);
+  }
+  set maxWeight(value: number) {
+    this.view.setFloat32(20, value, true);
+  }
+  get child(): FuzzySeparator | null {
+    return this.heap.separator(this.view.getUint32(24, true));
+  }
+  set child(value: FuzzySeparator | null) {
+    this.view.setUint32(24, value?.pointer ?? 0, true);
+  }
+  get next(): FuzzySeparator | null {
+    return this.heap.separator(this.view.getUint32(28, true));
+  }
+  set next(value: FuzzySeparator | null) {
+    this.view.setUint32(28, value?.pointer ?? 0, true);
+  }
   get decision(): SeparatorDecision {
     const children = this.child;
     return children === null ? { kind: "leaf", leaf: this } : { kind: "branch", children };
   }
 
-  free(): void { this.heap.freeSeparator(this); }
+  free(): void {
+    this.heap.freeSeparator(this);
+  }
 }
 
 function freeSeparators(separator: FuzzySeparator | null): void {
@@ -465,8 +509,11 @@ class WeightParser {
   }
 
   private warn(message: string, location: SourceLocation): void {
-    const diagnostic: ScriptDiagnostic = Object.freeze({ severity: "warning", message,
-      location: frozenLocation({ ...this.sourceLocation(), column: location.column }) });
+    const diagnostic: ScriptDiagnostic = Object.freeze({
+      severity: "warning",
+      message,
+      location: frozenLocation({ ...this.sourceLocation(), column: location.column }),
+    });
     this.reported.push(diagnostic);
     this.report(diagnostic);
   }
@@ -505,9 +552,7 @@ export function sourceUnitRandom(random: BotRandom): number {
 
 function leafValue(separator: FuzzySeparator, inventory: WeightInventory): number {
   const decision = separator.decision;
-  return decision.kind === "branch"
-    ? evaluateSeparators(decision.children, inventory)
-    : separator.weight;
+  return decision.kind === "branch" ? evaluateSeparators(decision.children, inventory) : separator.weight;
 }
 
 function undecidedLeafValue(separator: FuzzySeparator, inventory: WeightInventory, random: BotRandom): number {
@@ -548,19 +593,13 @@ function evaluateSeparators(first: FuzzySeparator, inventory: WeightInventory): 
     if (inventoryValue(inventory, separator.inventoryIndex) < next.threshold) {
       const first = leafValue(separator, inventory);
       const second = leafValue(next, inventory);
-      return interpolate(sourceInterpolationScale(
-        inventoryValue(inventory, separator.inventoryIndex), separator.threshold, next.threshold,
-      ), first, second);
+      return interpolate(sourceInterpolationScale(inventoryValue(inventory, separator.inventoryIndex), separator.threshold, next.threshold), first, second);
     }
     separator = next;
   }
 }
 
-function evaluateUndecidedSeparators(
-  first: FuzzySeparator,
-  inventory: WeightInventory,
-  random: BotRandom,
-): number {
+function evaluateUndecidedSeparators(first: FuzzySeparator, inventory: WeightInventory, random: BotRandom): number {
   let separator = first;
   while (true) {
     if (inventoryValue(inventory, separator.inventoryIndex) < separator.threshold) {
@@ -573,12 +612,8 @@ function evaluateUndecidedSeparators(
     if (inventoryValue(inventory, separator.inventoryIndex) < next.threshold) {
       const first = undecidedLeafValue(separator, inventory, random);
       const decision = next.decision;
-      const second = decision.kind === "branch"
-        ? evaluateSeparators(decision.children, inventory)
-        : undecidedLeafValue(next, inventory, random);
-      return interpolate(sourceInterpolationScale(
-        inventoryValue(inventory, separator.inventoryIndex), separator.threshold, next.threshold,
-      ), first, second);
+      const second = decision.kind === "branch" ? evaluateSeparators(decision.children, inventory) : undecidedLeafValue(next, inventory, random);
+      return interpolate(sourceInterpolationScale(inventoryValue(inventory, separator.inventoryIndex), separator.threshold, next.threshold), first, second);
     }
     separator = next;
   }
@@ -597,12 +632,7 @@ function visitLeaves(first: FuzzySeparator, visit: (leaf: FuzzySeparator) => voi
   }
 }
 
-function interbreedSeparators(
-  parent1: FuzzySeparator,
-  parent2: FuzzySeparator,
-  output: FuzzySeparator,
-  report: (message: string) => void,
-): boolean {
+function interbreedSeparators(parent1: FuzzySeparator, parent2: FuzzySeparator, output: FuzzySeparator, report: (message: string) => void): boolean {
   let first = parent1;
   let second = parent2;
   let destination = output;
@@ -666,7 +696,9 @@ class OwnedWeightConfig implements WeightConfig {
     return { path: this.path, allocation: memory.reference(this.allocation), reported: structuredClone(this.reported) };
   }
 
-  private get view(): DataView { return allocationView(this.allocation); }
+  private get view(): DataView {
+    return allocationView(this.allocation);
+  }
 
   get weightCount(): number {
     this.requireOpen();
@@ -675,9 +707,13 @@ class OwnedWeightConfig implements WeightConfig {
     return count;
   }
 
-  set weightCount(count: number) { this.view.setInt32(0, count, true); }
+  set weightCount(count: number) {
+    this.view.setInt32(0, count, true);
+  }
 
-  get diagnostics(): readonly ScriptDiagnostic[] { return Object.freeze([...this.reported]); }
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return Object.freeze([...this.reported]);
+  }
 
   get maxInventoryIndex(): number {
     const maximum = (first: FuzzySeparator): number => {
@@ -716,7 +752,8 @@ class OwnedWeightConfig implements WeightConfig {
   }
 
   find(name: string): number {
-    const end = name.indexOf("\0"), query = end < 0 ? name : name.slice(0, end);
+    const end = name.indexOf("\0"),
+      query = end < 0 ? name : name.slice(0, end);
     for (let index = 0; index < this.weightCount; index++) {
       if (this.name(index) === query) return index;
     }
@@ -745,7 +782,7 @@ class OwnedWeightConfig implements WeightConfig {
     if (index < 0) {
       return;
     }
-    visitLeaves(this.separators(index), (leaf) => {
+    visitLeaves(this.separators(index), leaf => {
       if (!leaf.balanced) {
         return;
       }
@@ -768,15 +805,13 @@ class OwnedWeightConfig implements WeightConfig {
       storedScale = 100;
     }
     for (let index = 0; index < this.weightCount; index++) {
-      visitLeaves(this.separators(index), (leaf) => {
+      visitLeaves(this.separators(index), leaf => {
         if (!leaf.balanced) {
           return;
         }
         const midpoint = Math.fround(Math.fround(leaf.minWeight + leaf.maxWeight) * Math.fround(0.5));
-        leaf.maxWeight = Math.fround(midpoint
-          + Math.fround(Math.fround(leaf.maxWeight - midpoint) * storedScale));
-        leaf.minWeight = Math.fround(midpoint
-          + Math.fround(Math.fround(leaf.minWeight - midpoint) * storedScale));
+        leaf.maxWeight = Math.fround(midpoint + Math.fround(Math.fround(leaf.maxWeight - midpoint) * storedScale));
+        leaf.minWeight = Math.fround(midpoint + Math.fround(Math.fround(leaf.minWeight - midpoint) * storedScale));
         if (leaf.maxWeight < leaf.minWeight) {
           leaf.maxWeight = leaf.minWeight;
         }
@@ -787,7 +822,7 @@ class OwnedWeightConfig implements WeightConfig {
   evolve(random: BotRandom): void {
     this.requireOpen();
     for (let index = 0; index < this.weightCount; index++) {
-      visitLeaves(this.separators(index), (leaf) => {
+      visitLeaves(this.separators(index), leaf => {
         if (!leaf.balanced) {
           return;
         }
@@ -813,7 +848,10 @@ class OwnedWeightConfig implements WeightConfig {
     parent1.requireOpen();
     parent2.requireOpen();
     const errors: string[] = [];
-    const reportError = (message: string): void => { errors.push(message); report?.(message); };
+    const reportError = (message: string): void => {
+      errors.push(message);
+      report?.(message);
+    };
     if (parent1.weightCount !== parent2.weightCount || parent1.weightCount !== this.weightCount) {
       reportError("cannot interbreed weight configs, unequal numweights");
       return Object.freeze(errors);
@@ -834,7 +872,9 @@ class OwnedWeightConfig implements WeightConfig {
     this.disposed = true;
   }
 
-  private name(index: number): string { return this.heap.name(this.view.getUint32(4 + index * 8, true)); }
+  private name(index: number): string {
+    return this.heap.name(this.view.getUint32(4 + index * 8, true));
+  }
 
   private separators(index: number): FuzzySeparator {
     if (!Number.isInteger(index)) {
@@ -869,26 +909,49 @@ export class WeightConfigStore {
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
     const configs = [...this.owned];
-    return { generation: this.generation, heap: this.heap.checkpoint(memory), configs: configs.map(config => config.checkpoint(memory)),
-      cached: Array.from(this.cached, config => config === undefined ? null : configs.indexOf(config)) };
+    return {
+      generation: this.generation,
+      heap: this.heap.checkpoint(memory),
+      configs: configs.map(config => config.checkpoint(memory)),
+      cached: Array.from(this.cached, config => (config === undefined ? null : configs.indexOf(config))),
+    };
   }
   reference(config: WeightConfig): number {
     let index = 0;
-    for (const owned of this.owned) { if (owned === config) return index; index++; }
+    for (const owned of this.owned) {
+      if (owned === config) return index;
+      index++;
+    }
     throw new Error("Saved weight configuration belongs to another owner");
   }
-  configurations(): readonly WeightConfig[] { return [...this.owned]; }
+  configurations(): readonly WeightConfig[] {
+    return [...this.owned];
+  }
   resolve(reference: number): WeightConfig {
     const config = Number.isSafeInteger(reference) && reference >= 0 ? [...this.owned][reference] : undefined;
     if (config === undefined) throw new Error("Saved weight configuration reference is missing");
     return config;
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.weights"), image = { generation: reader.field("generation").integer(0), heap: reader.field("heap").value,
-      configs: reader.field("configs").list(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), reported: entry.field("reported").list(readScriptDiagnostic) })),
-      cached: reader.field("cached").list(entry => entry.nullable(reference => reference.integer(0))) };
-    if (this.owned.size !== 0 || this.cached.length !== 0 || !Number.isSafeInteger(image.generation) || image.generation < 0
-      || image.cached.length > this.maxCachedConfigs) throw new Error("Invalid weight configuration restoration");
+    const reader = new SaveReader(value, "bot.weights"),
+      image = {
+        generation: reader.field("generation").integer(0),
+        heap: reader.field("heap").value,
+        configs: reader.field("configs").list(entry => ({
+          allocation: entry.field("allocation").integer(0),
+          path: entry.field("path").string(),
+          reported: entry.field("reported").list(readScriptDiagnostic),
+        })),
+        cached: reader.field("cached").list(entry => entry.nullable(reference => reference.integer(0))),
+      };
+    if (
+      this.owned.size !== 0 ||
+      this.cached.length !== 0 ||
+      !Number.isSafeInteger(image.generation) ||
+      image.generation < 0 ||
+      image.cached.length > this.maxCachedConfigs
+    )
+      throw new Error("Invalid weight configuration restoration");
     this.heap.restore(image.heap, memory);
     const configs = image.configs.map(saved => {
       const allocation = memory.allocation(saved.allocation);
@@ -904,7 +967,8 @@ export class WeightConfigStore {
       return config;
     });
     for (const config of configs) this.owned.add(config);
-    this.cached.push(...cached); this.generation = image.generation;
+    this.cached.push(...cached);
+    this.generation = image.generation;
   }
 
   constructor(resolver: BotScriptReader, options: WeightConfigStoreOptions = {}) {
@@ -914,11 +978,7 @@ export class WeightConfigStore {
     this.reloadCharacters = typeof reloadCharacters === "function" ? reloadCharacters : () => reloadCharacters;
     this.print = options.print;
     this.debug = options.debug;
-    this.maxCachedConfigs = positiveInteger(
-      options.maxCachedConfigs,
-      MAX_CACHED_WEIGHT_CONFIGS,
-      "maxCachedConfigs",
-    );
+    this.maxCachedConfigs = positiveInteger(options.maxCachedConfigs, MAX_CACHED_WEIGHT_CONFIGS, "maxCachedConfigs");
     if (this.maxCachedConfigs > MAX_CACHED_WEIGHT_CONFIGS) {
       throw new RangeError(`maxCachedConfigs cannot exceed source limit ${MAX_CACHED_WEIGHT_CONFIGS}`);
     }
@@ -973,12 +1033,7 @@ export class WeightConfigStore {
     this.cached.length = 0;
   }
 
-  private readAndRetain(
-    path: string,
-    available: number,
-    generation: number,
-    startTime: number | undefined,
-  ): OwnedWeightConfig {
+  private readAndRetain(path: string, available: number, generation: number, startTime: number | undefined): OwnedWeightConfig {
     const config = this.read(path, generation);
     if (generation !== this.generation) {
       config.free();
@@ -1008,8 +1063,7 @@ export class WeightConfigStore {
 
   private report(diagnostic: ScriptDiagnostic, generation: number, path: string): undefined {
     this.requireCurrent(generation, path);
-    this.print?.(diagnostic.severity === "warning" ? 2 : 3,
-      `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
+    this.print?.(diagnostic.severity === "warning" ? 2 : 3, `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
     this.requireCurrent(generation, path);
     return undefined;
   }
@@ -1027,42 +1081,57 @@ export class WeightConfigStore {
     const reported: ScriptDiagnostic[] = [];
     let callbackAborted = false;
     const invokeCallback = <T>(callback: () => T): T => {
-      try { return callback(); }
-      catch (error) { callbackAborted = true; throw error; }
+      try {
+        return callback();
+      } catch (error) {
+        callbackAborted = true;
+        throw error;
+      }
     };
-    const isSourceFailure = (error: unknown): boolean => !callbackAborted
-      && (error instanceof WeightConfigError || error instanceof ScriptLanguageError);
+    const isSourceFailure = (error: unknown): boolean => !callbackAborted && (error instanceof WeightConfigError || error instanceof ScriptLanguageError);
     const report = (diagnostic: ScriptDiagnostic): undefined => invokeCallback(() => this.report(diagnostic, generation, path));
     const now = this.preprocessorOptions.now;
-    const preprocessor = ScriptSourceReader.open(source, {
-      resolve: request => invokeCallback(() => this.resolver.resolve(request)),
-    }, {
-      ...this.preprocessorOptions, globals: this.resolver.globals,
-      ...(this.resolver.debugEval === undefined ? {} : { debugEval: (text: string) => invokeCallback(() => this.resolver.debugEval?.(text)) }),
-      ...(now === undefined ? {} : { now: () => invokeCallback(now) }),
-      report: diagnostic => {
-        reported.push(diagnostic);
-        invokeCallback(() => this.preprocessorOptions.report?.(diagnostic));
-        report(diagnostic);
+    const preprocessor = ScriptSourceReader.open(
+      source,
+      {
+        resolve: request => invokeCallback(() => this.resolver.resolve(request)),
       },
-    });
+      {
+        ...this.preprocessorOptions,
+        globals: this.resolver.globals,
+        ...(this.resolver.debugEval === undefined ? {} : { debugEval: (text: string) => invokeCallback(() => this.resolver.debugEval?.(text)) }),
+        ...(now === undefined ? {} : { now: () => invokeCallback(now) }),
+        report: diagnostic => {
+          reported.push(diagnostic);
+          invokeCallback(() => this.preprocessorOptions.report?.(diagnostic));
+          report(diagnostic);
+        },
+      },
+    );
     this.requireCurrent(generation, path);
     const allocation = this.heap.memory.allocate(WEIGHT_CONFIG_BYTES, "heap", true);
     const config = new OwnedWeightConfig(source.path, this.heap, allocation, reported, path);
     const nextToken = (): ScriptToken | undefined => {
       this.requireCurrent(generation, path);
       let token: ScriptToken | undefined;
-      try { token = preprocessor.next()?.token; }
-      catch (error) {
+      try {
+        token = preprocessor.next()?.token;
+      } catch (error) {
         if (!preprocessor.isSourceFailure(error)) throw error;
       }
       this.requireCurrent(generation, path);
       return token;
     };
     try {
-      new WeightParser(() => ({ path: preprocessor.currentScriptFilename, line: preprocessor.position.line, column: 1 }),
-        nextToken, reported, this.heap, config,
-        report, isSourceFailure).parse();
+      new WeightParser(
+        () => ({ path: preprocessor.currentScriptFilename, line: preprocessor.position.line, column: 1 }),
+        nextToken,
+        reported,
+        this.heap,
+        config,
+        report,
+        isSourceFailure,
+      ).parse();
     } catch (error) {
       if (isSourceFailure(error)) {
         const reload = this.reloadCharacters();

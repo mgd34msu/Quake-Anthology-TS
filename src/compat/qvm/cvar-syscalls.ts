@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cvar traps from Quake III Arena sv_game.c, cl_cgame.c and cl_ui.c;
  * vmCvar_t registration/update and value formatting from qcommon/cvar.c.
@@ -24,8 +25,7 @@ function update(pointer: number, memory: Q3GameMemory, cvars: QvmCvarServices): 
 
 function register(words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices): void {
   const pointer = words.getInt32(4, true);
-  const handle = cvars.bindVm(memory.readString(words.getInt32(8, true)),
-    memory.readString(words.getInt32(12, true)), words.getInt32(16, true));
+  const handle = cvars.bindVm(memory.readString(words.getInt32(8, true)), memory.readString(words.getInt32(12, true)), words.getInt32(16, true));
   if (memory.pointer(pointer) === null) return;
   const record = memory.view(pointer, 272);
   record.setInt32(0, handle, true);
@@ -49,48 +49,69 @@ function variableString(words: DataView, memory: Q3GameMemory, cvars: QvmCvarSer
 }
 
 /** Trap numbers come from g_public.h, cg_public.h and ui_public.h. */
-export function qvmCvarSyscall(
-  role: "qagame" | "cgame" | "ui", words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices,
-): number | null {
+export function qvmCvarSyscall(role: "qagame" | "cgame" | "ui", words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices): number | null {
   const trap = words.getInt32(0, true);
   if (role !== "ui") {
     switch (trap) {
-      case 3: register(words, memory, cvars); return 0;
-      case 4: update(words.getInt32(4, true), memory, cvars); return 0;
-      case 5: set(words, memory, cvars); return 0;
+      case 3:
+        register(words, memory, cvars);
+        return 0;
+      case 4:
+        update(words.getInt32(4, true), memory, cvars);
+        return 0;
+      case 5:
+        set(words, memory, cvars);
+        return 0;
       case 6: {
-        if (role === "cgame") { variableString(words, memory, cvars); return 0; }
+        if (role === "cgame") {
+          variableString(words, memory, cvars);
+          return 0;
+        }
         const source = cvars.get(memory.readString(words.getInt32(4, true)));
         return source === undefined ? 0 : source.integerValue;
       }
       case 7:
         if (role === "cgame") return null;
-        variableString(words, memory, cvars); return 0;
-      default: return null;
+        variableString(words, memory, cvars);
+        return 0;
+      default:
+        return null;
     }
   }
   switch (trap) {
-    case 3: set(words, memory, cvars); return 0;
+    case 3:
+      set(words, memory, cvars);
+      return 0;
     case 4: {
       const source = cvars.get(memory.readString(words.getInt32(4, true)));
       return float32ToBits(source === undefined ? 0 : source.numericValue) | 0;
     }
-    case 5: variableString(words, memory, cvars); return 0;
+    case 5:
+      variableString(words, memory, cvars);
+      return 0;
     case 6:
       cvars.setValue(memory.readString(words.getInt32(4, true)), words.getFloat32(8, true));
       return 0;
-    case 7: cvars.reset(memory.readString(words.getInt32(4, true))); return 0;
+    case 7:
+      cvars.reset(memory.readString(words.getInt32(4, true)));
+      return 0;
     case 8:
-      cvars.register(memory.readString(words.getInt32(4, true)), memory.readString(words.getInt32(8, true)),
-        words.getInt32(12, true));
+      cvars.register(memory.readString(words.getInt32(4, true)), memory.readString(words.getInt32(8, true)), words.getInt32(12, true));
       return 0;
     case 9: {
-      const flags = words.getInt32(4, true), destination = words.getInt32(8, true), capacity = words.getInt32(12, true);
+      const flags = words.getInt32(4, true),
+        destination = words.getInt32(8, true),
+        capacity = words.getInt32(12, true);
       memory.writeString(destination, cvars.infoString(flags), capacity);
       return 0;
     }
-    case 50: register(words, memory, cvars); return 0;
-    case 51: update(words.getInt32(4, true), memory, cvars); return 0;
-    default: return null;
+    case 50:
+      register(words, memory, cvars);
+      return 0;
+    case 51:
+      update(words.getInt32(4, true), memory, cvars);
+      return 0;
+    default:
+      return null;
   }
 }

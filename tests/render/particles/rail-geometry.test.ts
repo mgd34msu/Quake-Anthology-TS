@@ -1,8 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { railGeometry } from "../../../src/render/scene/particles/primitives.ts";
 
-const pose = (kind: "rail-core" | "rail-rings" | "lightning", x: number): Parameters<typeof railGeometry>[0] =>
-  ({ kind, origin: { x, y: 0, z: 0 }, oldOrigin: { x: 0, y: 0, z: 0 }, shaderRGBA: { x: 255, y: 255, z: 255, w: 255 } });
+const pose = (kind: "rail-core" | "rail-rings" | "lightning", x: number): Parameters<typeof railGeometry>[0] => ({
+  kind,
+  origin: { x, y: 0, z: 0 },
+  oldOrigin: { x: 0, y: 0, z: 0 },
+  shaderRGBA: { x: 255, y: 255, z: 255, w: 255 },
+});
 
 test("rails with source-undefined lengths draw nothing instead of throwing", () => {
   const view = { x: 0, y: 100, z: 0 };

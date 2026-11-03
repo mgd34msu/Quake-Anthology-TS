@@ -1,10 +1,11 @@
-import type { QuakeWorldMessage } from './quakeworld.ts';
-import { writeQuakeWorldMessage } from './quakeworld.ts';
-import { SizeBuf } from './message.ts';
-import type { QuakeWorldDemoRecord } from './demos.ts';
-import { IdIndex, StringTable } from '../../foundation/index.ts';
+// SPDX-License-Identifier: GPL-2.0-or-later
+import type { QuakeWorldMessage } from "./quakeworld.ts";
+import { writeQuakeWorldMessage } from "./quakeworld.ts";
+import { SizeBuf } from "./message.ts";
+import type { QuakeWorldDemoRecord } from "./demos.ts";
+import { IdIndex, StringTable } from "../../foundation/index.ts";
 
-type SeedMessage = Exclude<QuakeWorldMessage, { kind: 'packet-entities' | 'invalid-delta' }>;
+type SeedMessage = Exclude<QuakeWorldMessage, { kind: "packet-entities" | "invalid-delta" }>;
 
 const FIELD_BASELINE = 0;
 const FIELD_LIGHT_STYLE = 1;
@@ -40,7 +41,10 @@ export class QuakeWorldRecordingState {
 
   private setField(category: number, discriminator: number, message: SeedMessage): void {
     const row = this.fields.find(category, discriminator);
-    if (row >= 0) { this.rows[row] = message; return; }
+    if (row >= 0) {
+      this.rows[row] = message;
+      return;
+    }
     this.fields.reserve(1);
     this.fields.insert(category, discriminator, this.rows.length);
     this.rows.push(message);
@@ -69,52 +73,106 @@ export class QuakeWorldRecordingState {
   observe(messages: readonly QuakeWorldMessage[]): void {
     for (const message of messages) {
       switch (message.kind) {
-        case 'server-data': this.fields.clear(); this.rows.length = 0; this.statics.length = 0; break;
-        case 'static': case 'static-sound':
-          if (this.statics.length >= 4096) throw new Error('Too many static entities');
-          this.statics.push(message); break;
-        case 'baseline': this.setField(FIELD_BASELINE, message.state.number, message); break;
-        case 'light-style': this.setField(FIELD_LIGHT_STYLE, message.index, message); break;
-        case 'stat': this.setField(FIELD_STAT, message.index, message); break;
-        case 'userinfo':
+        case "server-data":
+          this.fields.clear();
+          this.rows.length = 0;
+          this.statics.length = 0;
+          break;
+        case "static":
+        case "static-sound":
+          if (this.statics.length >= 4096) throw new Error("Too many static entities");
+          this.statics.push(message);
+          break;
+        case "baseline":
+          this.setField(FIELD_BASELINE, message.state.number, message);
+          break;
+        case "light-style":
+          this.setField(FIELD_LIGHT_STYLE, message.index, message);
+          break;
+        case "stat":
+          this.setField(FIELD_STAT, message.index, message);
+          break;
+        case "userinfo":
           this.deleteSetInfo(message.slot);
-          this.setField(FIELD_USERINFO, message.slot, message); break;
-        case 'set-info':
-          if (message.key.length > 63 || message.value.length > 511 || this.pairSlots.length >= 4096) throw new Error('QuakeWorld info exceeds its limits');
-          this.setField(FIELD_SET_INFO, this.pairId(message.slot, message.key), message); break;
-        case 'server-info': this.setField(FIELD_SERVER_INFO, this.keys.intern(message.key), message); break;
-        case 'frags': this.setField(FIELD_FRAGS, message.slot, message); break;
-        case 'ping': this.setField(FIELD_PING, message.slot, message); break;
-        case 'enter-time': this.setField(FIELD_ENTER_TIME, message.slot, message); break;
-        case 'packet-loss': this.setField(FIELD_PACKET_LOSS, message.slot, message); break;
-        case 'set-angle': this.setField(FIELD_SET_ANGLE, 0, message); break;
-        case 'set-view': this.setField(FIELD_SET_VIEW, 0, message); break;
-        case 'pause': this.setField(FIELD_PAUSE, 0, message); break;
-        case 'intermission': this.setField(FIELD_INTERMISSION, 0, message); break;
-        case 'finale': this.setField(FIELD_FINALE, 0, message); break;
-        case 'cd-track': this.setField(FIELD_CD_TRACK, 0, message); break;
-        case 'max-speed': this.setField(FIELD_MAX_SPEED, 0, message); break;
-        case 'entity-gravity': this.setField(FIELD_ENTITY_GRAVITY, 0, message); break;
-        default: break;
+          this.setField(FIELD_USERINFO, message.slot, message);
+          break;
+        case "set-info":
+          if (message.key.length > 63 || message.value.length > 511 || this.pairSlots.length >= 4096) throw new Error("QuakeWorld info exceeds its limits");
+          this.setField(FIELD_SET_INFO, this.pairId(message.slot, message.key), message);
+          break;
+        case "server-info":
+          this.setField(FIELD_SERVER_INFO, this.keys.intern(message.key), message);
+          break;
+        case "frags":
+          this.setField(FIELD_FRAGS, message.slot, message);
+          break;
+        case "ping":
+          this.setField(FIELD_PING, message.slot, message);
+          break;
+        case "enter-time":
+          this.setField(FIELD_ENTER_TIME, message.slot, message);
+          break;
+        case "packet-loss":
+          this.setField(FIELD_PACKET_LOSS, message.slot, message);
+          break;
+        case "set-angle":
+          this.setField(FIELD_SET_ANGLE, 0, message);
+          break;
+        case "set-view":
+          this.setField(FIELD_SET_VIEW, 0, message);
+          break;
+        case "pause":
+          this.setField(FIELD_PAUSE, 0, message);
+          break;
+        case "intermission":
+          this.setField(FIELD_INTERMISSION, 0, message);
+          break;
+        case "finale":
+          this.setField(FIELD_FINALE, 0, message);
+          break;
+        case "cd-track":
+          this.setField(FIELD_CD_TRACK, 0, message);
+          break;
+        case "max-speed":
+          this.setField(FIELD_MAX_SPEED, 0, message);
+          break;
+        case "entity-gravity":
+          this.setField(FIELD_ENTITY_GRAVITY, 0, message);
+          break;
+        default:
+          break;
       }
     }
   }
-  seed(data: Extract<QuakeWorldMessage, { kind: 'server-data' }>, models: readonly string[], sounds: readonly string[], seconds: number,
-    outgoing: number, incoming: number): readonly QuakeWorldDemoRecord[] {
+  seed(
+    data: Extract<QuakeWorldMessage, { kind: "server-data" }>,
+    models: readonly string[],
+    sounds: readonly string[],
+    seconds: number,
+    outgoing: number,
+    incoming: number,
+  ): readonly QuakeWorldDemoRecord[] {
     const messages: SeedMessage[] = [data];
-    for (const [kind, names] of [['model-list', models], ['sound-list', sounds]] satisfies readonly (readonly ['model-list' | 'sound-list', readonly string[]])[]) {
+    for (const [kind, names] of [
+      ["model-list", models],
+      ["sound-list", sounds],
+    ] satisfies readonly (readonly ["model-list" | "sound-list", readonly string[]])[]) {
       if (names.length === 0) messages.push({ kind, first: 0, names: [], next: 0 });
       for (const [first, name] of names.entries()) messages.push({ kind, first, names: [name], next: first + 1 === names.length ? 0 : first + 1 });
     }
     messages.push(...this.statics);
     for (const row of this.rows) if (row !== null) messages.push(row);
     const records: QuakeWorldDemoRecord[] = messages.map((message, index) => {
-      const payload = new SizeBuf(1442); writeQuakeWorldMessage(payload, data.protocol, message);
-      const bytes = new Uint8Array(payload.cursize + 8), header = new DataView(bytes.buffer);
-      header.setInt32(0, index + 1, true); header.setInt32(4, outgoing - 1, true); bytes.set(payload.bytes(), 8);
-      return { kind: 'packet', seconds, message: bytes };
+      const payload = new SizeBuf(1442);
+      writeQuakeWorldMessage(payload, data.protocol, message);
+      const bytes = new Uint8Array(payload.cursize + 8),
+        header = new DataView(bytes.buffer);
+      header.setInt32(0, index + 1, true);
+      header.setInt32(4, outgoing - 1, true);
+      bytes.set(payload.bytes(), 8);
+      return { kind: "packet", seconds, message: bytes };
     });
-    records.push({ kind: 'sequences', seconds, outgoing, incoming });
+    records.push({ kind: "sequences", seconds, outgoing, incoming });
     return records;
   }
 }

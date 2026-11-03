@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import titleImage from "../../../assets/ui/title.png" with { type: "file" };
 import type { PngImage } from "../../formats/images/png.ts";
 
-export interface SplashScreen { close(): void; }
+export interface SplashScreen {
+  close(): void;
+}
 
 /** Bilinear cover-fit scale of the title art into a width*height RGBA frame. */
 export function scaleCover(image: PngImage, width: number, height: number): Uint8Array {
@@ -9,14 +12,17 @@ export function scaleCover(image: PngImage, width: number, height: number): Uint
   const scale = Math.max(width / image.width, height / image.height);
   const sourceWidth = width / scale;
   // Anchor vertical crops to the top so the title treatment is never cut.
-  const originX = (image.width - sourceWidth) / 2, originY = 0;
+  const originX = (image.width - sourceWidth) / 2,
+    originY = 0;
   for (let y = 0; y < height; y++) {
     const sourceY = originY + (y + 0.5) / scale - 0.5;
-    const y0 = Math.max(0, Math.min(image.height - 1, Math.floor(sourceY))), y1 = Math.min(image.height - 1, y0 + 1);
+    const y0 = Math.max(0, Math.min(image.height - 1, Math.floor(sourceY))),
+      y1 = Math.min(image.height - 1, y0 + 1);
     const fy = Math.max(0, Math.min(1, sourceY - y0));
     for (let x = 0; x < width; x++) {
       const sourceX = originX + (x + 0.5) / scale - 0.5;
-      const x0 = Math.max(0, Math.min(image.width - 1, Math.floor(sourceX))), x1 = Math.min(image.width - 1, x0 + 1);
+      const x0 = Math.max(0, Math.min(image.width - 1, Math.floor(sourceX))),
+        x1 = Math.min(image.width - 1, x0 + 1);
       const fx = Math.max(0, Math.min(1, sourceX - x0));
       const target = (y * width + x) * 4;
       for (let channel = 0; channel < 4; channel++) {
@@ -43,8 +49,13 @@ export async function runSplashChild(width: number, height: number): Promise<num
   const window = SdlWindow.open({ title: "Quake Anthology", width, height, backend: "cpu" });
   let parentGone = false;
   void (async () => {
-    try { for await (const _chunk of Bun.stdin.stream()) { /* Parent sends nothing; EOF is the signal. */ } }
-    catch { /* A broken pipe is the same signal. */ }
+    try {
+      for await (const _chunk of Bun.stdin.stream()) {
+        /* Parent sends nothing; EOF is the signal. */
+      }
+    } catch {
+      /* A broken pipe is the same signal. */
+    }
     parentGone = true;
   })();
   try {
@@ -58,7 +69,9 @@ export async function runSplashChild(width: number, height: number): Promise<num
       if (++ticks % 30 === 0) process.stdout.write(`tick ${Date.now()}\n`);
       await Bun.sleep(16);
     }
-  } finally { window.close(); }
+  } finally {
+    window.close();
+  }
   return 0;
 }
 
@@ -76,21 +89,36 @@ export async function openSplash(width: number, height: number): Promise<SplashS
       close: () => {
         if (closed.value) return;
         closed.value = true;
-        try { child.stdin.end(); } catch { /* Already closed. */ }
-        setTimeout(() => { try { child.kill(); } catch { /* Already exited. */ } }, 300).unref();
+        try {
+          child.stdin.end();
+        } catch {
+          /* Already closed. */
+        }
+        setTimeout(() => {
+          try {
+            child.kill();
+          } catch {
+            /* Already exited. */
+          }
+        }, 300).unref();
       },
     };
     // Drain the child's pipe (discarding ticks) and wait briefly for its
     // first presented frame so the splash is up before loading starts.
     let signalReady: (presented: boolean) => void = () => {};
-    const ready = new Promise<boolean>(resolveReady => { signalReady = resolveReady; });
+    const ready = new Promise<boolean>(resolveReady => {
+      signalReady = resolveReady;
+    });
     void (async () => {
       const decoder = new TextDecoder();
       let pending = "";
       let presented = false;
       for await (const chunk of child.stdout) {
         pending += decoder.decode(chunk, { stream: true });
-        if (!presented && pending.includes("ready\n")) { presented = true; signalReady(true); }
+        if (!presented && pending.includes("ready\n")) {
+          presented = true;
+          signalReady(true);
+        }
         if (pending.length > 4096) pending = pending.slice(-1024);
       }
       signalReady(presented);
@@ -98,5 +126,7 @@ export async function openSplash(width: number, height: number): Promise<SplashS
     const presented = await Promise.race([ready, Bun.sleep(5000).then(() => false), child.exited.then(() => false)]);
     if (!presented && child.exitCode !== null) return null;
     return splash;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
@@ -24,11 +25,20 @@ export interface ModCommandPort extends SessionResource {
   executeNow(text: string | null, caller?: CommandContext): number;
 }
 
-interface Entry { readonly binding: ModCommandBinding; readonly port: ModCommandPort; }
-interface PendingCommand { readonly kind: "append" | "insert"; readonly text: string; readonly source: CommandContext; readonly dialect: CommandDialect; }
+interface Entry {
+  readonly binding: ModCommandBinding;
+  readonly port: ModCommandPort;
+}
+interface PendingCommand {
+  readonly kind: "append" | "insert";
+  readonly text: string;
+  readonly source: CommandContext;
+  readonly dialect: CommandDialect;
+}
 
 export function readModCommand(raw: string): { readonly selection: ModSelection; readonly text: string } {
-  const selected = tokenizeCommand(raw, "q3").argv[1], text = commandTextTail(raw, "q3", 2);
+  const selected = tokenizeCommand(raw, "q3").argv[1],
+    text = commandTextTail(raw, "q3", 2);
   if (selected === undefined || text.length === 0) throw new Error("Usage: modcmd PRODUCT/COMPONENT_ID <command>");
   return { selection: readModSelection(selected), text };
 }
@@ -40,24 +50,35 @@ export class ModCommands {
   private readonly pending = new EventRing<PendingCommand>(4096);
   private readonly pendingCursor: EventCursor = this.pending.openCursor();
 
-  constructor(private readonly options: {
-    readonly context: CommandContext;
-    commands(): CommandBuffer | null;
-  }) {}
+  constructor(
+    private readonly options: {
+      readonly context: CommandContext;
+      commands(): CommandBuffer | null;
+    },
+  ) {}
 
   private submit(kind: PendingCommand["kind"], text: string, source: CommandContext, dialect: CommandDialect): void {
     if (source.session !== this.options.context.session) throw new Error("Staged command belongs to another session");
     const commands = this.options.commands();
-    if (commands === null) { this.pending.admit({ kind, text, source, dialect }); return; }
-    this.flush(); commands[kind](text, source, dialect);
+    if (commands === null) {
+      this.pending.admit({ kind, text, source, dialect });
+      return;
+    }
+    this.flush();
+    commands[kind](text, source, dialect);
   }
-  append(text: string, source: CommandContext, dialect: CommandDialect): void { this.submit("append", text, source, dialect); }
-  insert(text: string, source: CommandContext, dialect: CommandDialect): void { this.submit("insert", text, source, dialect); }
+  append(text: string, source: CommandContext, dialect: CommandDialect): void {
+    this.submit("append", text, source, dialect);
+  }
+  insert(text: string, source: CommandContext, dialect: CommandDialect): void {
+    this.submit("insert", text, source, dialect);
+  }
   flush(): void {
     if (this.pending.pending(this.pendingCursor) === 0) return;
     const commands = this.options.commands();
     if (commands === null) throw new Error("Source commands require the candidate's prepared command buffer");
-    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
+    const pending = this.pending.take(this.pendingCursor);
+    this.pending.retire();
     for (const entry of pending) commands[entry.kind](entry.text, entry.source, entry.dialect);
   }
 
@@ -67,7 +88,10 @@ export class ModCommands {
     if (binding.module.id !== modInstanceProvider(binding.selection)) throw new Error("Mod commands require their component's module identity");
     if (binding.cvars.context.session !== this.options.context.session) throw new Error("Mod command cvars belong to another session");
     if (this.selections.has(key)) throw new Error(`Mod commands are already bound: ${key}`);
-    const instance = Symbol(key), producer = Object.freeze({ kind: "game-module", module: Object.freeze({ ...binding.module }), instance } satisfies NonNullable<CommandContext["producer"]>);
+    const instance = Symbol(key),
+      producer = Object.freeze({ kind: "game-module", module: Object.freeze({ ...binding.module }), instance } satisfies NonNullable<
+        CommandContext["producer"]
+      >);
     const buffers = new Set<CommandBuffer>();
     let closed = false;
     const current = (): CommandBuffer | null => {
@@ -76,7 +100,8 @@ export class ModCommands {
       const buffer = this.options.commands();
       if (buffer === null) return null;
       if (buffer.context.session !== this.options.context.session) throw new Error("Mod command buffer belongs to another session");
-      buffers.add(buffer); return buffer;
+      buffers.add(buffer);
+      return buffer;
     };
     const source = (buffer: CommandBuffer | null, caller: CommandContext | undefined): CommandContext => {
       const context = caller ?? buffer?.executionContext ?? this.options.context;
@@ -85,23 +110,35 @@ export class ModCommands {
     };
     const port: ModCommandPort = {
       producer,
-      append: (text, caller) => { const buffer = current(); this.append(text, source(buffer, caller), binding.cvars.dialect); },
-      insert: (text, caller) => { const buffer = current(); this.insert(text, source(buffer, caller), binding.cvars.dialect); },
-      executeNow: (text, caller) => { const buffer = current();
+      append: (text, caller) => {
+        const buffer = current();
+        this.append(text, source(buffer, caller), binding.cvars.dialect);
+      },
+      insert: (text, caller) => {
+        const buffer = current();
+        this.insert(text, source(buffer, caller), binding.cvars.dialect);
+      },
+      executeNow: (text, caller) => {
+        const buffer = current();
         if (buffer === null) throw new Error("Immediate mod commands require the candidate's prepared command buffer");
-        this.flush(); return buffer.executeNow(text, source(buffer, caller), binding.cvars.dialect); },
+        this.flush();
+        return buffer.executeNow(text, source(buffer, caller), binding.cvars.dialect);
+      },
       close: () => {
         if (closed) return undefined;
         closed = true;
-        this.entries.delete(instance); this.selections.delete(key);
+        this.entries.delete(instance);
+        this.selections.delete(key);
         this.pending.filterLive(entry => entry.source.producer?.instance !== instance);
-        const current = this.options.commands(); if (current !== null) buffers.add(current);
+        const current = this.options.commands();
+        if (current !== null) buffers.add(current);
         for (const buffer of buffers) buffer.discardProducer(instance);
         return undefined;
       },
     };
     const entry = { binding, port };
-    this.entries.set(instance, entry); this.selections.set(key, entry);
+    this.entries.set(instance, entry);
+    this.selections.set(key, entry);
     return resources.own(port);
   }
 
@@ -109,15 +146,23 @@ export class ModCommands {
     const instance = source.producer?.instance;
     if (instance === undefined) return null;
     if (source.session !== this.options.context.session) throw new Error("Mod command source belongs to another session");
-    const entry = this.entries.get(instance), module = source.producer?.module;
+    const entry = this.entries.get(instance),
+      module = source.producer?.module;
     if (entry === undefined || module === undefined) throw new Error("Mod command producer is no longer bound to this world");
     const expected = entry.port.producer.module;
-    if (module.id !== expected.id || module.artifactPath !== expected.artifactPath || module.digest !== expected.digest || module.revision !== expected.revision)
+    if (
+      module.id !== expected.id ||
+      module.artifactPath !== expected.artifactPath ||
+      module.digest !== expected.digest ||
+      module.revision !== expected.revision
+    )
       throw new Error("Mod command source differs from its admitted module");
     return entry;
   }
 
-  cvars(source: CommandContext): CvarRegistry | null { return this.entry(source)?.binding.cvars ?? null; }
+  cvars(source: CommandContext): CvarRegistry | null {
+    return this.entry(source)?.binding.cvars ?? null;
+  }
   active(source: CommandContext): boolean {
     const instance = source.producer?.instance;
     return instance !== undefined && this.entries.has(instance) && this.entry(source) !== null;
@@ -133,7 +178,8 @@ export class ModCommands {
     return this.entry(command.source)?.binding.invoke(command) ?? false;
   }
   execute(selection: ModSelection, text: string, caller: CommandContext): number {
-    const key = modSelectionKey(selection), entry = this.selections.get(key);
+    const key = modSelectionKey(selection),
+      entry = this.selections.get(key);
     if (entry === undefined) throw new Error(`Mod commands are unavailable: ${key}`);
     return entry.port.executeNow(text, caller);
   }

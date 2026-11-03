@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { discoverInstalledContent, expectedProducts } from "../../src/content/catalog/index.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -15,80 +16,162 @@ import { openMountPlan } from "../../src/content/mounts/index.ts";
 import { FrameCapture } from "../../src/capture/index.ts";
 
 const identity = createIdentityOwner("config-scripts");
-function context(index: number): CommandContext { return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } }; }
+function context(index: number): CommandContext {
+  return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } };
+}
 
 test("common Q3 levelshot forwards source authority while raw renderer levelshot remains available", async () => {
-  const root = await mkdtemp(join(tmpdir(), "q3-levelshot-routing-")), source = context(1);
-  const forwarded: CommandContext[] = [], writes: Promise<void>[] = [];
+  const root = await mkdtemp(join(tmpdir(), "q3-levelshot-routing-")),
+    source = context(1);
+  const forwarded: CommandContext[] = [],
+    writes: Promise<void>[] = [];
   let reads = 0;
-  const commands = new CommandBuffer({ dialect: "q3", context: source, forwardToServer: command => {
-    expect(command.argv).toEqual(["levelshot"]); forwarded.push(command.source); return undefined;
-  } });
-  const capture = new FrameCapture(root, { readRgba: () => { reads++; return { width: 2, height: 2, pixels: new Uint8Array(16) }; } });
-  const unregister = registerConsoleCommands({ commands, config: () => new ConfigStore(root), configuration: () => "", console: () => null,
-    canChat: () => false, capture: () => capture, mapName: () => "q3dm1", print: () => undefined, queue: operation => { writes.push(operation()); } });
+  const commands = new CommandBuffer({
+    dialect: "q3",
+    context: source,
+    forwardToServer: command => {
+      expect(command.argv).toEqual(["levelshot"]);
+      forwarded.push(command.source);
+      return undefined;
+    },
+  });
+  const capture = new FrameCapture(root, {
+    readRgba: () => {
+      reads++;
+      return { width: 2, height: 2, pixels: new Uint8Array(16) };
+    },
+  });
+  const unregister = registerConsoleCommands({
+    commands,
+    config: () => new ConfigStore(root),
+    configuration: () => "",
+    console: () => null,
+    canChat: () => false,
+    capture: () => capture,
+    mapName: () => "q3dm1",
+    print: () => undefined,
+    queue: operation => {
+      writes.push(operation());
+    },
+  });
   try {
     commands.executeNow("levelshot");
-    expect(forwarded).toEqual([source]); expect(reads).toBe(0);
-    commands.executeNow("screenshot levelshot"); await Promise.all(writes);
-    expect(reads).toBe(1); expect(await Bun.file(join(root, "levelshots/q3dm1.tga")).exists()).toBe(true);
-  } finally { unregister(); await rm(root, { recursive: true, force: true }); }
+    expect(forwarded).toEqual([source]);
+    expect(reads).toBe(0);
+    commands.executeNow("screenshot levelshot");
+    await Promise.all(writes);
+    expect(reads).toBe(1);
+    expect(await Bun.file(join(root, "levelshots/q3dm1.tga")).exists()).toBe(true);
+  } finally {
+    unregister();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("mounted library listing protects its owner through queued writes and retirement", async () => {
-  const writing = Promise.withResolvers<void>(), listing = Promise.withResolvers<readonly string[]>();
-  const entered = Promise.withResolvers<void>(), calls: string[] = [];
+  const writing = Promise.withResolvers<void>(),
+    listing = Promise.withResolvers<readonly string[]>();
+  const entered = Promise.withResolvers<void>(),
+    calls: string[] = [];
   let retired = 0;
-  const scripts = new ConsoleScriptFiles({ consoleRoot: tmpdir(), settings: new ConfigStore(tmpdir()), mounted: undefined,
-    mountedFiles: (directory, extension) => { calls.push(`${directory}:${extension}`); entered.resolve(); return listing.promise; } }, async () => { retired++; });
-  const remote: CommandContext = { session: identity.session, origin: { kind: "script", name: "remote.cfg", caller: { kind: "remote-client", client: identity.client(2, 0) } } };
+  const scripts = new ConsoleScriptFiles(
+    {
+      consoleRoot: tmpdir(),
+      settings: new ConfigStore(tmpdir()),
+      mounted: undefined,
+      mountedFiles: (directory, extension) => {
+        calls.push(`${directory}:${extension}`);
+        entered.resolve();
+        return listing.promise;
+      },
+    },
+    async () => {
+      retired++;
+    },
+  );
+  const remote: CommandContext = {
+    session: identity.session,
+    origin: { kind: "script", name: "remote.cfg", caller: { kind: "remote-client", client: identity.client(2, 0) } },
+  };
   await expect(scripts.listMounted("video", ".roq", remote)).rejects.toThrow("Remote clients");
   expect(calls).toEqual([]);
   const write = scripts.write(() => writing.promise);
   const result = scripts.listMounted("video", ".roq", context(0));
   const close = scripts.close();
-  await Promise.resolve(); expect(calls).toEqual([]); expect(retired).toBe(0);
-  writing.resolve(); await write; await entered.promise;
-  expect(calls).toEqual(["video:.roq"]); expect(retired).toBe(0);
+  await Promise.resolve();
+  expect(calls).toEqual([]);
+  expect(retired).toBe(0);
+  writing.resolve();
+  await write;
+  await entered.promise;
+  expect(calls).toEqual(["video:.roq"]);
+  expect(retired).toBe(0);
   listing.resolve(["intro.roq", "end.roq"]);
   expect(await result).toEqual(["intro.roq", "end.roq"]);
-  await close; expect(retired).toBe(1);
+  await close;
+  expect(retired).toBe(1);
   await expect(scripts.listMounted("", ".dem", context(0))).rejects.toThrow("retired");
 });
 
 test("configuration library lists readable seat and product scripts with the same precedence", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-library-"));
   try {
-    const settings = new ConfigStore(join(root, "product")), consoleRoot = join(root, "console");
+    const settings = new ConfigStore(join(root, "product")),
+      consoleRoot = join(root, "console");
     const scripts = new ConsoleScriptFiles({ consoleRoot, settings, mounted: undefined });
     await settings.dump("config.cfg", "echo product\n");
     await settings.dump("presets/aim.cfg", "echo aim\n");
     await settings.dump("ignored.txt", "not a config");
     await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("CONFIG.cfg", "echo seat\n");
     await seatConsoleConfig(consoleRoot, identity.seat(1)).dump("other.cfg", "echo other\n");
-    expect(await scripts.list(context(0))).toEqual([{ name: "CONFIG.cfg", kind: "seat" }, { name: "presets/aim.cfg", kind: "product" }]);
+    expect(await scripts.list(context(0))).toEqual([
+      { name: "CONFIG.cfg", kind: "seat" },
+      { name: "presets/aim.cfg", kind: "product" },
+    ]);
     expect(await scripts.read("CONFIG.cfg", context(0))).toBe("echo seat\n");
     expect((await scripts.list(context(1))).map(entry => entry.name)).toEqual(["config.cfg", "other.cfg", "presets/aim.cfg"]);
     await scripts.close();
     await expect(scripts.list(context(0))).rejects.toThrow("retired");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("explicit legacy home migration selects latest game config without writing or overriding seat archives", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-migration-"));
   try {
-    const home = join(root, "legacy"), first = new ConfigStore(join(home, "id1")), latest = new ConfigStore(join(home, "hipnotic"));
-    const settings = new ConfigStore(join(root, "current-product")), consoleRoot = join(root, "console");
+    const home = join(root, "legacy"),
+      first = new ConfigStore(join(home, "id1")),
+      latest = new ConfigStore(join(home, "hipnotic"));
+    const settings = new ConfigStore(join(root, "current-product")),
+      consoleRoot = join(root, "console");
     await first.dump("config.cfg", "seta imported older\n");
     await latest.dump("config.cfg", "seta imported newest\nexec nested.cfg\n");
-    await utimes(join(first.root, "config.cfg"), 100, 100); await utimes(join(latest.root, "config.cfg"), 200, 200);
+    await utimes(join(first.root, "config.cfg"), 100, 100);
+    await utimes(join(latest.root, "config.cfg"), 200, 200);
     await settings.dump("nested.cfg", "seta nested done\n");
-    const source = context(0), output: string[] = [];
-    const scripts = new ConsoleScriptFiles({ consoleRoot, settings, legacyConfig: { sharedRoot: home, gameRoots: [first.root, latest.root] }, mounted: undefined });
+    const source = context(0),
+      output: string[] = [];
+    const scripts = new ConsoleScriptFiles({
+      consoleRoot,
+      settings,
+      legacyConfig: { sharedRoot: home, gameRoots: [first.root, latest.root] },
+      mounted: undefined,
+    });
     const cvars = new CvarRegistry({ dialect: "q1-netquake", context: source });
-    const commands = new CommandBuffer({ dialect: "q1-netquake", context: source, cvars, readScript: (name, caller) => scripts.read(name, caller), print: text => { output.push(text); } });
-    commands.append("exec config.cfg\necho after\n"); await commands.executeScriptsAsync(async () => {});
-    expect(cvars.variableString("imported")).toBe("newest"); expect(cvars.variableString("nested")).toBe("done");
+    const commands = new CommandBuffer({
+      dialect: "q1-netquake",
+      context: source,
+      cvars,
+      readScript: (name, caller) => scripts.read(name, caller),
+      print: text => {
+        output.push(text);
+      },
+    });
+    commands.append("exec config.cfg\necho after\n");
+    await commands.executeScriptsAsync(async () => {});
+    expect(cvars.variableString("imported")).toBe("newest");
+    expect(cvars.variableString("nested")).toBe("done");
     expect(output.join("")).toContain("after");
     expect(await Bun.file(join(consoleRoot, "settings/seat-0/config.cfg")).exists()).toBe(false);
     await writeFile(join(home, "config.cfg"), Buffer.from('seta imported "caf\xe9"\n', "latin1"));
@@ -98,20 +181,39 @@ test("explicit legacy home migration selects latest game config without writing 
     await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("config.cfg", "seta imported retained\n");
     expect(await scripts.read("config.cfg", source)).toBe("seta imported retained\n");
     expect(await scripts.read("config.cfg", context(1))).toContain('"caf\xe9"');
-    const separate = new ConsoleScriptFiles({ consoleRoot: join(root, "qw-console"), settings, mounted: async () => new TextEncoder().encode("mounted config") });
+    const separate = new ConsoleScriptFiles({
+      consoleRoot: join(root, "qw-console"),
+      settings,
+      mounted: async () => new TextEncoder().encode("mounted config"),
+    });
     expect(await separate.read("config.cfg", context(0))).toBe("mounted config");
-    await separate.close(); await scripts.close();
-  } finally { await rm(root, { recursive: true, force: true }); }
+    await separate.close();
+    await scripts.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("configuration retirement retains reads from invocation through queued writes and mounted settlement", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-retirement-"));
   try {
-    const writing = Promise.withResolvers<void>(), reading = Promise.withResolvers<Uint8Array | undefined>();
+    const writing = Promise.withResolvers<void>(),
+      reading = Promise.withResolvers<Uint8Array | undefined>();
     const entered = Promise.withResolvers<void>();
     let retired = 0;
-    const scripts = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(join(root, "product")),
-      mounted: () => { entered.resolve(); return reading.promise; } }, async () => { retired++; });
+    const scripts = new ConsoleScriptFiles(
+      {
+        consoleRoot: root,
+        settings: new ConfigStore(join(root, "product")),
+        mounted: () => {
+          entered.resolve();
+          return reading.promise;
+        },
+      },
+      async () => {
+        retired++;
+      },
+    );
     const write = scripts.write(() => writing.promise);
     const read = scripts.read("pending.cfg", context(0));
     const close = scripts.close();
@@ -119,64 +221,137 @@ test("configuration retirement retains reads from invocation through queued writ
     await Promise.resolve();
     expect(retired).toBe(0);
     await expect(scripts.read("late.cfg", context(0))).rejects.toThrow("retired");
-    writing.resolve(); await write; await entered.promise;
+    writing.resolve();
+    await write;
+    await entered.promise;
     expect(retired).toBe(0);
     reading.resolve(new TextEncoder().encode("echo retained\n"));
     expect(await read).toBe("echo retained\n");
-    await close; expect(retired).toBe(1);
+    await close;
+    expect(retired).toBe(1);
 
     const mountedRead = Promise.withResolvers<Uint8Array | undefined>();
-    const mounted = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(root), mounted: () => mountedRead.promise }, async () => { retired++; });
-    const pending = mounted.readMounted("default.cfg"), retirement = mounted.close();
-    await Promise.resolve(); expect(retired).toBe(1);
+    const mounted = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(root), mounted: () => mountedRead.promise }, async () => {
+      retired++;
+    });
+    const pending = mounted.readMounted("default.cfg"),
+      retirement = mounted.close();
+    await Promise.resolve();
+    expect(retired).toBe(1);
     mountedRead.reject(new Error("read failed"));
     await expect(pending).rejects.toThrow("read failed");
-    await retirement; expect(retired).toBe(2);
-  } finally { await rm(root, { recursive: true, force: true }); }
+    await retirement;
+    expect(retired).toBe(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("exec reads each seat's exported config before product user files and mounted arbitrary scripts", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-scripts-"));
   try {
-    const consoleRoot = join(root, "console"), settings = new ConfigStore(join(root, "product")), installed = new ConfigStore(join(root, "installed"));
+    const consoleRoot = join(root, "console"),
+      settings = new ConfigStore(join(root, "product")),
+      installed = new ConfigStore(join(root, "installed"));
     await installed.dump("scripts/custom.txt", "seta mounted_value yes\n");
     await installed.dump("config.cfg", "seta seat_value mounted\n");
     await settings.dump("config.cfg", "seta seat_value user\n");
     await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("config.cfg", "seta seat_value zero\nexec scripts/custom.txt\n");
     await seatConsoleConfig(consoleRoot, identity.seat(1)).dump("config.cfg", "seta seat_value one\nexec scripts/custom.txt\n");
-    using mounts = await openMountPlan({ id: "mount-plan:scripts:1", mounts: [{ kind: "loose", rootPath: installed.root, identity: { id: "mount:scripts:1", content: "q3:classic:baseq3:installed", generation: 1 } }], defaultOrder: ["mount:scripts:1"], prefixOrders: [] });
-    const resource = await mounts.open("scripts/custom.txt"), gate = Promise.withResolvers<void>();
+    using mounts = await openMountPlan({
+      id: "mount-plan:scripts:1",
+      mounts: [{ kind: "loose", rootPath: installed.root, identity: { id: "mount:scripts:1", content: "q3:classic:baseq3:installed", generation: 1 } }],
+      defaultOrder: ["mount:scripts:1"],
+      prefixOrders: [],
+    });
+    const resource = await mounts.open("scripts/custom.txt"),
+      gate = Promise.withResolvers<void>();
     let retired = false;
-    const resourceReader = new ConsoleScriptFiles({ consoleRoot, settings, mounted: undefined,
-      mountedResource: async () => { await gate.promise; return resource; } }, async () => { retired = true; });
+    const resourceReader = new ConsoleScriptFiles(
+      {
+        consoleRoot,
+        settings,
+        mounted: undefined,
+        mountedResource: async () => {
+          await gate.promise;
+          return resource;
+        },
+      },
+      async () => {
+        retired = true;
+      },
+    );
     expect(resourceReader.root).toBe(settings.root);
-    await expect(resourceReader.openMounted("scripts/custom.txt", { session: identity.session, origin: { kind: "remote-client", client: identity.client(3, 0) } })).rejects.toThrow("Remote clients");
+    await expect(
+      resourceReader.openMounted("scripts/custom.txt", { session: identity.session, origin: { kind: "remote-client", client: identity.client(3, 0) } }),
+    ).rejects.toThrow("Remote clients");
     const opened = resourceReader.openMounted("scripts/custom.txt", context(0));
     const retirement = resourceReader.close();
-    await Promise.resolve(); expect(retired).toBe(false);
-    gate.resolve(); expect(await opened).toBe(resource); expect(resource).not.toBeNull();
-    await retirement; expect(retired).toBe(true);
+    await Promise.resolve();
+    expect(retired).toBe(false);
+    gate.resolve();
+    expect(await opened).toBe(resource);
+    expect(resource).not.toBeNull();
+    await retirement;
+    expect(retired).toBe(true);
     await expect(resourceReader.openMounted("scripts/custom.txt", context(0))).rejects.toThrow("retired");
     for (const index of [0, 1, 2]) {
-      const source = context(index), cvars = new CvarRegistry({ dialect: "q3", context: source });
+      const source = context(index),
+        cvars = new CvarRegistry({ dialect: "q3", context: source });
       const scripts = new ConsoleScriptFiles({ consoleRoot, settings, mounted: async path => (await mounts.open(path))?.bytes });
       const commands = new CommandBuffer({ dialect: "q3", context: source, cvars, readScript: (name, source) => scripts.read(name, source) });
       commands.append("exec config; seta finished yes\n");
-      for (let attempts = 0; attempts < 100 && cvars.variableString("finished") !== "yes"; attempts++) { commands.execute(); await Bun.sleep(1); }
+      for (let attempts = 0; attempts < 100 && cvars.variableString("finished") !== "yes"; attempts++) {
+        commands.execute();
+        await Bun.sleep(1);
+      }
       expect(cvars.variableString("finished")).toBe("yes");
       expect(cvars.variableString("seat_value")).toBe(index === 0 ? "zero" : index === 1 ? "one" : "user");
       if (index !== 2) expect(cvars.variableString("mounted_value")).toBe("yes");
-      const seatConsole = new SeatConsole({ seat: identity.seat(index), dialect: "q3", context: source, commands, cvars,
-        now: () => 0, connected: () => false, clipboard: () => null, focus() {}, chat() {} });
+      const seatConsole = new SeatConsole({
+        seat: identity.seat(index),
+        dialect: "q3",
+        context: source,
+        commands,
+        cvars,
+        now: () => 0,
+        connected: () => false,
+        clipboard: () => null,
+        focus() {},
+        chat() {},
+      });
       const writes: Promise<void>[] = [];
       const results: string[] = [];
-      let failPreparation = false, failQueue = false;
-      const unregister = registerConsoleCommands({ commands, config: seat => seatConsoleConfig(consoleRoot, seat),
-        configurationWriteStarted: (caller, path) => { expect(caller).toEqual(source); return result => { results.push(`${path}:${result.kind}`); }; },
-        configuration: invocation => { if (failPreparation) throw new Error("snapshot rejected"); return `${commands.archiveCommands(invocation.source).join("\n")}\n`; }, console: () => seatConsole,
-        canChat: () => false, capture: () => null, mapName: () => "test", print() {}, queue: operation => { if (failQueue) throw new Error("queue rejected"); writes.push(scripts.write(operation)); } });
+      let failPreparation = false,
+        failQueue = false;
+      const unregister = registerConsoleCommands({
+        commands,
+        config: seat => seatConsoleConfig(consoleRoot, seat),
+        configurationWriteStarted: (caller, path) => {
+          expect(caller).toEqual(source);
+          return result => {
+            results.push(`${path}:${result.kind}`);
+          };
+        },
+        configuration: invocation => {
+          if (failPreparation) throw new Error("snapshot rejected");
+          return `${commands.archiveCommands(invocation.source).join("\n")}\n`;
+        },
+        console: () => seatConsole,
+        canChat: () => false,
+        capture: () => null,
+        mapName: () => "test",
+        print() {},
+        queue: operation => {
+          if (failQueue) throw new Error("queue rejected");
+          writes.push(scripts.write(operation));
+        },
+      });
       commands.append("writeconfig roundtrip; seta seat_value changed; exec roundtrip; seta roundtrip_finished yes\n");
-      for (let attempts = 0; attempts < 100 && cvars.variableString("roundtrip_finished") !== "yes"; attempts++) { commands.execute(); await Bun.sleep(1); }
+      for (let attempts = 0; attempts < 100 && cvars.variableString("roundtrip_finished") !== "yes"; attempts++) {
+        commands.execute();
+        await Bun.sleep(1);
+      }
       expect(cvars.variableString("seat_value")).toBe(index === 0 ? "zero" : index === 1 ? "one" : "user");
       await Promise.all(writes);
       expect(results).toEqual(["roundtrip.cfg:written"]);
@@ -186,38 +361,57 @@ test("exec reads each seat's exported config before product user files and mount
       expect(results).toEqual(["roundtrip.cfg:written", "../escape.cfg:failed"]);
       failPreparation = true;
       expect(() => commands.executeNow("writeconfig preparation")).toThrow("snapshot rejected");
-      failPreparation = false; failQueue = true;
+      failPreparation = false;
+      failQueue = true;
       expect(() => commands.executeNow("writeconfig queue")).toThrow("queue rejected");
       expect(results).toEqual(["roundtrip.cfg:written", "../escape.cfg:failed", "preparation.cfg:failed", "queue.cfg:failed"]);
       unregister();
     }
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("script reader rejects escapes and symlinks without falling through to mounted files", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-paths-"));
   try {
-    const consoleRoot = join(root, "console"), settings = new ConfigStore(join(root, "product")), outside = new ConfigStore(join(root, "outside"));
+    const consoleRoot = join(root, "console"),
+      settings = new ConfigStore(join(root, "product")),
+      outside = new ConfigStore(join(root, "outside"));
     await outside.dump("secret.cfg", "secret");
-    await mkdir(settings.root); await mkdir(join(consoleRoot, "settings/seat-0"), { recursive: true });
+    await mkdir(settings.root);
+    await mkdir(join(consoleRoot, "settings/seat-0"), { recursive: true });
     await symlink(outside.root, join(settings.root, "escape"));
     await symlink(join(outside.root, "secret.cfg"), join(consoleRoot, "settings/seat-0/secret.cfg"));
     let reads = 0;
-    const read = (name: string) => readConsoleScript({ name, source: context(0), consoleRoot, settings, mounted: async () => { reads++; return undefined; } });
+    const read = (name: string) =>
+      readConsoleScript({
+        name,
+        source: context(0),
+        consoleRoot,
+        settings,
+        mounted: async () => {
+          reads++;
+          return undefined;
+        },
+      });
     await expect(read("../secret.cfg")).rejects.toThrow("Invalid relative resource path: ../secret.cfg");
     await expect(read("escape/secret.cfg")).rejects.toThrow("symlink");
     await expect(read("secret.cfg")).rejects.toThrow("symlink");
     expect(reads).toBe(0);
     expect(await read("absent.cfg")).toBeUndefined();
     expect(reads).toBe(1);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("mixed assets cannot supply another game's configuration or override expansion script precedence", async () => {
   const root = await mkdtemp(join(tmpdir(), "mixed-script-owner-"));
   try {
     const selected = ["q1-classic-id1", "q1-classic-hipnotic", "q2-classic-baseq2", "q3-baseq3"];
-    const products = expectedProducts.filter(product => selected.includes(product.id))
+    const products = expectedProducts
+      .filter(product => selected.includes(product.id))
       .map(product => ({ ...product, requiredContentArchives: [], requiredPrograms: [], mapWitness: null }));
     for (const product of products) await mkdir(join(root, product.contentDirectory), { recursive: true });
     await writeFile(join(root, "q2/baseq2/config.cfg"), "set name ForeignConfig\n");
@@ -228,28 +422,51 @@ test("mixed assets cannot supply another game's configuration or override expans
     await writeFile(join(root, "q1/hipnotic/autoexec.cfg"), "echo expansion-autoexec\nexec shared.cfg\n");
     await writeFile(join(root, "q3a/baseq3/foreign.dm_68"), "foreign-demo");
     const catalog = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: false });
-    const mounts = [...new Map((await Promise.all(["q2-classic-baseq2", "q3-baseq3", "q1-classic-id1", "q1-classic-hipnotic"]
-      .map(id => catalog.mountsFor(catalog.require(id).id)))).flat().map(mount => [mount.identity.id, mount])).values()];
+    const mounts = [
+      ...new Map(
+        (await Promise.all(["q2-classic-baseq2", "q3-baseq3", "q1-classic-id1", "q1-classic-hipnotic"].map(id => catalog.mountsFor(catalog.require(id).id))))
+          .flat()
+          .map(mount => [mount.identity.id, mount]),
+      ).values(),
+    ];
     using mixed = await openMountPlan({ id: "mount-plan:mixed-script:1", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     const mounted = (name: string) => mixed.open(name).then(resource => resource?.bytes);
     expect(new TextDecoder().decode(await mounted("config.cfg"))).toContain("ForeignConfig");
     const read = sourceScriptReader(catalog, mixed, catalog.require("q1-classic-hipnotic").id);
-    const scripts = new ConsoleScriptFiles({ consoleRoot: join(root, "console"), settings: new ConfigStore(join(root, "settings")), mounted, mountedScript: read });
+    const scripts = new ConsoleScriptFiles({
+      consoleRoot: join(root, "console"),
+      settings: new ConfigStore(join(root, "settings")),
+      mounted,
+      mountedScript: read,
+    });
     expect(await scripts.read("config.cfg", context(0))).toBeUndefined();
     expect(await scripts.readMountedScript("config.cfg")).toBeUndefined();
     expect(await scripts.read("autoexec.cfg", context(0))).toContain("expansion-autoexec");
     expect(new TextDecoder().decode(await scripts.readMounted("foreign.dm_68"))).toBe("foreign-demo");
-    const output: string[] = [], source = context(0);
-    const commands = new CommandBuffer({ dialect: "q1-netquake", context: source, cvars: new CvarRegistry({ dialect: "q1-netquake", context: source }),
-      readScript: (name, caller) => scripts.read(name, caller), print: text => { output.push(text); } });
-    commands.append("exec autoexec.cfg\n"); await commands.executeScriptsAsync(async () => {});
+    const output: string[] = [],
+      source = context(0);
+    const commands = new CommandBuffer({
+      dialect: "q1-netquake",
+      context: source,
+      cvars: new CvarRegistry({ dialect: "q1-netquake", context: source }),
+      readScript: (name, caller) => scripts.read(name, caller),
+      print: text => {
+        output.push(text);
+      },
+    });
+    commands.append("exec autoexec.cfg\n");
+    await commands.executeScriptsAsync(async () => {});
     expect(output.join("")).toContain("expansion-autoexec");
     expect(output.join("")).toContain("inherited-script");
     expect(output.join("")).not.toContain("foreign");
     expect(output.join("")).not.toContain("base-autoexec");
     await seatConsoleConfig(join(root, "console"), identity.seat(0)).dump("config.cfg", "echo explicit-seat\n");
     expect(await scripts.read("config.cfg", context(0))).toBe("echo explicit-seat\n");
-    await scripts.close(); await expect(scripts.readMountedScript("default.cfg")).rejects.toThrow("retired");
-    mixed.close(); await expect(read("default.cfg")).rejects.toThrow("closed");
-  } finally { await rm(root, { recursive: true, force: true }); }
+    await scripts.close();
+    await expect(scripts.readMountedScript("default.cfg")).rejects.toThrow("retired");
+    mixed.close();
+    await expect(read("default.cfg")).rejects.toThrow("closed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

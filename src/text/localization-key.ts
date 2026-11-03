@@ -8,7 +8,9 @@
 // a reader that sees a newer version shows the key and arguments as plain text.
 
 export const LOCALIZATION_KEY_VERSION = 1;
-const RS = "\u001e", US = "\u001f", TAG = `${RS}QLK`;
+const RS = "\u001e",
+  US = "\u001f",
+  TAG = `${RS}QLK`;
 
 export interface LocalizationKeyText {
   readonly key: string;

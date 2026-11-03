@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { stepQ3Holdable } from "../../../src/movement/q3/weapon.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -11,22 +12,47 @@ import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 
 function fixture() {
   const actors = new SessionActorRegistry(createIdentityOwner("q3-primary-handoff"));
-  const actor = actors.allocate("q3:character", "q3:player"), inventory = new SharedInventoryTable(actors);
+  const actor = actors.allocate("q3:character", "q3:player"),
+    inventory = new SharedInventoryTable(actors);
   inventory.create(actor, []);
-  const shots: number[] = [], holdables: number[] = [], events: number[] = [];
-  const arsenal = new Q3SelectedArsenal({ provider: "q3:official", product: "baseq3", inventory,
-    fire: (_actor, weapon) => { shots.push(weapon); return undefined; },
-    useHoldable: (_actor, event) => { holdables.push(event); return undefined; } });
+  const shots: number[] = [],
+    holdables: number[] = [],
+    events: number[] = [];
+  const arsenal = new Q3SelectedArsenal({
+    provider: "q3:official",
+    product: "baseq3",
+    inventory,
+    fire: (_actor, weapon) => {
+      shots.push(weapon);
+      return undefined;
+    },
+    useHoldable: (_actor, event) => {
+      holdables.push(event);
+      return undefined;
+    },
+  });
   arsenal.admit(actor, 100);
   let time = 0;
   const step = (msec: number, attack = false, useHoldable = false) => {
     time += msec;
-    const input: WeaponStepInput = { actor, arsenal: arsenal.read(actor.id),
-      command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: { x: 0, y: 0, z: 0 },
-        forwardMove: 0, sideMove: 0, upMove: 0, buttons: attack ? 1 : 0, impulse: 0 },
+    const input: WeaponStepInput = {
+      actor,
+      arsenal: arsenal.read(actor.id),
+      command: {
+        kind: "q1-netquake",
+        acknowledgedServerTimeSeconds: 0,
+        viewAngles: { x: 0, y: 0, z: 0 },
+        forwardMove: 0,
+        sideMove: 0,
+        upMove: 0,
+        buttons: attack ? 1 : 0,
+        impulse: 0,
+      },
       frame: { frame: 1, time: { kind: "milliseconds", value: time }, elapsed: { kind: "milliseconds", value: msec }, phase: "client-command" },
       animation: { provider: "q3:character", state: q3SpawnAnimation() },
-      environment: { health: 100, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 }, gauntletHit: false };
+      environment: { health: 100, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
+      gauntletHit: false,
+    };
     const result = arsenal.step(input, { provider: "q3:official", weapon: null, useHoldable });
     for (const effect of result.effects) if (effect.kind === "event") events.push(effect.value.event);
     return result;
@@ -101,7 +127,9 @@ test("Q3 completes a committed native switch before external drop and uses nativ
 
 test("Q3 holster cancels a queued resume before any source raise commits", () => {
   const f = fixture();
-  f.handoff.holster(); f.step(0); f.step(200);
+  f.handoff.holster();
+  f.step(0);
+  f.step(200);
   expect(f.handoff.isHolstered()).toBe(true);
   const before = f.save();
   f.handoff.resume(null);
@@ -112,11 +140,11 @@ test("Q3 holster cancels a queued resume before any source raise commits", () =>
   f.step(100, true);
   expect(f.handoff.isHolstered()).toBe(true);
   expect(f.shots).toHaveLength(0);
-  f.handoff.resume(null); f.step(0);
+  f.handoff.resume(null);
+  f.step(0);
   expect(f.save().arsenal.state).toEqual({ kind: "q3", sourceWeapon: Weapon.WP_MACHINEGUN, state: WeaponState.WEAPON_RAISING, timeMilliseconds: 250 });
   f.actors.close();
 });
-
 
 test("shared Q3 holdable step blocks initial use, debounces held input, and retains a refused medkit", () => {
   const events: number[] = [];

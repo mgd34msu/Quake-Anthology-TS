@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* R_LightPoint/RecursiveLightPoint from Q1/Q2 and entity grids from Q3.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Plane, Vec3 } from "../../../contracts/math.ts";
@@ -18,7 +19,8 @@ export interface ModelLightSample {
   readonly floor: { readonly point: Vec3; readonly plane: Plane } | null;
 }
 
-const black: Vec3 = { x: 0, y: 0, z: 0 }, white: Vec3 = { x: 1, y: 1, z: 1 };
+const black: Vec3 = { x: 0, y: 0, z: 0 },
+  white: Vec3 = { x: 1, y: 1, z: 1 };
 const q2DefaultStyles = Array.from({ length: 256 }, () => ({ rgb: white, white: 3 }));
 
 export class ModelLightSampler {
@@ -27,14 +29,21 @@ export class ModelLightSampler {
 
   constructor(readonly world: WorldScene) {
     const map = world.map;
-    this.grid = map.kind === "q3-bsp" ? prepareLightGrid({ lightGrid: map.lightGrid, models: map.models, entityRecords: parseEntities(map.entities) },
-      { mapOverbrightBits: world.options.q3LightmapOverbright ?? 2, overbrightBits: 0 }).grid : null;
-    if (map.kind !== "q3-bsp") for (const surface of world.surfaces) {
-      if (surface.kind !== "legacy" || surface.lightmap !== null) continue;
-      const ordinary = surface.material.kind === "q1" ? ["ordinary", "fence"].includes(surface.material.surface) : (surface.material.surfaceFlags & (4 | 8)) === 0;
-      const face = map.faces[surface.index];
-      if (ordinary && face !== undefined) this.unlitFaces.set(surface.index, prepareBrushFace(map, face, surface.index, { x: 1, y: 1 }, false).lightmap);
-    }
+    this.grid =
+      map.kind === "q3-bsp"
+        ? prepareLightGrid(
+            { lightGrid: map.lightGrid, models: map.models, entityRecords: parseEntities(map.entities) },
+            { mapOverbrightBits: world.options.q3LightmapOverbright ?? 2, overbrightBits: 0 },
+          ).grid
+        : null;
+    if (map.kind !== "q3-bsp")
+      for (const surface of world.surfaces) {
+        if (surface.kind !== "legacy" || surface.lightmap !== null) continue;
+        const ordinary =
+          surface.material.kind === "q1" ? ["ordinary", "fence"].includes(surface.material.surface) : (surface.material.surfaceFlags & (4 | 8)) === 0;
+        const face = map.faces[surface.index];
+        if (ordinary && face !== undefined) this.unlitFaces.set(surface.index, prepareBrushFace(map, face, surface.index, { x: 1, y: 1 }, false).lightmap);
+      }
   }
 
   sample(point: Vec3, input: WorldViewInput, includeDynamic = true): ModelLightSample {
@@ -51,10 +60,12 @@ export class ModelLightSampler {
       if (node === undefined) throw new RangeError(`Missing light-trace BSP node ${child.index}`);
       const plane = map.planes[node.plane];
       if (plane === undefined) throw new RangeError(`Missing light-trace BSP plane ${node.plane}`);
-      const front = dot3(start, plane.normal) - plane.distance, back = dot3(end, plane.normal) - plane.distance;
+      const front = dot3(start, plane.normal) - plane.distance,
+        back = dot3(end, plane.normal) - plane.distance;
       const side = front < 0 ? 1 : 0;
       if ((back < 0 ? 1 : 0) === side) return trace(node.children[side], start, end);
-      const fraction = front / (front - back), middle = add3(start, scale3(sub3(end, start), fraction));
+      const fraction = front / (front - back),
+        middle = add3(start, scale3(sub3(end, start), fraction));
       const near = trace(node.children[side], start, middle);
       if (near !== null) return near;
       for (let i = 0; i < node.faces.count; i++) {
@@ -64,25 +75,40 @@ export class ModelLightSampler {
         if (face === undefined) continue;
         const coordinates = lightmapCoordinates(middle, face.projection);
         // Classic R_LightPoint truncates world texture coordinates before subtracting texturemins.
-        const uv = face.projection.kind === "classic" ? {
-          x: (Math.trunc(dot3(middle, face.projection.texture.s) + face.projection.texture.s.w) - face.projection.textureMins.x) / 16,
-          y: (Math.trunc(dot3(middle, face.projection.texture.t) + face.projection.texture.t.w) - face.projection.textureMins.y) / 16,
-        } : coordinates;
+        const uv =
+          face.projection.kind === "classic"
+            ? {
+                x: (Math.trunc(dot3(middle, face.projection.texture.s) + face.projection.texture.s.w) - face.projection.textureMins.x) / 16,
+                y: (Math.trunc(dot3(middle, face.projection.texture.t) + face.projection.texture.t.w) - face.projection.textureMins.y) / 16,
+              }
+            : coordinates;
         if (uv.x < 0 || uv.y < 0 || uv.x > face.width - 1 || uv.y > face.height - 1) continue;
         const lighting = face.lighting;
         if (lighting === null) return { color: black, floor: { point: middle, plane } };
-        const pixel = Math.trunc(uv.y) * face.width + Math.trunc(uv.x), channels = lighting.kind === "rgb8" ? 3 : 1;
-        let r = 0, g = 0, b = 0;
+        const pixel = Math.trunc(uv.y) * face.width + Math.trunc(uv.x),
+          channels = lighting.kind === "rgb8" ? 3 : 1;
+        let r = 0,
+          g = 0,
+          b = 0;
         for (const [layer, style] of face.styles.entries()) {
           if (style === 255) break;
           const offset = face.offset + (layer * face.width * face.height + pixel) * channels;
-          const red = lighting.samples[offset] ?? 0, green = lighting.samples[offset + (channels === 3 ? 1 : 0)] ?? 0,
+          const red = lighting.samples[offset] ?? 0,
+            green = lighting.samples[offset + (channels === 3 ? 1 : 0)] ?? 0,
             blue = lighting.samples[offset + (channels === 3 ? 2 : 0)] ?? 0;
-          if (map.kind === "q1-bsp") { const value = input.q1Styles?.[style] ?? 256; r += red * value; g += green * value; b += blue * value; }
-          else { const value = input.q2Styles?.[style]?.rgb ?? white; r += red * value.x; g += green * value.y; b += blue * value.z; }
+          if (map.kind === "q1-bsp") {
+            const value = input.q1Styles?.[style] ?? 256;
+            r += red * value;
+            g += green * value;
+            b += blue * value;
+          } else {
+            const value = input.q2Styles?.[style]?.rgb ?? white;
+            r += red * value.x;
+            g += green * value.y;
+            b += blue * value.z;
+          }
         }
-        const color = map.kind === "q1-bsp" ? { x: (r >> 8) / 255, y: (g >> 8) / 255, z: (b >> 8) / 255 }
-          : { x: r / 255, y: g / 255, z: b / 255 };
+        const color = map.kind === "q1-bsp" ? { x: (r >> 8) / 255, y: (g >> 8) / 255, z: (b >> 8) / 255 } : { x: r / 255, y: g / 255, z: b / 255 };
         return { color, floor: { point: middle, plane } };
       }
       return trace(node.children[side === 0 ? 1 : 0], middle, end);
@@ -105,20 +131,44 @@ export class ModelLightSampler {
 
   entityLighting(entity: SceneEntity, input: WorldViewInput, noWorldModel = false): EntityLighting {
     const identityLight = input.identityLight ?? 1;
-    const axis = entity.transform.axis.map((value, index) => scale3(value,
-      index === 0 ? entity.transform.scale.x : index === 1 ? entity.transform.scale.y : entity.transform.scale.z));
+    const axis = entity.transform.axis.map((value, index) =>
+      scale3(value, index === 0 ? entity.transform.scale.x : index === 1 ? entity.transform.scale.y : entity.transform.scale.z),
+    );
     const [forward, left, up] = axis;
     if (forward === undefined || left === undefined || up === undefined) throw new Error("Model lost its three axes");
-    if (this.world.map.kind === "q3-bsp" || noWorldModel) return setupEntityLighting({ origin: entity.transform.origin,
-      lightingOrigin: entity.lightingOrigin, axis: [forward, left, up], renderFlags: entity.flags.kind === "q3" ? entity.flags.bits : 0 },
-    { grid: this.grid, ambientScale: 1, directedScale: 1, noWorldModel, identityLight, identityLightByte: Math.trunc(identityLight * 255),
-      sunDirection: this.world.shaders.sun?.direction ?? normalize3({ x: 0.45, y: 0.3, z: 0.9 }), dynamicLights: input.q3Lights ?? [] });
+    if (this.world.map.kind === "q3-bsp" || noWorldModel)
+      return setupEntityLighting(
+        {
+          origin: entity.transform.origin,
+          lightingOrigin: entity.lightingOrigin,
+          axis: [forward, left, up],
+          renderFlags: entity.flags.kind === "q3" ? entity.flags.bits : 0,
+        },
+        {
+          grid: this.grid,
+          ambientScale: 1,
+          directedScale: 1,
+          noWorldModel,
+          identityLight,
+          identityLightByte: Math.trunc(identityLight * 255),
+          sunDirection: this.world.shaders.sun?.direction ?? normalize3({ x: 0.45, y: 0.3, z: 0.9 }),
+          dynamicLights: input.q3Lights ?? [],
+        },
+      );
     const point = entity.flags.kind === "q3" && (entity.flags.bits & 128) !== 0 ? entity.lightingOrigin : entity.transform.origin;
     // Foreign lightmaps carry RGB irradiance, without Q3's separate directional lobe.
     const color = this.sample(point, input).color;
-    const ambientLight = { x: Math.min(identityLight * 255, color.x * 255 + identityLight * 32),
-      y: Math.min(identityLight * 255, color.y * 255 + identityLight * 32), z: Math.min(identityLight * 255, color.z * 255 + identityLight * 32) };
-    return { ambientLight, directedLight: black, lightDir: { x: 0, y: 0, z: 1 },
-      ambientLightInt: ((Math.trunc(ambientLight.x) & 255) | ((Math.trunc(ambientLight.y) & 255) << 8) | ((Math.trunc(ambientLight.z) & 255) << 16) | 0xff000000) >>> 0 };
+    const ambientLight = {
+      x: Math.min(identityLight * 255, color.x * 255 + identityLight * 32),
+      y: Math.min(identityLight * 255, color.y * 255 + identityLight * 32),
+      z: Math.min(identityLight * 255, color.z * 255 + identityLight * 32),
+    };
+    return {
+      ambientLight,
+      directedLight: black,
+      lightDir: { x: 0, y: 0, z: 1 },
+      ambientLightInt:
+        ((Math.trunc(ambientLight.x) & 255) | ((Math.trunc(ambientLight.y) & 255) << 8) | ((Math.trunc(ambientLight.z) & 255) << 16) | 0xff000000) >>> 0,
+    };
   }
 }

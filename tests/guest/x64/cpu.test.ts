@@ -40,7 +40,15 @@ function fixture(bytes: readonly number[], start = base, managed = false) {
   memory.map({ base: stack - 0x1000n, byteLength: 0x1008, permissions: "read-write" });
   memory.writeUint64(pointer(memory, stack), returned);
   const createState = managed ? createManagedGuestProcessorState : createGuestProcessorState;
-  const state = createState({ architecture: "x86-64", instructionPointer: start, stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createState({
+    architecture: "x86-64",
+    instructionPointer: start,
+    stackPointer: stack,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   const cpu = new X64Cpu({ state, memory });
   const run = (instructionBudget = 100) => cpu.run({ instructionBudget, returnAddress: pointer(memory, returned) });
   return { memory, state, cpu, run };
@@ -58,13 +66,15 @@ test("decoded instructions observe live operands, writable aliases and mapping r
     expect(f.run().kind).toBe("return");
     return f.state.registers.read("rax", 32);
   };
-  expect(run(0n)).toBe(11n); expect(run(4n)).toBe(21n);
+  expect(run(0n)).toBe(11n);
+  expect(run(4n)).toBe(21n);
   const code = pointer(f.memory, base);
   const alias = f.memory.mapAlias({ base: 0x60000n, byteLength: 7, permissions: "read-write", source: code });
   // Borrowed host writes bypass store observers; instruction bytes must still be checked.
   f.memory.borrow(alias, 7).setUint8(5, 7);
   expect(run(0n)).toBe(17n);
-  f.memory.protect(code, 7, "read"); f.state.instructionPointer = base;
+  f.memory.protect(code, 7, "read");
+  f.state.instructionPointer = base;
   expect(f.run().kind).toBe("exception");
   f.memory.unmap(code, 7);
   f.memory.map({ base, byteLength: 6, permissions: "execute", bytes: new Uint8Array([0xb8, 99, 0, 0, 0, 0xc3]) });
@@ -81,11 +91,16 @@ test("immediate decoding retains unsigned widths and exact partial fault bytes",
   }
   const signed = fixture([0x90, 0xff, 0xff, 0xff, 0xff]);
   expect(new X64DecodeCursor(signed.memory, signed.state).readSigned(4)).toBe(-1n);
-  const truncated = fixture([0x90, 0x12, 0x34]), partial = new X64DecodeCursor(truncated.memory, truncated.state);
-  expect(() => partial.readUnsigned(4)).toThrow("test:x64: execute at 0x10003 (1 bytes): range includes unmapped bytes"); expect(partial.bytes).toEqual([0x90, 0x12, 0x34]);
-  const long = fixture([0x90, ...new Array<number>(15).fill(255)]), limited = new X64DecodeCursor(long.memory, long.state);
-  limited.readUnsigned(8); limited.readUnsigned(4);
-  expect(() => limited.readUnsigned(4)).toThrow("15 bytes"); expect(limited.bytes.length).toBe(15);
+  const truncated = fixture([0x90, 0x12, 0x34]),
+    partial = new X64DecodeCursor(truncated.memory, truncated.state);
+  expect(() => partial.readUnsigned(4)).toThrow("test:x64: execute at 0x10003 (1 bytes): range includes unmapped bytes");
+  expect(partial.bytes).toEqual([0x90, 0x12, 0x34]);
+  const long = fixture([0x90, ...new Array<number>(15).fill(255)]),
+    limited = new X64DecodeCursor(long.memory, long.state);
+  limited.readUnsigned(8);
+  limited.readUnsigned(4);
+  expect(() => limited.readUnsigned(4)).toThrow("15 bytes");
+  expect(limited.bytes.length).toBe(15);
 });
 
 test("MOV widths preserve byte/word aliases and zero-extend dword writes", () => {
@@ -246,19 +261,28 @@ test("nested CPU runs keep independent rollback snapshots", () => {
   const { memory, state } = fixture([0xb8, 1, 0, 0, 0, 0x90]);
   const nested = base + 0x1000n;
   memory.map({ base: nested, byteLength: 11, permissions: "read-execute", bytes: new Uint8Array([0xb8, 2, 0, 0, 0, 0xbb, 3, 0, 0, 0, 0xf4]) });
-  let cpu: X64Cpu | null = null, entered = false;
-  cpu = new X64Cpu({ state, memory, isHostCall: address => {
-    if (address.byteOffset !== base + 5n || entered) return false;
-    entered = true; state.instructionPointer = nested;
-    if (cpu === null) throw new Error("Missing recursive CPU");
-    expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
-    expect(state.registers.read("rax", 64)).toBe(2n); expect(state.registers.read("rbx", 64)).toBe(3n);
-    memory.readUint8(pointer(memory, 0x50000n));
-    return false;
-  } });
+  let cpu: X64Cpu | null = null,
+    entered = false;
+  cpu = new X64Cpu({
+    state,
+    memory,
+    isHostCall: address => {
+      if (address.byteOffset !== base + 5n || entered) return false;
+      entered = true;
+      state.instructionPointer = nested;
+      if (cpu === null) throw new Error("Missing recursive CPU");
+      expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
+      expect(state.registers.read("rax", 64)).toBe(2n);
+      expect(state.registers.read("rbx", 64)).toBe(3n);
+      memory.readUint8(pointer(memory, 0x50000n));
+      return false;
+    },
+  });
   const stopped = cpu.run({ instructionBudget: 2, returnAddress: null });
-  expect(stopped.kind).toBe("exception"); expect(stopped.instructions).toBe(1);
-  expect(state.instructionPointer).toBe(base + 5n); expect(state.registers.read("rax", 64)).toBe(1n);
+  expect(stopped.kind).toBe("exception");
+  expect(stopped.instructions).toBe(1);
+  expect(state.instructionPointer).toBe(base + 5n);
+  expect(state.registers.read("rax", 64)).toBe(1n);
   expect(state.registers.read("rbx", 64)).toBe(0n);
 });
 
@@ -293,7 +317,7 @@ test("WAIT dispatches shared x87 state and preserves a pending exception at its 
 });
 
 const dllPath = new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///");
-test.skipIf(!await Bun.file(dllPath).exists())("actual rerelease DLL .text+0 executes its linked-list initializer", async () => {
+test.skipIf(!(await Bun.file(dllPath).exists()))("actual rerelease DLL .text+0 executes its linked-list initializer", async () => {
   const bytes = new Uint8Array(await Bun.file(dllPath).arrayBuffer());
   expect(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")).toBe("045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
@@ -302,7 +326,15 @@ test.skipIf(!await Bun.file(dllPath).exists())("actual rerelease DLL .text+0 exe
   memory.map({ base: stack - 0x1000n, byteLength: 0x1008, permissions: "read-write" });
   memory.writeUint64(pointer(memory, stack), returned);
   memory.writeUint64(pointer(memory, 0x18025ba18n), 0x123456789abcdef0n);
-  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: 0x180001000n, stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "x86-64",
+    instructionPointer: 0x180001000n,
+    stackPointer: stack,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   const cpu = new X64Cpu({ state, memory });
   const stopped = cpu.run({ instructionBudget: 32, returnAddress: pointer(memory, returned) });
   expect(stopped.kind).toBe("return");
@@ -312,11 +344,16 @@ test.skipIf(!await Bun.file(dllPath).exists())("actual rerelease DLL .text+0 exe
   expect(state.registers.read("rsp", 64)).toBe(stack + 8n);
 });
 
-test.skipIf(!await Bun.file(dllPath).exists())("actual relocated rerelease GetGameAPI returns its API table through integer and SSE execution", async () => {
+test.skipIf(!(await Bun.file(dllPath).exists()))("actual relocated rerelease GetGameAPI returns its API table through integer and SSE execution", async () => {
   const bytes = new Uint8Array(await Bun.file(dllPath).arrayBuffer());
   const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
   expect(digest).toBe("045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
-  const module: ModuleIdentity = { id: "q2:rerelease-guest", artifactPath: dllPath.pathname, revision: "retail-2025-10-23", digest: createContentDigest(digest) };
+  const module: ModuleIdentity = {
+    id: "q2:rerelease-guest",
+    artifactPath: dllPath.pathname,
+    revision: "retail-2025-10-23",
+    digest: createContentDigest(digest),
+  };
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const imageBase = 0xffff800018000000n;
   const image = mapPeImage({ bytes, memory, base: imageBase });
@@ -331,7 +368,15 @@ test.skipIf(!await Bun.file(dllPath).exists())("actual relocated rerelease GetGa
   view.setFloat32(4, 0.025, true);
   view.setUint32(8, 25, true);
   memory.write(imports, expectedImports);
-  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: entry.byteOffset, stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const state = createGuestProcessorState({
+    architecture: "x86-64",
+    instructionPointer: entry.byteOffset,
+    stackPointer: stack,
+    flags: 2n,
+    x87ControlWord: 0x37f,
+    mxcsr: 0x1f80,
+    mxcsrMask: 0xffff,
+  });
   state.registers.write("rcx", 64, imports.byteOffset);
   const stopped = new X64Cpu({ state, memory }).run({ instructionBudget: 512, returnAddress: pointer(memory, returned) });
   expect(stopped.kind).toBe("return");
@@ -344,28 +389,51 @@ test.skipIf(!await Bun.file(dllPath).exists())("actual relocated rerelease GetGa
   expect(state.registers.read("rsp", 64)).toBe(stack + 8n);
 });
 
-
 test("canonical address range retains sign, wrap and exact fault boundaries", () => {
-  const values = [0n, 1n, -1n, -(1n << 47n), -(1n << 47n) - 1n,
-    (1n << 47n) - 1n, 1n << 47n, (1n << 47n) + 1n,
-    0xffff7fffffffffffn, 0xffff800000000000n, 0xffff800000000001n,
-    (1n << 64n) - 1n, 1n << 64n, (1n << 64n) + 1n, -(1n << 64n), -(1n << 64n) - 1n];
-  for (const value of values) for (const offset of [-1n, 0n, 1n]) {
-    const input = value + offset, raw = BigInt.asUintN(64, input), high = raw >> 47n;
-    if (high === 0n || high === 0x1ffffn) expect(canonicalAddress(input)).toBe(raw);
-    else {
-      expect(() => canonicalAddress(input)).toThrow(X64ProcessorFault);
-      expect(() => canonicalAddress(input)).toThrow(`Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
+  const values = [
+    0n,
+    1n,
+    -1n,
+    -(1n << 47n),
+    -(1n << 47n) - 1n,
+    (1n << 47n) - 1n,
+    1n << 47n,
+    (1n << 47n) + 1n,
+    0xffff7fffffffffffn,
+    0xffff800000000000n,
+    0xffff800000000001n,
+    (1n << 64n) - 1n,
+    1n << 64n,
+    (1n << 64n) + 1n,
+    -(1n << 64n),
+    -(1n << 64n) - 1n,
+  ];
+  for (const value of values)
+    for (const offset of [-1n, 0n, 1n]) {
+      const input = value + offset,
+        raw = BigInt.asUintN(64, input),
+        high = raw >> 47n;
+      if (high === 0n || high === 0x1ffffn) expect(canonicalAddress(input)).toBe(raw);
+      else {
+        expect(() => canonicalAddress(input)).toThrow(X64ProcessorFault);
+        expect(() => canonicalAddress(input)).toThrow(`Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
+      }
     }
-  }
 });
 
 test("instruction sequence preserves canonical, wrap and 15-byte fetch fault order", () => {
   for (const start of [0x7fffffffffffn, 0xffffffffffffffffn, 0x1000n]) {
     const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
     memory.map({ base: start, byteLength: 1, permissions: "execute", bytes: new Uint8Array([0xb8]) });
-    const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: start,
-      stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+    const state = createGuestProcessorState({
+      architecture: "x86-64",
+      instructionPointer: start,
+      stackPointer: stack,
+      flags: 2n,
+      x87ControlWord: 0x37f,
+      mxcsr: 0x1f80,
+      mxcsrMask: 0xffff,
+    });
     const cursor = new X64DecodeCursor(memory, state);
     expect(cursor.opcode).toBe(0xb8);
     expect(cursor.bytes).toEqual([0xb8]);
@@ -375,12 +443,18 @@ test("instruction sequence preserves canonical, wrap and 15-byte fetch fault ord
   for (const start of [0x1000n, 0x7ffffffffff1n, 0xfffffffffffffff1n]) {
     const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
     memory.map({ base: start, byteLength: 15, permissions: "execute", bytes: new Uint8Array(15).fill(0x66) });
-    const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: start,
-      stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+    const state = createGuestProcessorState({
+      architecture: "x86-64",
+      instructionPointer: start,
+      stackPointer: stack,
+      flags: 2n,
+      x87ControlWord: 0x37f,
+      mxcsr: 0x1f80,
+      mxcsrMask: 0xffff,
+    });
     expect(() => new X64DecodeCursor(memory, state)).toThrow("Instruction exceeds 15 bytes");
   }
 });
-
 
 test("instruction cursors remain local when a committed store reenters the same CPU", () => {
   const f = fixture([0x66, 0xc7, 0x03, 0x34, 0x12, 0xb8, 86, 0, 0, 0, 0xc3]);
@@ -388,166 +462,263 @@ test("instruction cursors remain local when a committed store reenters the same 
   const nested = f.memory.map({ base: 0x70000n, byteLength: 6, permissions: "execute", bytes: new Uint8Array([0xb8, 37, 0, 0, 0, 0xc3]) });
   let calls = 0;
   const release = f.memory.observeWrites(data, 2, () => {
-    const ip = f.state.instructionPointer, registers = f.state.registers.checkpoint(), flags = f.state.flags.value;
+    const ip = f.state.instructionPointer,
+      registers = f.state.registers.checkpoint(),
+      flags = f.state.flags.value;
     try {
       f.state.instructionPointer = nested.byteOffset;
-      expect(f.run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(37n); calls++;
+      expect(f.run().kind).toBe("return");
+      expect(f.state.registers.read("rax", 32)).toBe(37n);
+      calls++;
     } finally {
-      f.state.registers.restore(registers); f.state.flags.value = flags; f.state.instructionPointer = ip;
+      f.state.registers.restore(registers);
+      f.state.flags.value = flags;
+      f.state.instructionPointer = ip;
     }
   });
   try {
     for (let iteration = 0; iteration < 2; iteration++) {
-      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset);
-      expect(f.run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(86n);
+      f.state.instructionPointer = base;
+      f.state.registers.write("rsp", 64, stack);
+      f.state.registers.write("rbx", 64, data.byteOffset);
+      expect(f.run().kind).toBe("return");
+      expect(f.state.registers.read("rax", 32)).toBe(86n);
       expect(f.memory.readUint16(data)).toBe(0x1234);
     }
     expect(calls).toBe(2);
-  } finally { release(); }
+  } finally {
+    release();
+  }
 });
-
 
 test("retained semantic blocks requalify registered entries before the next instruction", () => {
   const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x83, 0xc0, 3, 0xc3]);
-  const callbacks = new GuestCallbackTable(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const callbacks = new GuestCallbackTable(f.memory),
+    cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
   const run = (budget = 100) => {
-    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+    f.state.instructionPointer = base;
+    f.state.registers.write("rsp", 64, stack);
     return cpu.run({ instructionBudget: budget, returnAddress: pointer(f.memory, returned) });
   };
-  for (let index = 0; index < 3; index++) { expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); }
+  for (let index = 0; index < 3; index++) {
+    expect(run().kind).toBe("return");
+    expect(f.state.registers.read("rax", 32)).toBe(6n);
+  }
   let entries = 0;
-  const unobserve = callbacks.observeEntry(pointer(f.memory, base + 5n), () => { entries++; f.state.registers.write("rax", 32, 10n); });
-  expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(15n); expect(entries).toBe(1);
-  unobserve(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); expect(entries).toBe(1);
+  const unobserve = callbacks.observeEntry(pointer(f.memory, base + 5n), () => {
+    entries++;
+    f.state.registers.write("rax", 32, 10n);
+  });
+  expect(run().kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(15n);
+  expect(entries).toBe(1);
+  unobserve();
+  expect(run().kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(6n);
+  expect(entries).toBe(1);
   let accepts = false;
-  const remove = callbacks.bindEntry(pointer(f.memory, base + 5n), { id: "test:plan-hook", signature: { abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }, parameters: [], result: "void", variadic: false }, invoke: () => ({ kind: "void" }) }, () => accepts);
-  expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); accepts = true;
-  const stopped = run(); expect(stopped.kind).toBe("host-call"); expect(stopped.instructions).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(1n);
-  remove(); expect(run(2).kind).toBe("budget"); expect(f.state.registers.read("rax", 32)).toBe(3n); expect(f.state.instructionPointer).toBe(base + 8n);
-  expect(cpu.run({ instructionBudget: 2, returnAddress: pointer(f.memory, returned) }).kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
+  const remove = callbacks.bindEntry(
+    pointer(f.memory, base + 5n),
+    {
+      id: "test:plan-hook",
+      signature: { abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }, parameters: [], result: "void", variadic: false },
+      invoke: () => ({ kind: "void" }),
+    },
+    () => accepts,
+  );
+  expect(run().kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(6n);
+  accepts = true;
+  const stopped = run();
+  expect(stopped.kind).toBe("host-call");
+  expect(stopped.instructions).toBe(1);
+  expect(f.state.registers.read("rax", 32)).toBe(1n);
+  remove();
+  expect(run(2).kind).toBe("budget");
+  expect(f.state.registers.read("rax", 32)).toBe(3n);
+  expect(f.state.instructionPointer).toBe(base + 8n);
+  expect(cpu.run({ instructionBudget: 2, returnAddress: pointer(f.memory, returned) }).kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(6n);
   const redirected = f.memory.map({ base: 0x70000n, byteLength: 4, permissions: "read-execute", bytes: new Uint8Array([0x31, 0xc0, 0x90, 0xc3]) });
-  const restoreEntry = callbacks.observeEntry(pointer(f.memory, base), () => { f.state.instructionPointer = redirected.byteOffset; });
-  const redirectedStop = run(); expect(redirectedStop.kind).toBe("return"); expect(redirectedStop.instructions).toBe(3); expect(f.state.registers.read("rax", 32)).toBe(0n);
-  restoreEntry(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
+  const restoreEntry = callbacks.observeEntry(pointer(f.memory, base), () => {
+    f.state.instructionPointer = redirected.byteOffset;
+  });
+  const redirectedStop = run();
+  expect(redirectedStop.kind).toBe("return");
+  expect(redirectedStop.instructions).toBe(3);
+  expect(f.state.registers.read("rax", 32)).toBe(0n);
+  restoreEntry();
+  expect(run().kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(6n);
   let returns = 0;
-  const restoreReturn = callbacks.observeEntry(pointer(f.memory, base + 11n), () => { returns++; });
-  expect(run().kind).toBe("return"); expect(returns).toBe(1);
-  restoreReturn(); expect(run().kind).toBe("return"); expect(returns).toBe(1);
+  const restoreReturn = callbacks.observeEntry(pointer(f.memory, base + 11n), () => {
+    returns++;
+  });
+  expect(run().kind).toBe("return");
+  expect(returns).toBe(1);
+  restoreReturn();
+  expect(run().kind).toBe("return");
+  expect(returns).toBe(1);
 });
 
 test("prepared raw SIMD preserves scalar lanes, overlapping registers and committed store entry changes", () => {
   const f = fixture([
-    0xf3, 0x0f, 0x10, 0xc1, 0xf2, 0x0f, 0x10, 0x03,
-    0x66, 0x0f, 0x28, 0xd0, 0x66, 0x0f, 0x6f, 0xda,
-    0xf3, 0x0f, 0x7f, 0x5b, 17, 0x0f, 0x57, 0xdb,
-    0x66, 0x0f, 0xeb, 0xd8, 0x66, 0x0f, 0xdb, 0xda,
-    0x0f, 0x55, 0xd8, 0x0f, 0x29, 0x5b, 32, 0xc3,
+    0xf3, 0x0f, 0x10, 0xc1, 0xf2, 0x0f, 0x10, 0x03, 0x66, 0x0f, 0x28, 0xd0, 0x66, 0x0f, 0x6f, 0xda, 0xf3, 0x0f, 0x7f, 0x5b, 17, 0x0f, 0x57, 0xdb, 0x66, 0x0f,
+    0xeb, 0xd8, 0x66, 0x0f, 0xdb, 0xda, 0x0f, 0x55, 0xd8, 0x0f, 0x29, 0x5b, 32, 0xc3,
   ]);
   const data = f.memory.map({ base: 0x50000n, byteLength: 64, permissions: "read-write" });
   const input = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
   f.memory.write(data, input);
-  const callbacks = new GuestCallbackTable(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
-  const expected = new Uint8Array(16); expected.set(input.subarray(0, 8));
-  let entries = 0, removeEntry = (): void => {};
+  const callbacks = new GuestCallbackTable(f.memory),
+    cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const expected = new Uint8Array(16);
+  expected.set(input.subarray(0, 8));
+  let entries = 0,
+    removeEntry = (): void => {};
   const removeStore = f.memory.observeWrites(f.memory.offset(data, 17n), 16, () => {
-    removeEntry(); removeEntry = callbacks.observeEntry(pointer(f.memory, base + 21n), () => { entries++; });
+    removeEntry();
+    removeEntry = callbacks.observeEntry(pointer(f.memory, base + 21n), () => {
+      entries++;
+    });
     f.state.simd.xmm.fill(0xcc, 48, 64);
   });
   const step = (budget = 1) => cpu.run({ instructionBudget: budget, returnAddress: pointer(f.memory, returned) });
   try {
     for (let pass = 0; pass < 2; pass++) {
-      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset);
-      f.state.simd.xmm.fill(0xaa, 0, 16); f.state.simd.xmm.fill(0xbb, 16, 32); f.state.flags.value = 0x8d7n; f.state.simd.mxcsr = 0x5fa0;
+      f.state.instructionPointer = base;
+      f.state.registers.write("rsp", 64, stack);
+      f.state.registers.write("rbx", 64, data.byteOffset);
+      f.state.simd.xmm.fill(0xaa, 0, 16);
+      f.state.simd.xmm.fill(0xbb, 16, 32);
+      f.state.flags.value = 0x8d7n;
+      f.state.simd.mxcsr = 0x5fa0;
       expect(step().kind).toBe("budget");
       expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array([0xbb, 0xbb, 0xbb, 0xbb, ...new Array<number>(12).fill(0xaa)]));
-      expect(step().kind).toBe("budget"); expect(f.state.simd.xmm.slice(0, 16)).toEqual(expected);
-      expect(step(3).kind).toBe("budget"); expect(f.memory.copy(f.memory.offset(data, 17n), 16)).toEqual(expected);
-      expect(step(6).kind).toBe("return"); expect(f.memory.copy(f.memory.offset(data, 32n), 16)).toEqual(new Uint8Array(16));
-      expect(entries).toBe(pass + 1); expect(f.state.flags.value).toBe(0x8d7n); expect(f.state.simd.mxcsr).toBe(0x5fa0);
+      expect(step().kind).toBe("budget");
+      expect(f.state.simd.xmm.slice(0, 16)).toEqual(expected);
+      expect(step(3).kind).toBe("budget");
+      expect(f.memory.copy(f.memory.offset(data, 17n), 16)).toEqual(expected);
+      expect(step(6).kind).toBe("return");
+      expect(f.memory.copy(f.memory.offset(data, 32n), 16)).toEqual(new Uint8Array(16));
+      expect(entries).toBe(pass + 1);
+      expect(f.state.flags.value).toBe(0x8d7n);
+      expect(f.state.simd.mxcsr).toBe(0x5fa0);
     }
-  } finally { removeStore(); removeEntry(); }
+  } finally {
+    removeStore();
+    removeEntry();
+  }
 });
 
 test("prepared SIMD retains alignment, fault-before-write and live instruction bytes", () => {
   const f = fixture([0x0f, 0x28, 0x03, 0xc3]);
   const data = f.memory.map({ base: 0x50000n, byteLength: 32, permissions: "read-write", bytes: new Uint8Array(32).fill(0x5a) });
   const run = (offset: bigint) => {
-    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset + offset);
+    f.state.instructionPointer = base;
+    f.state.registers.write("rsp", 64, stack);
+    f.state.registers.write("rbx", 64, data.byteOffset + offset);
     return f.run();
   };
   expect(run(0n).kind).toBe("return");
   f.state.simd.xmm.fill(0xab, 0, 16);
-  const misaligned = run(1n); expect(misaligned.kind).toBe("exception");
+  const misaligned = run(1n);
+  expect(misaligned.kind).toBe("exception");
   if (misaligned.kind === "exception" && misaligned.exception.kind === "processor") expect(misaligned.exception.vector).toBe(13);
   expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0xab));
   const alias = f.memory.mapAlias({ base: 0x60000n, byteLength: 4, permissions: "read-write", source: pointer(f.memory, base) });
   f.memory.borrow(alias, 4).setUint8(1, 0x10);
-  expect(run(1n).kind).toBe("return"); expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0x5a));
+  expect(run(1n).kind).toBe("return");
+  expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0x5a));
   f.state.simd.xmm.fill(0xcd, 0, 16);
-  const missing = run(24n); expect(missing.kind).toBe("exception");
+  const missing = run(24n);
+  expect(missing.kind).toBe("exception");
   expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0xcd));
 });
 
-test('prepared integer kernels match source ALU flags and exact register halves', async () => {
-  const { X64IntegerKernel, prepareX64IntegerPlan } = await import('../../../src/guest/x64/integer-kernel.ts');
-  const { executeX64Plan, makeX64Plan } = await import('../../../src/guest/x64/plan.ts');
-  const { IntegerRegisterFile } = await import('../../../src/guest/core/registers.ts');
-  const operations: readonly import('../../../src/guest/x86/arithmetic.ts').AluOperation[] = ['add', 'adc', 'sub', 'sbb', 'cmp', 'and', 'test', 'or', 'xor'];
-  const widths: readonly import('../../../src/guest/core/contracts.ts').GuestIntegerWidth[] = [8, 16, 32, 64];
-  const source = fixture([0x90]), compiled = fixture([0x90]);
+test("prepared integer kernels match source ALU flags and exact register halves", async () => {
+  const { X64IntegerKernel, prepareX64IntegerPlan } = await import("../../../src/guest/x64/integer-kernel.ts");
+  const { executeX64Plan, makeX64Plan } = await import("../../../src/guest/x64/plan.ts");
+  const { IntegerRegisterFile } = await import("../../../src/guest/core/registers.ts");
+  const operations: readonly import("../../../src/guest/x86/arithmetic.ts").AluOperation[] = ["add", "adc", "sub", "sbb", "cmp", "and", "test", "or", "xor"];
+  const widths: readonly import("../../../src/guest/core/contracts.ts").GuestIntegerWidth[] = [8, 16, 32, 64];
+  const source = fixture([0x90]),
+    compiled = fixture([0x90]);
   const kernel = X64IntegerKernel.create(compiled.state, compiled.memory);
-  if (kernel === null) throw new Error('Standard CPU must admit integer kernels');
-  expect(X64IntegerKernel.create({ ...compiled.state, registers: new IntegerRegisterFile('i386') }, compiled.memory)).toBeNull();
-  const customized = fixture([0x90]), originalRead = customized.state.registers.read.bind(customized.state.registers);
-  Object.defineProperty(customized.state.registers, 'read', { value: originalRead });
+  if (kernel === null) throw new Error("Standard CPU must admit integer kernels");
+  expect(X64IntegerKernel.create({ ...compiled.state, registers: new IntegerRegisterFile("i386") }, compiled.memory)).toBeNull();
+  const customized = fixture([0x90]),
+    originalRead = customized.state.registers.read.bind(customized.state.registers);
+  Object.defineProperty(customized.state.registers, "read", { value: originalRead });
   expect(X64IntegerKernel.create(customized.state, customized.memory)).toBeNull();
   for (const width of widths) {
-    const sign = 1n << BigInt(width - 1), maximum = (1n << BigInt(width)) - 1n;
-    const edges: readonly (readonly [bigint, bigint])[] = [[maximum, 1n], [sign - 1n, 1n], [sign, maximum], [0n, 1n], [0x1234567887654321n, 0x8765432112345678n]];
-    for (const operation of operations) for (const [left, right] of edges)
-      for (const initialFlags of operation === 'adc' || operation === 'sbb' ? [0x98765432abcdefd6n, 0x98765432abcdefd7n] : [0x98765432abcdefd7n]) {
-      const plan = makeX64Plan({ kind: 'alu', operation,
-        destination: { kind: 'register', register: 'rax', width, highByte: width === 8 },
-        source: { kind: 'register', register: 'rbx', width, highByte: false } }, base + 1n, false);
-      const prepared = prepareX64IntegerPlan(plan);
-      if (prepared === null) throw new Error('Integer plan was not prepared');
-      for (const state of [source.state, compiled.state]) {
-        state.flags.value = initialFlags;
-        state.registers.write('rax', 64, 0xfedcba9876543210n);
-        state.registers.write('rax', width, left, width === 8);
-        state.registers.write('rbx', 64, right);
-      }
-      executeX64Plan(plan, source.memory, source.state); kernel.execute(prepared);
-      expect(compiled.state.registers.checkpoint()).toEqual(source.state.registers.checkpoint());
-      expect(compiled.state.flags.value).toBe(source.state.flags.value);
-    }
+    const sign = 1n << BigInt(width - 1),
+      maximum = (1n << BigInt(width)) - 1n;
+    const edges: readonly (readonly [bigint, bigint])[] = [
+      [maximum, 1n],
+      [sign - 1n, 1n],
+      [sign, maximum],
+      [0n, 1n],
+      [0x1234567887654321n, 0x8765432112345678n],
+    ];
+    for (const operation of operations)
+      for (const [left, right] of edges)
+        for (const initialFlags of operation === "adc" || operation === "sbb" ? [0x98765432abcdefd6n, 0x98765432abcdefd7n] : [0x98765432abcdefd7n]) {
+          const plan = makeX64Plan(
+            {
+              kind: "alu",
+              operation,
+              destination: { kind: "register", register: "rax", width, highByte: width === 8 },
+              source: { kind: "register", register: "rbx", width, highByte: false },
+            },
+            base + 1n,
+            false,
+          );
+          const prepared = prepareX64IntegerPlan(plan);
+          if (prepared === null) throw new Error("Integer plan was not prepared");
+          for (const state of [source.state, compiled.state]) {
+            state.flags.value = initialFlags;
+            state.registers.write("rax", 64, 0xfedcba9876543210n);
+            state.registers.write("rax", width, left, width === 8);
+            state.registers.write("rbx", 64, right);
+          }
+          executeX64Plan(plan, source.memory, source.state);
+          kernel.execute(prepared);
+          expect(compiled.state.registers.checkpoint()).toEqual(source.state.registers.checkpoint());
+          expect(compiled.state.flags.value).toBe(source.state.flags.value);
+        }
   }
-  const addresses: readonly import('../../../src/guest/x64/decoder.ts').X64MemoryOperand[] = [
-    { kind: 'memory', width: 64, base: 'rax', index: 'rbx', scale: 8n, displacement: -17n, ripRelative: false, addressBits: 64, segment: 'fs' },
-    { kind: 'memory', width: 32, base: 'rax', index: 'rbx', scale: 4n, displacement: 0x80000000n, ripRelative: false, addressBits: 32, segment: null },
-    { kind: 'memory', width: 64, base: null, index: null, scale: 1n, displacement: -0x100000007n, ripRelative: true, addressBits: 64, segment: null },
+  const addresses: readonly import("../../../src/guest/x64/decoder.ts").X64MemoryOperand[] = [
+    { kind: "memory", width: 64, base: "rax", index: "rbx", scale: 8n, displacement: -17n, ripRelative: false, addressBits: 64, segment: "fs" },
+    { kind: "memory", width: 32, base: "rax", index: "rbx", scale: 4n, displacement: 0x80000000n, ripRelative: false, addressBits: 32, segment: null },
+    { kind: "memory", width: 64, base: null, index: null, scale: 1n, displacement: -0x100000007n, ripRelative: true, addressBits: 64, segment: null },
   ];
   for (const address of addresses) {
-    const plan = makeX64Plan({ kind: 'lea', source: address,
-      destination: { kind: 'register', register: 'r8', width: address.width, highByte: false } }, base + 7n, false);
+    const plan = makeX64Plan(
+      { kind: "lea", source: address, destination: { kind: "register", register: "r8", width: address.width, highByte: false } },
+      base + 7n,
+      false,
+    );
     const prepared = prepareX64IntegerPlan(plan);
-    if (prepared === null) throw new Error('LEA was not prepared');
+    if (prepared === null) throw new Error("LEA was not prepared");
     for (const state of [source.state, compiled.state]) {
-      state.registers.write('rax', 64, 0xffff800012345678n); state.registers.write('rbx', 64, 0xfffffffffffedcban);
+      state.registers.write("rax", 64, 0xffff800012345678n);
+      state.registers.write("rbx", 64, 0xfffffffffffedcban);
       state.segments.fs.base = 0x1234567890n;
     }
-    executeX64Plan(plan, source.memory, source.state); kernel.execute(prepared);
+    executeX64Plan(plan, source.memory, source.state);
+    kernel.execute(prepared);
     expect(compiled.state.registers.checkpoint()).toEqual(source.state.registers.checkpoint());
   }
-  for (let code = 0; code < 16; code++) for (const flags of [0n, 0x8d5n, 0x881n, 0x44n]) {
-    const plan = makeX64Plan({ kind: 'branch', condition: code, displacement: -3n }, base + 7n, false);
-    const prepared = prepareX64IntegerPlan(plan);
-    if (prepared === null) throw new Error('Branch was not prepared');
-    source.state.flags.value = flags; compiled.state.flags.value = flags;
-    expect(kernel.execute(prepared)).toEqual(executeX64Plan(plan, source.memory, source.state));
-  }
+  for (let code = 0; code < 16; code++)
+    for (const flags of [0n, 0x8d5n, 0x881n, 0x44n]) {
+      const plan = makeX64Plan({ kind: "branch", condition: code, displacement: -3n }, base + 7n, false);
+      const prepared = prepareX64IntegerPlan(plan);
+      if (prepared === null) throw new Error("Branch was not prepared");
+      source.state.flags.value = flags;
+      compiled.state.flags.value = flags;
+      expect(kernel.execute(prepared)).toEqual(executeX64Plan(plan, source.memory, source.state));
+    }
 });
-
 
 test("a warmed single conditional branch preserves a noncanonical target fault", () => {
   const location = 0x7fffffffffe0n;
@@ -556,12 +727,16 @@ test("a warmed single conditional branch preserves a noncanonical target fault",
   for (const f of [generic, managed]) {
     f.state.flags.set("zero", true);
     expect(f.run().kind).toBe("return");
-    f.state.instructionPointer = location; f.state.registers.write("rsp", 64, stack);
+    f.state.instructionPointer = location;
+    f.state.registers.write("rsp", 64, stack);
     f.state.flags.set("zero", false);
   }
-  const expected = generic.run(), actual = managed.run();
-  expect(actual.kind).toBe("exception"); expect(expected.kind).toBe("exception");
-  expect(actual.instructions).toBe(0); expect(expected.instructions).toBe(0);
+  const expected = generic.run(),
+    actual = managed.run();
+  expect(actual.kind).toBe("exception");
+  expect(expected.kind).toBe("exception");
+  expect(actual.instructions).toBe(0);
+  expect(expected.instructions).toBe(0);
   expect(managed.state.instructionPointer).toBe(location);
   expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
   expect(managed.state.flags.value).toBe(generic.state.flags.value);
@@ -574,77 +749,104 @@ test("prepared numeric instructions read live operands and preserve memory fault
     const xmm = new DataView(sse.state.simd.xmm.buffer, sse.state.simd.xmm.byteOffset, sse.state.simd.xmm.byteLength);
     sse.state.registers.write("rbx", 64, input.byteOffset);
     for (const value of [2.25, 3.5, -1.5]) {
-      sse.state.instructionPointer = base; sse.state.registers.write("rsp", 64, stack);
-      sse.memory.writeFloat32(input, value); xmm.setFloat32(0, 1.5, true);
-      expect(sse.run().kind).toBe("return"); expect(xmm.getFloat32(0, true)).toBe(1.5 + value);
+      sse.state.instructionPointer = base;
+      sse.state.registers.write("rsp", 64, stack);
+      sse.memory.writeFloat32(input, value);
+      xmm.setFloat32(0, 1.5, true);
+      expect(sse.run().kind).toBe("return");
+      expect(xmm.getFloat32(0, true)).toBe(1.5 + value);
     }
-    sse.memory.protect(input, 4, "execute"); sse.state.instructionPointer = base;
+    sse.memory.protect(input, 4, "execute");
+    sse.state.instructionPointer = base;
     const sseFault = sse.run();
-    expect(sseFault.kind).toBe("exception"); expect(sseFault.instructions).toBe(0);
-    expect(xmm.getFloat32(0, true)).toBe(0); expect(sse.state.instructionPointer).toBe(base);
+    expect(sseFault.kind).toBe("exception");
+    expect(sseFault.instructions).toBe(0);
+    expect(xmm.getFloat32(0, true)).toBe(0);
+    expect(sse.state.instructionPointer).toBe(base);
     const x87 = fixture([0xd9, 0x03, 0xd9, 0x5b, 4, 0xc3], base, managed);
     const values = x87.memory.map({ base: 0x50000n, byteLength: 8, permissions: "read-write" });
     x87.state.registers.write("rbx", 64, values.byteOffset);
     for (const value of [2.25, -3.5, 7.5]) {
-      x87.state.instructionPointer = base; x87.state.registers.write("rsp", 64, stack);
+      x87.state.instructionPointer = base;
+      x87.state.registers.write("rsp", 64, stack);
       x87.memory.writeFloat32(values, value);
-      expect(x87.run().kind).toBe("return"); expect(x87.memory.readFloat32(x87.memory.offset(values, 4n))).toBe(value);
+      expect(x87.run().kind).toBe("return");
+      expect(x87.memory.readFloat32(x87.memory.offset(values, 4n))).toBe(value);
     }
-    x87.memory.protect(x87.memory.offset(values, 4n), 4, "read"); x87.state.instructionPointer = base;
+    x87.memory.protect(x87.memory.offset(values, 4n), 4, "read");
+    x87.state.instructionPointer = base;
     const x87Fault = x87.run();
-    expect(x87Fault.kind).toBe("exception"); expect(x87Fault.instructions).toBe(1);
+    expect(x87Fault.kind).toBe("exception");
+    expect(x87Fault.instructions).toBe(1);
     expect(x87.state.instructionPointer).toBe(base + 2n);
   }
 });
 
 test("prepared returns preserve stack adjustment and precise target and stack faults", () => {
-  for (const managed of [false, true]) for (const discard of [0, 32]) {
-    const f = fixture(discard === 0 ? [0xc3] : [0xc2, discard, 0], base, managed);
-    for (let pass = 0; pass < 2; pass++) {
-      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
-      expect(f.run(1).kind).toBe("return");
-      expect(f.state.registers.read("rsp", 64)).toBe(stack + 8n + BigInt(discard));
+  for (const managed of [false, true])
+    for (const discard of [0, 32]) {
+      const f = fixture(discard === 0 ? [0xc3] : [0xc2, discard, 0], base, managed);
+      for (let pass = 0; pass < 2; pass++) {
+        f.state.instructionPointer = base;
+        f.state.registers.write("rsp", 64, stack);
+        expect(f.run(1).kind).toBe("return");
+        expect(f.state.registers.read("rsp", 64)).toBe(stack + 8n + BigInt(discard));
+      }
+      f.state.instructionPointer = base;
+      f.state.registers.write("rsp", 64, stack);
+      f.memory.writeUint64(pointer(f.memory, stack), 0x800000000000n);
+      const targetFault = f.run();
+      expect(targetFault.kind).toBe("exception");
+      expect(targetFault.instructions).toBe(0);
+      expect(f.state.instructionPointer).toBe(base);
+      expect(f.state.registers.read("rsp", 64)).toBe(stack);
+      f.memory.unmap(pointer(f.memory, stack + 4n), 4);
+      const stackFault = f.run();
+      expect(stackFault.kind).toBe("exception");
+      expect(stackFault.instructions).toBe(0);
+      expect(f.state.instructionPointer).toBe(base);
+      expect(f.state.registers.read("rsp", 64)).toBe(stack);
     }
-    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
-    f.memory.writeUint64(pointer(f.memory, stack), 0x800000000000n);
-    const targetFault = f.run();
-    expect(targetFault.kind).toBe("exception"); expect(targetFault.instructions).toBe(0);
-    expect(f.state.instructionPointer).toBe(base); expect(f.state.registers.read("rsp", 64)).toBe(stack);
-    f.memory.unmap(pointer(f.memory, stack + 4n), 4);
-    const stackFault = f.run();
-    expect(stackFault.kind).toBe("exception"); expect(stackFault.instructions).toBe(0);
-    expect(f.state.instructionPointer).toBe(base); expect(f.state.registers.read("rsp", 64)).toBe(stack);
-  }
 });
 
 test("managed blocks preserve warm instruction budgets, live registers and precise read faults", () => {
   // MOV EAX,7; ADD EAX,5; MOV ECX,[RBX]; ADC EAX,ECX; RET.
   const bytes = [0xb8, 7, 0, 0, 0, 0x83, 0xc0, 5, 0x8b, 0x0b, 0x11, 0xc8, 0xc3];
-  const generic = fixture(bytes), managed = fixture(bytes, base, true);
+  const generic = fixture(bytes),
+    managed = fixture(bytes, base, true);
   for (const f of [generic, managed]) {
     const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
-    f.memory.writeUint32(data, 30); f.state.registers.write("rbx", 64, data.byteOffset);
+    f.memory.writeUint32(data, 30);
+    f.state.registers.write("rbx", 64, data.byteOffset);
     expect(f.run().kind).toBe("return");
   }
   for (const budget of [1, 2, 3, 4, 5]) {
     for (const f of [generic, managed]) {
-      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+      f.state.instructionPointer = base;
+      f.state.registers.write("rsp", 64, stack);
       f.state.flags.value = 0x1234567800000003n;
     }
-    const expected = generic.run(budget), actual = managed.run(budget);
-    expect(actual.kind).toBe(expected.kind); expect(actual.instructions).toBe(expected.instructions);
+    const expected = generic.run(budget),
+      actual = managed.run(budget);
+    expect(actual.kind).toBe(expected.kind);
+    expect(actual.instructions).toBe(expected.instructions);
     expect(managed.state.instructionPointer).toBe(generic.state.instructionPointer);
     expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
     expect(managed.state.flags.value).toBe(generic.state.flags.value);
   }
   for (const f of [generic, managed]) {
-    f.state.instructionPointer = base; f.state.registers.write("rbx", 64, 0n);
-    f.state.registers.write("rcx", 64, 123n); f.state.registers.write("rsp", 64, stack);
+    f.state.instructionPointer = base;
+    f.state.registers.write("rbx", 64, 0n);
+    f.state.registers.write("rcx", 64, 123n);
+    f.state.registers.write("rsp", 64, stack);
     f.state.flags.value = 0x1234567800000003n;
   }
-  const expected = generic.run(), actual = managed.run();
-  expect(actual.kind).toBe("exception"); expect(actual.instructions).toBe(2);
-  expect(expected.kind).toBe("exception"); expect(managed.state.instructionPointer).toBe(base + 8n);
+  const expected = generic.run(),
+    actual = managed.run();
+  expect(actual.kind).toBe("exception");
+  expect(actual.instructions).toBe(2);
+  expect(expected.kind).toBe("exception");
+  expect(managed.state.instructionPointer).toBe(base + 8n);
   expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
   expect(managed.state.flags.value).toBe(generic.state.flags.value);
   expect(managed.state.registers.read("rax", 32)).toBe(12n);
@@ -656,33 +858,55 @@ test("managed block boundaries observe committed stores, nested entry callbacks 
   const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x89, 0x03, 0x83, 0xc0, 3, 0x83, 0xc0, 4, 0xc3], base, true);
   const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
   f.state.registers.write("rbx", 64, data.byteOffset);
-  const callbacks = GuestCallbackTable.createManaged(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const callbacks = GuestCallbackTable.createManaged(f.memory),
+    cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
   const run = () => cpu.run({ instructionBudget: 100, returnAddress: pointer(f.memory, returned) });
-  const reset = () => { f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); };
-  expect(run().kind).toBe("return"); reset(); expect(run().kind).toBe("return");
+  const reset = () => {
+    f.state.instructionPointer = base;
+    f.state.registers.write("rsp", 64, stack);
+  };
+  expect(run().kind).toBe("return");
+  reset();
+  expect(run().kind).toBe("return");
   const code = f.memory.mapAlias({ base: 0x60000n, byteLength: 17, permissions: "read-write", source: pointer(f.memory, base) });
   const view = f.memory.borrow(code, 17);
   let observed = 0;
   const removeStore = f.memory.observeWrites(data, 4, () => {
-    observed++; expect(f.state.instructionPointer).toBe(base + 8n);
+    observed++;
+    expect(f.state.instructionPointer).toBe(base + 8n);
     view.setUint8(12, 8);
   });
-  reset(); expect(run().kind).toBe("return"); expect(observed).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(15n);
+  reset();
+  expect(run().kind).toBe("return");
+  expect(observed).toBe(1);
+  expect(f.state.registers.read("rax", 32)).toBe(15n);
   removeStore();
   let entries = 0;
   const removeEntry = callbacks.observeEntry(pointer(f.memory, base + 13n), () => {
     entries++;
-    const saved = f.state.registers.checkpoint(), flags = f.state.flags.value, ip = f.state.instructionPointer;
+    const saved = f.state.registers.checkpoint(),
+      flags = f.state.flags.value,
+      ip = f.state.instructionPointer;
     f.state.instructionPointer = base;
     expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
-    f.state.registers.restore(saved); f.state.flags.value = flags; f.state.instructionPointer = ip;
+    f.state.registers.restore(saved);
+    f.state.flags.value = flags;
+    f.state.instructionPointer = ip;
     view.setUint8(15, 9);
   });
-  reset(); expect(run().kind).toBe("return"); expect(entries).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(20n);
+  reset();
+  expect(run().kind).toBe("return");
+  expect(entries).toBe(1);
+  expect(f.state.registers.read("rax", 32)).toBe(20n);
   removeEntry();
-  reset(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(20n);
-  f.memory.protect(pointer(f.memory, base), 17, "read"); reset();
-  const fault = run(); expect(fault.kind).toBe("exception"); expect(fault.instructions).toBe(0);
+  reset();
+  expect(run().kind).toBe("return");
+  expect(f.state.registers.read("rax", 32)).toBe(20n);
+  f.memory.protect(pointer(f.memory, base), 17, "read");
+  reset();
+  const fault = run();
+  expect(fault.kind).toBe("exception");
+  expect(fault.instructions).toBe(0);
 });
 
 test("managed ownership is explicit and a throwing store observer retains original rollback", () => {
@@ -690,16 +914,24 @@ test("managed ownership is explicit and a throwing store observer retains origin
   Object.defineProperty(generic.state, "instructionPointer", { value: base + 1n, writable: true });
   expect(generic.state.instructionPointer).toBe(base + 1n);
   const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x89, 0x03, 0xc3], base, true);
-  expect(() => Object.defineProperty(f.state, "instructionPointer", { get: () => base })).toThrow("Attempting to change the getter of an unconfigurable property.");
-  expect(() => Object.defineProperty(f.state, "instructionPointer", { writable: false })).toThrow("Attempting to change access mechanism for an unconfigurable property.");
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { get: () => base })).toThrow(
+    "Attempting to change the getter of an unconfigurable property.",
+  );
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { writable: false })).toThrow(
+    "Attempting to change access mechanism for an unconfigurable property.",
+  );
   expect(() => Object.defineProperty(f.state.registers, "write", { value: () => undefined })).toThrow("Attempting to change value of a readonly property.");
   expect(() => Object.defineProperty(f.cpu, "state", { value: generic.state })).toThrow("Attempting to change value of a readonly property.");
   const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
   f.state.registers.write("rbx", 64, data.byteOffset);
   expect(f.run().kind).toBe("return");
-  f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+  f.state.instructionPointer = base;
+  f.state.registers.write("rsp", 64, stack);
   const problem = new Error("observer after committed write");
-  f.memory.observeWrites(data, 4, () => { f.state.registers.write("rax", 64, 999n); throw problem; });
+  f.memory.observeWrites(data, 4, () => {
+    f.state.registers.write("rax", 64, 999n);
+    throw problem;
+  });
   expect(() => f.run()).toThrow(problem);
   expect(f.state.instructionPointer).toBe(base + 8n);
   expect(f.state.registers.read("rax", 64)).toBe(3n);

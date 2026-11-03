@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createQ1SourceComposition, type Q1SourceComposition } from "../../../content/composition/q1/index.ts";
 import type { Q1CompositionServices, Q1SourceProgram } from "../../../content/composition/q1/types.ts";
 import type { Q1CampaignBinding } from "../../../content/q1/base/index.ts";
@@ -21,8 +22,11 @@ export function createForeignQ1WorldModules(options: {
   readonly campaign: Q1CampaignBinding;
   readonly services: Q1CompositionServices;
 }): ForeignQ1WorldModules {
-  const composition = createQ1SourceComposition(options.host, options.foundation,
+  const composition = createQ1SourceComposition(
+    options.host,
+    options.foundation,
     { program: options.program, campaign: options.campaign, registered: true, officialCampaign: options.program === "id1" },
-    options.services);
+    options.services,
+  );
   return { game: composition.game, composition };
 }

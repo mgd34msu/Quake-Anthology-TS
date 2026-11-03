@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { qvmEvent, qvmPersistent, qvmPowerups } from "./legacy-presentation.ts";
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // Ported from id Software's code/game/q_shared.h playerState_t.
@@ -10,7 +11,9 @@ import type { Q3PlayerState } from "../../contracts/protocol.ts";
 /** Selected 32-bit QVM ABI: 117 four-byte words, including the non-network tail. */
 export const QVM_PLAYER_STATE_BYTES = 468;
 
-export function qvmPlayerStateBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? 468 : 444; }
+export function qvmPlayerStateBytes(profile: QvmAbiProfile): number {
+  return profile === "q3-modern" ? 468 : 444;
+}
 
 function checkRecord(view: DataView, profile: QvmAbiProfile): void {
   const QVM_PLAYER_STATE_BYTES = qvmPlayerStateBytes(profile);
@@ -39,8 +42,13 @@ function writeSlots(view: DataView, offset: number, slots: readonly number[]): v
 /** The caller resolves the VM pointer; this view starts at the complete C record. */
 export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-modern"): Q3PlayerState {
   const source = readSourceQvmPlayerState(view, profile);
-  return { ...source, events: [qvmEvent(source.events[0], profile), qvmEvent(source.events[1], profile)],
-    externalEvent: qvmEvent(source.externalEvent, profile), persistent: qvmPersistent(source.persistent, profile), powerups: qvmPowerups(source.powerups, profile) };
+  return {
+    ...source,
+    events: [qvmEvent(source.events[0], profile), qvmEvent(source.events[1], profile)],
+    externalEvent: qvmEvent(source.externalEvent, profile),
+    persistent: qvmPersistent(source.persistent, profile),
+    powerups: qvmPowerups(source.powerups, profile),
+  };
 }
 
 /** Retains the original module's enum values and private slots without presentation translation. */
@@ -96,22 +104,36 @@ export function readSourceQvmPlayerState(view: DataView, profile: QvmAbiProfile)
 }
 
 /** Writes playerState_t; borrowed records retain source-only persistent slots. */
-export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile = "q3-modern",
-  persistentWrite: "initialize" | "preserve-private" = "initialize", unmapped: "throw" | "ignore" = "throw"): void {
+export function writeQvmPlayerState(
+  view: DataView,
+  state: Q3PlayerState,
+  profile: QvmAbiProfile = "q3-modern",
+  persistentWrite: "initialize" | "preserve-private" = "initialize",
+  unmapped: "throw" | "ignore" = "throw",
+): void {
   const lenient = unmapped === "ignore";
   checkRecord(view, profile);
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
   }
-  const persistent = profile === "q3-modern" ? [...state.persistent]
-    : persistentWrite === "preserve-private" ? readSlots(view, 248) : Array<number>(16).fill(0);
+  const persistent =
+    profile === "q3-modern" ? [...state.persistent] : persistentWrite === "preserve-private" ? readSlots(view, 248) : Array<number>(16).fill(0);
   if (profile !== "q3-modern") {
     for (const index of [0, 1, 2, 3, 4, 8, 9, 10]) persistent[index] = state.persistent[index] ?? 0;
-    persistent[7] = state.persistent[6] ?? 0; persistent[11] = state.persistent[13] ?? 0;
+    persistent[7] = state.persistent[6] ?? 0;
+    persistent[11] = state.persistent[13] ?? 0;
   }
-  writeSourceQvmPlayerState(view, { ...state, persistent,
-    events: [qvmEvent(state.events[0], profile, true, lenient), qvmEvent(state.events[1], profile, true, lenient)],
-    externalEvent: qvmEvent(state.externalEvent, profile, true, lenient), powerups: qvmPowerups(state.powerups, profile, lenient) }, profile);
+  writeSourceQvmPlayerState(
+    view,
+    {
+      ...state,
+      persistent,
+      events: [qvmEvent(state.events[0], profile, true, lenient), qvmEvent(state.events[1], profile, true, lenient)],
+      externalEvent: qvmEvent(state.externalEvent, profile, true, lenient),
+      powerups: qvmPowerups(state.powerups, profile, lenient),
+    },
+    profile,
+  );
 }
 
 /** Writes original enum values and private slots directly, without stock presentation translation. */
@@ -160,7 +182,10 @@ export function writeSourceQvmPlayerState(view: DataView, state: Q3PlayerState, 
   writeSlots(view, 248, state.persistent);
   writeSlots(view, 312, state.powerups);
   writeSlots(view, 376, state.ammo);
-  if (profile !== "q3-modern") { view.setInt32(440, state.pingMilliseconds, true); return; }
+  if (profile !== "q3-modern") {
+    view.setInt32(440, state.pingMilliseconds, true);
+    return;
+  }
   view.setInt32(440, state.generic1, true);
   view.setInt32(444, state.loopSound, true);
   view.setInt32(448, state.jumpPadEntity, true);

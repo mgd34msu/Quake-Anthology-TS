@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // BSP v46 layout and loading semantics from id Software's GPL-2.0-or-later
 // code/qcommon/qfiles.h, cm_load.c and code/renderer/tr_bsp.c.
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
@@ -8,9 +9,20 @@ import { normalizeQ3Bsp } from "./ibsp44.ts";
 /** Original MAX_MAP_AREAS is 256; collision allocates areas squared. */
 const MAX_MAP_AREAS = 1024;
 
-export interface BspShader { readonly name: string; readonly surfaceFlags: number; readonly contentFlags: number }
-export interface BspPlane { readonly normal: Vec3; readonly distance: number }
-export interface BspNode { readonly plane: number; readonly children: readonly [number, number]; readonly bounds: Bounds }
+export interface BspShader {
+  readonly name: string;
+  readonly surfaceFlags: number;
+  readonly contentFlags: number;
+}
+export interface BspPlane {
+  readonly normal: Vec3;
+  readonly distance: number;
+}
+export interface BspNode {
+  readonly plane: number;
+  readonly children: readonly [number, number];
+  readonly bounds: Bounds;
+}
 export interface BspLeaf {
   readonly cluster: number;
   readonly area: number;
@@ -27,8 +39,15 @@ export interface BspModel {
   readonly firstBrush: number;
   readonly brushCount: number;
 }
-export interface BspBrush { readonly firstSide: number; readonly sideCount: number; readonly shader: number }
-export interface BspBrushSide { readonly plane: number; readonly shader: number }
+export interface BspBrush {
+  readonly firstSide: number;
+  readonly sideCount: number;
+  readonly shader: number;
+}
+export interface BspBrushSide {
+  readonly plane: number;
+  readonly shader: number;
+}
 export interface BspVertex {
   readonly position: Vec3;
   readonly texCoord: Vec2;
@@ -37,7 +56,11 @@ export interface BspVertex {
   readonly normal: Vec3;
   readonly color: Vec4;
 }
-export interface BspFog { readonly shader: string; readonly brush: number; readonly visibleSide: number }
+export interface BspFog {
+  readonly shader: string;
+  readonly brush: number;
+  readonly visibleSide: number;
+}
 interface BspSurfaceFields {
   readonly shader: number;
   readonly fog: number;
@@ -55,12 +78,18 @@ interface BspSurfaceFields {
   readonly patchWidth: number;
   readonly patchHeight: number;
 }
-export type BspSurface = BspSurfaceFields & (
-  { readonly type: "planar" } | { readonly type: "patch" }
-  | { readonly type: "triangles" } | { readonly type: "flare" }
-);
-export interface BspLightGridPoint { readonly ambient: Vec3; readonly directed: Vec3; readonly latLong: Vec2 }
-export interface BspVisibility { readonly clusterCount: number; readonly bytesPerCluster: number; readonly bits: Uint8Array }
+export type BspSurface = BspSurfaceFields &
+  ({ readonly type: "planar" } | { readonly type: "patch" } | { readonly type: "triangles" } | { readonly type: "flare" });
+export interface BspLightGridPoint {
+  readonly ambient: Vec3;
+  readonly directed: Vec3;
+  readonly latLong: Vec2;
+}
+export interface BspVisibility {
+  readonly clusterCount: number;
+  readonly bytesPerCluster: number;
+  readonly bits: Uint8Array;
+}
 export interface BspMap {
   readonly entities: string;
   readonly entityRecords: ReturnType<typeof parseEntities>;
@@ -82,16 +111,27 @@ export interface BspMap {
   readonly visibility: BspVisibility | null;
 }
 
-interface Lump { readonly offset: number; readonly length: number }
+interface Lump {
+  readonly offset: number;
+  readonly length: number;
+}
 const HEADER_SIZE = 8 + 17 * 8;
 export const Q3_LIGHTMAP_WIDTH = 128;
 export const Q3_LIGHTMAP_HEIGHT = 128;
 export const Q3_LIGHTMAP_BYTES = Q3_LIGHTMAP_WIDTH * Q3_LIGHTMAP_HEIGHT * 3;
 
-function vec2(reader: BinaryReader): Vec2 { return { x: reader.finiteF32(), y: reader.finiteF32() }; }
-function vec3(reader: BinaryReader): Vec3 { return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32() }; }
-function intVec3(reader: BinaryReader): Vec3 { return { x: reader.i32(), y: reader.i32(), z: reader.i32() }; }
-function byteVec3(reader: BinaryReader): Vec3 { return { x: reader.u8(), y: reader.u8(), z: reader.u8() }; }
+function vec2(reader: BinaryReader): Vec2 {
+  return { x: reader.finiteF32(), y: reader.finiteF32() };
+}
+function vec3(reader: BinaryReader): Vec3 {
+  return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32() };
+}
+function intVec3(reader: BinaryReader): Vec3 {
+  return { x: reader.i32(), y: reader.i32(), z: reader.i32() };
+}
+function byteVec3(reader: BinaryReader): Vec3 {
+  return { x: reader.u8(), y: reader.u8(), z: reader.u8() };
+}
 
 function surface(reader: BinaryReader): BspSurface {
   const shader = reader.i32();
@@ -99,19 +139,33 @@ function surface(reader: BinaryReader): BspSurface {
   const typeOffset = reader.offset;
   const type = reader.i32();
   const fields: BspSurfaceFields = {
-    shader, fog, firstVertex: reader.i32(), vertexCount: reader.i32(),
-    firstIndex: reader.i32(), indexCount: reader.i32(), lightmap: reader.i32(),
-    lightmapX: reader.i32(), lightmapY: reader.i32(),
-    lightmapWidth: reader.i32(), lightmapHeight: reader.i32(),
-    lightmapOrigin: vec3(reader), lightmapVectors: [vec3(reader), vec3(reader), vec3(reader)],
-    patchWidth: reader.i32(), patchHeight: reader.i32(),
+    shader,
+    fog,
+    firstVertex: reader.i32(),
+    vertexCount: reader.i32(),
+    firstIndex: reader.i32(),
+    indexCount: reader.i32(),
+    lightmap: reader.i32(),
+    lightmapX: reader.i32(),
+    lightmapY: reader.i32(),
+    lightmapWidth: reader.i32(),
+    lightmapHeight: reader.i32(),
+    lightmapOrigin: vec3(reader),
+    lightmapVectors: [vec3(reader), vec3(reader), vec3(reader)],
+    patchWidth: reader.i32(),
+    patchHeight: reader.i32(),
   };
   switch (type) {
-    case 1: return { ...fields, type: "planar" };
-    case 2: return { ...fields, type: "patch" };
-    case 3: return { ...fields, type: "triangles" };
-    case 4: return { ...fields, type: "flare" };
-    default: throw new BinaryError(reader.source, typeOffset, `unknown BSP surface type ${type}`);
+    case 1:
+      return { ...fields, type: "planar" };
+    case 2:
+      return { ...fields, type: "patch" };
+    case 3:
+      return { ...fields, type: "triangles" };
+    case 4:
+      return { ...fields, type: "flare" };
+    default:
+      throw new BinaryError(reader.source, typeOffset, `unknown BSP surface type ${type}`);
   }
 }
 
@@ -151,19 +205,30 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
   const planes = records<BspPlane>(2, 16, r => ({ normal: vec3(r), distance: r.finiteF32() }));
   const nodes = records<BspNode>(3, 36, r => ({ plane: r.i32(), children: [r.i32(), r.i32()], bounds: { min: intVec3(r), max: intVec3(r) } }));
   const leaves = records<BspLeaf>(4, 48, r => ({
-    cluster: r.i32(), area: r.i32(), bounds: { min: intVec3(r), max: intVec3(r) },
-    firstSurface: r.i32(), surfaceCount: r.i32(), firstBrush: r.i32(), brushCount: r.i32(),
+    cluster: r.i32(),
+    area: r.i32(),
+    bounds: { min: intVec3(r), max: intVec3(r) },
+    firstSurface: r.i32(),
+    surfaceCount: r.i32(),
+    firstBrush: r.i32(),
+    brushCount: r.i32(),
   }));
   const leafSurfaces = records(5, 4, r => r.i32());
   const leafBrushes = records(6, 4, r => r.i32());
   const models = records<BspModel>(7, 40, r => ({
-    bounds: { min: vec3(r), max: vec3(r) }, firstSurface: r.i32(), surfaceCount: r.i32(),
-    firstBrush: r.i32(), brushCount: r.i32(),
+    bounds: { min: vec3(r), max: vec3(r) },
+    firstSurface: r.i32(),
+    surfaceCount: r.i32(),
+    firstBrush: r.i32(),
+    brushCount: r.i32(),
   }));
   const brushes = records<BspBrush>(8, 12, r => ({ firstSide: r.i32(), sideCount: r.i32(), shader: r.i32() }));
   const brushSides = records<BspBrushSide>(9, 8, r => ({ plane: r.i32(), shader: r.i32() }));
   const vertices = records<BspVertex>(10, 44, r => ({
-    position: vec3(r), texCoord: vec2(r), lightmapCoord: { x: r.f32(), y: r.f32() }, normal: vec3(r),
+    position: vec3(r),
+    texCoord: vec2(r),
+    lightmapCoord: { x: r.f32(), y: r.f32() },
+    normal: vec3(r),
     color: { x: r.u8(), y: r.u8(), z: r.u8(), w: r.u8() },
   }));
   const indices = records(11, 4, r => r.i32());
@@ -178,13 +243,14 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     if (visibilityLump.length < 8) throw new BinaryError(source, reader.offset, "truncated visibility header");
     const clusterCount = reader.i32();
     const bytesPerCluster = reader.i32();
-    if (clusterCount < 0 || bytesPerCluster < Math.ceil(clusterCount / 8)
-      || clusterCount * bytesPerCluster !== visibilityLump.length - 8) {
+    if (clusterCount < 0 || bytesPerCluster < Math.ceil(clusterCount / 8) || clusterCount * bytesPerCluster !== visibilityLump.length - 8) {
       throw new BinaryError(source, visibilityLump.offset, "invalid visibility dimensions");
     }
     visibility = { clusterCount, bytesPerCluster, bits: reader.bytes(visibilityLump.length - 8) };
   }
-  function fail(offset: number, message: string): never { throw new BinaryError(source, offset, message); }
+  function fail(offset: number, message: string): never {
+    throw new BinaryError(source, offset, message);
+  }
   function reference(value: number, count: number, offset: number, name: string): void {
     if (value < 0 || value >= count) fail(offset, `${name} index ${value} outside 0..${count - 1}`);
   }
@@ -207,7 +273,10 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     while (stack.length > 0) {
       const current = stack.pop();
       if (current === undefined) break;
-      if (current.exiting) { visited[current.node] = 2; continue; }
+      if (current.exiting) {
+        visited[current.node] = 2;
+        continue;
+      }
       if (visited[current.node] === 1) fail(lump(3).offset + current.node * 36, "cycle in BSP nodes");
       if (visited[current.node] === 2) continue;
       visited[current.node] = 1;
@@ -261,8 +330,7 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     surfaceWork += item.vertexCount + item.indexCount;
     if (surfaceWork > 4 * (vertices.length + indices.length) + 65536) fail(offset + 12, "surface ranges overlap excessively");
     // R_FindShader falls back to vertex lighting for missing lightmaps, including retail texturegrab.
-    const usesLightmap = (item.type === "planar" || item.type === "patch")
-      && item.lightmap >= 0 && item.lightmap < lightmaps.length;
+    const usesLightmap = (item.type === "planar" || item.type === "patch") && item.lightmap >= 0 && item.lightmap < lightmaps.length;
     if (item.type === "planar" || item.type === "patch") {
       if (item.lightmap < -4) fail(offset + 28, "invalid lightmap sentinel");
     }
@@ -271,8 +339,14 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
       else if (lightmapUse[index] !== 2) lightmapUse[index] = 1;
     }
     if (item.type === "patch") {
-      if (item.patchWidth < 3 || item.patchHeight < 3 || item.patchWidth % 2 !== 1 || item.patchHeight % 2 !== 1
-        || item.patchWidth * item.patchHeight !== item.vertexCount) fail(offset + 96, "invalid patch control grid");
+      if (
+        item.patchWidth < 3 ||
+        item.patchHeight < 3 ||
+        item.patchWidth % 2 !== 1 ||
+        item.patchHeight % 2 !== 1 ||
+        item.patchWidth * item.patchHeight !== item.vertexCount
+      )
+        fail(offset + 96, "invalid patch control grid");
     }
     if ((item.type === "planar" || item.type === "triangles") && item.indexCount % 3 !== 0) fail(offset + 24, "triangle index count is not a multiple of 3");
     for (let index = item.firstIndex; index < item.firstIndex + item.indexCount; index++) {
@@ -288,7 +362,24 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     if (!Number.isFinite(vertex.lightmapCoord.x)) fail(lump(10).offset + index * 44 + 20, "non-finite lightmap coordinate");
     if (!Number.isFinite(vertex.lightmapCoord.y)) fail(lump(10).offset + index * 44 + 24, "non-finite lightmap coordinate");
   }
-  return { entities, entityRecords: parseEntities(entities, `${source}:entities`), shaders, planes, nodes, leaves,
-    leafSurfaces, leafBrushes, models, brushes, brushSides, vertices, indices, fogs,
-    surfaces, lightmaps, lightGrid, visibility };
+  return {
+    entities,
+    entityRecords: parseEntities(entities, `${source}:entities`),
+    shaders,
+    planes,
+    nodes,
+    leaves,
+    leafSurfaces,
+    leafBrushes,
+    models,
+    brushes,
+    brushSides,
+    vertices,
+    indices,
+    fogs,
+    surfaces,
+    lightmaps,
+    lightGrid,
+    visibility,
+  };
 }

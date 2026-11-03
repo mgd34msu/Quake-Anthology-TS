@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Quake III source joystick/mouse lifecycle. GPL-2.0-or-later.
 import { registerSourceInputSettings } from "./device-settings.ts";
 import type { CvarRegistry } from "../core/cvars/index.ts";
@@ -5,7 +6,10 @@ import { SdlJoystick } from "../platform/sdl.ts";
 import type { SdlJoystickEvent } from "../platform/sdl.ts";
 import { SourceJoystickState, windowsJoystickDebug } from "./source-joystick.ts";
 import type { SourceJoystickProfile } from "./source-joystick.ts";
-export interface SourceInputOptions { readonly cvars: CvarRegistry; readonly print: (text: string) => undefined; }
+export interface SourceInputOptions {
+  readonly cvars: CvarRegistry;
+  readonly print: (text: string) => undefined;
+}
 /** Client-build input survives window replacement and starts at Sys_Init, before Netchan_Init. */
 export class SourceInputState {
   readonly mouse = { available: false, active: false, resetTime: 0 };
@@ -14,7 +18,9 @@ export class SourceInputState {
   private joystick: SdlJoystick | null = null;
   private joystickEvents: SdlJoystickEvent[] = [];
   private joystickProfile: SourceJoystickProfile = "linux";
-  get instance(): number | null { return this.joystick?.instance ?? null; }
+  get instance(): number | null {
+    return this.joystick?.instance ?? null;
+  }
 
   /** Inert construction permits the common owner to publish input before initialization prints. */
   constructor(private readonly options: SourceInputOptions) {}
@@ -25,7 +31,8 @@ export class SourceInputState {
     const { cvars, print } = this.options;
     print("\n------- Input Initialization -------\n");
     registerSourceInputSettings(cvars);
-    cvars.applyLatched("in_joystick"); cvars.applyLatched("in_joystickProfile");
+    cvars.applyLatched("in_joystick");
+    cvars.applyLatched("in_joystickProfile");
     const profile = this.cvar("in_joystickProfile").value;
     if (profile !== "linux" && profile !== "windows") throw new Error("in_joystickProfile must be linux or windows");
     this.joystickProfile = profile;
@@ -40,7 +47,11 @@ export class SourceInputState {
       if (this.joystickProfile === "windows") this.joystickState.clear();
       const joystick = SdlJoystick.openFirst(print, this.joystickProfile);
       this.joystick = joystick;
-      print(joystick === null ? "No joystick found.\n" : `Joystick SDL instance ${joystick.instance} found\nName:    ${joystick.name}\nAxes:    ${joystick.axes}\nButtons: ${joystick.buttons}\n`);
+      print(
+        joystick === null
+          ? "No joystick found.\n"
+          : `Joystick SDL instance ${joystick.instance} found\nName:    ${joystick.name}\nAxes:    ${joystick.axes}\nButtons: ${joystick.buttons}\n`,
+      );
       // Linux discards JS_EVENT_INIT; Windows samples current values in each frame.
       joystick?.pollEvents();
     } else print("Joystick is not active.\n");
@@ -60,14 +71,13 @@ export class SourceInputState {
   }
 
   /** IN_JoyMove runs after console polling, with or without an attached SDL window. */
-  joystickFrame(queueKey: (key: number, down: boolean, time: number) => undefined,
-    queueMouse?: (dx: number, dy: number, time: number) => undefined): void {
+  joystickFrame(queueKey: (key: number, down: boolean, time: number) => undefined, queueMouse?: (dx: number, dy: number, time: number) => undefined): void {
     this.requireOpen();
     if (this.joystick === null) return;
     const events = [...this.joystickEvents, ...this.joystick.pollEvents(this.joystickProfile)];
     this.joystickEvents = [];
-    if (this.joystickProfile === "windows" && this.cvar("in_debugjoystick").integerValue !== 0
-      && !events.some(event => event.kind === "joystick-removed")) this.options.print(windowsJoystickDebug(events));
+    if (this.joystickProfile === "windows" && this.cvar("in_debugjoystick").integerValue !== 0 && !events.some(event => event.kind === "joystick-removed"))
+      this.options.print(windowsJoystickDebug(events));
     for (const event of events) {
       if (this.joystick === null) break;
       switch (event.kind) {
@@ -82,7 +92,8 @@ export class SourceInputState {
           break;
         case "joystick-removed":
           this.options.print("SDL joystick disconnected.\n");
-          this.joystick?.close(); this.joystick = null;
+          this.joystick?.close();
+          this.joystick = null;
           this.joystickState.removeDevice(queueKey);
           break;
       }
@@ -116,7 +127,8 @@ export class SourceInputState {
     this.closed = true;
     this.mouse.available = false;
     const joystick = this.joystick;
-    this.joystick = null; this.joystickEvents = [];
+    this.joystick = null;
+    this.joystickEvents = [];
     this.joystickState.clear();
     joystick?.close();
   }

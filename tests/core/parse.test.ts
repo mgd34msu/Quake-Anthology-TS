@@ -1,9 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { CommonError } from "../../src/core/common-error.ts";
-import {
-  CommonParseCursor, CommonParseState, Tokenizer, compressCommonText,
-  parseQ1Token, parseQ2Token,
-} from "../../src/core/common-parse.ts";
+import { CommonParseCursor, CommonParseState, Tokenizer, compressCommonText, parseQ1Token, parseQ2Token } from "../../src/core/common-parse.ts";
 
 test("Q3 COM_Parse preserves line boundaries, shared tokens, and matrix writes", () => {
   const state = new CommonParseState();
@@ -33,8 +31,7 @@ test("general Q3 tokenizer and compressor retain literal quoted text", () => {
 
 test("Q1 punctuation and Q2 token limits retain their donor dialects", () => {
   const netquake = { data: 'key:value "a\\b"', index: 0 };
-  expect([parseQ1Token(netquake), parseQ1Token(netquake), parseQ1Token(netquake), parseQ1Token(netquake)])
-    .toEqual(["key", ":", "value", "a\\b"]);
+  expect([parseQ1Token(netquake), parseQ1Token(netquake), parseQ1Token(netquake), parseQ1Token(netquake)]).toEqual(["key", ":", "value", "a\\b"]);
   expect(parseQ1Token(netquake)).toBeNull();
   expect(parseQ1Token({ data: "key:value", index: 0 }, "quakeworld")).toBe("key:value");
   const quake2 = { data: `// header\n${"x".repeat(128)} "a\\b"`, index: 0 };

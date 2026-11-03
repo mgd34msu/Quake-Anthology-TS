@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { sameActor } from "../../contracts/identity.ts";
 import type { ActorId, IdentityOwner, OwnedActor, ProviderId, SessionId } from "../../contracts/identity.ts";
 import type { ActorObservation, ActorRegistry } from "../../contracts/world.ts";
@@ -24,7 +25,10 @@ export function nextActorGeneration(session: SessionId, slot: number, minimum = 
   if (!Number.isSafeInteger(slot) || slot < 0) throw new RangeError("Actor slot must be a nonnegative safe integer");
   if (!Number.isSafeInteger(minimum) || minimum < 0) throw new RangeError("Actor generation must be a nonnegative safe integer");
   let generations = sessionGenerations.get(session);
-  if (generations === undefined) { generations = new Map<number, number>(); sessionGenerations.set(session, generations); }
+  if (generations === undefined) {
+    generations = new Map<number, number>();
+    sessionGenerations.set(session, generations);
+  }
   const generation = Math.max(minimum, generations.get(slot) ?? 0);
   if (!Number.isSafeInteger(generation) || generation >= Number.MAX_SAFE_INTEGER) throw new RangeError("Actor generation is exhausted");
   generations.set(slot, generation + 1);
@@ -48,20 +52,32 @@ export class SessionActorRegistry implements ActorRegistry {
   /** Every slot below this index is occupied, so allocation still takes the lowest free slot. */
   private lowestFree = 0;
 
-  get revision(): number { return this.orderingRevision; }
+  get revision(): number {
+    return this.orderingRevision;
+  }
 
-  constructor(private readonly identities: IdentityOwner, readonly capacity = 65536) {
+  constructor(
+    private readonly identities: IdentityOwner,
+    readonly capacity = 65536,
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity <= 0) throw new RangeError("Actor capacity must be a positive safe integer");
     this.session = identities.session;
     let generations = sessionGenerations.get(this.session);
-    if (generations === undefined) { generations = new Map<number, number>(); sessionGenerations.set(this.session, generations); }
+    if (generations === undefined) {
+      generations = new Map<number, number>();
+      sessionGenerations.set(this.session, generations);
+    }
     this.generations = generations;
   }
 
   allocate(owner: ProviderId, definition: `${string}:${string}`): OwnedActor {
     if (this.closed) throw new Error("Actor registry is closed");
     let index = -1;
-    for (let candidate = this.lowestFree; candidate < this.slots.length; candidate++) if (this.slots[candidate]?.actor === null) { index = candidate; break; }
+    for (let candidate = this.lowestFree; candidate < this.slots.length; candidate++)
+      if (this.slots[candidate]?.actor === null) {
+        index = candidate;
+        break;
+      }
     if (index < 0) {
       index = this.slots.length;
       if (index >= this.capacity) throw new RangeError("Actor registry is full");
@@ -93,7 +109,10 @@ export class SessionActorRegistry implements ActorRegistry {
     const slot = this.requireSlot(actor);
     if (slot.source !== null) throw new RangeError("Actor already has a source binding");
     let table = this.sourceSlots.get(provider);
-    if (table === undefined) { table = new Map<number, OwnedActor>(); this.sourceSlots.set(provider, table); }
+    if (table === undefined) {
+      table = new Map<number, OwnedActor>();
+      this.sourceSlots.set(provider, table);
+    }
     if (table.has(sourceSlot)) throw new RangeError(`Source slot ${provider}/${sourceSlot} is occupied`);
     slot.source = Object.freeze({ provider, slot: sourceSlot });
     table.set(sourceSlot, actor);
@@ -101,7 +120,9 @@ export class SessionActorRegistry implements ActorRegistry {
     return undefined;
   }
 
-  atSource(owner: ProviderId, slot: number): OwnedActor | null { return this.sourceSlots.get(owner)?.get(slot) ?? null; }
+  atSource(owner: ProviderId, slot: number): OwnedActor | null {
+    return this.sourceSlots.get(owner)?.get(slot) ?? null;
+  }
 
   sourceOf(actor: ActorId): { readonly provider: ProviderId; readonly slot: number } | null {
     if (!this.isLive(actor)) return null;
@@ -127,7 +148,11 @@ export class SessionActorRegistry implements ActorRegistry {
     if (source !== null) this.sourceSlots.get(source.provider)?.delete(source.slot);
     const errors: unknown[] = [];
     for (const callback of [...this.releases]) {
-      try { callback(actor); } catch (error) { errors.push(error); }
+      try {
+        callback(actor);
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Actor release callbacks failed");
     return undefined;
@@ -147,15 +172,15 @@ export class SessionActorRegistry implements ActorRegistry {
   }
 
   resolveOwned(actor: ActorId): OwnedActor | null {
-    return this.isLive(actor) ? this.slots[actor.slot]?.actor ?? null : null;
+    return this.isLive(actor) ? (this.slots[actor.slot]?.actor ?? null) : null;
   }
 
   ownedBy(owner: ProviderId): readonly OwnedActor[] {
-    return this.slots.flatMap(slot => slot.actor !== null && slot.actor.owner === owner ? [slot.actor] : []);
+    return this.slots.flatMap(slot => (slot.actor !== null && slot.actor.owner === owner ? [slot.actor] : []));
   }
 
   observations(): readonly ActorObservation[] {
-    return this.slots.flatMap(slot => slot.observation === null ? [] : [slot.observation]);
+    return this.slots.flatMap(slot => (slot.observation === null ? [] : [slot.observation]));
   }
 
   checkpoint(): readonly ActorSlotCheckpoint[] {
@@ -170,8 +195,11 @@ export class SessionActorRegistry implements ActorRegistry {
   }
 
   sourceCheckpoint(): readonly SourceActorCheckpoint[] {
-    return this.slots.flatMap(slot => slot.actor === null || slot.source === null ? [] : [{ provider: slot.source.provider,
-      sourceSlot: slot.source.slot, actor: { slot: slot.actor.id.slot, generation: slot.actor.id.generation } }]);
+    return this.slots.flatMap(slot =>
+      slot.actor === null || slot.source === null
+        ? []
+        : [{ provider: slot.source.provider, sourceSlot: slot.source.slot, actor: { slot: slot.actor.id.slot, generation: slot.actor.id.generation } }],
+    );
   }
 
   resolveSaved(saved: SavedActorId): OwnedActor | null {
@@ -207,62 +235,98 @@ export class SessionActorRegistry implements ActorRegistry {
   referenceSaved(saved: SavedActorId, domain: "checkpoint" | "current" = "checkpoint"): ActorId {
     if (domain === "current") {
       const slot = this.slots[saved.slot];
-      if (!Number.isSafeInteger(saved.slot) || saved.slot < 0 || !Number.isSafeInteger(saved.generation) || saved.generation < 0 || slot === undefined
-        || saved.generation > slot.generation || (slot.actor === null && saved.generation === slot.generation)) throw new RangeError("Invalid current actor history reference");
+      if (
+        !Number.isSafeInteger(saved.slot) ||
+        saved.slot < 0 ||
+        !Number.isSafeInteger(saved.generation) ||
+        saved.generation < 0 ||
+        slot === undefined ||
+        saved.generation > slot.generation ||
+        (slot.actor === null && saved.generation === slot.generation)
+      )
+        throw new RangeError("Invalid current actor history reference");
       if (slot.actor !== null && slot.actor.id.generation === saved.generation) return slot.actor.id;
       const key = `current:${saved.slot}/${saved.generation}`;
-      const existing = this.savedReferences.get(key); if (existing !== undefined) return existing;
+      const existing = this.savedReferences.get(key);
+      if (existing !== undefined) return existing;
       const reference = this.identities.actor(saved.slot, saved.generation);
-      this.savedReferences.set(key, reference); return reference;
+      this.savedReferences.set(key, reference);
+      return reference;
     }
     const key = `${saved.slot}/${saved.generation}`;
     const existing = this.savedReferences.get(key);
     if (existing !== undefined) return existing;
     const history = this.restoredHistory[saved.slot];
-    if (!Number.isSafeInteger(saved.slot) || saved.slot < 0 || !Number.isSafeInteger(saved.generation) || saved.generation < 0 || history === undefined
-      || saved.generation > history.checkpoint.generation || (history.checkpoint.lifetime.kind === "free" && saved.generation === history.checkpoint.generation)) throw new RangeError("Invalid historical actor checkpoint reference");
+    if (
+      !Number.isSafeInteger(saved.slot) ||
+      saved.slot < 0 ||
+      !Number.isSafeInteger(saved.generation) ||
+      saved.generation < 0 ||
+      history === undefined ||
+      saved.generation > history.checkpoint.generation ||
+      (history.checkpoint.lifetime.kind === "free" && saved.generation === history.checkpoint.generation)
+    )
+      throw new RangeError("Invalid historical actor checkpoint reference");
     const generation = history.generationBase + saved.generation;
     const reference = this.identities.actor(saved.slot, generation);
     this.savedReferences.set(key, reference);
     return reference;
   }
 
-  static restore(identities: IdentityOwner, checkpoints: readonly ActorSlotCheckpoint[], sources: readonly SourceActorCheckpoint[], capacity = 65536): SessionActorRegistry {
+  static restore(
+    identities: IdentityOwner,
+    checkpoints: readonly ActorSlotCheckpoint[],
+    sources: readonly SourceActorCheckpoint[],
+    capacity = 65536,
+  ): SessionActorRegistry {
     const registry = new SessionActorRegistry(identities, capacity);
     if (checkpoints.length > capacity) throw new RangeError("Actor checkpoint exceeds capacity");
     for (const [index, checkpoint] of checkpoints.entries()) {
-      if (checkpoint.slot !== index || !Number.isSafeInteger(checkpoint.generation) || checkpoint.generation < 0) throw new RangeError("Invalid actor slot checkpoint");
+      if (checkpoint.slot !== index || !Number.isSafeInteger(checkpoint.generation) || checkpoint.generation < 0)
+        throw new RangeError("Invalid actor slot checkpoint");
       const active = checkpoint.lifetime;
       const generationBase = registry.generations.get(index) ?? 0;
       const restoredGeneration = generationBase + checkpoint.generation;
-      if (!Number.isSafeInteger(restoredGeneration) || restoredGeneration >= Number.MAX_SAFE_INTEGER) throw new RangeError("Restored actor generation is exhausted");
+      if (!Number.isSafeInteger(restoredGeneration) || restoredGeneration >= Number.MAX_SAFE_INTEGER)
+        throw new RangeError("Restored actor generation is exhausted");
       registry.restoredHistory.push({ checkpoint, generationBase });
       // Reserve the complete saved lifetime interval, including references to freed actors.
       const generation = active.kind === "free" ? restoredGeneration : registry.reserveGeneration(index, restoredGeneration);
       const actor = active.kind === "free" ? null : identities.ownedActor(identities.actor(index, generation), active.owner);
       const definition = active.kind === "free" ? "world:free" : active.definition;
-      registry.slots.push({ generation, actor, definition, source: null,
-        observation: actor === null ? null : Object.freeze({ id: actor.id, owner: actor.owner, definition }) });
+      registry.slots.push({
+        generation,
+        actor,
+        definition,
+        source: null,
+        observation: actor === null ? null : Object.freeze({ id: actor.id, owner: actor.owner, definition }),
+      });
       if (actor !== null) {
         registry.orderingRevision++;
         registry.restoredActors.set(index, { savedGeneration: checkpoint.generation, actor });
         registry.restoredActorSlots.set(actor, index);
         registry.savedReferences.set(`${index}/${checkpoint.generation}`, actor.id);
-      }
-      else registry.generations.set(index, generation);
+      } else registry.generations.set(index, generation);
     }
     for (const source of sources) {
       const restored = registry.restoredActors.get(source.actor.slot);
       const actor = restored?.savedGeneration === source.actor.generation ? restored.actor : null;
-      if (actor === null || actor.owner !== source.provider || !Number.isSafeInteger(source.sourceSlot) || source.sourceSlot < 0) throw new RangeError("Invalid source actor checkpoint");
+      if (actor === null || actor.owner !== source.provider || !Number.isSafeInteger(source.sourceSlot) || source.sourceSlot < 0)
+        throw new RangeError("Invalid source actor checkpoint");
       let table = registry.sourceSlots.get(source.provider);
-      if (table === undefined) { table = new Map<number, OwnedActor>(); registry.sourceSlots.set(source.provider, table); }
+      if (table === undefined) {
+        table = new Map<number, OwnedActor>();
+        registry.sourceSlots.set(source.provider, table);
+      }
       const slot = registry.requireSlot(actor);
       if (table.has(source.sourceSlot) || slot.source !== null) throw new RangeError("Duplicate source actor binding");
       slot.source = Object.freeze({ provider: source.provider, slot: source.sourceSlot });
       table.set(source.sourceSlot, actor);
       let restoredSources = registry.restoredSources.get(source.provider);
-      if (restoredSources === undefined) { restoredSources = []; registry.restoredSources.set(source.provider, restoredSources); }
+      if (restoredSources === undefined) {
+        restoredSources = [];
+        registry.restoredSources.set(source.provider, restoredSources);
+      }
       restoredSources.push({ provider: source.provider, sourceSlot: source.sourceSlot, actor: { ...source.actor } });
       registry.orderingRevision++;
     }
@@ -271,10 +335,16 @@ export class SessionActorRegistry implements ActorRegistry {
 
   onRelease(callback: (actor: OwnedActor) => undefined): () => undefined {
     this.releases.add(callback);
-    return () => { this.releases.delete(callback); return undefined; };
+    return () => {
+      this.releases.delete(callback);
+      return undefined;
+    };
   }
 
-  assertOwned(actor: OwnedActor): undefined { this.requireSlot(actor); return undefined; }
+  assertOwned(actor: OwnedActor): undefined {
+    this.requireSlot(actor);
+    return undefined;
+  }
 
   close(): undefined {
     if (this.closed) return undefined;
@@ -282,7 +352,11 @@ export class SessionActorRegistry implements ActorRegistry {
     const errors: unknown[] = [];
     for (const slot of this.slots) {
       if (slot.actor !== null) {
-        try { this.release(slot.actor); } catch (error) { errors.push(error); }
+        try {
+          this.release(slot.actor);
+        } catch (error) {
+          errors.push(error);
+        }
       }
     }
     this.releases.clear();

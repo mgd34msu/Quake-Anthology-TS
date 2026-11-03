@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Arithmetic selection belongs to the executable recipe, independently of wire format. */
 export type ArithmeticProfile =
   | { readonly kind: "binary32"; readonly round: "each-operation" }
@@ -31,12 +32,21 @@ export interface NumericOperations {
   wrapUint32(value: number): number;
 }
 
-export interface RandomStep { readonly seed: number; readonly value: number; }
+export interface RandomStep {
+  readonly seed: number;
+  readonly value: number;
+}
 export type RandomState =
   | { readonly kind: "q3-lcg"; readonly seed: number; readonly draws: number }
   | { readonly kind: "msvcrt-rand"; readonly seed: number; readonly draws: number }
   | { readonly kind: "glibc-random"; readonly words: readonly number[]; readonly front: number; readonly rear: number; readonly draws: number }
-  | { readonly kind: "q2-rerelease-mt19937"; readonly distribution: "msvc-2022-17.6"; readonly words: readonly number[]; readonly index: number; readonly draws: number }
+  | {
+      readonly kind: "q2-rerelease-mt19937";
+      readonly distribution: "msvc-2022-17.6";
+      readonly words: readonly number[];
+      readonly index: number;
+      readonly draws: number;
+    }
   | { readonly kind: "guest"; readonly module: string; readonly bytes: Uint8Array; readonly draws: number };
 
 export interface RandomSource {

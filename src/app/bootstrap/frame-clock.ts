@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** A committed client frame clock, separate from transport wall timestamps. */
 export class PresentationTime {
   private committedMilliseconds: number | null = null;

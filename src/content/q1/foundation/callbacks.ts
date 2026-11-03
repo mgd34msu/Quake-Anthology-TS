@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 /* Named QC continuations. Only names are saved; handlers are registered by source modules. */
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -36,37 +37,48 @@ export class Q1CallbackRegistry {
   constructor(private readonly game: Q1EntityServices) {}
   register(name: string, handlers: Q1CallbackHandlers): undefined {
     if (this.handlers.has(name)) throw new Error(`Duplicate Q1 callback: ${name}`);
-    this.handlers.set(name, handlers); return undefined;
+    this.handlers.set(name, handlers);
+    return undefined;
   }
   private get(name: string): Q1CallbackHandlers {
-    const handlers = this.handlers.get(name); if (handlers === undefined) throw new Error(`Unknown Q1 saved callback: ${name}`); return handlers;
+    const handlers = this.handlers.get(name);
+    if (handlers === undefined) throw new Error(`Unknown Q1 saved callback: ${name}`);
+    return handlers;
   }
   projectTrajectory(entity: Q1Actor, update: WeaponTrajectoryUpdate): void {
     const name = callbackName(entity.touch);
     if (name !== null) this.get(name).trajectory?.(this.game, entity, update);
   }
   action(entity: Q1Actor, name: string): () => undefined {
-    const handler = this.get(name).action; if (handler === undefined) throw new Error(`Q1 callback is not an action: ${name}`);
+    const handler = this.get(name).action;
+    if (handler === undefined) throw new Error(`Q1 callback is not an action: ${name}`);
     return Object.assign(() => handler(this.game, entity), { q1CallbackName: name });
   }
   use(entity: Q1Actor, name: string): NonNullable<Q1Actor["use"]> {
-    const handler = this.get(name).use; if (handler === undefined) throw new Error(`Q1 callback is not use: ${name}`);
+    const handler = this.get(name).use;
+    if (handler === undefined) throw new Error(`Q1 callback is not use: ${name}`);
     return Object.assign((other: ActorId | null, activator: ActorId | null) => handler(this.game, entity, other, activator), { q1CallbackName: name });
   }
   touch(entity: Q1Actor, name: string): NonNullable<Q1Actor["touch"]> {
-    const handler = this.get(name).touch; if (handler === undefined) throw new Error(`Q1 callback is not touch: ${name}`);
-    return Object.assign((other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]) => handler(this.game, entity, other, normal, surface), { q1CallbackName: name });
+    const handler = this.get(name).touch;
+    if (handler === undefined) throw new Error(`Q1 callback is not touch: ${name}`);
+    return Object.assign((other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]) => handler(this.game, entity, other, normal, surface), {
+      q1CallbackName: name,
+    });
   }
   pain(entity: Q1Actor, name: string): NonNullable<Q1Actor["pain"]> {
-    const handler = this.get(name).pain; if (handler === undefined) throw new Error(`Q1 callback is not pain: ${name}`);
+    const handler = this.get(name).pain;
+    if (handler === undefined) throw new Error(`Q1 callback is not pain: ${name}`);
     return Object.assign((attacker: ActorId | null, damage: number) => handler(this.game, entity, attacker, damage), { q1CallbackName: name });
   }
   die(entity: Q1Actor, name: string): NonNullable<Q1Actor["die"]> {
-    const handler = this.get(name).die; if (handler === undefined) throw new Error(`Q1 callback is not die: ${name}`);
+    const handler = this.get(name).die;
+    if (handler === undefined) throw new Error(`Q1 callback is not die: ${name}`);
     return Object.assign((attacker: ActorId | null) => handler(this.game, entity, attacker), { q1CallbackName: name });
   }
   blocked(entity: Q1Actor, name: string): NonNullable<Q1Actor["blocked"]> {
-    const handler = this.get(name).blocked; if (handler === undefined) throw new Error(`Q1 callback is not blocked: ${name}`);
+    const handler = this.get(name).blocked;
+    if (handler === undefined) throw new Error(`Q1 callback is not blocked: ${name}`);
     return Object.assign((other: ActorId) => handler(this.game, entity, other), { q1CallbackName: name });
   }
 }

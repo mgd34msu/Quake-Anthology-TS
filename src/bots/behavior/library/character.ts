@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Bot character profiles translated from id Software's be_ai_char.c and
@@ -10,13 +11,7 @@ import { ScriptSourceReader } from "../../../content/legacy-script/preprocessor.
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 import type { BotScriptReader } from "./script-sources.ts";
 import type { BotLog } from "./log.ts";
-import {
-  NumberFlag,
-  Punctuation,
-  ScriptLanguageError,
-  type ScriptToken,
-  type SourceLocation,
-} from "../../../content/legacy-script/lexer.ts";
+import { NumberFlag, Punctuation, ScriptLanguageError, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
 
 export enum Characteristic {
   Name = 0,
@@ -131,9 +126,11 @@ const PROFILE_BYTES = CHARACTERISTICS_OFFSET + STORED_CHARACTERISTICS * CHARACTE
 
 function characterFloatText(value: number): string {
   if (!Number.isFinite(value)) return Number.isNaN(value) ? "nan" : value < 0 ? "-inf" : "inf";
-  const negative = value < 0 || Object.is(value, -0), absolute = Math.abs(value);
+  const negative = value < 0 || Object.is(value, -0),
+    absolute = Math.abs(value);
   if (absolute >= 1e21) return `${negative ? "-" : ""}${BigInt(absolute)}.000000`;
-  const scaled = absolute * 1_000_000, whole = Math.floor(scaled);
+  const scaled = absolute * 1_000_000,
+    whole = Math.floor(scaled);
   if (Number.isSafeInteger(whole) && scaled - whole === 0.5) {
     const rounded = whole % 2 === 0 ? whole : whole + 1;
     return `${negative ? "-" : ""}${(rounded / 1_000_000).toFixed(6)}`;
@@ -148,13 +145,17 @@ interface CharacterStrings {
 
 function readString(bytes: Uint8Array): string {
   let result = "";
-  for (const byte of bytes) { if (byte === 0) break; result += String.fromCharCode(byte); }
+  for (const byte of bytes) {
+    if (byte === 0) break;
+    result += String.fromCharCode(byte);
+  }
   return result;
 }
 
 function encodeString(text: string): Uint8Array {
   const end = text.indexOf("\0");
-  const length = end < 0 ? text.length : end, bytes = new Uint8Array(length);
+  const length = end < 0 ? text.length : end,
+    bytes = new Uint8Array(length);
   for (let index = 0; index < length; index++) {
     const byte = text.charCodeAt(index);
     if (byte > 255) throw new RangeError("character strings require source bytes");
@@ -168,7 +169,11 @@ function encodeString(text: string): Uint8Array {
 class CharacterProfile {
   readonly allocation: BotMemoryAllocation;
 
-  constructor(private readonly memory: BotMemory, private readonly strings: CharacterStrings, restored?: BotMemoryAllocation) {
+  constructor(
+    private readonly memory: BotMemory,
+    private readonly strings: CharacterStrings,
+    restored?: BotMemoryAllocation,
+  ) {
     if (restored !== undefined && restored.bytes.length !== PROFILE_BYTES) throw new Error("Saved bot character allocation size mismatch");
     this.allocation = restored ?? memory.allocate(PROFILE_BYTES, "heap", true);
   }
@@ -178,26 +183,50 @@ class CharacterProfile {
     return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  get filename(): string { return readString(this.allocation.bytes.subarray(0, MAX_QPATH)); }
+  get filename(): string {
+    return readString(this.allocation.bytes.subarray(0, MAX_QPATH));
+  }
   set filename(value: string) {
     const bytes = encodeString(value);
     this.allocation.bytes.set(bytes, 0);
     this.allocation.bytes[bytes.length] = 0;
   }
-  get skill(): number { return this.view.getFloat32(MAX_QPATH, true); }
-  set skill(value: number) { this.view.setFloat32(MAX_QPATH, value, true); }
+  get skill(): number {
+    return this.view.getFloat32(MAX_QPATH, true);
+  }
+  set skill(value: number) {
+    this.view.setFloat32(MAX_QPATH, value, true);
+  }
 
   value(index: number): CharacteristicValue | undefined {
     const offset = CHARACTERISTICS_OFFSET + index * CHARACTERISTIC_BYTES;
     const profile = this;
     switch (this.view.getUint8(offset)) {
-      case 0: return undefined;
-      case 1: return { kind: "integer", get value(): number { return profile.view.getInt32(offset + 4, true); } };
-      case 2: return { kind: "float", get value(): number { return profile.view.getFloat32(offset + 4, true); } };
-      case 3: return { kind: "string", get value(): string {
-        return readString(profile.stringAllocation(profile.view.getUint32(offset + 4, true)).bytes);
-      } };
-      default: throw new Error("Invalid bot characteristic type byte");
+      case 0:
+        return undefined;
+      case 1:
+        return {
+          kind: "integer",
+          get value(): number {
+            return profile.view.getInt32(offset + 4, true);
+          },
+        };
+      case 2:
+        return {
+          kind: "float",
+          get value(): number {
+            return profile.view.getFloat32(offset + 4, true);
+          },
+        };
+      case 3:
+        return {
+          kind: "string",
+          get value(): string {
+            return readString(profile.stringAllocation(profile.view.getUint32(offset + 4, true)).bytes);
+          },
+        };
+      default:
+        throw new Error("Invalid bot characteristic type byte");
     }
   }
 
@@ -306,23 +335,63 @@ export class BotCharacterLibrary {
   }
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { generation: this.generation, reported: structuredClone(this.reported), nextPointer: this.strings.nextPointer,
+    return {
+      generation: this.generation,
+      reported: structuredClone(this.reported),
+      nextPointer: this.strings.nextPointer,
       strings: [...this.strings.allocations].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })),
-      profiles: this.profiles.map(profile => profile === undefined ? null : memory.reference(profile.allocation)) };
+      profiles: this.profiles.map(profile => (profile === undefined ? null : memory.reference(profile.allocation))),
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.characters"), image = { generation: reader.field("generation").integer(0), nextPointer: reader.field("nextPointer").integer(1),
-      reported: reader.field("reported").list(entry => ({ severity: entry.field("severity").choice("info", "warning", "error", "fatal"),
-        code: entry.field("code").choice("loaded", "missing-source", "missing-skill", "fallback", "parse-error", "invalid-input", "invalid-handle", "invalid-index", "uninitialized", "wrong-type", "invalid-bounds", "unsupported-log-format"),
-        source: entry.field("source").string(), message: entry.field("message").string(), location: entry.field("location").nullable(location => ({ path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() })) })),
-      strings: reader.field("strings").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
-      profiles: reader.field("profiles").list(entry => entry.nullable(reference => reference.integer(0))) };
-    if (this.profiles.some(profile => profile !== undefined) || this.strings.allocations.size !== 0
-      || image.profiles.length !== MAX_CHARACTER_HANDLES + 1 || image.profiles[0] !== null
-      || !Number.isSafeInteger(image.generation) || image.generation < 0
-      || !Number.isSafeInteger(image.nextPointer) || image.nextPointer < 1 || image.nextPointer > 0x100000000) throw new Error("Invalid bot character restoration");
+    const reader = new SaveReader(value, "bot.characters"),
+      image = {
+        generation: reader.field("generation").integer(0),
+        nextPointer: reader.field("nextPointer").integer(1),
+        reported: reader.field("reported").list(entry => ({
+          severity: entry.field("severity").choice("info", "warning", "error", "fatal"),
+          code: entry
+            .field("code")
+            .choice(
+              "loaded",
+              "missing-source",
+              "missing-skill",
+              "fallback",
+              "parse-error",
+              "invalid-input",
+              "invalid-handle",
+              "invalid-index",
+              "uninitialized",
+              "wrong-type",
+              "invalid-bounds",
+              "unsupported-log-format",
+            ),
+          source: entry.field("source").string(),
+          message: entry.field("message").string(),
+          location: entry.field("location").nullable(location => ({
+            path: location.field("path").string(),
+            line: location.field("line").integer(),
+            column: location.field("column").integer(),
+          })),
+        })),
+        strings: reader.field("strings").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
+        profiles: reader.field("profiles").list(entry => entry.nullable(reference => reference.integer(0))),
+      };
+    if (
+      this.profiles.some(profile => profile !== undefined) ||
+      this.strings.allocations.size !== 0 ||
+      image.profiles.length !== MAX_CHARACTER_HANDLES + 1 ||
+      image.profiles[0] !== null ||
+      !Number.isSafeInteger(image.generation) ||
+      image.generation < 0 ||
+      !Number.isSafeInteger(image.nextPointer) ||
+      image.nextPointer < 1 ||
+      image.nextPointer > 0x100000000
+    )
+      throw new Error("Invalid bot character restoration");
     for (const entry of image.strings) {
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.strings.allocations.has(entry.pointer)) throw new Error("Invalid saved bot character string pointer");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.strings.allocations.has(entry.pointer))
+        throw new Error("Invalid saved bot character string pointer");
       const allocation = memory.allocation(entry.allocation);
       if (!allocation.bytes.includes(0)) throw new Error("Saved bot character string is unterminated");
       this.strings.allocations.set(entry.pointer, allocation);
@@ -333,7 +402,8 @@ export class BotCharacterLibrary {
       for (let characteristic = 0; characteristic < STORED_CHARACTERISTICS; characteristic++) void profile.value(characteristic)?.value;
       this.profiles[index] = profile;
     }
-    this.strings.nextPointer = image.nextPointer; this.generation = image.generation;
+    this.strings.nextPointer = image.nextPointer;
+    this.generation = image.generation;
     this.reported.push(...structuredClone(image.reported));
   }
 
@@ -385,8 +455,7 @@ export class BotCharacterLibrary {
     if (profile === undefined) return;
     this.log?.write(profile.filename);
     if (this.log !== undefined && this.log.filePointer() !== null) {
-      this.emit("warning", "unsupported-log-format", profile.filename,
-        "BotDumpCharacter: omitted undefined skill log format (%d receives a promoted float)");
+      this.emit("warning", "unsupported-log-format", profile.filename, "BotDumpCharacter: omitted undefined skill log format (%d receives a promoted float)");
     }
     this.log?.write("{\n");
     for (let index = 0; index < MAX_CHARACTERISTICS; index++) {
@@ -418,8 +487,10 @@ export class BotCharacterLibrary {
     const value = this.value(handle, index);
     if (value === undefined) return 0;
     switch (value.kind) {
-      case "integer": return float32(value.value);
-      case "float": return value.value;
+      case "integer":
+        return float32(value.value);
+      case "float":
+        return value.value;
       case "string":
         this.emit("error", "wrong-type", this.profileSource(handle), `characteristic ${index} is not a float`);
         return 0;
@@ -435,8 +506,12 @@ export class BotCharacterLibrary {
     const min = float32(minimum);
     const max = float32(maximum);
     if (min > max) {
-      this.emit("error", "invalid-bounds", this.profileSource(handle),
-        `cannot bound characteristic ${index} between ${characterFloatText(min)} and ${characterFloatText(max)}`);
+      this.emit(
+        "error",
+        "invalid-bounds",
+        this.profileSource(handle),
+        `cannot bound characteristic ${index} between ${characterFloatText(min)} and ${characterFloatText(max)}`,
+      );
       return 0;
     }
     const value = this.float(handle, index);
@@ -449,8 +524,10 @@ export class BotCharacterLibrary {
     const value = this.value(handle, index);
     if (value === undefined) return 0;
     switch (value.kind) {
-      case "integer": return value.value;
-      case "float": return int32(Math.trunc(value.value));
+      case "integer":
+        return value.value;
+      case "float":
+        return int32(Math.trunc(value.value));
       case "string":
         this.emit("error", "wrong-type", this.profileSource(handle), `characteristic ${index} is not a integer`);
         return 0;
@@ -470,8 +547,7 @@ export class BotCharacterLibrary {
     const min = int32(minimum);
     const max = int32(maximum);
     if (min > max) {
-      this.emit("error", "invalid-bounds", this.profileSource(handle),
-        `cannot bound characteristic ${index} between ${min} and ${max}`);
+      this.emit("error", "invalid-bounds", this.profileSource(handle), `cannot bound characteristic ${index} between ${min} and ${max}`);
       return 0;
     }
     const value = this.integer(handle, index);
@@ -482,7 +558,9 @@ export class BotCharacterLibrary {
 
   string(handle: number, index: number): string {
     let text = "";
-    this.writeString(handle, index, value => { text = value; });
+    this.writeString(handle, index, value => {
+      text = value;
+    });
     return text;
   }
 
@@ -618,25 +696,32 @@ export class BotCharacterLibrary {
     if (!this.isCurrent(generation)) return { kind: "parse-error" };
     const callbackState: { failure?: { readonly error: unknown } } = {};
     const invokeCallback = <T>(callback: () => T): T => {
-      try { return callback(); }
-      catch (error) { callbackState.failure = { error }; throw error; }
+      try {
+        return callback();
+      } catch (error) {
+        callbackState.failure = { error };
+        throw error;
+      }
     };
     const report = (issue: CharacterDiagnostic): void => invokeCallback(() => this.record(issue));
-    const tokens = ScriptSourceReader.open(source, {
-      resolve: request => invokeCallback(() => this.reader.resolve(request)),
-    }, {
-      globals: this.reader.globals,
-      ...(this.reader.debugEval === undefined ? {} : { debugEval: (text: string) => invokeCallback(() => this.reader.debugEval?.(text)) }),
-      report: item => {
-        if (this.isCurrent(generation)) {
-          report(diagnostic(item.severity, "parse-error", filename, item.message, item.location));
-        }
+    const tokens = ScriptSourceReader.open(
+      source,
+      {
+        resolve: request => invokeCallback(() => this.reader.resolve(request)),
       },
-    });
+      {
+        globals: this.reader.globals,
+        ...(this.reader.debugEval === undefined ? {} : { debugEval: (text: string) => invokeCallback(() => this.reader.debugEval?.(text)) }),
+        report: item => {
+          if (this.isCurrent(generation)) {
+            report(diagnostic(item.severity, "parse-error", filename, item.message, item.location));
+          }
+        },
+      },
+    );
     const profile = new CharacterProfile(this.memory, this.strings);
     if (encodeString(storedFilename).length >= MAX_QPATH) {
-      const issue = diagnostic("error", "invalid-input", storedFilename,
-        "character filename copy exceeds MAX_QPATH destination");
+      const issue = diagnostic("error", "invalid-input", storedFilename, "character filename copy exceeds MAX_QPATH destination");
       this.record(issue);
       throw new CharacterError(issue);
     }
@@ -664,13 +749,22 @@ export class BotCharacterLibrary {
     report: (issue: CharacterDiagnostic) => void,
   ): LoadAttempt {
     const next = (): ScriptToken | undefined => {
-      try { return tokens.next()?.token; }
-      catch (error) { if (!tokens.isSourceFailure(error)) throw error; return undefined; }
+      try {
+        return tokens.next()?.token;
+      } catch (error) {
+        if (!tokens.isSourceFailure(error)) throw error;
+        return undefined;
+      }
     };
     const parseError = (token: ScriptToken | undefined, message: string): LoadAttempt => {
       if (this.isCurrent(generation)) {
-        report(diagnostic("error", "parse-error", filename, message, { path: tokens.currentScriptFilename,
-          line: tokens.position.line, column: token?.location.column ?? 1 }));
+        report(
+          diagnostic("error", "parse-error", filename, message, {
+            path: tokens.currentScriptFilename,
+            line: tokens.position.line,
+            column: token?.location.column ?? 1,
+          }),
+        );
       }
       return { kind: "parse-error" };
     };
@@ -702,13 +796,11 @@ export class BotCharacterLibrary {
             return this.isCurrent(generation) ? { kind: "loaded", profile } : { kind: "parse-error" };
           }
           if (indexToken?.kind !== "number" || !hasNumberFlag(indexToken, NumberFlag.Integer)) {
-            return parseError(indexToken,
-              `expected integer index, found ${indexToken?.text ?? "<eof>"}\n`);
+            return parseError(indexToken, `expected integer index, found ${indexToken?.text ?? "<eof>"}\n`);
           }
           const index = indexToken.integerValue;
           if (index < 0 || index > MAX_CHARACTERISTICS) {
-            return parseError(indexToken,
-              `characteristic index out of range [0, ${MAX_CHARACTERISTICS}]\n`);
+            return parseError(indexToken, `characteristic index out of range [0, ${MAX_CHARACTERISTICS}]\n`);
           }
           if (profile.value(index) !== undefined) {
             return parseError(indexToken, `characteristic ${index} already initialized\n`);
@@ -729,8 +821,7 @@ export class BotCharacterLibrary {
           } else if (valueToken?.kind === "string") {
             profile.setValue(index, { kind: "string", value: valueToken.value });
           } else {
-            return parseError(valueToken,
-              `expected integer, float or string, found ${valueToken.text}\n`);
+            return parseError(valueToken, `expected integer, float or string, found ${valueToken.text}\n`);
           }
         }
       }
@@ -786,8 +877,7 @@ export class BotCharacterLibrary {
       const filename = this.validateFilename(characterFile);
       if (!this.isCurrent(generation)) return 0;
       if (this.profiles[handle] !== profile) continue;
-      if (profile.filename === filename
-        && (skill < 0 || Math.abs(profile.skill - skill) < 0.01)) return handle;
+      if (profile.filename === filename && (skill < 0 || Math.abs(profile.skill - skill) < 0.01)) return handle;
     }
     return 0;
   }
@@ -799,10 +889,7 @@ export class BotCharacterLibrary {
     return 0;
   }
 
-  private store(
-    profile: CharacterProfile, handle: number, code: "loaded" | "fallback",
-    characterFile: string | (() => string), message: string,
-  ): number {
+  private store(profile: CharacterProfile, handle: number, code: "loaded" | "fallback", characterFile: string | (() => string), message: string): number {
     this.profiles[handle] = profile;
     const filename = this.validateFilename(characterFile);
     this.emit("info", code, filename, `${message} from ${filename}`);
@@ -838,12 +925,7 @@ export class BotCharacterLibrary {
     return this.profiles[handle]?.filename ?? "<character-library>";
   }
 
-  private emit(
-    severity: CharacterDiagnostic["severity"],
-    code: CharacterDiagnosticCode,
-    source: string,
-    message: string,
-  ): void {
+  private emit(severity: CharacterDiagnostic["severity"], code: CharacterDiagnosticCode, source: string, message: string): void {
     this.record(diagnostic(severity, code, source, message));
   }
 

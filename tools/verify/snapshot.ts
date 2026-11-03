@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { hashBytes, hashJson } from "./hash.ts";
@@ -34,9 +35,11 @@ export class WorkspaceSnapshot {
 
   private constructor(entries: readonly SnapshotEntry[]) {
     this.#entries = entries;
-    const files: SnapshotFile[] = entries.map(entry => entry.kind === "link"
-      ? { kind: "link", path: entry.path, target: entry.target }
-      : { kind: "file", path: entry.path, mode: entry.mode, bytes: entry.data.length, sha256: entry.sha256 });
+    const files: SnapshotFile[] = entries.map(entry =>
+      entry.kind === "link"
+        ? { kind: "link", path: entry.path, target: entry.target }
+        : { kind: "file", path: entry.path, mode: entry.mode, bytes: entry.data.length, sha256: entry.sha256 },
+    );
     this.manifest = { sha256: hashJson(files), files };
   }
 
@@ -54,9 +57,12 @@ export class WorkspaceSnapshot {
         if (child.isDirectory()) await visit(absolutePath, path);
         else if (child.isSymbolicLink()) {
           const target = await readlink(absolutePath);
-          if (!path.startsWith("node_modules/") || isAbsolute(target)
-            || !isWithin(dependencyRoot, resolve(dirname(absolutePath), target))
-            || !isWithin(dependencyRoot, await realpath(absolutePath))) {
+          if (
+            !path.startsWith("node_modules/") ||
+            isAbsolute(target) ||
+            !isWithin(dependencyRoot, resolve(dirname(absolutePath), target)) ||
+            !isWithin(dependencyRoot, await realpath(absolutePath))
+          ) {
             throw new Error(`Snapshot refuses a source or external dependency symlink: ${path}`);
           }
           entries.push({ kind: "link", path, target });
@@ -69,7 +75,7 @@ export class WorkspaceSnapshot {
       }
     }
     await visit(root, "");
-    entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+    entries.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
     return new WorkspaceSnapshot(entries);
   }
 

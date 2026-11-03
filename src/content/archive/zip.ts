@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Central/local header validation adapted from the reference port
 // STORE/DEFLATE extraction follows the reference port
 // GPL-2.0-or-later.
@@ -43,8 +44,7 @@ function byteString(bytes: Uint8Array): string {
   return result;
 }
 
-export function readZipDirectory(bytes: Uint8Array, source: string, directory: ZipDirectory,
-  format: Exclude<ArchiveFormat, "pak">): readonly ZipEntry[] {
+export function readZipDirectory(bytes: Uint8Array, source: string, directory: ZipDirectory, format: Exclude<ArchiveFormat, "pak">): readonly ZipEntry[] {
   const reader = new BinaryReader(bytes, source);
   const entries: ZipEntry[] = [];
   for (let index = 0; index < directory.entryCount; index++) {
@@ -61,10 +61,12 @@ export function readZipDirectory(bytes: Uint8Array, source: string, directory: Z
     const commentLength = header.getUint16(32, true);
     const disk = header.getUint16(34, true);
     const localOffset = header.getUint32(42, true);
-    if (compressedSize === 0xffffffff || byteLength === 0xffffffff || localOffset === 0xffffffff) throw new ArchiveError(source, directory.offset + offset, "ZIP64 entry is unsupported");
+    if (compressedSize === 0xffffffff || byteLength === 0xffffffff || localOffset === 0xffffffff)
+      throw new ArchiveError(source, directory.offset + offset, "ZIP64 entry is unsupported");
     if (disk !== 0) throw new ArchiveError(source, directory.offset + offset, "entry starts on another disk");
     if ((flags & 1) !== 0) throw new ArchiveError(source, directory.offset + offset, "encrypted entry is unsupported");
-    if (compressionMethod !== 0 && compressionMethod !== 8) throw new ArchiveError(source, directory.offset + offset, `unsupported compression method ${compressionMethod}`);
+    if (compressionMethod !== 0 && compressionMethod !== 8)
+      throw new ArchiveError(source, directory.offset + offset, `unsupported compression method ${compressionMethod}`);
     if (compressionMethod === 0 && compressedSize !== byteLength) throw new ArchiveError(source, directory.offset + offset, "stored entry sizes disagree");
     const localHeaderOffset = localOffset + directory.prefixLength;
     checkRange(source, directory.offset, localHeaderOffset, 30);
@@ -74,8 +76,21 @@ export function readZipDirectory(bytes: Uint8Array, source: string, directory: Z
     const path = tryNormalizeEntryPath(rawPath);
     // An unaddressable member is skipped instead of rejecting the archive; it could never be looked up anyway.
     if (path === null) continue;
-    entries.push(Object.freeze({ format, ordinal: entries.length, rawPath, path, byteLength, compressedSize,
-      compressionMethod, flags, crc32, localHeaderOffset, isDirectory: path.endsWith("/") }));
+    entries.push(
+      Object.freeze({
+        format,
+        ordinal: entries.length,
+        rawPath,
+        path,
+        byteLength,
+        compressedSize,
+        compressionMethod,
+        flags,
+        crc32,
+        localHeaderOffset,
+        isDirectory: path.endsWith("/"),
+      }),
+    );
   }
   if (reader.remaining !== 0) throw new ArchiveError(source, directory.offset + reader.offset, "central directory size disagrees with entry count");
   return Object.freeze(entries);
@@ -90,11 +105,14 @@ export function readZipLocalHeader(bytes: Uint8Array, source: string, entry: Zip
   const compressedSize = view.getUint32(18, true);
   const byteLength = view.getUint32(22, true);
   // APPNOTE 4.4.4 reserves bit 15; legacy writers may leave it set in only one header.
-  if (((flags ^ entry.flags) & 0x7fff) !== 0 || method !== entry.compressionMethod) throw new ArchiveError(source, entry.localHeaderOffset, "local header disagrees with central directory");
+  if (((flags ^ entry.flags) & 0x7fff) !== 0 || method !== entry.compressionMethod)
+    throw new ArchiveError(source, entry.localHeaderOffset, "local header disagrees with central directory");
   const usesDescriptor = (flags & 8) !== 0;
-  if ((!usesDescriptor || crc32 !== 0) && crc32 !== entry.crc32
-    || (!usesDescriptor || compressedSize !== 0) && compressedSize !== entry.compressedSize
-    || (!usesDescriptor || byteLength !== 0) && byteLength !== entry.byteLength) {
+  if (
+    ((!usesDescriptor || crc32 !== 0) && crc32 !== entry.crc32) ||
+    ((!usesDescriptor || compressedSize !== 0) && compressedSize !== entry.compressedSize) ||
+    ((!usesDescriptor || byteLength !== 0) && byteLength !== entry.byteLength)
+  ) {
     throw new ArchiveError(source, entry.localHeaderOffset, "local sizes or CRC disagree with central directory");
   }
   const nameLength = view.getUint16(26, true);
@@ -102,9 +120,9 @@ export function readZipLocalHeader(bytes: Uint8Array, source: string, entry: Zip
   return { nameLength, byteLength: nameLength + extraLength };
 }
 
-export function zipDataOffset(variable: Uint8Array, nameLength: number, source: string,
-  centralOffset: number, entry: ZipEntry): number {
-  if (byteString(variable.subarray(0, nameLength)) !== entry.rawPath) throw new ArchiveError(source, entry.localHeaderOffset, "local entry name disagrees with central directory");
+export function zipDataOffset(variable: Uint8Array, nameLength: number, source: string, centralOffset: number, entry: ZipEntry): number {
+  if (byteString(variable.subarray(0, nameLength)) !== entry.rawPath)
+    throw new ArchiveError(source, entry.localHeaderOffset, "local entry name disagrees with central directory");
   const dataOffset = entry.localHeaderOffset + 30 + variable.byteLength;
   checkRange(source, centralOffset, dataOffset, entry.compressedSize);
   return dataOffset;
@@ -114,16 +132,17 @@ export function zipDataOffset(variable: Uint8Array, nameLength: number, source: 
 export const MAX_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
 
 export function decodeZipEntry(compressed: Uint8Array, source: string, dataOffset: number, entry: ZipEntry): Uint8Array {
-  if (entry.byteLength > MAX_ZIP_ENTRY_BYTES) throw new ArchiveError(source, dataOffset, `entry size ${entry.byteLength} exceeds the ${MAX_ZIP_ENTRY_BYTES}-byte limit`);
+  if (entry.byteLength > MAX_ZIP_ENTRY_BYTES)
+    throw new ArchiveError(source, dataOffset, `entry size ${entry.byteLength} exceeds the ${MAX_ZIP_ENTRY_BYTES}-byte limit`);
   let output: Uint8Array;
   try {
-    output = entry.compressionMethod === 0 ? compressed
-      : new Uint8Array(inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.byteLength) }));
+    output = entry.compressionMethod === 0 ? compressed : new Uint8Array(inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.byteLength) }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new ArchiveError(source, dataOffset, `DEFLATE failed: ${message}`);
   }
-  if (output.byteLength !== entry.byteLength) throw new ArchiveError(source, dataOffset, `decoded size ${output.byteLength} disagrees with ${entry.byteLength}`);
+  if (output.byteLength !== entry.byteLength)
+    throw new ArchiveError(source, dataOffset, `decoded size ${output.byteLength} disagrees with ${entry.byteLength}`);
   if (Bun.hash.crc32(output) !== entry.crc32) throw new ArchiveError(source, dataOffset, "entry CRC32 mismatch");
   return output;
 }

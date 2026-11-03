@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/renderer/tr_image.c LoadTGA.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -15,16 +16,7 @@ function reject(source: string, offset: number, message: string): never {
   throw new BinaryError(source, offset, message);
 }
 
-function writePixel(
-  output: Uint8Array,
-  sourcePixel: number,
-  width: number,
-  height: number,
-  red: number,
-  green: number,
-  blue: number,
-  alpha: number,
-): void {
+function writePixel(output: Uint8Array, sourcePixel: number, width: number, height: number, red: number, green: number, blue: number, alpha: number): void {
   const sourceY = Math.floor(sourcePixel / width);
   const sourceX = sourcePixel - sourceY * width;
   const destination = ((height - sourceY - 1) * width + sourceX) * 4;
@@ -34,14 +26,7 @@ function writePixel(
   output[destination + 3] = alpha;
 }
 
-function readAndWritePixel(
-  reader: BinaryReader,
-  output: Uint8Array,
-  sourcePixel: number,
-  width: number,
-  height: number,
-  pixelDepth: number,
-): void {
+function readAndWritePixel(reader: BinaryReader, output: Uint8Array, sourcePixel: number, width: number, height: number, pixelDepth: number): void {
   if (pixelDepth === 8) {
     const intensity = reader.u8();
     writePixel(output, sourcePixel, width, height, intensity, intensity, intensity, 255);
@@ -56,8 +41,7 @@ function readAndWritePixel(
 }
 
 // LoadTGA always traverses bottom-up, left-to-right; its origin flip is disabled.
-export function decodeTga(bytes: Uint8Array, source = "<buffer>",
-  warning: (text: string) => undefined = () => undefined): ImageData {
+export function decodeTga(bytes: Uint8Array, source = "<buffer>", warning: (text: string) => undefined = () => undefined): ImageData {
   const reader = new BinaryReader(bytes, source);
   if (reader.length < TGA_HEADER_SIZE) reject(source, 0, "truncated TGA header");
 

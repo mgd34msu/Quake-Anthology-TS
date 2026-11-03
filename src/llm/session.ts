@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { LlmSettingsError } from "./errors.ts";
 import type { LlmRequestInput } from "./request.ts";
 
@@ -40,10 +41,18 @@ export class LlmSession {
     private readonly fingerprint: () => string = () => "",
   ) {}
 
-  get id(): string { return this.#id; }
-  get active(): boolean { return !this.#closed && this.#primer !== ""; }
-  get primed(): boolean { return this.#primed; }
-  get turnCount(): number { return this.#turns.length; }
+  get id(): string {
+    return this.#id;
+  }
+  get active(): boolean {
+    return !this.#closed && this.#primer !== "";
+  }
+  get primed(): boolean {
+    return this.#primed;
+  }
+  get turnCount(): number {
+    return this.#turns.length;
+  }
 
   prime(instructions: string): Promise<void> {
     return this.#enqueue(() => this.#primeNow(instructions));
@@ -85,7 +94,10 @@ export class LlmSession {
 
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.#chain.catch(() => undefined).then(operation);
-    this.#chain = run.then(() => undefined, () => undefined);
+    this.#chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../../contracts/math.ts";
 import type { BotMovementStop } from "../behavior/prediction.ts";
 import { aasTraceAreas, type AasAsset } from "./aas.ts";

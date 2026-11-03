@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 import { readModuleEntity } from "./save-module-values.ts";
 import { useClient, useActor } from "./use-participant.ts";
@@ -32,11 +33,15 @@ const MOD_TELEFRAG = 18;
 const MOD_TARGET_LASER = 21;
 
 export class TargetLocationState {
-  captureSaveState() { return { linked: this.linked, head: this.head?.slot ?? null }; }
+  captureSaveState() {
+    return { linked: this.linked, head: this.head?.slot ?? null };
+  }
   restoreSaveState(value: unknown, pool: EntityPool): void {
-    const reader = new SaveReader(value, "q3.locations"), linked = reader.field("linked").boolean();
+    const reader = new SaveReader(value, "q3.locations"),
+      linked = reader.field("linked").boolean();
     const head = reader.field("head").nullable(entry => readModuleEntity(entry, pool));
-    this.linked = linked; this.head = head;
+    this.linked = linked;
+    this.head = head;
   }
 
   linked = false;
@@ -95,13 +100,23 @@ function requireActivator(_runtime: TargetRuntime, activator: UseParticipant | n
 }
 
 function dispatchTargets(runtime: TargetRuntime, entity: GameEntity, activator: UseParticipant | null): void {
-  useTargets({ pool: runtime.entities, time: gameTime(runtime),
-    remapShader: (oldName, newName, timeSeconds) => { runtime.remapShader(oldName, newName, timeSeconds); },
-    warn: message => { runtime.warn(message); } }, entity, activator);
+  useTargets(
+    {
+      pool: runtime.entities,
+      time: gameTime(runtime),
+      remapShader: (oldName, newName, timeSeconds) => {
+        runtime.remapShader(oldName, newName, timeSeconds);
+      },
+      warn: message => {
+        runtime.warn(message);
+      },
+    },
+    entity,
+    activator,
+  );
 }
 
-function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
   if (activator === null) return;
   if (activator.client === null || entity.target === null) return;
@@ -120,8 +135,7 @@ function spawnTargetGive(entity: GameEntity, _variables: SpawnVariables, runtime
   entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetGive.use");
 }
 
-function useTargetRemovePowerups(_entity: GameEntity, _other: UseParticipant | null,
-  activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
+function useTargetRemovePowerups(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
   if (activator === null) return;
   const client = activator.client;
@@ -156,8 +170,7 @@ function thinkTargetDelay(entity: GameEntity, runtime: TargetRuntime): void {
   dispatchTargets(runtime, entity, entity.activation);
 }
 
-function useTargetDelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetDelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null, runtime: TargetRuntime): void {
   bindTargetSaveCallbacks(runtime);
   const variance = Math.fround(Math.fround(entity.random) * targetCrandom(runtime));
   const seconds = Math.fround(Math.fround(entity.wait) + variance);
@@ -175,8 +188,7 @@ function spawnTargetDelay(entity: GameEntity, variables: SpawnVariables, runtime
   entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetDelay.use");
 }
 
-function useTargetScore(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetScore(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const player = useClient(requireActivator(runtime, activatorValue), runtime.participants);
   if (player !== null) runtime.addScore(player, entity.r.currentOrigin, entity.count);
 }
@@ -189,11 +201,10 @@ function spawnTargetScore(entity: GameEntity, _variables: SpawnVariables, runtim
 }
 
 function centerPrint(message: string | null): string {
-  return gameFormat("cp \"%s\"", [message]);
+  return gameFormat('cp "%s"', [message]);
 }
 
-function useTargetPrint(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetPrint(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const activator = requireActivator(runtime, activatorValue);
   const player = useClient(activator, runtime.participants);
   const command = centerPrint(entity.message);
@@ -202,7 +213,9 @@ function useTargetPrint(entity: GameEntity, _other: UseParticipant | null, activ
     return;
   }
   if ((entity.spawnflags & 3) !== 0) {
-    const send = (clientNum: number, value: string): void => { runtime.sendServerCommand(clientNum, value); };
+    const send = (clientNum: number, value: string): void => {
+      runtime.sendServerCommand(clientNum, value);
+    };
     if ((entity.spawnflags & 1) !== 0) teamCommand(runtime.entities, Team.TEAM_RED, command, send);
     if ((entity.spawnflags & 2) !== 0) teamCommand(runtime.entities, Team.TEAM_BLUE, command, send);
     return;
@@ -220,8 +233,7 @@ function speakerSoundPath(noise: string): string {
   return noise.includes(".wav") ? gameFormat("%s", [noise], 64) : gameFormat("%s.wav", [noise], 64);
 }
 
-function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null, runtime: TargetRuntime): void {
   if ((entity.spawnflags & 3) !== 0) {
     entity.s.loopSound = entity.s.loopSound !== 0 ? 0 : entity.noiseIndex;
     return;
@@ -231,7 +243,10 @@ function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, act
     if (participant === null) return;
     const native = participant instanceof GameEntity ? participant : null;
     if (native !== null) runtime.entities.addEvent(native, EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
-    else { if (runtime.participants === undefined) throw new Error("Shared target sound requires actor events"); runtime.participants.event(useActor(participant), EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex); }
+    else {
+      if (runtime.participants === undefined) throw new Error("Shared target sound requires actor events");
+      runtime.participants.event(useActor(participant), EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
+    }
   } else if ((entity.spawnflags & 4) !== 0) {
     runtime.entities.addEvent(entity, EntityEvent.EV_GLOBAL_SOUND, entity.noiseIndex);
   } else runtime.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
@@ -264,13 +279,11 @@ function targetSound(entity: GameEntity, soundIndex: number, runtime: TargetRunt
   sound.s.eventParm = soundIndex;
 }
 
-function useTargetPush(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetPush(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
   if (activator === null) return;
   const client = activator.client;
-  if (client === null || client.ps.pmType !== MoveType.PM_NORMAL ||
-    client.ps.powerups.get(Powerup.PW_FLIGHT) !== 0) return;
+  if (client === null || client.ps.pmType !== MoveType.PM_NORMAL || client.ps.powerups.get(Powerup.PW_FLIGHT) !== 0) return;
   client.ps.velocity = vec3(entity.s.origin2.x, entity.s.origin2.y, entity.s.origin2.z);
   const time = gameTime(runtime);
   if (activator.flySoundDebounceTime < time) {
@@ -285,8 +298,7 @@ function spawnTargetPush(entity: GameEntity, _variables: SpawnVariables, runtime
   if (entity.speed === 0) entity.speed = 1_000;
   const moved = moveDirectionForTarget(entity);
   entity.s.origin2 = scale3(moved, entity.speed);
-  entity.noiseIndex = runtime.soundIndex((entity.spawnflags & 1) !== 0
-    ? "sound/world/jumppad.wav" : "sound/misc/windfly.wav");
+  entity.noiseIndex = runtime.soundIndex((entity.spawnflags & 1) !== 0 ? "sound/world/jumppad.wav" : "sound/misc/windfly.wav");
   if (entity.target !== null) {
     entity.r.absmin = { ...entity.s.origin };
     entity.r.absmax = { ...entity.s.origin };
@@ -310,13 +322,11 @@ function laserThink(entity: GameEntity, runtime: TargetRuntime): void {
   }
   const end = add3(entity.s.origin, scale3(entity.movedir, 2_048));
   const combat = combatContext(runtime);
-  const trace = combat.spatial.traceActor({ start: entity.s.origin, end, shape: { kind: "point" },
-    passActor: entity.actor.id, mask: MASK_TARGET_LASER });
+  const trace = combat.spatial.traceActor({ start: entity.s.origin, end, shape: { kind: "point" }, passActor: entity.actor.id, mask: MASK_TARGET_LASER });
   if (trace.hit.kind === "actor") {
     const target = combat.actors.participant(trace.hit.actor);
     if (!(target instanceof GameEntity) || target.slot !== 0) {
-      damage(combat, target, entity, entity.activation,
-        entity.movedir, trace.end, entity.damage, DamageFlags.NO_KNOCKBACK, MOD_TARGET_LASER);
+      damage(combat, target, entity, entity.activation, entity.movedir, trace.end, entity.damage, DamageFlags.NO_KNOCKBACK, MOD_TARGET_LASER);
     }
   }
   entity.s.origin2 = vec3(trace.end.x, trace.end.y, trace.end.z);
@@ -334,8 +344,7 @@ function laserOff(entity: GameEntity, runtime: TargetRuntime): void {
   entity.nextthink = 0;
 }
 
-function useTargetLaser(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetLaser(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null, runtime: TargetRuntime): void {
   entity.activation = activator;
   if (entity.nextthink > 0) laserOff(entity, runtime);
   else laserOn(entity, runtime);
@@ -347,8 +356,9 @@ function startTargetLaser(entity: GameEntity, runtime: TargetRuntime): void {
   if (entity.target !== null) {
     const target = findEntity(runtime.entities, null, "targetname", entity.target);
     if (target === null) {
-      runtime.warn(gameFormat("%s at %s: %s is a bad target\n",
-        [entity.classname, runtime.entities.utilities.vtos(entity.s.origin).readString(), entity.target]));
+      runtime.warn(
+        gameFormat("%s at %s: %s is a bad target\n", [entity.classname, runtime.entities.utilities.vtos(entity.s.origin).readString(), entity.target]),
+      );
     }
     entity.enemy = target;
   } else entity.movedir = moveDirectionForTarget(entity);
@@ -366,8 +376,7 @@ function spawnTargetLaser(entity: GameEntity, _variables: SpawnVariables, runtim
   entity.nextthink = (gameTime(runtime) + 100) | 0;
 }
 
-function useTargetTeleporter(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetTeleporter(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
   if (activator === null) return;
   if (activator.client === null) return;
@@ -376,8 +385,7 @@ function useTargetTeleporter(entity: GameEntity, _other: UseParticipant | null, 
     runtime.warn("Couldn't find teleporter destination\n");
     return;
   }
-  teleportPlayer({ combat: combatContext(runtime), world: runtime.world }, activator,
-    destination.s.origin, destination.s.angles);
+  teleportPlayer({ combat: combatContext(runtime), world: runtime.world }, activator, destination.s.origin, destination.s.angles);
 }
 
 function spawnTargetTeleporter(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -389,12 +397,10 @@ function spawnTargetTeleporter(entity: GameEntity, _variables: SpawnVariables, r
   entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetTeleporter.use");
 }
 
-function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
   const victim = requireActivator(runtime, activatorValue);
   if (victim === null) return;
-  damage(combatContext(runtime), victim, null, null, null, null,
-    100_000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
+  damage(combatContext(runtime), victim, null, null, null, null, 100_000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
 }
 
 function spawnTargetKill(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -433,13 +439,10 @@ function spawnTargetLocation(entity: GameEntity, _variables: SpawnVariables, run
   setOrigin(entity, entity.s.origin);
 }
 
-function useTargetRelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
-  runtime: TargetRuntime): void {
+function useTargetRelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null, runtime: TargetRuntime): void {
   const player = useClient(activator, runtime.participants);
-  if ((entity.spawnflags & 1) !== 0 && player !== null && player.client !== null &&
-    player.client.sess.sessionTeam !== Team.TEAM_RED) return;
-  if ((entity.spawnflags & 2) !== 0 && player !== null && player.client !== null &&
-    player.client.sess.sessionTeam !== Team.TEAM_BLUE) return;
+  if ((entity.spawnflags & 1) !== 0 && player !== null && player.client !== null && player.client.sess.sessionTeam !== Team.TEAM_RED) return;
+  if ((entity.spawnflags & 2) !== 0 && player !== null && player.client !== null && player.client.sess.sessionTeam !== Team.TEAM_BLUE) return;
   if ((entity.spawnflags & 4) !== 0) {
     const selected = pickTargetForRuntime(runtime, entity.target);
     selected?.use?.(selected, entity, activator);
@@ -449,8 +452,16 @@ function useTargetRelay(entity: GameEntity, _other: UseParticipant | null, activ
 }
 
 function pickTargetForRuntime(runtime: TargetRuntime, targetName: string | null): GameEntity | null {
-  return pickTarget({ pool: runtime.entities, randomInt: () => runtime.random.rand(),
-    warn: message => { runtime.warn(message); } }, targetName);
+  return pickTarget(
+    {
+      pool: runtime.entities,
+      randomInt: () => runtime.random.rand(),
+      warn: message => {
+        runtime.warn(message);
+      },
+    },
+    targetName,
+  );
 }
 
 function spawnTargetRelay(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -471,41 +482,146 @@ export function targetSpawnHandlers(runtime: TargetRuntime): ReadonlyMap<string,
     throw new Error("Target item lifecycle context does not match its entity pool and world");
   }
   return new Map<string, SpawnHandler>([
-    ["target_give", (entity, variables) => { spawnTargetGive(entity, variables, runtime); }],
-    ["target_remove_powerups", (entity, variables) => { spawnTargetRemovePowerups(entity, variables, runtime); }],
-    ["target_delay", (entity, variables) => { spawnTargetDelay(entity, variables, runtime); }],
-    ["target_score", (entity, variables) => { spawnTargetScore(entity, variables, runtime); }],
-    ["target_print", (entity, variables) => { spawnTargetPrint(entity, variables, runtime); }],
-    ["target_speaker", (entity, variables) => { spawnTargetSpeaker(entity, variables, runtime); }],
-    ["target_laser", (entity, variables) => { spawnTargetLaser(entity, variables, runtime); }],
-    ["target_teleporter", (entity, variables) => { spawnTargetTeleporter(entity, variables, runtime); }],
-    ["target_relay", (entity, variables) => { spawnTargetRelay(entity, variables, runtime); }],
-    ["target_position", (entity, variables) => { spawnTargetPosition(entity, variables, runtime); }],
-    ["target_push", (entity, variables) => { spawnTargetPush(entity, variables, runtime); }],
-    ["target_kill", (entity, variables) => { spawnTargetKill(entity, variables, runtime); }],
-    ["target_location", (entity, variables) => { spawnTargetLocation(entity, variables, runtime); }],
+    [
+      "target_give",
+      (entity, variables) => {
+        spawnTargetGive(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_remove_powerups",
+      (entity, variables) => {
+        spawnTargetRemovePowerups(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_delay",
+      (entity, variables) => {
+        spawnTargetDelay(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_score",
+      (entity, variables) => {
+        spawnTargetScore(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_print",
+      (entity, variables) => {
+        spawnTargetPrint(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_speaker",
+      (entity, variables) => {
+        spawnTargetSpeaker(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_laser",
+      (entity, variables) => {
+        spawnTargetLaser(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_teleporter",
+      (entity, variables) => {
+        spawnTargetTeleporter(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_relay",
+      (entity, variables) => {
+        spawnTargetRelay(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_position",
+      (entity, variables) => {
+        spawnTargetPosition(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_push",
+      (entity, variables) => {
+        spawnTargetPush(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_kill",
+      (entity, variables) => {
+        spawnTargetKill(entity, variables, runtime);
+      },
+    ],
+    [
+      "target_location",
+      (entity, variables) => {
+        spawnTargetLocation(entity, variables, runtime);
+      },
+    ],
   ]);
 }
 
 export function bindTargetSaveCallbacks(runtime: TargetRuntime): void {
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetGive.use", (self, other, activator) => { useTargetGive(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRemovePowerups.use", (self, other, activator) => { useTargetRemovePowerups(self, other, activator, runtime); });
-  runtime.entities.callbacks.think.intern("q3.base.game.targets.useTargetDelay.think", self => { thinkTargetDelay(self, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetDelay.use", (self, other, activator) => { useTargetDelay(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetScore.use", (self, other, activator) => { useTargetScore(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPrint.use", (self, other, activator) => { useTargetPrint(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetSpeaker.use", (self, other, activator) => { useTargetSpeaker(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetGive.use", (self, other, activator) => {
+    useTargetGive(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRemovePowerups.use", (self, other, activator) => {
+    useTargetRemovePowerups(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.useTargetDelay.think", self => {
+    thinkTargetDelay(self, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetDelay.use", (self, other, activator) => {
+    useTargetDelay(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetScore.use", (self, other, activator) => {
+    useTargetScore(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPrint.use", (self, other, activator) => {
+    useTargetPrint(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetSpeaker.use", (self, other, activator) => {
+    useTargetSpeaker(self, other, activator, runtime);
+  });
   runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetPush.think", self => {
-      const origin = scale3(add3(self.r.absmin, self.r.absmax), 0.5);
-      aimAtTarget({ pool: runtime.entities, randomInt: () => runtime.random.rand(),
-        gravity: () => runtime.gravity(), warn: message => { runtime.warn(message); } }, self, origin);
-    });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPush.use", (self, other, activator) => { useTargetPush(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.startTargetLaser.use", (self, other, activator) => { useTargetLaser(self, other, activator, runtime); });
-  runtime.entities.callbacks.think.intern("q3.base.game.targets.startTargetLaser.think", self => { laserThink(self, runtime); });
-  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLaser.think", self => { startTargetLaser(self, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetTeleporter.use", (self, other, activator) => { useTargetTeleporter(self, other, activator, runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetKill.use", (self, other, activator) => { useTargetKill(self, other, activator, runtime); });
-  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLocation.think", () => { linkTargetLocations(runtime); });
-  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRelay.use", (self, other, activator) => { useTargetRelay(self, other, activator, runtime); });
+    const origin = scale3(add3(self.r.absmin, self.r.absmax), 0.5);
+    aimAtTarget(
+      {
+        pool: runtime.entities,
+        randomInt: () => runtime.random.rand(),
+        gravity: () => runtime.gravity(),
+        warn: message => {
+          runtime.warn(message);
+        },
+      },
+      self,
+      origin,
+    );
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPush.use", (self, other, activator) => {
+    useTargetPush(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.startTargetLaser.use", (self, other, activator) => {
+    useTargetLaser(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.startTargetLaser.think", self => {
+    laserThink(self, runtime);
+  });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLaser.think", self => {
+    startTargetLaser(self, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetTeleporter.use", (self, other, activator) => {
+    useTargetTeleporter(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetKill.use", (self, other, activator) => {
+    useTargetKill(self, other, activator, runtime);
+  });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLocation.think", () => {
+    linkTargetLocations(runtime);
+  });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRelay.use", (self, other, activator) => {
+    useTargetRelay(self, other, activator, runtime);
+  });
 }

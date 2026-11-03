@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "../../foundation/host.ts";
 import { add, length, subtract, zero } from "../../foundation/fields.ts";
@@ -5,12 +6,17 @@ import type { Q2PlayerState } from "./types.ts";
 
 const fixedCoopMaps = ["jail2", "jail4", "mine1", "mine2", "mine3", "mine4", "lab", "boss1", "fact3", "biggun", "space", "command", "power2", "strike"];
 export function q2EntitiesNamed(game: Q2GameServices, classname: string): readonly Q2Entity[] {
-  return [...game.entities.values()].filter(entity => entity.classname === classname).sort((left, right) =>
-    (game.host.actors.sourceOf(left.actor.id)?.slot ?? left.actor.id.slot) - (game.host.actors.sourceOf(right.actor.id)?.slot ?? right.actor.id.slot));
+  return [...game.entities.values()]
+    .filter(entity => entity.classname === classname)
+    .sort(
+      (left, right) =>
+        (game.host.actors.sourceOf(left.actor.id)?.slot ?? left.actor.id.slot) - (game.host.actors.sourceOf(right.actor.id)?.slot ?? right.actor.id.slot),
+    );
 }
 const createCoopSpots: Q2Think = (_self, active) => {
   for (const x of [124, 252, 316]) {
-    const spot = active.create("info_player_coop"); spot.targetname = "jail3";
+    const spot = active.create("info_player_coop");
+    spot.targetname = "jail3";
     active.move(spot, { origin: { x, y: -164, z: 80 }, angles: { x: 0, y: 90, z: 0 } });
   }
   return undefined;
@@ -36,20 +42,31 @@ export const q2PlayerSpawns: Q2SpawnModule = {
         return true;
       }
       case "info_player_deathmatch": {
-        if (game.options.mode !== "deathmatch") { game.remove(entity); return true; }
-        entity.model = "models/objects/dmspot/tris.md2"; entity.skin = 1;
+        if (game.options.mode !== "deathmatch") {
+          game.remove(entity);
+          return true;
+        }
+        entity.model = "models/objects/dmspot/tris.md2";
+        entity.skin = 1;
         game.move(entity, { bounds: { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: -16 } } }, false);
-        game.solid(entity, "box"); game.show(entity); return true;
+        game.solid(entity, "box");
+        game.show(entity);
+        return true;
       }
       case "info_player_coop": {
-        if (game.options.mode !== "coop") { game.remove(entity); return true; }
+        if (game.options.mode !== "coop") {
+          game.remove(entity);
+          return true;
+        }
         if (fixedCoopMaps.includes(game.options.mapName.toLowerCase())) {
           game.schedule(entity, 0.1, fixCoopSpots);
         }
         return true;
       }
-      case "info_player_intermission": return true;
-      default: return false;
+      case "info_player_intermission":
+        return true;
+      default:
+        return false;
     }
   },
 };
@@ -70,22 +87,39 @@ export function selectQ2Spawn(game: Q2GameServices, state: Q2PlayerState, spawnP
     const spots = q2EntitiesNamed(game, "info_player_deathmatch");
     if ((game.options.deathmatchFlags & 512) !== 0) {
       let best = 0;
-      for (const candidate of spots) { const distance = q2PlayersRange(game, candidate); if (distance > best) { best = distance; spot = candidate; } }
+      for (const candidate of spots) {
+        const distance = q2PlayersRange(game, candidate);
+        if (distance > best) {
+          best = distance;
+          spot = candidate;
+        }
+      }
       spot ??= spots[0];
     } else {
-      let first: Q2Entity | null = null, second: Q2Entity | null = null, firstRange = 99999, secondRange = 99999;
+      let first: Q2Entity | null = null,
+        second: Q2Entity | null = null,
+        firstRange = 99999,
+        secondRange = 99999;
       for (const candidate of spots) {
         const range = q2PlayersRange(game, candidate);
         // Preserve source selection, including its non-shifting first/second closest slots.
-        if (range < firstRange) { firstRange = range; first = candidate; }
-        else if (range < secondRange) { secondRange = range; second = candidate; }
+        if (range < firstRange) {
+          firstRange = range;
+          first = candidate;
+        } else if (range < secondRange) {
+          secondRange = range;
+          second = candidate;
+        }
       }
       const count = spots.length <= 2 ? spots.length : spots.length - 2;
       if (count > 0) {
         let selection = Math.floor(game.host.random() * count);
         for (const candidate of spots) {
           if (spots.length > 2 && (candidate === first || candidate === second)) selection++;
-          if (selection-- === 0) { spot = candidate; break; }
+          if (selection-- === 0) {
+            spot = candidate;
+            break;
+          }
         }
       }
     }
@@ -94,7 +128,7 @@ export function selectQ2Spawn(game: Q2GameServices, state: Q2PlayerState, spawnP
   }
   if (spot === undefined) {
     const starts = q2EntitiesNamed(game, "info_player_start");
-    spot = starts.find(candidate => spawnPoint === "" ? candidate.targetname === "" : candidate.targetname.toLowerCase() === spawnPoint.toLowerCase());
+    spot = starts.find(candidate => (spawnPoint === "" ? candidate.targetname === "" : candidate.targetname.toLowerCase() === spawnPoint.toLowerCase()));
     if (spot === undefined && spawnPoint === "") spot = starts[0];
   }
   if (spot === undefined) throw new Error(`No Q2 player spawn for '${spawnPoint}' on ${game.options.mapName}`);
@@ -115,4 +149,6 @@ export function q2KillBox(entity: Q2Entity, game: Q2GameServices): boolean {
   }
 }
 
-export function q2SpawnOrigin(entity: Q2Entity, game: Q2GameServices) { return add(game.body(entity).origin, { x: 0, y: 0, z: 10 }); }
+export function q2SpawnOrigin(entity: Q2Entity, game: Q2GameServices) {
+  return add(game.body(entity).origin, { x: 0, y: 0, z: 10 });
+}

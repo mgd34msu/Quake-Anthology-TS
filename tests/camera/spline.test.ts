@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { CameraPlayback, parseCamera, serializeCamera } from "../../src/camera/spline.ts";
 import { ApplicationSplineCamera } from "../../src/camera/application.ts";
@@ -14,7 +15,8 @@ event { type 9 param "" time 2500 }
 fov { fov 90 startFOV 90 endFOV 60 time 2000 }
 }`;
 test("source camera serialization retains paths, velocity entries, timed targets and events", () => {
-  const camera = parseCamera(file); expect(parseCamera(serializeCamera(camera))).toEqual(camera);
+  const camera = parseCamera(file);
+  expect(parseCamera(serializeCamera(camera))).toEqual(camera);
   const playback = new CameraPlayback(camera, 100);
   expect(playback.sample(100)?.origin.x).toBe(0);
   expect(playback.sample(350)?.origin.x).toBe(2.5);
@@ -38,29 +40,64 @@ test("source cubic basis and neighbor interpolation produce expected line positi
 test("bad camera files fail at admission without unbounded spline sampling", () => {
   expect(() => parseCamera(file.replace('param "look"', 'param "missing"'))).toThrow("Unknown camera target");
   expect(() => parseCamera(file.replace("time 2", "time NaN"))).toThrow("number");
-  expect(() => parseCamera(`cameraPathDef { time 1 camera_spline { target { granularity 0 ( 0 0 0 ) ( 0 0 0 ) ( 0 0 0 ) ( 0 0 0 ) } } }`)).toThrow("granularity");
+  expect(() => parseCamera(`cameraPathDef { time 1 camera_spline { target { granularity 0 ( 0 0 0 ) ( 0 0 0 ) ( 0 0 0 ) ( 0 0 0 ) } } }`)).toThrow(
+    "granularity",
+  );
 });
 test("actual command dispatch loads, starts, applies and saves a source camera", async () => {
-  const owner = createIdentityOwner("camera-tools"); let time = 100, saved = "";
+  const owner = createIdentityOwner("camera-tools");
+  let time = 100,
+    saved = "";
   const commands = new CommandBuffer({ dialect: "q3", context: { session: owner.session, origin: { kind: "server-console" } } });
-  const camera = new ApplicationSplineCamera({ commands, read: async () => file, write: async (_path, text) => { saved = text; }, milliseconds: () => time, print: () => {} });
-  camera.activate(); commands.append("loadcamera fixture.camera;startcamera\n");
+  const camera = new ApplicationSplineCamera({
+    commands,
+    read: async () => file,
+    write: async (_path, text) => {
+      saved = text;
+    },
+    milliseconds: () => time,
+    print: () => {},
+  });
+  camera.activate();
+  commands.append("loadcamera fixture.camera;startcamera\n");
   await commands.executeAsync(() => camera.drain());
-  const source: SceneCamera = { origin: { x: 99, y: 0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], projection: perspectiveProjection(90, 60, 1000), viewport: { x: 0, y: 0, width: 640, height: 480 }, clip: { kind: "none" } };
-  expect(camera.apply(source).origin.x).toBe(0); time = 350;
+  const source: SceneCamera = {
+    origin: { x: 99, y: 0, z: 0 },
+    axis: [
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+      { x: 0, y: 0, z: 1 },
+    ],
+    projection: perspectiveProjection(90, 60, 1000),
+    viewport: { x: 0, y: 0, width: 640, height: 480 },
+    clip: { kind: "none" },
+  };
+  expect(camera.apply(source).origin.x).toBe(0);
+  time = 350;
   expect(camera.apply(source).origin.x).toBe(2.5);
-  commands.executeNow("savecamera exported.camera"); await camera.drain(); expect(parseCamera(saved)).toEqual(parseCamera(file));
-  commands.executeNow("stopcamera"); expect(camera.apply(source)).toBe(source);
-  await camera.close(); expect(commands.exists("loadcamera")).toBe(false);
+  commands.executeNow("savecamera exported.camera");
+  await camera.drain();
+  expect(parseCamera(saved)).toEqual(parseCamera(file));
+  commands.executeNow("stopcamera");
+  expect(camera.apply(source)).toBe(source);
+  await camera.close();
+  expect(commands.exists("loadcamera")).toBe(false);
 });
 
 import { CommandBuffer as PlatformCommandBuffer } from "../../src/core/commands/index.ts";
 import { createIdentityOwner as platformIdentityOwner } from "../../src/contracts/identity.ts";
 
 test("PLATFORM-004 camera usage errors are printed instead of thrown through the command buffer", () => {
-  const owner = platformIdentityOwner("camera-usage"), context: ConstructorParameters<typeof PlatformCommandBuffer>[0]["context"] = { session: owner.session, origin: { kind: "local-seat", seat: owner.seat(0), client: owner.client(0, 0) } };
-  const commands = new PlatformCommandBuffer({ dialect: "q3", context }), printed: string[] = [];
-  commands.bindOutput(text => { printed.push(text); });
+  const owner = platformIdentityOwner("camera-usage"),
+    context: ConstructorParameters<typeof PlatformCommandBuffer>[0]["context"] = {
+      session: owner.session,
+      origin: { kind: "local-seat", seat: owner.seat(0), client: owner.client(0, 0) },
+    };
+  const commands = new PlatformCommandBuffer({ dialect: "q3", context }),
+    printed: string[] = [];
+  commands.bindOutput(text => {
+    printed.push(text);
+  });
   new ApplicationSplineCamera({ commands, read: async () => null, write: async () => {}, milliseconds: () => 0, print: () => {} }).activate();
   commands.append("startcamera\nloadcamera\nsavecamera x\n");
   expect(() => commands.execute()).not.toThrow();

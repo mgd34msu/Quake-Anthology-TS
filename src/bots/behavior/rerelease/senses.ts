@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from the reference game-agnostic bot brain. Verbatim apart from this
 // line, the import paths that changed with the directory, and three
 // parameterizations (NAV2-specific graph construction, run/walk speeds,
@@ -103,7 +104,14 @@ export function evaluateSightGeometry(
  * Advances one enemy's awareness by a frame. Returns the record so a caller
  * can chain; it is mutated in place.
  */
-export function senseStep(aw: BotAwarenessT, contact: BotContactT, senses: BotSensesSettings, weapons: BotWeaponSenseSettings, dt: number, now: number): BotAwarenessT {
+export function senseStep(
+  aw: BotAwarenessT,
+  contact: BotContactT,
+  senses: BotSensesSettings,
+  weapons: BotWeaponSenseSettings,
+  dt: number,
+  now: number,
+): BotAwarenessT {
   const visible = contact.lineOfSight && contact.inSightFov;
 
   // sight: fill while visible, drain otherwise. An invisible enemy takes

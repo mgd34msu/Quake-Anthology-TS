@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Native get_org table, mg3_oldone_new.qc. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../../contracts/math.ts";
 const points: readonly Vec3[] = [
@@ -102,4 +103,8 @@ const points: readonly Vec3[] = [
   { x: -0.18, y: 0.321, z: -0.93 },
   { x: 0.297, y: -0.098, z: -0.95 },
 ];
-export function spherePoint(index: number): Vec3 { const point = points[index]; if (point === undefined) throw new Error("Invalid native sphere point"); return point; }
+export function spherePoint(index: number): Vec3 {
+  const point = points[index];
+  if (point === undefined) throw new Error("Invalid native sphere point");
+  return point;
+}

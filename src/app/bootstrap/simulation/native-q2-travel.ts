@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SimulationTravel } from "./types.ts";
 import type { HandGrenadeTravel } from "./equipment-runtime.ts";
 import type { WeaponReference } from "./weapon-slot.ts";
@@ -9,7 +10,14 @@ import type { DroppedPickupLevels } from "./dropped-pickups.ts";
 /** Transferred only after the application commits to retiring the current source world. */
 interface NativeQ2TravelClients {
   readonly droppedPickups?: DroppedPickupLevels;
-  readonly clients: readonly { readonly client: ClientId; readonly phase: "connected" | "active"; readonly handGrenades?: HandGrenadeTravel; readonly weaponSlot?: WeaponReference; readonly nativeInventorySelection?: import("../../../contracts/gameplay.ts").ItemId | null; readonly selectedArsenal?: SimulationTravel["players"][number]["selectedArsenal"] }[];
+  readonly clients: readonly {
+    readonly client: ClientId;
+    readonly phase: "connected" | "active";
+    readonly handGrenades?: HandGrenadeTravel;
+    readonly weaponSlot?: WeaponReference;
+    readonly nativeInventorySelection?: import("../../../contracts/gameplay.ts").ItemId | null;
+    readonly selectedArsenal?: SimulationTravel["players"][number]["selectedArsenal"];
+  }[];
   readonly spawnPoint: string;
 }
 

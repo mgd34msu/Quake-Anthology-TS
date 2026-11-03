@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_spawn.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { vec3 } from "../../../../core/math.ts";
@@ -17,12 +18,22 @@ import type { GameEntity } from "./state.ts";
 
 export const MAX_SPAWN_VARS = 64;
 export const MAX_SPAWN_VARS_CHARS = 4096;
-export interface SpawnPair { readonly key: string; readonly value: string }
-export interface SpawnValue<T> { readonly present: boolean; readonly value: T }
+export interface SpawnPair {
+  readonly key: string;
+  readonly value: string;
+}
+export interface SpawnValue<T> {
+  readonly present: boolean;
+  readonly value: T;
+}
 
-function lower(value: string): string { return value.replace(/[A-Z]/g, character => character.toLowerCase()); }
+function lower(value: string): string {
+  return value.replace(/[A-Z]/g, character => character.toLowerCase());
+}
 // Native x86 COM_Parse promotes signed char to int before comparing with space.
-function tokenWhitespace(code: number): boolean { return code <= 32 || code >= 128; }
+function tokenWhitespace(code: number): boolean {
+  return code <= 32 || code >= 128;
+}
 function checkByteString(value: string): void {
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index);
@@ -106,8 +117,10 @@ export class SpawnParser {
   }
 
   #advance(): void {
-    if (this.#text.charAt(this.#offset) === "\n") { this.#line++; this.#column = 1; }
-    else this.#column++;
+    if (this.#text.charAt(this.#offset) === "\n") {
+      this.#line++;
+      this.#column = 1;
+    } else this.#column++;
     this.#offset++;
   }
 
@@ -117,13 +130,19 @@ export class SpawnParser {
       if (this.#text.startsWith("//", this.#offset)) {
         while (this.#offset < this.#text.length && this.#text.charAt(this.#offset) !== "\n") this.#advance();
       } else if (this.#text.startsWith("/*", this.#offset)) {
-        this.#advance(); this.#advance();
+        this.#advance();
+        this.#advance();
         while (this.#offset < this.#text.length && !this.#text.startsWith("*/", this.#offset)) this.#advance();
-        if (this.#offset < this.#text.length) { this.#advance(); this.#advance(); }
+        if (this.#offset < this.#text.length) {
+          this.#advance();
+          this.#advance();
+        }
       } else break;
     }
     if (this.#offset === this.#text.length) return undefined;
-    const line = this.#line, column = this.#column, quoted = this.#text.charAt(this.#offset) === '"';
+    const line = this.#line,
+      column = this.#column,
+      quoted = this.#text.charAt(this.#offset) === '"';
     let value = "";
     if (quoted) this.#advance();
     while (this.#offset < this.#text.length) {
@@ -162,17 +181,45 @@ export class SpawnParser {
 export function parseSpawnField(key: string, value: string, entity: GameEntity, memory: GameMemory): boolean {
   const field = lower(key);
   switch (field) {
-    case "classname": case "model": case "model2": case "target": case "targetname": case "message": case "team":
-      entity[field] = newSpawnString(value, memory); break;
-    case "targetshadername": entity.targetShaderName = newSpawnString(value, memory); break;
-    case "targetshadernewname": entity.targetShaderNewName = newSpawnString(value, memory); break;
-    case "spawnflags": case "count": case "health": entity[field] = gameAtoi(value); break;
-    case "dmg": entity.damage = gameAtoi(value); break;
-    case "speed": case "wait": case "random": entity[field] = gameAtof(value); break;
-    case "origin": case "angles": entity.s[field] = scanGameVector(value); break;
-    case "angle": entity.s.angles = vec3(0, gameAtof(value), 0); break;
-    case "light": break;
-    default: return false;
+    case "classname":
+    case "model":
+    case "model2":
+    case "target":
+    case "targetname":
+    case "message":
+    case "team":
+      entity[field] = newSpawnString(value, memory);
+      break;
+    case "targetshadername":
+      entity.targetShaderName = newSpawnString(value, memory);
+      break;
+    case "targetshadernewname":
+      entity.targetShaderNewName = newSpawnString(value, memory);
+      break;
+    case "spawnflags":
+    case "count":
+    case "health":
+      entity[field] = gameAtoi(value);
+      break;
+    case "dmg":
+      entity.damage = gameAtoi(value);
+      break;
+    case "speed":
+    case "wait":
+    case "random":
+      entity[field] = gameAtof(value);
+      break;
+    case "origin":
+    case "angles":
+      entity.s[field] = scanGameVector(value);
+      break;
+    case "angle":
+      entity.s.angles = vec3(0, gameAtof(value), 0);
+      break;
+    case "light":
+      break;
+    default:
+      return false;
   }
   return true;
 }
@@ -210,7 +257,8 @@ function excluded(variables: SpawnVariables, context: SpawnContext): SpawnFilter
 
 /** G_SpawnGEntityFromSpawnVars/G_CallSpawn. Actual class implementations come from the host. */
 export function spawnEntity(variables: SpawnVariables, context: SpawnContext): SpawnOutcome {
-  const entity = context.pool.spawn(), slot = entity.slot;
+  const entity = context.pool.spawn(),
+    slot = entity.slot;
   try {
     for (const pair of variables.entries) parseSpawnField(pair.key, pair.value, entity, context.memory);
   } catch (error) {
@@ -219,7 +267,10 @@ export function spawnEntity(variables: SpawnVariables, context: SpawnContext): S
     throw error;
   }
   const reason = excluded(variables, context);
-  if (reason !== null) { context.pool.free(entity); return { kind: "filtered", slot, reason }; }
+  if (reason !== null) {
+    context.pool.free(entity);
+    return { kind: "filtered", slot, reason };
+  }
   entity.s.pos = { ...entity.s.pos, base: { ...entity.s.origin } };
   entity.r.currentOrigin = { ...entity.s.origin };
   const classname = entity.classname;
@@ -282,7 +333,9 @@ export function spawnWorld(variables: SpawnVariables, context: WorldspawnContext
   }
 }
 
-export interface SpawnMapContext extends SpawnContext { readonly world: WorldspawnContext }
+export interface SpawnMapContext extends SpawnContext {
+  readonly world: WorldspawnContext;
+}
 export interface SpawnReport {
   readonly worldVariables: SpawnVariables;
   readonly outcomes: readonly SpawnOutcome[];
@@ -291,7 +344,8 @@ export interface SpawnReport {
 /** Parses and dispatches supplied handlers; this does not imply gameplay coverage for a map. */
 export function spawnEntities(text: string, context: SpawnMapContext, source = "<spawn entities>"): SpawnReport {
   if (context.pool !== context.world.pool) throw new Error("Worldspawn and entity dispatch must share an entity pool");
-  const parser = new SpawnParser(text, source), worldVariables = parser.next();
+  const parser = new SpawnParser(text, source),
+    worldVariables = parser.next();
   if (worldVariables === null) throw new Error("SpawnEntities: no entities");
   spawnWorld(worldVariables, context.world);
   const outcomes: SpawnOutcome[] = [];

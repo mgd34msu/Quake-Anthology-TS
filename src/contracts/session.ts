@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ExecutableRecipe, ResourceId } from "./content.ts";
 import type { GuestCheckpoint } from "./execution.ts";
 import type { ArsenalIntent, CombatState, DamageOutcome, InventoryEntry, TransitionDecision } from "./gameplay.ts";
@@ -44,7 +45,15 @@ export type EventAudience =
   | { readonly kind: "client"; readonly client: ClientId };
 
 export type SimulationEventPayload =
-  | { readonly kind: "sound"; readonly resource: ResourceId; readonly actor: ActorId | null; readonly origin: Vec3; readonly channel: number; readonly volume: number; readonly attenuation: number }
+  | {
+      readonly kind: "sound";
+      readonly resource: ResourceId;
+      readonly actor: ActorId | null;
+      readonly origin: Vec3;
+      readonly channel: number;
+      readonly volume: number;
+      readonly attenuation: number;
+    }
   | { readonly kind: "damage"; readonly outcome: DamageOutcome }
   | { readonly kind: "transition"; readonly decision: TransitionDecision }
   | { readonly kind: "message"; readonly event: NetworkEvent; readonly sourcePresentationSequence?: number };
@@ -56,8 +65,14 @@ export interface SimulationEvent {
   readonly payload: SimulationEventPayload;
 }
 
-export interface BodySnapshot { readonly actor: ActorId; readonly body: BodyState; }
-export interface InventorySnapshot { readonly actor: ActorId; readonly entries: readonly InventoryEntry[]; }
+export interface BodySnapshot {
+  readonly actor: ActorId;
+  readonly body: BodyState;
+}
+export interface InventorySnapshot {
+  readonly actor: ActorId;
+  readonly entries: readonly InventoryEntry[];
+}
 
 export interface WorldSnapshot {
   readonly session: SessionId;
@@ -82,7 +97,10 @@ export interface SimulationOutput {
 }
 
 /** Serialized references are resolved by the restoring registry into fresh live handles. */
-export interface SavedActorId { readonly slot: number; readonly generation: number; }
+export interface SavedActorId {
+  readonly slot: number;
+  readonly generation: number;
+}
 
 export interface ActorSlotCheckpoint extends SavedActorId {
   readonly lifetime:
@@ -90,8 +108,12 @@ export interface ActorSlotCheckpoint extends SavedActorId {
     | { readonly kind: "free"; readonly freedAt: SourceTime | null };
 }
 
-export interface SavedBodyState extends Omit<BodyState, "ground"> { readonly ground: SavedActorId | null; }
-export interface SavedBodyAttachment extends Omit<BodyAttachment, "anchor"> { readonly anchor: SavedActorId; }
+export interface SavedBodyState extends Omit<BodyState, "ground"> {
+  readonly ground: SavedActorId | null;
+}
+export interface SavedBodyAttachment extends Omit<BodyAttachment, "anchor"> {
+  readonly anchor: SavedActorId;
+}
 export interface BodyCheckpoint {
   readonly actor: SavedActorId;
   readonly body: SavedBodyState;
@@ -101,9 +123,17 @@ export interface BodyCheckpoint {
   readonly linked: { readonly state: SavedBodyState; readonly absoluteBounds: BodyState["bounds"] } | null;
 }
 
-export interface CombatCheckpoint { readonly actor: SavedActorId; readonly state: CombatState; }
-export interface InventoryCheckpoint { readonly actor: SavedActorId; readonly entries: readonly InventoryEntry[]; }
-export interface ActorConfigurationCheckpoint extends Omit<ActorConfiguration, "actor"> { readonly actor: SavedActorId; }
+export interface CombatCheckpoint {
+  readonly actor: SavedActorId;
+  readonly state: CombatState;
+}
+export interface InventoryCheckpoint {
+  readonly actor: SavedActorId;
+  readonly entries: readonly InventoryEntry[];
+}
+export interface ActorConfigurationCheckpoint extends Omit<ActorConfiguration, "actor"> {
+  readonly actor: SavedActorId;
+}
 
 export interface ThinkCheckpoint {
   readonly executionProvider?: ProviderId;
@@ -168,9 +198,7 @@ export interface Simulation {
   close(): undefined;
 }
 
-export type SeatActorBinding =
-  | { readonly kind: "spectator" }
-  | { readonly kind: "player"; readonly actor: ActorId };
+export type SeatActorBinding = { readonly kind: "spectator" } | { readonly kind: "player"; readonly actor: ActorId };
 
 export interface SeatClientState {
   readonly seat: SeatId;

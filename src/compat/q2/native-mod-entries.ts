@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../contracts/execution.ts";
 import type { CallbackId } from "../../contracts/identity.ts";
 import type { GuestCallSignature } from "../../guest/core/contracts.ts";
@@ -9,18 +10,47 @@ export interface NativeModEntryBinding {
 }
 
 /** Bypass only the exact original entry frame; recursive source calls still compose. */
-export function bindNativeModEntry(host: Pick<NativeModHost, "memory" | "entries" | "invoke">, address: GuestAddress, id: CallbackId, signature: GuestCallSignature,
+export function bindNativeModEntry(
+  host: Pick<NativeModHost, "memory" | "entries" | "invoke">,
+  address: GuestAddress,
+  id: CallbackId,
+  signature: GuestCallSignature,
   execute: (values: readonly GuestCallValue[], original: NativeModEntryBinding["original"]) => GuestCallResult,
-  accepts: () => boolean = () => true): NativeModEntryBinding {
-  const { callbacks, cpu } = host.entries, frames: { stack: bigint | null }[] = [];
+  accepts: () => boolean = () => true,
+): NativeModEntryBinding {
+  const { callbacks, cpu } = host.entries,
+    frames: { stack: bigint | null }[] = [];
   const stack = () => cpu.state.registers.read("rsp", host.memory.pointerBytes === 4 ? 32 : 64);
   const original = (values: readonly GuestCallValue[]): GuestCallResult => {
-    const frame = { stack: null }; frames.push(frame);
-    try { return host.invoke(address, signature, values); } finally { frames.pop(); }
+    const frame = { stack: null };
+    frames.push(frame);
+    try {
+      return host.invoke(address, signature, values);
+    } finally {
+      frames.pop();
+    }
   };
-  const observe = callbacks.observeEntry(address, () => { const frame = frames.at(-1); if (frame !== undefined && frame.stack === null) frame.stack = stack(); });
+  const observe = callbacks.observeEntry(address, () => {
+    const frame = frames.at(-1);
+    if (frame !== undefined && frame.stack === null) frame.stack = stack();
+  });
   let remove: () => void;
-  try { remove = callbacks.bindEntry(address, { id, signature, invoke: (_context, values) => execute(values, original) }, () => frames.at(-1)?.stack !== stack() && accepts()); }
-  catch (error) { observe(); throw error; }
-  return { original, close: () => { remove(); observe(); return undefined; } };
+  try {
+    remove = callbacks.bindEntry(
+      address,
+      { id, signature, invoke: (_context, values) => execute(values, original) },
+      () => frames.at(-1)?.stack !== stack() && accepts(),
+    );
+  } catch (error) {
+    observe();
+    throw error;
+  }
+  return {
+    original,
+    close: () => {
+      remove();
+      observe();
+      return undefined;
+    },
+  };
 }

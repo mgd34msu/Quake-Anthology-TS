@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec4 } from "../../contracts/math.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
 import type { SceneEntity } from "../../contracts/scene.ts";
@@ -25,13 +26,23 @@ export function sceneFlagsCastShadow(flags: SceneEntity["flags"], alpha = 1, vie
 /** Run the same deformation and shader clock as the color pass before projection. */
 export function shadowMaterialGeometry(shader: CompiledMaterial, geometry: MaterialGeometry, context: MaterialDrawContext): MaterialGeometry | null {
   const definition = shader.registered.definition;
-  if (shader.finished.iterator.kind === "sky" || shader.finished.sort > 3
-    || definition.surfaceParms.some(value => ["nodraw", "trans", "water", "slime", "lava"].includes(value))
-    || definition.deforms.some(value => value.kind === "autosprite" || value.kind === "autosprite2" || value.kind === "projectionshadow")) return null;
+  if (
+    shader.finished.iterator.kind === "sky" ||
+    shader.finished.sort > 3 ||
+    definition.surfaceParms.some(value => ["nodraw", "trans", "water", "slime", "lava"].includes(value)) ||
+    definition.deforms.some(value => value.kind === "autosprite" || value.kind === "autosprite2" || value.kind === "projectionshadow")
+  )
+    return null;
   let time = context.time - context.timeOffset;
   if (definition.clampTime !== 0 && time >= definition.clampTime) time = definition.clampTime;
-  return deformGeometry(new MaterialDeformState(geometry, context.refdefTime, context.renderText, definition), definition.deforms,
-    context.deformView, Math.fround(time), context.noise, context.projectionShadow);
+  return deformGeometry(
+    new MaterialDeformState(geometry, context.refdefTime, context.renderText, definition),
+    definition.deforms,
+    context.deformView,
+    Math.fround(time),
+    context.noise,
+    context.projectionShadow,
+  );
 }
 
 /** RB_ShadowFinish draws this quad at eye-space z = -10 under the view projection. */

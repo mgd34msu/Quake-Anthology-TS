@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake III Arena code/game/g_public.h, cgame/cg_public.h, ui/ui_public.h.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 
@@ -7,7 +8,7 @@ function enumDecoder<T extends number>(members: { readonly [key: string]: string
   for (const value of Object.values(members)) if (typeof value === "number") numeric.push(value);
   const admitted = new Uint8Array(Math.max(...numeric) + 1);
   for (const value of numeric) admitted[value] = 1;
-  return word => Number.isInteger(word) && word >= 0 && word < admitted.length && admitted[word] === 1 ? word as T : null;
+  return word => (Number.isInteger(word) && word >= 0 && word < admitted.length && admitted[word] === 1 ? (word as T) : null);
 }
 
 export enum QvmGameImport {

@@ -15,13 +15,17 @@ test.skipIf(!existsSync(archivePath))("AAS_TraceClientBBox on the retail q3dm1 a
     const entry = archive.findEntries("maps/q3dm1.aas")[0];
     if (entry === undefined) throw new Error("Required supplied q3dm1.aas missing");
     bytes = await archive.readEntry(entry);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
   const asset = parseAas(bytes, "maps/q3dm1.aas");
-  let checked = 0, stopped = 0;
+  let checked = 0,
+    stopped = 0;
   for (const [number, area] of asset.areas.entries()) {
     if (number === 0 || ((asset.settings[number]?.presence ?? 0) & 4) === 0 || checked >= 200) continue;
     checked++;
-    const start = { ...area.center, z: area.center.z + 0.25 }, end = { ...start, z: start.z - 50 };
+    const start = { ...area.center, z: area.center.z + 0.25 },
+      end = { ...start, z: start.z - 50 };
     const trace = aasTraceClientBBox(asset, start, end, 4);
     expect(trace.startSolid).toBe(aasPointArea(asset, start) === 0 || ((asset.settings[aasPointArea(asset, start)]?.presence ?? 0) & 4) === 0);
     expect(trace.fraction).toBeGreaterThanOrEqual(0);

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* World replacement transaction. GPL-2.0-or-later. */
 import type { SeatId } from "../../contracts/identity.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
-import type {
-  GraphicalApplication, LocalQ3GuestBrowser, LocalQ3GuestWorld, NativeQ2SeatClient, SavedApplicationClients,
-} from "./application.ts";
+import type { GraphicalApplication, LocalQ3GuestBrowser, LocalQ3GuestWorld, NativeQ2SeatClient, SavedApplicationClients } from "./application.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationCapture } from "./capture.ts";
@@ -48,7 +47,9 @@ export class WorldReplacement {
   constructor(
     private readonly content: { close(): unknown },
     private readonly previousGuestBrowser: LocalQ3GuestBrowser | null,
-  ) { this.guestBrowser = previousGuestBrowser; }
+  ) {
+    this.guestBrowser = previousGuestBrowser;
+  }
 
   /** Release the staged scripts to the caller, which then owns closing them. */
   takeScripts(): ConsoleScriptFiles | null {
@@ -60,7 +61,13 @@ export class WorldReplacement {
   /** Close every resource still owned by the transaction, then throw the original failure with any close failures attached. */
   async rollback(error: unknown, retainedRenderer: { flush(): unknown } | null): Promise<never> {
     const errors: unknown[] = [error];
-    const discard = async (close: () => unknown): Promise<void> => { try { await close(); } catch (failure) { errors.push(failure); } };
+    const discard = async (close: () => unknown): Promise<void> => {
+      try {
+        await close();
+      } catch (failure) {
+        errors.push(failure);
+      }
+    };
     await discard(() => this.capture?.close());
     for (const client of this.clients) await discard(() => client.close());
     for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();

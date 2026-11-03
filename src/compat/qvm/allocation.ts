@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** An engine arena can account for QVM storage without owning VM execution. */
 export interface QvmAllocation {
   /** Reading bytes must reject a released allocation. */
@@ -5,4 +6,7 @@ export interface QvmAllocation {
 }
 export type QvmAllocationProfile =
   | { readonly kind: "unaccounted" }
-  | { readonly kind: "accounted"; readonly allocate: (request: { readonly purpose: string; readonly resource: string; readonly byteLength: number }) => QvmAllocation };
+  | {
+      readonly kind: "accounted";
+      readonly allocate: (request: { readonly purpose: string; readonly resource: string; readonly byteLength: number }) => QvmAllocation;
+    };

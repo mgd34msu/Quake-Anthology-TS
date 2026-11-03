@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Brush face reconstruction and water subdivision from gl_rsurf.c/gl_warp.c.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec2, Vec3 } from "../../contracts/math.ts";
@@ -14,10 +15,15 @@ function at<T>(values: readonly T[], index: number): T {
 }
 
 export function geometryBounds(vertices: readonly { readonly position: Vec3 }[]): Bounds {
-  const min = { x: Infinity, y: Infinity, z: Infinity }, max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  const min = { x: Infinity, y: Infinity, z: Infinity },
+    max = { x: -Infinity, y: -Infinity, z: -Infinity };
   for (const vertex of vertices) {
-    min.x = Math.min(min.x, vertex.position.x); min.y = Math.min(min.y, vertex.position.y); min.z = Math.min(min.z, vertex.position.z);
-    max.x = Math.max(max.x, vertex.position.x); max.y = Math.max(max.y, vertex.position.y); max.z = Math.max(max.z, vertex.position.z);
+    min.x = Math.min(min.x, vertex.position.x);
+    min.y = Math.min(min.y, vertex.position.y);
+    min.z = Math.min(min.z, vertex.position.z);
+    max.x = Math.max(max.x, vertex.position.x);
+    max.y = Math.max(max.y, vertex.position.y);
+    max.z = Math.max(max.z, vertex.position.z);
   }
   return vertices.length === 0 ? { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } : { min, max };
 }
@@ -25,18 +31,26 @@ export function geometryBounds(vertices: readonly { readonly position: Vec3 }[])
 function splitWater(points: readonly Vec3[], size: number): readonly (readonly Vec3[])[] {
   const bounds = geometryBounds(points.map(position => ({ position })));
   for (const axis of ["x", "y", "z"] satisfies readonly (keyof Vec3)[]) {
-    const middle = size * Math.floor((bounds.min[axis] + bounds.max[axis]) * 0.5 / size + 0.5);
+    const middle = size * Math.floor(((bounds.min[axis] + bounds.max[axis]) * 0.5) / size + 0.5);
     if (bounds.max[axis] - middle < 8 || middle - bounds.min[axis] < 8) continue;
-    const front: Vec3[] = [], back: Vec3[] = [];
+    const front: Vec3[] = [],
+      back: Vec3[] = [];
     for (let i = 0; i < points.length; i++) {
-      const point = at(points, i), next = at(points, (i + 1) % points.length);
-      const distance = point[axis] - middle, nextDistance = next[axis] - middle;
+      const point = at(points, i),
+        next = at(points, (i + 1) % points.length);
+      const distance = point[axis] - middle,
+        nextDistance = next[axis] - middle;
       if (distance >= 0) front.push(point);
       if (distance <= 0) back.push(point);
-      if (distance === 0 || nextDistance === 0 || (distance > 0) === (nextDistance > 0)) continue;
+      if (distance === 0 || nextDistance === 0 || distance > 0 === nextDistance > 0) continue;
       const fraction = distance / (distance - nextDistance);
-      const intersection = { x: point.x + fraction * (next.x - point.x), y: point.y + fraction * (next.y - point.y), z: point.z + fraction * (next.z - point.z) };
-      front.push(intersection); back.push(intersection);
+      const intersection = {
+        x: point.x + fraction * (next.x - point.x),
+        y: point.y + fraction * (next.y - point.y),
+        z: point.z + fraction * (next.z - point.z),
+      };
+      front.push(intersection);
+      back.push(intersection);
     }
     return [...splitWater(front, size), ...splitWater(back, size)];
   }
@@ -50,19 +64,37 @@ export interface PreparedBrushFace {
   readonly decoupled: boolean;
 }
 
-export function prepareBrushFace(map: Q1WorldGeometry | Q2WorldGeometry, face: BspFace, faceIndex: number,
-  imageSize: Vec2, warp: boolean, subdivision = 64): PreparedBrushFace {
-  const info = at<(Q1WorldGeometry | Q2WorldGeometry)["textureInfo"][number]>(map.textureInfo, face.textureInfo), rawPlane = at(map.planes, face.plane);
+export function prepareBrushFace(
+  map: Q1WorldGeometry | Q2WorldGeometry,
+  face: BspFace,
+  faceIndex: number,
+  imageSize: Vec2,
+  warp: boolean,
+  subdivision = 64,
+): PreparedBrushFace {
+  const info = at<(Q1WorldGeometry | Q2WorldGeometry)["textureInfo"][number]>(map.textureInfo, face.textureInfo),
+    rawPlane = at(map.planes, face.plane);
   const plane = face.back ? { normal: scale3(rawPlane.normal, -1), distance: -rawPlane.distance } : rawPlane;
   const points: Vec3[] = [];
   for (let edgeIndex = 0; edgeIndex < face.edges.count; edgeIndex++) {
-    const signed = at(map.surfaceEdges, face.edges.first + edgeIndex), edge = at(map.edges, Math.abs(signed));
+    const signed = at(map.surfaceEdges, face.edges.first + edgeIndex),
+      edge = at(map.edges, Math.abs(signed));
     points.push(at(map.vertices, edge.vertices[signed >= 0 ? 0 : 1]));
   }
-  const texture = (position: Vec3): Vec2 => ({ x: dot3(position, info.projection.s) + info.projection.s.w, y: dot3(position, info.projection.t) + info.projection.t.w });
-  let minS = Infinity, minT = Infinity, maxS = -Infinity, maxT = -Infinity;
+  const texture = (position: Vec3): Vec2 => ({
+    x: dot3(position, info.projection.s) + info.projection.s.w,
+    y: dot3(position, info.projection.t) + info.projection.t.w,
+  });
+  let minS = Infinity,
+    minT = Infinity,
+    maxS = -Infinity,
+    maxT = -Infinity;
   for (const point of points) {
-    const uv = texture(point); minS = Math.min(minS, uv.x); minT = Math.min(minT, uv.y); maxS = Math.max(maxS, uv.x); maxT = Math.max(maxT, uv.y);
+    const uv = texture(point);
+    minS = Math.min(minS, uv.x);
+    minT = Math.min(minT, uv.y);
+    maxS = Math.max(maxS, uv.x);
+    maxT = Math.max(maxT, uv.y);
   }
   const mins = { x: Math.floor(minS / 16) * 16, y: Math.floor(minT / 16) * 16 };
   const mapping = map.decoupledLightmaps?.[faceIndex] ?? null;
@@ -72,15 +104,29 @@ export function prepareBrushFace(map: Q1WorldGeometry | Q2WorldGeometry, face: B
   const sampleOffset = mapping === null ? face.lightingOffset : mapping.lightingOffset;
   // Q1 offsets count samples; Q2 offsets already count bytes in RGB data.
   const offset = sampleOffset === null ? null : sampleOffset * (map.kind === "q1-bsp" && map.lighting.kind === "rgb8" ? 3 : 1);
-  const lightmap: LightmapFace = { width, height, plane, projection, lighting: offset === null ? null : map.lighting, offset: offset ?? 0, styles: face.styles };
+  const lightmap: LightmapFace = {
+    width,
+    height,
+    plane,
+    projection,
+    lighting: offset === null ? null : map.lighting,
+    offset: offset ?? 0,
+    styles: face.styles,
+  };
   const polygons = warp ? splitWater(points, subdivision) : [points];
-  const vertices: MaterialVertex[] = [], indices: number[] = [];
+  const vertices: MaterialVertex[] = [],
+    indices: number[] = [];
   for (const polygon of polygons) {
     const first = vertices.length;
     for (const position of polygon) {
       const uv = texture(position);
-      vertices.push({ position, normal: plane.normal, texCoord: warp ? uv : { x: uv.x / imageSize.x, y: uv.y / imageSize.y },
-        lightmapCoord: lightmapAtlasCoordinates(position, projection, { x: 0, y: 0 }, width, height), color: { x: 255, y: 255, z: 255, w: 255 } });
+      vertices.push({
+        position,
+        normal: plane.normal,
+        texCoord: warp ? uv : { x: uv.x / imageSize.x, y: uv.y / imageSize.y },
+        lightmapCoord: lightmapAtlasCoordinates(position, projection, { x: 0, y: 0 }, width, height),
+        color: { x: 255, y: 255, z: 255, w: 255 },
+      });
     }
     for (let index = 2; index < polygon.length; index++) indices.push(first, first + index - 1, first + index);
   }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from the reference game-agnostic bot brain. Verbatim apart from this
 // line, the import paths that changed with the directory, and three
 // parameterizations (NAV2-specific graph construction, run/walk speeds,
@@ -62,7 +63,8 @@ export class Xorshift32 implements BotRandomT {
 
   /** Restores an already warmed stream without consuming construction draws. */
   restore(state: number): void {
-    if (!Number.isInteger(state) || state === 0 || state < -0x80000000 || state > 0x7fffffff) throw new RangeError("Bot random checkpoint must be a nonzero signed 32-bit word");
+    if (!Number.isInteger(state) || state === 0 || state < -0x80000000 || state > 0x7fffffff)
+      throw new RangeError("Bot random checkpoint must be a nonzero signed 32-bit word");
     this.state = state;
   }
 }

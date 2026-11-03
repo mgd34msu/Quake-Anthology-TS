@@ -1,40 +1,41 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { BoundedQueue } from "../../../../foundation/bounded-queue.ts";
 import type { ArsenalState } from "../../../../contracts/movement.ts";
-import { Q3GuestBots, type Q3GuestBotOptions } from './guest-bots.ts';
-import { tokenizeCommand } from '../../../../core/commands/index.ts';
-import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from '../../../../persistence/value.ts';
-import { savedActorId, readSavedActor } from '../../../../persistence/save-image.ts';
-import type { QvmHostCheckpoint } from '../../../../compat/qvm/module.ts';
-import type { ActorId, ClientId } from '../../../../contracts/identity.ts';
-import type { MountedContent } from '../../../../content/mounts/index.ts';
-import type { UserFileStore } from '../../../../core/files/writable.ts';
-import type { WireUserCommand } from '../../../../network/q3/message.ts';
-import { CommonParseCursor, CommonParseState } from '../../../../core/common-parse.ts';
-import type { QvmGame } from '../../../../compat/qvm/game.ts';
-import { QvmInputBinding, type QvmInputDefinition, type QvmInputServices } from '../../../../compat/qvm/game-input.ts';
-import type { QvmFunctionCall, QvmSystemCallResult } from '../../../../compat/qvm/interpreter.ts';
-import type { ModClientIdentity } from '../../../../world/session/mod-clients.ts';
-import { QvmGameExport } from '../../../../compat/qvm/abi.ts';
-import { qvmArguments, qvmSemanticsFromCvar } from '../../../../compat/qvm/module.ts';
-import type { QvmModuleOptions } from '../../../../compat/qvm/module.ts';
-import { QvmFiles } from '../../../../compat/qvm/file-syscalls.ts';
-import type { QvmCommonServices } from '../../../../compat/qvm/common-syscalls.ts';
-import type { QvmServerGameServices } from '../../../../compat/qvm/server-game-syscalls.ts';
-import type { QvmHostResult, SharedHostCall } from '../../../../compat/qvm/syscalls.ts';
-import type { Q3ApplicationAdmission, Q3ApplicationPlayer } from '../../network/q3-types.ts';
-import { Q3GuestRecords } from './guest-records.ts';
-import type { Q3GuestRecordHost } from './guest-records.ts';
-import { Q3GuestSpatial } from './guest-spatial.ts';
-import { Q3ServerTraps } from './server-traps.ts';
-import { Q3QvmEngine } from './qvm-engine.ts';
-import { Q3NativeGuestSource } from './native-guest-source.ts';
-import type { Q3NativeImage } from './native-guest-source.ts';
-import type { Q3GameEngine, Q3GuestCheckpoint } from './engine.ts';
-import type { Q3ServerState } from './server-state.ts';
+import { Q3GuestBots, type Q3GuestBotOptions } from "./guest-bots.ts";
+import { tokenizeCommand } from "../../../../core/commands/index.ts";
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../../persistence/value.ts";
+import { savedActorId, readSavedActor } from "../../../../persistence/save-image.ts";
+import type { QvmHostCheckpoint } from "../../../../compat/qvm/module.ts";
+import type { ActorId, ClientId } from "../../../../contracts/identity.ts";
+import type { MountedContent } from "../../../../content/mounts/index.ts";
+import type { UserFileStore } from "../../../../core/files/writable.ts";
+import type { WireUserCommand } from "../../../../network/q3/message.ts";
+import { CommonParseCursor, CommonParseState } from "../../../../core/common-parse.ts";
+import type { QvmGame } from "../../../../compat/qvm/game.ts";
+import { QvmInputBinding, type QvmInputDefinition, type QvmInputServices } from "../../../../compat/qvm/game-input.ts";
+import type { QvmFunctionCall, QvmSystemCallResult } from "../../../../compat/qvm/interpreter.ts";
+import type { ModClientIdentity } from "../../../../world/session/mod-clients.ts";
+import { QvmGameExport } from "../../../../compat/qvm/abi.ts";
+import { qvmArguments, qvmSemanticsFromCvar } from "../../../../compat/qvm/module.ts";
+import type { QvmModuleOptions } from "../../../../compat/qvm/module.ts";
+import { QvmFiles } from "../../../../compat/qvm/file-syscalls.ts";
+import type { QvmCommonServices } from "../../../../compat/qvm/common-syscalls.ts";
+import type { QvmServerGameServices } from "../../../../compat/qvm/server-game-syscalls.ts";
+import type { QvmHostResult, SharedHostCall } from "../../../../compat/qvm/syscalls.ts";
+import type { Q3ApplicationAdmission, Q3ApplicationPlayer } from "../../network/q3-types.ts";
+import { Q3GuestRecords } from "./guest-records.ts";
+import type { Q3GuestRecordHost } from "./guest-records.ts";
+import { Q3GuestSpatial } from "./guest-spatial.ts";
+import { Q3ServerTraps } from "./server-traps.ts";
+import { Q3QvmEngine } from "./qvm-engine.ts";
+import { Q3NativeGuestSource } from "./native-guest-source.ts";
+import type { Q3NativeImage } from "./native-guest-source.ts";
+import type { Q3GameEngine, Q3GuestCheckpoint } from "./engine.ts";
+import type { Q3ServerState } from "./server-state.ts";
 
 export interface Q3GuestBotPreparation {
-  readonly library: Omit<Q3GuestBotOptions['library'], 'clientCommand'>;
-  readonly selected: Q3GuestBotOptions['selected'];
+  readonly library: Omit<Q3GuestBotOptions["library"], "clientCommand">;
+  readonly selected: Q3GuestBotOptions["selected"];
   createClient(slot: number): ClientId | null;
   freeClient(client: ClientId): void;
   snapshotEntities(player: Q3ApplicationPlayer): readonly number[];
@@ -45,8 +46,9 @@ export interface Q3GuestOutput {
   configstring(index: number, value: string): void | Promise<void>;
 }
 /** Which execution form of the qagame this server game hosts. */
-export type Q3GuestModule = { readonly kind: 'qvm'; readonly artifact: QvmModuleOptions['artifact'] }
-  | { readonly kind: 'native'; readonly image: Q3NativeImage; readonly instructionBudget?: number };
+export type Q3GuestModule =
+  | { readonly kind: "qvm"; readonly artifact: QvmModuleOptions["artifact"] }
+  | { readonly kind: "native"; readonly image: Q3NativeImage; readonly instructionBudget?: number };
 export interface Q3GuestRuntimeOptions {
   readonly module: Q3GuestModule;
   readonly state: Q3ServerState;
@@ -57,60 +59,72 @@ export interface Q3GuestRuntimeOptions {
   readonly dedicated?: boolean;
   readonly seed: number;
   readonly entityText: string;
-  readonly common: Pick<Extract<QvmCommonServices, { readonly role: 'qagame' }>, 'milliseconds' | 'realTime' | 'commands'>;
+  readonly common: Pick<Extract<QvmCommonServices, { readonly role: "qagame" }>, "milliseconds" | "realTime" | "commands">;
   now(): number;
   assertCurrent(): void;
   beforeDisconnect?(actor: ActorId): void;
   beforeRetire?(): void;
   sourceRestored?(): void;
   arsenal?(actor: ActorId): ArsenalState;
-  clientChanged?(kind: 'admitted' | 'userinfo', actor: ActorId): void;
+  clientChanged?(kind: "admitted" | "userinfo", actor: ActorId): void;
   botCommand?(actor: ActorId, command: WireUserCommand): void;
 }
-export type Q3SavedGuestClientId = Pick<ClientId, 'slot' | 'generation'>;
-export interface Q3GuestMapClient { readonly client: ClientId; readonly userinfo: string; readonly bot?: boolean; }
+export type Q3SavedGuestClientId = Pick<ClientId, "slot" | "generation">;
+export interface Q3GuestMapClient {
+  readonly client: ClientId;
+  readonly userinfo: string;
+  readonly bot?: boolean;
+}
 export interface Q3GuestMapTransition {
   /** Restore through the destination registry before applying its new map settings. */
-  readonly cvars: ReturnType<Q3ServerState['cvars']['captureSaveState']>;
+  readonly cvars: ReturnType<Q3ServerState["cvars"]["captureSaveState"]>;
   readonly clients: readonly Q3GuestMapClient[];
 }
-export type Q3GuestInitialization = { readonly kind: 'new' }
-  | { readonly kind: 'map-change' | 'map-restart'; readonly clients: readonly Q3GuestMapClient[] };
+export type Q3GuestInitialization = { readonly kind: "new" } | { readonly kind: "map-change" | "map-restart"; readonly clients: readonly Q3GuestMapClient[] };
 function readGuestClients(reader: SaveReader) {
-  return reader.list(entry => ({ sourceEntity: entry.field('sourceEntity').integer(0),
-    client: { slot: entry.field('client').field('slot').integer(0), generation: entry.field('client').field('generation').integer(0) },
-    actor: readSavedActor(entry.field('actor')), phase: entry.field('phase').choice('connected', 'active') }));
+  return reader.list(entry => ({
+    sourceEntity: entry.field("sourceEntity").integer(0),
+    client: { slot: entry.field("client").field("slot").integer(0), generation: entry.field("client").field("generation").integer(0) },
+    actor: readSavedActor(entry.field("actor")),
+    phase: entry.field("phase").choice("connected", "active"),
+  }));
 }
 
 /** The server game's own record inside a saved qagame: interpreted checkpoints keep it as host state, native ones as runtime state. */
-export function q3GuestHostState(checkpoint: Q3GuestCheckpoint) { return checkpoint.kind === 'qvm' ? checkpoint.hostState : checkpoint.runtimeState; }
+export function q3GuestHostState(checkpoint: Q3GuestCheckpoint) {
+  return checkpoint.kind === "qvm" ? checkpoint.hostState : checkpoint.runtimeState;
+}
 
 export function savedQ3GuestClients(checkpoint: Q3GuestCheckpoint) {
   const host = q3GuestHostState(checkpoint);
-  if (host.format !== 'q3:qagame-host') throw new Error('Unsupported Q3 guest host checkpoint format');
-  const reader = new SaveReader(decodeCheckpointValue(host.bytes), 'q3.guest.host');
-  reader.field('version').literal(1);
-  const maximum = reader.field('maxClients').integer(1), slots = new Set<number>();
-  if (maximum > 64) reader.fail('invalid guest client capacity');
-  const clients = readGuestClients(reader.field('clients'));
+  if (host.format !== "q3:qagame-host") throw new Error("Unsupported Q3 guest host checkpoint format");
+  const reader = new SaveReader(decodeCheckpointValue(host.bytes), "q3.guest.host");
+  reader.field("version").literal(1);
+  const maximum = reader.field("maxClients").integer(1),
+    slots = new Set<number>();
+  if (maximum > 64) reader.fail("invalid guest client capacity");
+  const clients = readGuestClients(reader.field("clients"));
   for (const entry of clients) {
-    if (entry.sourceEntity >= maximum || entry.sourceEntity !== entry.client.slot || slots.has(entry.sourceEntity)) reader.fail('invalid or duplicate source client slot');
+    if (entry.sourceEntity >= maximum || entry.sourceEntity !== entry.client.slot || slots.has(entry.sourceEntity))
+      reader.fail("invalid or duplicate source client slot");
     slots.add(entry.sourceEntity);
   }
   return clients;
 }
 
-type Lifecycle = { readonly kind: 'created' | 'restoring' | 'restored' } | { readonly kind: 'retired' }
-  | { readonly kind: 'initializing' | 'running' | 'shutting-down'; readonly output: Q3GuestOutput };
+type Lifecycle =
+  | { readonly kind: "created" | "restoring" | "restored" }
+  | { readonly kind: "retired" }
+  | { readonly kind: "initializing" | "running" | "shutting-down"; readonly output: Q3GuestOutput };
 interface ClientEntry {
   readonly player: Q3ApplicationPlayer;
   disconnectNotified?: boolean;
-  phase: { readonly kind: 'connecting' | 'connected' | 'active' } | { readonly kind: 'dropping'; readonly reason: string };
+  phase: { readonly kind: "connecting" | "connected" | "active" } | { readonly kind: "dropping"; readonly reason: string };
 }
 interface InputRetirement {
   readonly identity: ModClientIdentity;
   readonly entry: ClientEntry | null;
-  phase: 'pending' | 'disconnecting' | 'complete';
+  phase: "pending" | "disconnecting" | "complete";
 }
 
 /** The guest owns all game-private state; application operations own external serialization. */
@@ -129,8 +143,8 @@ export class Q3ServerGame {
   private readonly pendingBotAdmissions = new Set<number>();
   private readonly botMessages = new Map<number, BoundedQueue<string>>();
   private readonly services: QvmServerGameServices;
-  private readonly common: Extract<QvmCommonServices, { readonly role: 'qagame' }>;
-  private lifecycle: Lifecycle = { kind: 'created' };
+  private readonly common: Extract<QvmCommonServices, { readonly role: "qagame" }>;
+  private lifecycle: Lifecycle = { kind: "created" };
   private externalOperations = 0;
   private readonly cursor: CommonParseCursor;
   private readonly parser = new CommonParseState();
@@ -140,81 +154,141 @@ export class Q3ServerGame {
   private inputBinding: QvmInputBinding | null = null;
   private readonly inputRetirements = new Map<number, InputRetirement>();
 
-  playerArsenal(actor: ActorId): ArsenalState | null { this.current(); return this.options.arsenal?.(actor) ?? null; }
+  playerArsenal(actor: ActorId): ArsenalState | null {
+    this.current();
+    return this.options.arsenal?.(actor) ?? null;
+  }
 
   bindInput(definition: QvmInputDefinition, services: QvmInputServices): void {
     this.inputBinding?.close();
-    this.inputBinding = new QvmInputBinding({ game: this.qvmGame(), definition,
-      retiring: (slot, identity) => this.retireInput(slot, identity), retired: slot => this.records.isInputRetired(slot),
-      disconnect: (slot, identity, call) => this.disconnectInput(slot, identity, call),
-      movement: (slot, run) => this.records.withInputMotion(slot, run) }, services);
+    this.inputBinding = new QvmInputBinding(
+      {
+        game: this.qvmGame(),
+        definition,
+        retiring: (slot, identity) => this.retireInput(slot, identity),
+        retired: slot => this.records.isInputRetired(slot),
+        disconnect: (slot, identity, call) => this.disconnectInput(slot, identity, call),
+        movement: (slot, run) => this.records.withInputMotion(slot, run),
+      },
+      services,
+    );
   }
   private retireInput(slot: number, identity: ModClientIdentity): void {
     const existing = this.inputRetirements.get(slot);
     if (existing !== undefined) {
-      if (!existing.identity.actor.equals(identity.actor) || !existing.identity.client.equals(identity.client)) throw new Error('QVM input retirement changed client generation');
+      if (!existing.identity.actor.equals(identity.actor) || !existing.identity.client.equals(identity.client))
+        throw new Error("QVM input retirement changed client generation");
       return;
     }
     const entry = this.clients.get(slot) ?? null;
     if (entry !== null && (!entry.player.actor.equals(identity.actor) || !entry.player.client.equals(identity.client)))
-      throw new Error('QVM input retirement does not own its source client');
+      throw new Error("QVM input retirement does not own its source client");
     this.records.retireInputClient(slot);
-    this.inputRetirements.set(slot, { identity, entry, phase: entry === null ? 'complete' : 'pending' });
+    this.inputRetirements.set(slot, { identity, entry, phase: entry === null ? "complete" : "pending" });
   }
   private disconnectInput(slot: number, identity: ModClientIdentity, call: QvmFunctionCall): QvmSystemCallResult {
     this.retireInput(slot, identity);
     const retirement = this.inputRetirements.get(slot);
-    if (retirement === undefined) throw new Error('QVM input retirement was lost');
-    if (retirement.phase !== 'pending') return 0;
-    retirement.phase = 'disconnecting';
+    if (retirement === undefined) throw new Error("QVM input retirement was lost");
+    if (retirement.phase !== "pending") return 0;
+    retirement.phase = "disconnecting";
     const entry = retirement.entry;
-    if (entry !== null) { this.notifyDisconnect(entry); entry.phase = { kind: 'dropping', reason: 'Client input actor was removed.' }; }
-    const complete = (result: number): number => { retirement.phase = 'complete'; return result; };
+    if (entry !== null) {
+      this.notifyDisconnect(entry);
+      entry.phase = { kind: "dropping", reason: "Client input actor was removed." };
+    }
+    const complete = (result: number): number => {
+      retirement.phase = "complete";
+      return result;
+    };
     const args = qvmArguments([QvmGameExport.GAME_CLIENT_DISCONNECT, slot]);
-    return call.execution === 'synchronous' ? complete(call.invoke(args)) : call.invokeAsync(args).then(complete);
+    return call.execution === "synchronous" ? complete(call.invoke(args)) : call.invokeAsync(args).then(complete);
   }
   private finishExternalOperation(): void {
     this.externalOperations--;
     if (this.externalOperations !== 0 || this.engine.active) return;
     for (const [slot, retirement] of this.inputRetirements) {
-      if (retirement.phase !== 'complete') continue;
+      if (retirement.phase !== "complete") continue;
       if (retirement.entry !== null && this.clients.get(slot) === retirement.entry) this.release(retirement.entry);
       if (this.botClients.delete(slot)) this.botPreparation?.freeClient(retirement.identity.client);
-      this.botMessages.delete(slot); this.pendingBotAdmissions.delete(slot);
-      this.records.finishInputRetirement(slot); this.inputRetirements.delete(slot);
+      this.botMessages.delete(slot);
+      this.pendingBotAdmissions.delete(slot);
+      this.records.finishInputRetirement(slot);
+      this.inputRetirements.delete(slot);
     }
   }
 
   constructor(private readonly options: Q3GuestRuntimeOptions) {
-    if (!Number.isInteger(options.maxClients) || options.maxClients < 1 || options.maxClients > 64) throw new RangeError('Q3 guest requires 1..64 clients');
+    if (!Number.isInteger(options.maxClients) || options.maxClients < 1 || options.maxClients > 64) throw new RangeError("Q3 guest requires 1..64 clients");
     this.state = options.state;
-    this.state.cvars.register('bot_enable', '1', 0);
-    this.state.cvars.set('sv_maxclients', String(options.maxClients), true);
-    this.state.cvars.set('dedicated', options.dedicated === false ? '0' : '1', true);
-    this.files = new QvmFiles({ mounts: options.mounts, writable: options.writable, print: text => this.state.print(text), assertCurrent: () => this.current() });
-    const hostState = { checkpoint: () => this.captureHost(), restore: (state: QvmHostCheckpoint) => { this.restoreHost(state); return undefined; } };
+    this.state.cvars.register("bot_enable", "1", 0);
+    this.state.cvars.set("sv_maxclients", String(options.maxClients), true);
+    this.state.cvars.set("dedicated", options.dedicated === false ? "0" : "1", true);
+    this.files = new QvmFiles({
+      mounts: options.mounts,
+      writable: options.writable,
+      print: text => this.state.print(text),
+      assertCurrent: () => this.current(),
+    });
+    const hostState = {
+      checkpoint: () => this.captureHost(),
+      restore: (state: QvmHostCheckpoint) => {
+        this.restoreHost(state);
+        return undefined;
+      },
+    };
     let traps: Q3ServerTraps | null = null;
     const dispatch = (call: SharedHostCall): QvmHostResult => {
-      if (traps === null) throw new Error('Q3 guest trap table is not bound');
+      if (traps === null) throw new Error("Q3 guest trap table is not bound");
       return traps.dispatch(call);
     };
     try {
-      this.engine = options.module.kind === 'qvm'
-        ? new Q3QvmEngine({ artifact: options.module.artifact, semantics: qvmSemanticsFromCvar(this.state.cvars, 'qagame'), hostState }, dispatch, () => this.current())
-        : Q3NativeGuestSource.create({ prepared: options.module.image, traps: call => { this.current(); const result = dispatch(call); return result instanceof Promise ? result.then(value => { this.current(); return value; }) : result; },
-          hostState, ...(options.module.instructionBudget === undefined ? {} : { instructionBudget: options.module.instructionBudget }) });
-    } catch (error) { this.files.closeAll(); throw error; }
+      this.engine =
+        options.module.kind === "qvm"
+          ? new Q3QvmEngine({ artifact: options.module.artifact, semantics: qvmSemanticsFromCvar(this.state.cvars, "qagame"), hostState }, dispatch, () =>
+              this.current(),
+            )
+          : Q3NativeGuestSource.create({
+              prepared: options.module.image,
+              traps: call => {
+                this.current();
+                const result = dispatch(call);
+                return result instanceof Promise
+                  ? result.then(value => {
+                      this.current();
+                      return value;
+                    })
+                  : result;
+              },
+              hostState,
+              ...(options.module.instructionBudget === undefined ? {} : { instructionBudget: options.module.instructionBudget }),
+            });
+    } catch (error) {
+      this.files.closeAll();
+      throw error;
+    }
     try {
       this.engine.data.setClientCount(options.maxClients);
       this.records = new Q3GuestRecords(this.engine.data, options.records);
       this.spatial = new Q3GuestSpatial(this.records, options.records.scene, this.state.cvars);
-    } catch (error) { this.files.closeAll(); this.engine.retire(); throw error; }
-    this.common = { ...options.common, role: 'qagame', cvars: this.state.cvars, print: text => this.state.print(text), arguments: () => [] };
+    } catch (error) {
+      this.files.closeAll();
+      this.engine.retire();
+      throw error;
+    }
+    this.common = { ...options.common, role: "qagame", cvars: this.state.cvars, print: text => this.state.print(text), arguments: () => [] };
     this.cursor = new CommonParseCursor(options.entityText);
-    this.services = { data: this.engine.data, cvars: this.state.cvars, maxClients: options.maxClients, spatial: this.spatial,
+    this.services = {
+      data: this.engine.data,
+      cvars: this.state.cvars,
+      maxClients: options.maxClients,
+      spatial: this.spatial,
       configstrings: { get: index => this.state.configstrings.get(index), set: (index, value) => this.setConfigstring(index, value) },
-      getUserinfo: slot => this.state.getUserinfo(slot) ?? '', setUserinfo: (slot, value) => this.state.setUserinfo(slot, value),
-      getUserCommand: slot => this.state.getUserCommand(slot) ?? { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }, dropClient: (slot, reason) => this.drop(slot, reason),
+      getUserinfo: slot => this.state.getUserinfo(slot) ?? "",
+      setUserinfo: (slot, value) => this.state.setUserinfo(slot, value),
+      getUserCommand: slot =>
+        this.state.getUserCommand(slot) ?? { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 },
+      dropClient: (slot, reason) => this.drop(slot, reason),
       sendServerCommand: (slot, text) => {
         for (const [client, messages] of this.botMessages) if (slot === -1 || slot === client) messages.push(text);
         if (this.botClients.has(slot)) return;
@@ -226,160 +300,276 @@ export class Q3ServerGame {
   }
   /** The interpreted module, for the original-source bindings that read its function and data layout. */
   qvmGame(): QvmGame {
-    if (!(this.engine instanceof Q3QvmEngine)) throw new Error('This Q3 guest runs a native module; interpreted-module bindings do not apply');
+    if (!(this.engine instanceof Q3QvmEngine)) throw new Error("This Q3 guest runs a native module; interpreted-module bindings do not apply");
     return this.engine.game;
   }
   attachBots(preparation: Q3GuestBotPreparation): void {
     this.current();
-    if (this.bots !== null || (this.lifecycle.kind !== 'created' && this.lifecycle.kind !== 'restored')) throw new Error('Attach guest bot services before game initialization');
+    if (this.bots !== null || (this.lifecycle.kind !== "created" && this.lifecycle.kind !== "restored"))
+      throw new Error("Attach guest bot services before game initialization");
     this.botPreparation = preparation;
-    this.bots = new Q3GuestBots({ library: { ...preparation.library, clientCommand: (slot, text) => {
-      if (!this.botClients.has(slot)) throw new Error(`Bot command has no owned client ${slot}`);
-      this.pendingBotCommands.push({ slot, argv: tokenizeCommand(text, 'q3').argv }); return undefined;
-    } }, selected: preparation.selected, records: this.records, spatial: this.spatial, entities: this.options.entityText,
-      mapName: this.state.cvars.variableString('mapname'), clients: {
+    this.bots = new Q3GuestBots({
+      library: {
+        ...preparation.library,
+        clientCommand: (slot, text) => {
+          if (!this.botClients.has(slot)) throw new Error(`Bot command has no owned client ${slot}`);
+          this.pendingBotCommands.push({ slot, argv: tokenizeCommand(text, "q3").argv });
+          return undefined;
+        },
+      },
+      selected: preparation.selected,
+      records: this.records,
+      spatial: this.spatial,
+      entities: this.options.entityText,
+      mapName: this.state.cvars.variableString("mapname"),
+      clients: {
         allocateClient: () => {
           for (let slot = 0; slot < this.options.maxClients; slot++) {
             if (this.clients.has(slot) || this.reconnecting.has(slot) || this.inputRetirements.has(slot)) continue;
-            const client = preparation.createClient(slot); if (client === null) continue;
+            const client = preparation.createClient(slot);
+            if (client === null) continue;
             this.records.entity(slot).s.number = slot;
             const player = { client, actor: this.records.actor(slot).id, sourceEntity: slot };
-            this.validateClient(client); this.clients.set(slot, { player, phase: { kind: 'active' } }); this.botClients.add(slot); this.pendingBotAdmissions.add(slot); this.botMessages.set(slot, new BoundedQueue<string>(64)); return slot;
+            this.validateClient(client);
+            this.clients.set(slot, { player, phase: { kind: "active" } });
+            this.botClients.add(slot);
+            this.pendingBotAdmissions.add(slot);
+            this.botMessages.set(slot, new BoundedQueue<string>(64));
+            return slot;
           }
           return -1;
         },
         freeClient: slot => {
           if (!this.botClients.delete(slot)) return;
           this.records.entity(slot).r.svFlags &= ~8;
-          const entry = this.clients.get(slot); if (entry !== undefined) { this.notifyDisconnect(entry); this.release(entry); preparation.freeClient(entry.player.client); }
+          const entry = this.clients.get(slot);
+          if (entry !== undefined) {
+            this.notifyDisconnect(entry);
+            this.release(entry);
+            preparation.freeClient(entry.player.client);
+          }
           this.pendingBotAdmissions.delete(slot);
           this.botMessages.delete(slot);
         },
-        snapshotEntity: (slot, sequence) => { const entry = this.clients.get(slot); return entry === undefined ? -1 : preparation.snapshotEntities(entry.player)[sequence] ?? -1; },
+        snapshotEntity: (slot, sequence) => {
+          const entry = this.clients.get(slot);
+          return entry === undefined ? -1 : (preparation.snapshotEntities(entry.player)[sequence] ?? -1);
+        },
         consoleMessage: slot => this.botMessages.get(slot)?.shift() ?? null,
         userCommand: async (slot, command) => {
           if (!this.botClients.has(slot)) throw new Error(`Bot input has no owned client ${slot}`);
-          const entry = this.clients.get(slot); if (entry === undefined) throw new Error('Bot input lost its source client');
-          this.admitPendingBots(); this.options.botCommand?.(entry.player.actor, command);
-          this.state.setUserCommand(slot, command); await this.engine.clientThinkAsync(slot);
+          const entry = this.clients.get(slot);
+          if (entry === undefined) throw new Error("Bot input lost its source client");
+          this.admitPendingBots();
+          this.options.botCommand?.(entry.player.actor, command);
+          this.state.setUserCommand(slot, command);
+          await this.engine.clientThinkAsync(slot);
         },
-      } });
-    if (this.savedBots !== null) { this.bots.restore(this.savedBots); this.savedBots = null; }
+      },
+    });
+    if (this.savedBots !== null) {
+      this.bots.restore(this.savedBots);
+      this.savedBots = null;
+    }
   }
-  get isRetired(): boolean { return this.lifecycle.kind === 'retired'; }
+  get isRetired(): boolean {
+    return this.lifecycle.kind === "retired";
+  }
 
-  checkpoint(): Q3GuestCheckpoint { return this.engine.checkpoint(); }
+  checkpoint(): Q3GuestCheckpoint {
+    return this.engine.checkpoint();
+  }
 
-  private portalWorld() { return this.spatial.world; }
+  private portalWorld() {
+    return this.spatial.world;
+  }
 
   private captureHost(): QvmHostCheckpoint {
     this.running();
-    if (this.externalOperations !== 0 || this.engine.active || this.reconnecting.size !== 0 || this.inputRetirements.size !== 0 || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active')) {
-      throw new Error('Q3 guest checkpoint requires completed client operations');
+    if (
+      this.externalOperations !== 0 ||
+      this.engine.active ||
+      this.reconnecting.size !== 0 ||
+      this.inputRetirements.size !== 0 ||
+      [...this.clients.values()].some(entry => entry.phase.kind !== "connected" && entry.phase.kind !== "active")
+    ) {
+      throw new Error("Q3 guest checkpoint requires completed client operations");
     }
-    return { state: { module: this.engine.module, format: 'q3:qagame-host', bytes: encodeCheckpointValue({
-      version: 1, maxClients: this.engine.data.numClients, data: this.engine.data.checkpoint(), server: this.state.captureSaveState(),
-      entityText: this.cursor.source, cursor: this.cursor.offset, parser: this.parser.captureSaveState(),
-      bots: this.bots?.checkpoint() ?? null, botClients: [...this.botClients], botMessages: [...this.botMessages].map(([slot, messages]) => ({ slot, messages: messages.toArray() })),
-      records: this.records.captureCheckpoint(), portals: this.portalWorld().capturePortalCheckpoint(), files: this.files.captureCheckpoint(),
-      clients: [...this.clients.values()].map(entry => ({ sourceEntity: entry.player.sourceEntity,
-        client: { slot: entry.player.client.slot, generation: entry.player.client.generation },
-        actor: savedActorId(entry.player.actor), phase: entry.phase.kind })),
-    }) }, random: [], callbacks: [] };
+    return {
+      state: {
+        module: this.engine.module,
+        format: "q3:qagame-host",
+        bytes: encodeCheckpointValue({
+          version: 1,
+          maxClients: this.engine.data.numClients,
+          data: this.engine.data.checkpoint(),
+          server: this.state.captureSaveState(),
+          entityText: this.cursor.source,
+          cursor: this.cursor.offset,
+          parser: this.parser.captureSaveState(),
+          bots: this.bots?.checkpoint() ?? null,
+          botClients: [...this.botClients],
+          botMessages: [...this.botMessages].map(([slot, messages]) => ({ slot, messages: messages.toArray() })),
+          records: this.records.captureCheckpoint(),
+          portals: this.portalWorld().capturePortalCheckpoint(),
+          files: this.files.captureCheckpoint(),
+          clients: [...this.clients.values()].map(entry => ({
+            sourceEntity: entry.player.sourceEntity,
+            client: { slot: entry.player.client.slot, generation: entry.player.client.generation },
+            actor: savedActorId(entry.player.actor),
+            phase: entry.phase.kind,
+          })),
+        }),
+      },
+      random: [],
+      callbacks: [],
+    };
   }
 
   restoreCheckpoint(checkpoint: Q3GuestCheckpoint, resolveClient: (saved: Q3SavedGuestClientId) => ClientId): void {
     this.current();
-    if (this.lifecycle.kind !== 'created') throw new Error('Q3 guest restore requires an inert candidate');
-    this.lifecycle = { kind: 'restoring' }; this.restoreClient = resolveClient;
-    try { this.engine.restore(checkpoint); this.lifecycle = { kind: 'restored' }; }
-    catch (error) {
-      try { this.discard(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Q3 guest restore and discard failed'); }
+    if (this.lifecycle.kind !== "created") throw new Error("Q3 guest restore requires an inert candidate");
+    this.lifecycle = { kind: "restoring" };
+    this.restoreClient = resolveClient;
+    try {
+      this.engine.restore(checkpoint);
+      this.lifecycle = { kind: "restored" };
+    } catch (error) {
+      try {
+        this.discard();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "Q3 guest restore and discard failed");
+      }
       throw error;
-    } finally { this.restoreClient = null; }
+    } finally {
+      this.restoreClient = null;
+    }
   }
 
   private restoreHost(checkpoint: QvmHostCheckpoint): void {
     const resolveClient = this.restoreClient;
-    if (this.lifecycle.kind !== 'restoring' || resolveClient === null) throw new Error('Q3 guest host restore requires the candidate restore operation');
-    if (checkpoint.state.format !== 'q3:qagame-host' || checkpoint.callbacks.length !== 0 || checkpoint.random.length !== 0) {
-      throw new Error('Unsupported Q3 guest host checkpoint format, callbacks or external random streams');
+    if (this.lifecycle.kind !== "restoring" || resolveClient === null) throw new Error("Q3 guest host restore requires the candidate restore operation");
+    if (checkpoint.state.format !== "q3:qagame-host" || checkpoint.callbacks.length !== 0 || checkpoint.random.length !== 0) {
+      throw new Error("Unsupported Q3 guest host checkpoint format, callbacks or external random streams");
     }
     this.options.sourceRestored?.();
-    const reader = new SaveReader(decodeCheckpointValue(checkpoint.state.bytes), 'q3.guest.host');
-    reader.field('version').literal(1); reader.field('maxClients').literal(this.options.maxClients);
-    reader.field('entityText').literal(this.cursor.source);
-    const data = reader.field('data');
+    const reader = new SaveReader(decodeCheckpointValue(checkpoint.state.bytes), "q3.guest.host");
+    reader.field("version").literal(1);
+    reader.field("maxClients").literal(this.options.maxClients);
+    reader.field("entityText").literal(this.cursor.source);
+    const data = reader.field("data");
     this.engine.data.setClientCount(this.options.maxClients);
-    this.engine.data.restore({ entitiesWord: data.field('entitiesWord').integer(), numEntities: data.field('numEntities').integer(0),
-      entityStride: data.field('entityStride').integer(0), clientsWord: data.field('clientsWord').integer(), clientStride: data.field('clientStride').integer(0) });
-    this.state.restoreSaveState(reader.field('server').value);
+    this.engine.data.restore({
+      entitiesWord: data.field("entitiesWord").integer(),
+      numEntities: data.field("numEntities").integer(0),
+      entityStride: data.field("entityStride").integer(0),
+      clientsWord: data.field("clientsWord").integer(),
+      clientStride: data.field("clientStride").integer(0),
+    });
+    this.state.restoreSaveState(reader.field("server").value);
     this.current();
-    this.cursor.offset = reader.field('cursor').nullable(offset => offset.integer(0));
-    this.parser.restoreSaveState(reader.field('parser').value);
-    this.portalWorld().restorePortalCheckpoint(reader.field('portals').value);
-    this.records.restoreCheckpoint(reader.field('records').value);
-    const clients = readGuestClients(reader.field('clients'));
+    this.cursor.offset = reader.field("cursor").nullable(offset => offset.integer(0));
+    this.parser.restoreSaveState(reader.field("parser").value);
+    this.portalWorld().restorePortalCheckpoint(reader.field("portals").value);
+    this.records.restoreCheckpoint(reader.field("records").value);
+    const clients = readGuestClients(reader.field("clients"));
     for (const saved of clients) {
-      const actor = this.options.records.actors.resolveSaved(saved.actor), client = resolveClient(saved.client);
-      if (saved.sourceEntity >= this.options.maxClients || saved.sourceEntity !== saved.client.slot || this.clients.has(saved.sourceEntity)
-        || client.session !== this.options.records.actors.session || client.slot !== saved.sourceEntity || actor === null
-        || this.records.slot(actor.id) !== saved.sourceEntity) throw reader.fail('invalid restored guest client binding');
+      const actor = this.options.records.actors.resolveSaved(saved.actor),
+        client = resolveClient(saved.client);
+      if (
+        saved.sourceEntity >= this.options.maxClients ||
+        saved.sourceEntity !== saved.client.slot ||
+        this.clients.has(saved.sourceEntity) ||
+        client.session !== this.options.records.actors.session ||
+        client.slot !== saved.sourceEntity ||
+        actor === null ||
+        this.records.slot(actor.id) !== saved.sourceEntity
+      )
+        throw reader.fail("invalid restored guest client binding");
       this.clients.set(saved.sourceEntity, { player: { client, actor: actor.id, sourceEntity: saved.sourceEntity }, phase: { kind: saved.phase } });
     }
-    this.files.restoreCheckpoint(reader.field('files').value);
-    this.savedBots = reader.field('bots').value ?? null;
-    const savedClients = reader.field('botClients');
-    if (savedClients.value !== undefined) for (const slot of savedClients.list(cell => cell.integer(0))) {
-      if (!this.clients.has(slot) || this.botClients.has(slot)) throw new Error('Invalid saved guest bot slot');
-      this.botClients.add(slot);
-    }
-    const messages = reader.field('botMessages');
-    if (messages.value !== undefined) for (const entry of messages.list(cell => ({ slot: cell.field('slot').integer(0), messages: cell.field('messages').list(text => text.string()) }))) {
-      if (!this.botClients.has(entry.slot) || this.botMessages.has(entry.slot)) throw new Error('Invalid saved guest bot message owner');
-      const restored = new BoundedQueue<string>(64);
-      for (const text of entry.messages) restored.push(text);
-      this.botMessages.set(entry.slot, restored);
-    }
+    this.files.restoreCheckpoint(reader.field("files").value);
+    this.savedBots = reader.field("bots").value ?? null;
+    const savedClients = reader.field("botClients");
+    if (savedClients.value !== undefined)
+      for (const slot of savedClients.list(cell => cell.integer(0))) {
+        if (!this.clients.has(slot) || this.botClients.has(slot)) throw new Error("Invalid saved guest bot slot");
+        this.botClients.add(slot);
+      }
+    const messages = reader.field("botMessages");
+    if (messages.value !== undefined)
+      for (const entry of messages.list(cell => ({ slot: cell.field("slot").integer(0), messages: cell.field("messages").list(text => text.string()) }))) {
+        if (!this.botClients.has(entry.slot) || this.botMessages.has(entry.slot)) throw new Error("Invalid saved guest bot message owner");
+        const restored = new BoundedQueue<string>(64);
+        for (const text of entry.messages) restored.push(text);
+        this.botMessages.set(entry.slot, restored);
+      }
   }
 
   completeRestore(output: Q3GuestOutput): void {
     this.current();
-    if (this.lifecycle.kind !== 'restored') throw new Error('Q3 guest restore is not ready for output attachment');
-    if (this.savedBots !== null) throw new Error('Saved guest bot services must be restored before output attachment');
-    this.lifecycle = { kind: 'running', output };
+    if (this.lifecycle.kind !== "restored") throw new Error("Q3 guest restore is not ready for output attachment");
+    if (this.savedBots !== null) throw new Error("Saved guest bot services must be restored before output attachment");
+    this.lifecycle = { kind: "running", output };
   }
 
   discard(): void {
-    if (this.lifecycle.kind === 'retired') return;
-    if (this.externalOperations !== 0 || this.engine.active) throw new Error('Q3 guest discard must await the active operation');
-    this.inputBinding?.close(); this.inputBinding = null; this.inputRetirements.clear();
+    if (this.lifecycle.kind === "retired") return;
+    if (this.externalOperations !== 0 || this.engine.active) throw new Error("Q3 guest discard must await the active operation");
+    this.inputBinding?.close();
+    this.inputBinding = null;
+    this.inputRetirements.clear();
     const errors: unknown[] = [];
-    try { this.bots?.close(); } catch (error) { errors.push(error); }
-    try { this.files.closeAll(); } catch (error) { errors.push(error); }
-    try { this.options.beforeRetire?.(); } catch (error) { errors.push(error); }
-    try { this.records.close(); } catch (error) { errors.push(error); }
-    try { this.engine.retire(); } catch (error) { errors.push(error); }
-    this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
-    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest discard failed');
+    try {
+      this.bots?.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.files.closeAll();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.options.beforeRetire?.();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.records.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.engine.retire();
+    } catch (error) {
+      errors.push(error);
+    }
+    this.clients.clear();
+    this.reconnecting.clear();
+    this.lifecycle = { kind: "retired" };
+    if (errors.length !== 0) throw new AggregateError(errors, "Q3 guest discard failed");
   }
 
   private current(): void {
-    if (this.lifecycle.kind === 'retired') throw new Error('Q3 guest is retired');
+    if (this.lifecycle.kind === "retired") throw new Error("Q3 guest is retired");
     this.options.assertCurrent();
-
   }
   private running(): void {
     this.current();
-    if (this.lifecycle.kind !== 'running') throw new Error('Q3 guest is not running');
-    if (this.engine.active) throw new Error('Q3 guest already has an active external operation');
+    if (this.lifecycle.kind !== "running") throw new Error("Q3 guest is not running");
+    if (this.engine.active) throw new Error("Q3 guest already has an active external operation");
   }
   private output(): Q3GuestOutput {
     const lifecycle = this.lifecycle;
-    if (lifecycle.kind !== 'initializing' && lifecycle.kind !== 'running' && lifecycle.kind !== 'shutting-down') throw new Error('Q3 guest output is unavailable');
+    if (lifecycle.kind !== "initializing" && lifecycle.kind !== "running" && lifecycle.kind !== "shutting-down")
+      throw new Error("Q3 guest output is unavailable");
     return lifecycle.output;
   }
-  get timeMilliseconds(): number { this.current(); return this.options.now(); }
+  get timeMilliseconds(): number {
+    this.current();
+    return this.options.now();
+  }
   setConfigstring(index: number, value: string): void | Promise<void> {
     this.current();
     if (this.state.configstrings.get(index) === value) return;
@@ -393,118 +583,169 @@ export class Q3ServerGame {
     this.current();
   }
 
-  async initialize(output: Q3GuestOutput, start: Q3GuestInitialization = { kind: 'new' }): Promise<void> {
+  async initialize(output: Q3GuestOutput, start: Q3GuestInitialization = { kind: "new" }): Promise<void> {
     this.current();
-    if (this.lifecycle.kind !== 'created') throw new Error('Q3 guest has already initialized');
-    if (start.kind !== 'new') {
+    if (this.lifecycle.kind !== "created") throw new Error("Q3 guest has already initialized");
+    if (start.kind !== "new") {
       const slots = new Set<number>();
       for (const entry of start.clients) {
         this.validateClient(entry.client);
-        if (slots.has(entry.client.slot)) throw new Error('Q3 map transition repeats a client slot');
+        if (slots.has(entry.client.slot)) throw new Error("Q3 map transition repeats a client slot");
         slots.add(entry.client.slot);
       }
       for (const entry of start.clients) {
         this.reconnecting.set(entry.client.slot, entry);
         this.state.setUserinfo(entry.client.slot, entry.userinfo);
-        if (entry.bot === true) { this.botClients.add(entry.client.slot); this.botMessages.set(entry.client.slot, new BoundedQueue<string>(64)); }
+        if (entry.bot === true) {
+          this.botClients.add(entry.client.slot);
+          this.botMessages.set(entry.client.slot, new BoundedQueue<string>(64));
+        }
       }
     }
-    if (this.bots === null && this.state.cvars.variableValue('bot_enable') !== 0) throw new Error('Q3 guest bot services must be attached before initialization');
-    this.lifecycle = { kind: 'initializing', output };
+    if (this.bots === null && this.state.cvars.variableValue("bot_enable") !== 0)
+      throw new Error("Q3 guest bot services must be attached before initialization");
+    this.lifecycle = { kind: "initializing", output };
     try {
-      await this.engine.initializeAsync(this.options.now(), this.options.seed, start.kind === 'map-restart');
+      await this.engine.initializeAsync(this.options.now(), this.options.seed, start.kind === "map-restart");
       await this.refreshServerInfo();
-      this.current(); this.lifecycle = { kind: 'running', output }; await this.drainBotCommands();
+      this.current();
+      this.lifecycle = { kind: "running", output };
+      await this.drainBotCommands();
     } catch (error) {
-      try { await this.shutdown(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Q3 guest initialization and cleanup failed'); }
+      try {
+        await this.shutdown();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "Q3 guest initialization and cleanup failed");
+      }
       throw error;
     }
   }
   async connect(client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission> {
-    if (this.reconnecting.has(client.slot)) throw new Error('Q3 carried client requires map reconnection');
+    if (this.reconnecting.has(client.slot)) throw new Error("Q3 carried client requires map reconnection");
     return this.admit(client, userinfo, true);
   }
   async reconnect(client: ClientId): Promise<Q3ApplicationAdmission> {
     this.running();
     const previous = this.reconnecting.get(client.slot);
-    if (previous === undefined || !previous.client.equals(client)) throw new Error('Q3 client is not carried by this map transition');
-    try { return await this.admit(client, this.state.getUserinfo(client.slot) ?? previous.userinfo, false, previous.bot === true); }
-    finally { this.reconnecting.delete(client.slot); }
+    if (previous === undefined || !previous.client.equals(client)) throw new Error("Q3 client is not carried by this map transition");
+    try {
+      return await this.admit(client, this.state.getUserinfo(client.slot) ?? previous.userinfo, false, previous.bot === true);
+    } finally {
+      this.reconnecting.delete(client.slot);
+    }
   }
   private validateClient(client: ClientId): void {
     if (client.session !== this.options.records.actors.session || !Number.isInteger(client.slot) || client.slot < 0 || client.slot >= this.options.maxClients)
-      throw new RangeError('Q3 client slot belongs to another server or is outside its capacity');
+      throw new RangeError("Q3 client slot belongs to another server or is outside its capacity");
   }
   private async admit(client: ClientId, userinfo: string, firstTime: boolean, isBot = false): Promise<Q3ApplicationAdmission> {
     this.externalOperations++;
     try {
       this.running();
-      if (this.player(client) !== null) throw new Error('Q3 client already has a guest slot');
+      if (this.player(client) !== null) throw new Error("Q3 client already has a guest slot");
       const slot = client.slot;
       this.validateClient(client);
-      if (this.clients.has(slot) || this.inputRetirements.has(slot)) return { kind: 'rejected', reason: 'Client slot is already occupied.' };
+      if (this.clients.has(slot) || this.inputRetirements.has(slot)) return { kind: "rejected", reason: "Client slot is already occupied." };
       const player = { client, actor: this.records.actor(slot).id, sourceEntity: slot };
-      const entry: ClientEntry = { player, phase: { kind: 'connecting' } };
-      this.clients.set(slot, entry); this.state.setUserinfo(slot, userinfo);
+      const entry: ClientEntry = { player, phase: { kind: "connecting" } };
+      this.clients.set(slot, entry);
+      this.state.setUserinfo(slot, userinfo);
       try {
         const denied = await this.engine.clientConnectAsync(slot, firstTime, isBot);
         this.current();
-        if (this.clients.get(slot) !== entry || entry.phase.kind === 'dropping') return { kind: 'rejected', reason: entry.phase.kind === 'dropping' ? entry.phase.reason : 'Client disconnected during admission.' };
+        if (this.clients.get(slot) !== entry || entry.phase.kind === "dropping")
+          return { kind: "rejected", reason: entry.phase.kind === "dropping" ? entry.phase.reason : "Client disconnected during admission." };
         if (denied !== null) {
-          if (firstTime) this.release(entry); else await this.disconnect(entry.player);
-          return { kind: 'rejected', reason: denied };
+          if (firstTime) this.release(entry);
+          else await this.disconnect(entry.player);
+          return { kind: "rejected", reason: denied };
         }
-        entry.phase = { kind: 'connected' }; return { kind: 'accepted', player };
-      } catch (error) { if (this.clients.get(slot) === entry) this.release(entry); throw error; }
-    } finally { this.finishExternalOperation(); }
+        entry.phase = { kind: "connected" };
+        return { kind: "accepted", player };
+      } catch (error) {
+        if (this.clients.get(slot) === entry) this.release(entry);
+        throw error;
+      }
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   private entry(player: Q3ApplicationPlayer): ClientEntry {
     const entry = this.clients.get(player.sourceEntity);
-    if (entry === undefined || entry.player !== player) throw new Error('Q3 player is no longer admitted');
+    if (entry === undefined || entry.player !== player) throw new Error("Q3 player is no longer admitted");
     return entry;
   }
   async begin(player: Q3ApplicationPlayer, command: WireUserCommand): Promise<void> {
     this.externalOperations++;
     try {
-      this.running(); const entry = this.entry(player);
-      if (entry.phase.kind !== 'connected') throw new Error('Q3 guest client cannot begin in this phase');
+      this.running();
+      const entry = this.entry(player);
+      if (entry.phase.kind !== "connected") throw new Error("Q3 guest client cannot begin in this phase");
       this.state.setUserCommand(player.sourceEntity, command);
-      await this.engine.clientBeginAsync(player.sourceEntity); this.current();
-      if (this.clients.get(player.sourceEntity) === entry && entry.phase.kind === 'connected') {
-        entry.phase = { kind: 'active' }; this.options.clientChanged?.('admitted', player.actor);
+      await this.engine.clientBeginAsync(player.sourceEntity);
+      this.current();
+      if (this.clients.get(player.sourceEntity) === entry && entry.phase.kind === "connected") {
+        entry.phase = { kind: "active" };
+        this.options.clientChanged?.("admitted", player.actor);
       }
-    } finally { this.finishExternalOperation(); }
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   async think(player: Q3ApplicationPlayer, command: WireUserCommand): Promise<void> {
     this.externalOperations++;
     try {
-      this.running(); if (this.entry(player).phase.kind !== 'active') throw new Error('Q3 guest client is not active');
-      this.state.setUserCommand(player.sourceEntity, command); await this.engine.clientThinkAsync(player.sourceEntity); this.current();
-    } finally { this.finishExternalOperation(); }
+      this.running();
+      if (this.entry(player).phase.kind !== "active") throw new Error("Q3 guest client is not active");
+      this.state.setUserCommand(player.sourceEntity, command);
+      await this.engine.clientThinkAsync(player.sourceEntity);
+      this.current();
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   async userinfo(player: Q3ApplicationPlayer, value: string): Promise<void> {
     this.externalOperations++;
     try {
-      this.running(); this.entry(player); this.state.setUserinfo(player.sourceEntity, value);
-      await this.engine.clientUserinfoChangedAsync(player.sourceEntity); this.current();
-      this.options.clientChanged?.('userinfo', player.actor);
-    } finally { this.finishExternalOperation(); }
+      this.running();
+      this.entry(player);
+      this.state.setUserinfo(player.sourceEntity, value);
+      await this.engine.clientUserinfoChangedAsync(player.sourceEntity);
+      this.current();
+      this.options.clientChanged?.("userinfo", player.actor);
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   commandImmediate(player: Q3ApplicationPlayer, argv: readonly string[]): void {
     this.externalOperations++;
-    try { this.running(); this.entry(player); this.engine.clientCommand(player.sourceEntity, argv); this.current(); }
-    finally { this.finishExternalOperation(); }
+    try {
+      this.running();
+      this.entry(player);
+      this.engine.clientCommand(player.sourceEntity, argv);
+      this.current();
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   async command(player: Q3ApplicationPlayer, argv: readonly string[]): Promise<void> {
     this.externalOperations++;
     try {
-      this.running(); this.entry(player); await this.engine.clientCommandAsync(player.sourceEntity, argv); this.current();
-    } finally { this.finishExternalOperation(); }
+      this.running();
+      this.entry(player);
+      await this.engine.clientCommandAsync(player.sourceEntity, argv);
+      this.current();
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   private async drop(slot: number, reason: string): Promise<void> {
     this.reconnecting.delete(slot);
     const entry = this.clients.get(slot);
-    if (entry !== undefined) { this.notifyDisconnect(entry); entry.phase = { kind: 'dropping', reason }; }
+    if (entry !== undefined) {
+      this.notifyDisconnect(entry);
+      entry.phase = { kind: "dropping", reason };
+    }
     if (!this.botClients.has(slot)) await this.output().dropClient(slot, reason);
     this.current();
     if (entry !== undefined && this.clients.get(slot) === entry) await this.disconnect(entry.player);
@@ -513,21 +754,25 @@ export class Q3ServerGame {
     this.externalOperations++;
     try {
       this.current();
-      if (this.lifecycle.kind !== 'initializing' && this.lifecycle.kind !== 'running' && this.lifecycle.kind !== 'shutting-down') throw new Error('Q3 guest client disconnect requires attached output');
+      if (this.lifecycle.kind !== "initializing" && this.lifecycle.kind !== "running" && this.lifecycle.kind !== "shutting-down")
+        throw new Error("Q3 guest client disconnect requires attached output");
       const entry = this.clients.get(player.sourceEntity);
       if (entry === undefined || entry.player !== player) return;
       this.notifyDisconnect(entry);
-      if (entry.phase.kind !== 'dropping') entry.phase = { kind: 'dropping', reason: 'Client disconnected.' };
+      if (entry.phase.kind !== "dropping") entry.phase = { kind: "dropping", reason: "Client disconnected." };
       this.clients.delete(player.sourceEntity);
       try {
         await this.engine.clientDisconnectAsync(player.sourceEntity);
         this.current();
       } finally {
-        this.state.clearClient(player.sourceEntity); this.records.releaseClient(player.sourceEntity);
+        this.state.clearClient(player.sourceEntity);
+        this.records.releaseClient(player.sourceEntity);
         if (this.botClients.delete(player.sourceEntity)) this.botPreparation?.freeClient(player.client);
         this.botMessages.delete(player.sourceEntity);
       }
-    } finally { this.finishExternalOperation(); }
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   private notifyDisconnect(entry: ClientEntry): void {
     if (entry.disconnectNotified === true) return;
@@ -536,10 +781,12 @@ export class Q3ServerGame {
   }
   private async drainBotCommands(): Promise<void> {
     while (this.pendingBotCommands.length !== 0) {
-      const pending = this.pendingBotCommands.shift(); if (pending === undefined) break;
+      const pending = this.pendingBotCommands.shift();
+      if (pending === undefined) break;
       const { slot, argv } = pending;
       if (!this.botClients.has(slot)) continue;
-      await this.engine.clientCommandAsync(slot, argv); this.current();
+      await this.engine.clientCommandAsync(slot, argv);
+      this.current();
     }
     this.admitPendingBots();
   }
@@ -547,71 +794,140 @@ export class Q3ServerGame {
     for (const slot of this.pendingBotAdmissions) {
       this.pendingBotAdmissions.delete(slot);
       const entry = this.clients.get(slot);
-      if (entry?.phase.kind === 'active') this.options.clientChanged?.('admitted', entry.player.actor);
+      if (entry?.phase.kind === "active") this.options.clientChanged?.("admitted", entry.player.actor);
     }
   }
   private release(entry: ClientEntry): void {
     this.pendingBotAdmissions.delete(entry.player.sourceEntity);
-    this.clients.delete(entry.player.sourceEntity); this.state.clearClient(entry.player.sourceEntity); this.records.releaseClient(entry.player.sourceEntity);
+    this.clients.delete(entry.player.sourceEntity);
+    this.state.clearClient(entry.player.sourceEntity);
+    this.records.releaseClient(entry.player.sourceEntity);
   }
   async consoleCommand(argv: readonly string[]): Promise<boolean> {
     this.externalOperations++;
     try {
-      this.running(); const handled = await this.engine.consoleCommandAsync(argv); this.current(); await this.drainBotCommands(); return handled;
-    } finally { this.finishExternalOperation(); }
+      this.running();
+      const handled = await this.engine.consoleCommandAsync(argv);
+      this.current();
+      await this.drainBotCommands();
+      return handled;
+    } finally {
+      this.finishExternalOperation();
+    }
   }
   async runFrame(timeMilliseconds: number): Promise<void> {
     this.externalOperations++;
-    try { this.running();
-      if (this.bots !== null && this.state.cvars.variableValue('bot_enable') !== 0) await this.engine.botFrameAsync(timeMilliseconds);
-      await this.engine.runFrameAsync(timeMilliseconds); await this.refreshServerInfo(); this.current(); await this.drainBotCommands();
-    } finally { this.finishExternalOperation(); }
+    try {
+      this.running();
+      if (this.bots !== null && this.state.cvars.variableValue("bot_enable") !== 0) await this.engine.botFrameAsync(timeMilliseconds);
+      await this.engine.runFrameAsync(timeMilliseconds);
+      await this.refreshServerInfo();
+      this.current();
+      await this.drainBotCommands();
+    } finally {
+      this.finishExternalOperation();
+    }
   }
-  isBot(client: ClientId): boolean { return this.botClients.has(client.slot) && this.player(client) !== null; }
-  players(): readonly Q3ApplicationPlayer[] { return [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping' && !this.inputRetirements.has(entry.player.sourceEntity)).map(entry => entry.player); }
-  player(client: ClientId): Q3ApplicationPlayer | null { return this.players().find(player => player.client.equals(client)) ?? null; }
+  isBot(client: ClientId): boolean {
+    return this.botClients.has(client.slot) && this.player(client) !== null;
+  }
+  players(): readonly Q3ApplicationPlayer[] {
+    return [...this.clients.values()]
+      .filter(entry => entry.phase.kind !== "dropping" && !this.inputRetirements.has(entry.player.sourceEntity))
+      .map(entry => entry.player);
+  }
+  player(client: ClientId): Q3ApplicationPlayer | null {
+    return this.players().find(player => player.client.equals(client)) ?? null;
+  }
   async shutdown(): Promise<void> {
-    if (this.lifecycle.kind === 'retired') return;
-    if (this.externalOperations !== 0 || this.engine.active) throw new Error('Q3 guest shutdown must await the active operation');
+    if (this.lifecycle.kind === "retired") return;
+    if (this.externalOperations !== 0 || this.engine.active) throw new Error("Q3 guest shutdown must await the active operation");
     const errors: unknown[] = [];
-    try { await this.shutdownSource(); } catch (error) { errors.push(error); }
+    try {
+      await this.shutdownSource();
+    } catch (error) {
+      errors.push(error);
+    }
     this.releaseSource(errors);
-    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest shutdown failed');
+    if (errors.length !== 0) throw new AggregateError(errors, "Q3 guest shutdown failed");
   }
   async shutdownForMapChange(restart = false): Promise<Q3GuestMapTransition> {
     this.running();
-    if (this.externalOperations !== 0 || this.engine.active || this.reconnecting.size !== 0
-      || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active'))
-      throw new Error('Q3 map transition requires completed client operations');
+    if (
+      this.externalOperations !== 0 ||
+      this.engine.active ||
+      this.reconnecting.size !== 0 ||
+      [...this.clients.values()].some(entry => entry.phase.kind !== "connected" && entry.phase.kind !== "active")
+    )
+      throw new Error("Q3 map transition requires completed client operations");
     const errors: unknown[] = [];
     let transition: Q3GuestMapTransition | null = null;
     try {
       await this.shutdownSource(restart);
-      transition = { cvars: this.state.cvars.captureSaveState(), clients: [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping')
-        .map(entry => ({ client: entry.player.client, userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? '', bot: this.botClients.has(entry.player.sourceEntity) })) };
-    } catch (error) { errors.push(error); }
+      transition = {
+        cvars: this.state.cvars.captureSaveState(),
+        clients: [...this.clients.values()]
+          .filter(entry => entry.phase.kind !== "dropping")
+          .map(entry => ({
+            client: entry.player.client,
+            userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? "",
+            bot: this.botClients.has(entry.player.sourceEntity),
+          })),
+      };
+    } catch (error) {
+      errors.push(error);
+    }
     this.releaseSource(errors, transition !== null);
-    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest map shutdown failed');
-    if (transition === null) throw new Error('Q3 map transition did not capture source state');
+    if (errors.length !== 0) throw new AggregateError(errors, "Q3 guest map shutdown failed");
+    if (transition === null) throw new Error("Q3 map transition did not capture source state");
     return transition;
   }
   private async shutdownSource(restart = false): Promise<void> {
-    this.inputBinding?.close(); this.inputBinding = null; this.inputRetirements.clear();
+    this.inputBinding?.close();
+    this.inputBinding = null;
+    this.inputRetirements.clear();
     const lifecycle = this.lifecycle;
-    if (lifecycle.kind === 'initializing' || lifecycle.kind === 'running' || lifecycle.kind === 'shutting-down') {
-      this.lifecycle = { kind: 'shutting-down', output: lifecycle.output };
+    if (lifecycle.kind === "initializing" || lifecycle.kind === "running" || lifecycle.kind === "shutting-down") {
+      this.lifecycle = { kind: "shutting-down", output: lifecycle.output };
       await this.engine.shutdownAsync(restart);
     }
   }
   private releaseSource(errors: unknown[], transferClients = false): void {
-    try { this.bots?.close(); } catch (error) { errors.push(error); }
-    try { this.files.closeAll(); } catch (error) { errors.push(error); }
-    try { this.options.beforeRetire?.(); } catch (error) { errors.push(error); }
-    try { this.records.close(); } catch (error) { errors.push(error); }
-    if (!transferClients) for (const slot of this.botClients) { const entry = this.clients.get(slot); if (entry !== undefined) this.botPreparation?.freeClient(entry.player.client); }
-    this.botClients.clear(); this.botMessages.clear();
+    try {
+      this.bots?.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.files.closeAll();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.options.beforeRetire?.();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.records.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (!transferClients)
+      for (const slot of this.botClients) {
+        const entry = this.clients.get(slot);
+        if (entry !== undefined) this.botPreparation?.freeClient(entry.player.client);
+      }
+    this.botClients.clear();
+    this.botMessages.clear();
     for (const slot of new Set([...this.clients.keys(), ...this.reconnecting.keys()])) this.state.clearClient(slot);
-    try { this.engine.retire(); } catch (error) { errors.push(error); }
-    this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
+    try {
+      this.engine.retire();
+    } catch (error) {
+      errors.push(error);
+    }
+    this.clients.clear();
+    this.reconnecting.clear();
+    this.lifecycle = { kind: "retired" };
   }
 }

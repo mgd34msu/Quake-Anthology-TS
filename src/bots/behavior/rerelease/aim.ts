@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from the reference game-agnostic bot brain. Verbatim apart from this
 // line, the import paths that changed with the directory, and three
 // parameterizations (NAV2-specific graph construction, run/walk speeds,

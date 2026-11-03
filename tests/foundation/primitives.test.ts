@@ -1,17 +1,54 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import {
-  BoundedQueue, CleanupStack, IdIndex, StampSet, STRING_NONE, StringTable,
-  NAME_MONSTER, NAME_Q1_AMMO, NAME_TEAM_RED_ALIAS, NAME_TEAM_RED_EXACT,
-  float32Bits, float32FromBits, loadF32LE, loadI32LE, loadU32LE, storeF32LE, storeU32LE,
+  BoundedQueue,
+  CleanupStack,
+  IdIndex,
+  StampSet,
+  STRING_NONE,
+  StringTable,
+  NAME_MONSTER,
+  NAME_Q1_AMMO,
+  NAME_TEAM_RED_ALIAS,
+  NAME_TEAM_RED_EXACT,
+  float32Bits,
+  float32FromBits,
+  loadF32LE,
+  loadI32LE,
+  loadU32LE,
+  storeF32LE,
+  storeU32LE,
 } from "../../src/foundation/index.ts";
 import {
-  add3, add3Into, angleVectors, angleVectorsInto, anglesToAxis, anglesToAxisInto,
-  cross3, cross3Into, lerp3, lerp3Into, lookAtMat4, mutableVec3,
-  normalize3, normalize3Into, normalize3OrZero, normalize3OrZeroInto,
-  perpendicularVector, perpendicularVectorInto, planeFromPoints,
-  projectPointOnPlane, projectPointOnPlaneInto, radiusFromBounds,
-  rotatePointAroundVector, rotatePointAroundVectorInto, scale3, scale3Into,
-  sub3, sub3Into, vec3,
+  add3,
+  add3Into,
+  angleVectors,
+  angleVectorsInto,
+  anglesToAxis,
+  anglesToAxisInto,
+  cross3,
+  cross3Into,
+  lerp3,
+  lerp3Into,
+  lookAtMat4,
+  mutableVec3,
+  normalize3,
+  normalize3Into,
+  normalize3OrZero,
+  normalize3OrZeroInto,
+  perpendicularVector,
+  perpendicularVectorInto,
+  planeFromPoints,
+  projectPointOnPlane,
+  projectPointOnPlaneInto,
+  radiusFromBounds,
+  rotatePointAroundVector,
+  rotatePointAroundVectorInto,
+  scale3,
+  scale3Into,
+  sub3,
+  sub3Into,
+  vec3,
 } from "../../src/core/math.ts";
 import { bitsToFloat32, float32ToBits } from "../../src/core/numeric.ts";
 
@@ -114,13 +151,30 @@ describe("foundation cleanup stack", () => {
   test("runs snapshot entries in order and in reverse, deferring late additions", () => {
     const stack = new CleanupStack();
     const order: string[] = [];
-    stack.add(() => { order.push("a"); }, () => { order.push("b"); stack.add(() => { order.push("late"); }); });
+    stack.add(
+      () => {
+        order.push("a");
+      },
+      () => {
+        order.push("b");
+        stack.add(() => {
+          order.push("late");
+        });
+      },
+    );
     stack.runAll();
     expect(order).toEqual(["a", "b"]);
     expect(stack.length).toBe(1);
     stack.runReverse();
     expect(order).toEqual(["a", "b", "late"]);
-    stack.push(() => { order.push("x"); }, () => { order.push("y"); });
+    stack.push(
+      () => {
+        order.push("x");
+      },
+      () => {
+        order.push("y");
+      },
+    );
     stack.runReverse();
     expect(order).toEqual(["a", "b", "late", "y", "x"]);
     expect(stack.length).toBe(0);
@@ -147,7 +201,10 @@ describe("foundation id index", () => {
 
   test("id index keeps reverse admission order across growth", () => {
     const index = new IdIndex();
-    const put = (a: number, b: number, value: number): void => { index.reserve(1); index.insert(a, b, value); };
+    const put = (a: number, b: number, value: number): void => {
+      index.reserve(1);
+      index.insert(a, b, value);
+    };
     put(10, 1, 100);
     put(10, 1, 101);
     for (let offset = 0; offset < 500; offset++) put(1000 + offset, 1, 2000 + offset);
@@ -206,8 +263,7 @@ describe("out-parameter math", () => {
       expect(xyz(out)).toEqual(rotatePointAroundVector(unit, vec3(3, -2, 5), 37));
     }
     expect(lookAtMat4(vec3(1, 2, 3), vec3(4, 5, 6), vec3(0, 0, 1))).toHaveLength(16);
-    expect(planeFromPoints(vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 0, 0)))
-      .toEqual({ normal: vec3(0, 0, 1), distance: 0 });
+    expect(planeFromPoints(vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 0, 0))).toEqual({ normal: vec3(0, 0, 1), distance: 0 });
     expect(planeFromPoints(vec3(1, 1, 1), vec3(1, 1, 1), vec3(1, 1, 1))).toBeNull();
     expect(radiusFromBounds({ min: vec3(-3, -4, 0), max: vec3(0, 0, 0) })).toBe(5);
     // Aliased output snapshots its inputs first.

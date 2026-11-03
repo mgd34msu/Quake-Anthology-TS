@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,7 +6,9 @@ import { dirname, join, resolve } from "node:path";
 import { auditUnreachable, unreachableModules } from "../../tools/unreachable.ts";
 
 const roots: string[] = [];
-afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
 
 function project(files: Readonly<Record<string, string>>): string {
   const root = mkdtempSync(join(tmpdir(), "quake-unreachable-"));
@@ -19,7 +22,8 @@ function project(files: Readonly<Record<string, string>>): string {
 
 test("modules reachable through imports, re-exports, dynamic imports and worker URLs are live", () => {
   const root = project({
-    "src/main.ts": 'import { a } from "./a.ts"; export * from "./barrel/index.ts"; export const lazy = () => import("./lazy.ts"); new Worker(new URL("./worker.ts", import.meta.url)); export { a };',
+    "src/main.ts":
+      'import { a } from "./a.ts"; export * from "./barrel/index.ts"; export const lazy = () => import("./lazy.ts"); new Worker(new URL("./worker.ts", import.meta.url)); export { a };',
     "src/a.ts": "export const a = 1;",
     "src/barrel/index.ts": 'export * from "./member.ts";',
     "src/barrel/member.ts": "export const member = 1;",

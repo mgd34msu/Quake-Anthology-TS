@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import type { DynamicLight } from "./scene-host.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -12,10 +13,22 @@ import { DEFAULT_MODEL } from "./ref-entity.ts";
 import type { Q3AdmittedRefEntity, RefPoly, SceneModel, SceneShader, SceneSkin } from "./ref-entity.ts";
 import type { Refdef } from "./refdef.ts";
 import type { Q3SceneRecorder } from "./scene.ts";
-export interface AssetReader { read(path: string): Promise<Uint8Array>; has(path: string): boolean; list(prefix?: string): readonly string[]; }
-export interface SoundAssetReader extends AssetReader { readFileLength(path: string): number | Promise<number>; readSync(path: string): Uint8Array; }
-export interface ClientSoundBank { registerSound(path: string | null, compressed: boolean): Promise<PcmSound | null>; indexForSound(sound: PcmSound | null): number; }
-export interface WorldScene { readonly map: { readonly models: readonly { readonly bounds: Bounds }[] }; }
+export interface AssetReader {
+  read(path: string): Promise<Uint8Array>;
+  has(path: string): boolean;
+  list(prefix?: string): readonly string[];
+}
+export interface SoundAssetReader extends AssetReader {
+  readFileLength(path: string): number | Promise<number>;
+  readSync(path: string): Uint8Array;
+}
+export interface ClientSoundBank {
+  registerSound(path: string | null, compressed: boolean): Promise<PcmSound | null>;
+  indexForSound(sound: PcmSound | null): number;
+}
+export interface WorldScene {
+  readonly map: { readonly models: readonly { readonly bounds: Bounds }[] };
+}
 export interface Q3ResourceWorld {
   readonly map: Pick<Q3WorldGeometry, "entities" | "nodes" | "leaves" | "planes">;
   clusterPVS(cluster: number): SourceClusterPVS;
@@ -66,37 +79,60 @@ export class Q3RendererResources implements RendererResources {
   private readonly entityParser = new CommonParseState();
   private entityCursor = new CommonParseCursor("");
   private worldLoaded = false;
-  constructor(readonly host: Q3ResourceHost, private readonly world?: Q3ResourceWorld, private readonly handles: "renderer" | "client" = "renderer") {}
+  constructor(
+    readonly host: Q3ResourceHost,
+    private readonly world?: Q3ResourceWorld,
+    private readonly handles: "renderer" | "client" = "renderer",
+  ) {}
   captureCheckpoint() {
     if (this.handles !== "client" || this.operations !== 0) throw new Error("Resource checkpoint requires an idle client handle owner");
-    return { models: [...this.modelNames].map(([path, model]) => ({ path, handle: this.modelHandle(model),
-      resource: model.kind === "default" ? null : model.resource.id })),
+    return {
+      models: [...this.modelNames].map(([path, model]) => ({
+        path,
+        handle: this.modelHandle(model),
+        resource: model.kind === "default" ? null : model.resource.id,
+      })),
       skins: [...this.skins].map(([path, skin]) => ({ path, handle: this.skinHandle(skin), surfaces: skin?.surfaces ?? null })),
       shaders: this.shaderRequests.map(row => ({ ...row, name: this.shaders.get(row.handle)?.name ?? null })),
       bindings: [...this.pictures].map(([name, picture]) => ({ name, handle: this.shaderHandle(picture) })),
-      worldLoaded: this.worldLoaded, entitySource: this.entityCursor.source, entityOffset: this.entityCursor.offset,
-      entityParser: this.entityParser.captureSaveState() };
+      worldLoaded: this.worldLoaded,
+      entitySource: this.entityCursor.source,
+      entityOffset: this.entityCursor.offset,
+      entityParser: this.entityParser.captureSaveState(),
+    };
   }
   async restoreCheckpoint(value: unknown): Promise<void> {
     if (this.handles !== "client" || this.operations !== 0 || this.modelNames.size || this.skins.size || this.pictures.size || this.worldLoaded)
       throw new Error("Resource restore requires an empty client handle owner");
     const r = new SaveReader(value, "client-resources");
-    for (const row of r.field("models").list(item => ({ path: item.field("path").string(), handle: item.field("handle").integer(0), resource: item.field("resource").nullable(v => v.string()) }))) {
+    for (const row of r.field("models").list(item => ({
+      path: item.field("path").string(),
+      handle: item.field("handle").integer(0),
+      resource: item.field("resource").nullable(v => v.string()),
+    }))) {
       const model = await this.registerModel(row.path);
       if (this.modelHandle(model) !== row.handle || (model.kind === "default" ? null : model.resource.id) !== row.resource) r.fail("model binding changed");
     }
-    for (const row of r.field("skins").list(item => ({ path: item.field("path").string(), handle: item.field("handle").integer(0),
-      surfaces: item.field("surfaces").nullable(v => v.list(surface => ({ name: surface.field("name").string(), shader: surface.field("shader").string() }))) }))) {
+    for (const row of r.field("skins").list(item => ({
+      path: item.field("path").string(),
+      handle: item.field("handle").integer(0),
+      surfaces: item.field("surfaces").nullable(v => v.list(surface => ({ name: surface.field("name").string(), shader: surface.field("shader").string() }))),
+    }))) {
       const skin = await this.registerSkin(row.path);
       if (this.skinHandle(skin) !== row.handle || JSON.stringify(skin?.surfaces ?? null) !== JSON.stringify(row.surfaces)) r.fail("skin binding changed");
     }
-    for (const row of r.field("shaders").list(item => ({ path: item.field("path").string(), mip: item.field("mip").boolean(),
-      handle: item.field("handle").integer(1), name: item.field("name").string() }))) {
+    for (const row of r.field("shaders").list(item => ({
+      path: item.field("path").string(),
+      mip: item.field("mip").boolean(),
+      handle: item.field("handle").integer(1),
+      name: item.field("name").string(),
+    }))) {
       const shader = await this.shader(row.path, row.mip);
       if (this.shaderHandle(shader) !== row.handle || shader?.name !== row.name) r.fail("shader binding changed");
     }
     const bindings = r.field("bindings").list(item => ({ name: item.field("name").string(), handle: item.field("handle").integer(1) }));
-    if (bindings.length !== this.pictures.size || bindings.some(row => this.pictures.get(row.name) !== this.shaders.get(row.handle))) r.fail("shader aliases changed");
+    if (bindings.length !== this.pictures.size || bindings.some(row => this.pictures.get(row.name) !== this.shaders.get(row.handle)))
+      r.fail("shader aliases changed");
     this.worldLoaded = r.field("worldLoaded").boolean();
     this.entityCursor = new CommonParseCursor(r.field("entitySource").string());
     this.entityCursor.offset = r.field("entityOffset").nullable(v => v.integer(0));
@@ -122,10 +158,15 @@ export class Q3RendererResources implements RendererResources {
   }
   async registerModel(path: string | null): Promise<SceneModel> {
     if (path === null || path.length === 0) return DEFAULT_MODEL;
-    const prior = this.modelNames.get(path); if (prior !== undefined) return prior;
+    const prior = this.modelNames.get(path);
+    if (prior !== undefined) return prior;
     this.operations++;
     let model: SceneModel;
-    try { model = await this.host.model(path); } finally { this.operations--; }
+    try {
+      model = await this.host.model(path);
+    } finally {
+      this.operations--;
+    }
     if (model.kind !== "default" || this.failedModels++ < MAX_FAILED_LOOKUPS) this.modelNames.set(path, model);
     if (model.kind !== "default" && !this.models.includes(model)) this.models.push(model);
     return model;
@@ -134,38 +175,74 @@ export class Q3RendererResources implements RendererResources {
     if (this.skins.has(path)) return this.skins.get(path) ?? null;
     this.operations++;
     let skin: SceneSkin | null;
-    try { skin = await this.host.skin(path); } finally { this.operations--; }
+    try {
+      skin = await this.host.skin(path);
+    } finally {
+      this.operations--;
+    }
     if (skin !== null || this.failedSkins++ < MAX_FAILED_LOOKUPS) this.skins.set(path, skin);
     if (skin !== null && !this.skinHandles.includes(skin)) this.skinHandles.push(skin);
     return skin;
   }
-  registerShader(path: string): Promise<SceneShader | null> { return this.shader(path, true); }
-  registerShaderNoMip(path: string | null): Promise<SceneShader | null> { return path === null ? Promise.resolve(null) : this.shader(path, false); }
+  registerShader(path: string): Promise<SceneShader | null> {
+    return this.shader(path, true);
+  }
+  registerShaderNoMip(path: string | null): Promise<SceneShader | null> {
+    return path === null ? Promise.resolve(null) : this.shader(path, false);
+  }
   private async shader(path: string, mip: boolean): Promise<SceneShader | null> {
     const key = path.replace(/[A-Z]/g, value => value.toLowerCase());
-    const prior = this.pictures.get(key); if (prior !== undefined) return prior;
+    const prior = this.pictures.get(key);
+    if (prior !== undefined) return prior;
     this.operations++;
     let picture: MaterialPicture | null;
-    try { picture = await this.host.shader(path, mip); } finally { this.operations--; }
+    try {
+      picture = await this.host.shader(path, mip);
+    } finally {
+      this.operations--;
+    }
     if (picture === null) return null;
-    this.pictures.set(key, picture); this.pictures.set(picture.name.replace(/[A-Z]/g, value => value.toLowerCase()), picture);
+    this.pictures.set(key, picture);
+    this.pictures.set(
+      picture.name.replace(/[A-Z]/g, value => value.toLowerCase()),
+      picture,
+    );
     const existing = this.pictureHandles.get(picture);
     const handle = existing ?? (this.handles === "client" ? this.shaders.size + 1 : picture.material.order);
-    this.shaders.set(handle, picture); this.pictureHandles.set(picture, handle); this.shaderRequests.push({ path, mip, handle }); return picture;
+    this.shaders.set(handle, picture);
+    this.pictureHandles.set(picture, handle);
+    this.shaderRequests.push({ path, mip, handle });
+    return picture;
   }
   /** HUD draws look pictures up by shader name every frame; the lowercase key is computed once per name. */
   private readonly lowerNames = new Map<string, string>();
   picture(shader: SceneShader | null): MaterialPicture {
     if (shader === null) return this.host.zeroPicture;
     let key = this.lowerNames.get(shader.name);
-    if (key === undefined) { key = shader.name.replace(/[A-Z]/g, value => value.toLowerCase()); this.lowerNames.set(shader.name, key); }
+    if (key === undefined) {
+      key = shader.name.replace(/[A-Z]/g, value => value.toLowerCase());
+      this.lowerNames.set(shader.name, key);
+    }
     const picture = this.pictures.get(key);
     if (picture === undefined) throw new Error(`Cgame shader is not registered in this resource owner: ${shader.name}`);
     return picture;
   }
-  modelHandle(model: SceneModel): number { const index = this.models.indexOf(model); if (index < 0) throw new Error("Cgame model belongs to another resource owner"); return index; }
-  modelForHandle(handle: number): SceneModel { const model = this.models[handle]; if (model === undefined) throw new RangeError(`Invalid cgame model handle ${handle}`); return model; }
-  shaderForHandle(handle: number): SceneShader | null { if (handle === 0) return null; const shader = this.shaders.get(handle); if (shader === undefined) throw new RangeError(`Invalid cgame shader handle ${handle}`); return shader; }
+  modelHandle(model: SceneModel): number {
+    const index = this.models.indexOf(model);
+    if (index < 0) throw new Error("Cgame model belongs to another resource owner");
+    return index;
+  }
+  modelForHandle(handle: number): SceneModel {
+    const model = this.models[handle];
+    if (model === undefined) throw new RangeError(`Invalid cgame model handle ${handle}`);
+    return model;
+  }
+  shaderForHandle(handle: number): SceneShader | null {
+    if (handle === 0) return null;
+    const shader = this.shaders.get(handle);
+    if (shader === undefined) throw new RangeError(`Invalid cgame shader handle ${handle}`);
+    return shader;
+  }
   shaderHandle(shader: SceneShader | null): number {
     if (shader === null) return 0;
     const picture = this.picture(shader);
@@ -184,12 +261,24 @@ export class Q3RendererResources implements RendererResources {
     if (skin === undefined) throw new RangeError(`Invalid cgame skin handle ${handle}`);
     return skin;
   }
-  clearScene(): void { this.host.scene.clearScene(); }
-  addRefEntity(entity: Q3AdmittedRefEntity): void { this.host.scene.addRefEntity(entity); }
-  addPoly(poly: RefPoly): void { this.host.scene.addPoly(poly); }
-  addLight(light: DynamicLight): void { this.host.scene.addLight(light); }
-  remapShader(original: string, replacement: string, offset: string): Promise<void> { return this.host.remapShader(original, replacement, offset); }
-  renderScene(refdef: Refdef): void { this.host.scene.renderScene(refdef); }
+  clearScene(): void {
+    this.host.scene.clearScene();
+  }
+  addRefEntity(entity: Q3AdmittedRefEntity): void {
+    this.host.scene.addRefEntity(entity);
+  }
+  addPoly(poly: RefPoly): void {
+    this.host.scene.addPoly(poly);
+  }
+  addLight(light: DynamicLight): void {
+    this.host.scene.addLight(light);
+  }
+  remapShader(original: string, replacement: string, offset: string): Promise<void> {
+    return this.host.remapShader(original, replacement, offset);
+  }
+  renderScene(refdef: Refdef): void {
+    this.host.scene.renderScene(refdef);
+  }
   async loadWorld(path: string): Promise<WorldScene> {
     const scene = await this.host.world(path);
     this.entityCursor = new CommonParseCursor(this.world?.map.entities ?? "");
@@ -199,7 +288,10 @@ export class Q3RendererResources implements RendererResources {
   getEntityToken(write: (token: string) => void): boolean {
     const token = this.entityParser.parse(this.entityCursor);
     write(token);
-    if (this.entityCursor.offset === null || token.length === 0) { this.entityCursor.offset = 0; return false; }
+    if (this.entityCursor.offset === null || token.length === 0) {
+      this.entityCursor.offset = 0;
+      return false;
+    }
     return true;
   }
   private pointCluster(read: () => Vec3): number {
@@ -215,7 +307,10 @@ export class Q3RendererResources implements RendererResources {
         const plane = map.planes[node.plane];
         if (plane === undefined) throw new RangeError("R_PointInLeaf: invalid plane");
         const child = node.children[dot3(point, plane.normal) - plane.distance > 0 ? 0 : 1];
-        if (child.kind === "leaf") { leaf = child.index; break; }
+        if (child.kind === "leaf") {
+          leaf = child.index;
+          break;
+        }
         index = child.index;
       }
     }
@@ -226,7 +321,8 @@ export class Q3RendererResources implements RendererResources {
   inPVS(readFirst: () => Vec3, readSecond: () => Vec3): boolean {
     const first = this.pointCluster(readFirst);
     if (this.world === undefined) throw new CommonError("drop", "R_PointInLeaf: bad model");
-    const visibility = this.world.clusterPVS(first), second = this.pointCluster(readSecond);
+    const visibility = this.world.clusterPVS(first),
+      second = this.pointCluster(readSecond);
     return (visibility.byteAt(second >> 3) & (1 << (second & 7))) !== 0;
   }
 }

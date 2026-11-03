@@ -1,10 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source allocation order from Quake pr_edict.c, Quake II g_utils.c, Quake III g_utils.c.
 import type { OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { SourceTime } from "../../contracts/time.ts";
 import type { ActorLifetimePolicy } from "../../contracts/world.ts";
 import type { SessionActorRegistry } from "./registry.ts";
 
-export interface SourceSlotState { readonly free: boolean; readonly freedAt: SourceTime; }
+export interface SourceSlotState {
+  readonly free: boolean;
+  readonly freedAt: SourceTime;
+}
 
 /** These methods access source-owned fields directly, including guest bytes when applicable. */
 export interface SourceSlotStorage {
@@ -28,22 +32,33 @@ export interface SourceActorSlotsOptions {
 }
 
 export function quakeEdictLifetime(firstDynamicSlot: number, exhaustion: "fatal" | "qw-last-slot" = "fatal"): ActorLifetimePolicy {
-  return { firstDynamicSlot, reuse: "source-cooldown", clear: "source-edict", exhaustion,
+  return {
+    firstDynamicSlot,
+    reuse: "source-cooldown",
+    clear: "source-edict",
+    exhaustion,
     reusableAfter(freedAt, now) {
       if (freedAt.kind !== "seconds" || now.kind !== "seconds") throw new RangeError("Q1/Q2 classic edict lifetime uses seconds");
       return freedAt.value < 2 || now.value - freedAt.value > 0.5;
-    } };
+    },
+  };
 }
 
 /** Raw pointers use atSource on each access. Only built-in host references carry generations. */
 export class SourceActorSlots {
-  constructor(private readonly actors: SessionActorRegistry, readonly options: SourceActorSlotsOptions) {
+  constructor(
+    private readonly actors: SessionActorRegistry,
+    readonly options: SourceActorSlotsOptions,
+  ) {
     const first = options.lifetime.firstDynamicSlot;
-    if (!Number.isSafeInteger(first) || first < 0 || !Number.isSafeInteger(options.capacity) || options.capacity <= first) throw new RangeError("Invalid source actor slot range");
+    if (!Number.isSafeInteger(first) || first < 0 || !Number.isSafeInteger(options.capacity) || options.capacity <= first)
+      throw new RangeError("Invalid source actor slot range");
     this.count();
   }
 
-  at(slot: number): OwnedActor | null { return this.actors.atSource(this.options.provider, slot); }
+  at(slot: number): OwnedActor | null {
+    return this.actors.atSource(this.options.provider, slot);
+  }
 
   /** Map/world/client slots initialized by the source host already own their original record contents. */
   bindExisting(slot: number, definition: `${string}:${string}`): OwnedActor {
@@ -59,7 +74,10 @@ export class SourceActorSlots {
     let selected = count;
     for (let slot = lifetime.firstDynamicSlot; slot < count; slot++) {
       const state = storage.read(slot);
-      if (state.free && (lifetime.reuse === "immediate" || lifetime.reusableAfter(state.freedAt, now))) { selected = slot; break; }
+      if (state.free && (lifetime.reuse === "immediate" || lifetime.reusableAfter(state.freedAt, now))) {
+        selected = slot;
+        break;
+      }
     }
     if (selected === capacity) {
       this.options.exhausted(selected);
@@ -67,7 +85,10 @@ export class SourceActorSlots {
       selected--;
       // QW deliberately unlinks and overwrites the final edict when its table is full.
       const previous = this.at(selected);
-      if (previous !== null) { this.options.unlink(previous); this.actors.release(previous); }
+      if (previous !== null) {
+        this.options.unlink(previous);
+        this.actors.release(previous);
+      }
     } else if (selected === count) storage.setCount(count + 1);
     const previous = this.at(selected);
     if (previous !== null) this.actors.release(previous);
@@ -89,7 +110,8 @@ export class SourceActorSlots {
 
   private count(): number {
     const count = this.options.storage.count();
-    if (!Number.isSafeInteger(count) || count < this.options.lifetime.firstDynamicSlot || count > this.options.capacity) throw new RangeError("Invalid source actor high-water count");
+    if (!Number.isSafeInteger(count) || count < this.options.lifetime.firstDynamicSlot || count > this.options.capacity)
+      throw new RangeError("Invalid source actor high-water count");
     return count;
   }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q2 rerelease g_local.h random helpers (GPL-2.0-or-later), using MT19937.
  * Distribution profile: Microsoft STL vs-2022-17.6 <random>,
  * Apache-2.0 WITH LLVM-exception, https://github.com/microsoft/STL/tree/vs-2022-17.6.
@@ -31,7 +32,7 @@ export class Q2RereleaseRandom implements Q2RereleaseRandomSource {
     this.words[0] = seed;
     for (let i = 1; i < WORDS; i++) {
       const previous = this.word(i - 1);
-      this.words[i] = (Math.imul(1812433253, previous ^ previous >>> 30) + i) >>> 0;
+      this.words[i] = (Math.imul(1812433253, previous ^ (previous >>> 30)) + i) >>> 0;
     }
   }
 
@@ -45,14 +46,14 @@ export class Q2RereleaseRandom implements Q2RereleaseRandomSource {
     if (this.index === WORDS) {
       for (let i = 0; i < WORDS; i++) {
         const joined = (this.word(i) & 0x80000000) | (this.word((i + 1) % WORDS) & 0x7fffffff);
-        this.words[i] = this.word((i + 397) % WORDS) ^ joined >>> 1 ^ ((joined & 1) === 0 ? 0 : 0x9908b0df);
+        this.words[i] = this.word((i + 397) % WORDS) ^ (joined >>> 1) ^ ((joined & 1) === 0 ? 0 : 0x9908b0df);
       }
       this.index = 0;
     }
     let value = this.word(this.index++);
     value ^= value >>> 11;
-    value ^= value << 7 & 0x9d2c5680;
-    value ^= value << 15 & 0xefc60000;
+    value ^= (value << 7) & 0x9d2c5680;
+    value ^= (value << 15) & 0xefc60000;
     value ^= value >>> 18;
     this.draws++;
     return value >>> 0;
@@ -78,7 +79,8 @@ export class Q2RereleaseRandom implements Q2RereleaseRandomSource {
     if (first === undefined) return this.nextUint32();
     const minimum = second === undefined ? 0 : first;
     const maximum = second === undefined ? first : second;
-    if (!Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < -0x80000000 || maximum > 0x7fffffff) throw new RangeError("Invalid rerelease int32 range");
+    if (!Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < -0x80000000 || maximum > 0x7fffffff)
+      throw new RangeError("Invalid rerelease int32 range");
     if (second === undefined && maximum <= 0) return 0;
     if (minimum >= maximum) throw new RangeError("Empty rerelease int32 range");
     if (minimum === maximum - 1) return minimum;
@@ -105,7 +107,7 @@ export class Q2RereleaseRandom implements Q2RereleaseRandomSource {
     const threshold = (modulus - range) % range;
     for (;;) {
       let sample = BigInt(this.nextUint32());
-      if (bits === 64n) sample = sample << 32n | BigInt(this.nextUint32());
+      if (bits === 64n) sample = (sample << 32n) | BigInt(this.nextUint32());
       const product = sample * range;
       if ((product & mask) >= threshold) return product >> bits;
     }
@@ -115,13 +117,22 @@ export class Q2RereleaseRandom implements Q2RereleaseRandomSource {
     return { kind: "q2-rerelease-mt19937", distribution: "msvc-2022-17.6", words: Array.from(this.words), index: this.index, draws: this.draws };
   }
 
-  capture(): Q2RereleaseRandomState { return this.checkpoint(); }
+  capture(): Q2RereleaseRandomState {
+    return this.checkpoint();
+  }
 
   restore(state: Q2RereleaseRandomState): undefined {
-    if (state.distribution !== "msvc-2022-17.6" || state.words.length !== WORDS
-      || !state.words.every(value => Number.isInteger(value) && value >= 0 && value < UINT32_RANGE)
-      || !Number.isInteger(state.index) || state.index < 0 || state.index > WORDS
-      || !Number.isSafeInteger(state.draws) || state.draws < 0) throw new RangeError("Invalid rerelease MT19937 checkpoint");
+    if (
+      state.distribution !== "msvc-2022-17.6" ||
+      state.words.length !== WORDS ||
+      !state.words.every(value => Number.isInteger(value) && value >= 0 && value < UINT32_RANGE) ||
+      !Number.isInteger(state.index) ||
+      state.index < 0 ||
+      state.index > WORDS ||
+      !Number.isSafeInteger(state.draws) ||
+      state.draws < 0
+    )
+      throw new RangeError("Invalid rerelease MT19937 checkpoint");
     this.words = Uint32Array.from(state.words);
     this.index = state.index;
     this.draws = state.draws;

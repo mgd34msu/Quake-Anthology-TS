@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { buildGammaTable } from "../formats/images/palette.ts";
 
 /** Display gamma uses the Q3 convention: values above one brighten output. */

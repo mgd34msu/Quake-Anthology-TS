@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 
@@ -15,17 +16,30 @@ export function registerPlayerUserinfo(cvars: CvarRegistry, index: number, model
   if (dialect === "q2-rerelease") register("autoswitch", "0", flags);
   if (dialect === "q1-netquake") {
     register("_cl_name", cvars.find("name")?.value ?? `Player ${index + 1}`, CvarFlag.Archive);
-    register("_cl_color", cvars.find("color")?.value ?? "0", CvarFlag.Archive); return;
+    register("_cl_color", cvars.find("color")?.value ?? "0", CvarFlag.Archive);
+    return;
   }
   register("name", `Player ${index + 1}`, flags);
   if (dialect === "q1-quakeworld") {
-    for (const [name, value] of [["topcolor", "0"], ["bottomcolor", "0"], ["team", ""], ["skin", ""]])
+    for (const [name, value] of [
+      ["topcolor", "0"],
+      ["bottomcolor", "0"],
+      ["team", ""],
+      ["skin", ""],
+    ])
       if (name !== undefined && value !== undefined) register(name, value, flags);
     return;
   }
   register("spectator", "0", CvarFlag.UserInfo);
   register("password", "", CvarFlag.UserInfo);
-  for (const [name, value] of [["skin", `${model}/${model === "female" ? "athena" : model === "cyborg" ? "oni911" : "grunt"}`], ["rate", "25000"], ["msg", "1"], ["hand", "0"], ["fov", "90"], ["gender", model === "female" ? "female" : "male"]])
+  for (const [name, value] of [
+    ["skin", `${model}/${model === "female" ? "athena" : model === "cyborg" ? "oni911" : "grunt"}`],
+    ["rate", "25000"],
+    ["msg", "1"],
+    ["hand", "0"],
+    ["fov", "90"],
+    ["gender", model === "female" ? "female" : "male"],
+  ])
     if (name !== undefined && value !== undefined) register(name, value, flags);
 }
 
@@ -61,11 +75,9 @@ export function applyCharacterAppearance(cvars: CvarRegistry, options: Character
   }
   const skin = options.characterSkin?.trim();
   if (skin === undefined || skin === "") return;
-  if (dialect.startsWith("q2") && options.character === "q2" && cvars.find("skin") !== undefined)
-    cvars.set("skin", `${options.characterModel}/${skin}`, true);
+  if (dialect.startsWith("q2") && options.character === "q2" && cvars.find("skin") !== undefined) cvars.set("skin", `${options.characterModel}/${skin}`, true);
   if (dialect === "q3" && options.character === "q3")
     for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
       if (cvars.find(name) !== undefined) cvars.set(name, `${options.characterModel}/${skin}`, true);
-  if (dialect === "q1-quakeworld" && options.character === "q1" && cvars.find("skin") !== undefined)
-    cvars.set("skin", skin, true);
+  if (dialect === "q1-quakeworld" && options.character === "q1" && cvars.find("skin") !== undefined) cvars.set("skin", skin, true);
 }

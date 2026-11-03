@@ -1,4 +1,12 @@
-import type { ProviderShaderRegistrations, RegisteredSceneMaterial, ShaderLogicalKey, ShaderRegistration, ShaderReplacementStage, ShaderWorldIdentity } from "./material-registrations.ts";
+// SPDX-License-Identifier: GPL-2.0-or-later
+import type {
+  ProviderShaderRegistrations,
+  RegisteredSceneMaterial,
+  ShaderLogicalKey,
+  ShaderRegistration,
+  ShaderReplacementStage,
+  ShaderWorldIdentity,
+} from "./material-registrations.ts";
 import type { RendererImage, RenderImage } from "../../contracts/render.ts";
 import { compileImplicitMaterial, DEFAULT_SHADER_PROFILE, shaderRenderMaterial } from "../../materials/compile.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
@@ -10,9 +18,15 @@ import { SkyBuilder } from "../../materials/sky.ts";
 import { SceneTextureLoader, type SceneTexture } from "./textures.ts";
 import type { MaterialPicture } from "../../text/draw2d.ts";
 
-export type SceneShaderBinding = { readonly kind: "unlit"; readonly lightmapIndex: -1 | -2 | -3 | -4; readonly mipmap: boolean }
-  | { readonly kind: "world"; readonly world: ShaderWorldIdentity; readonly lightmapIndex: number;
-      readonly lightmap: RendererImage | null; readonly baseTexture: SceneTexture | null };
+export type SceneShaderBinding =
+  | { readonly kind: "unlit"; readonly lightmapIndex: -1 | -2 | -3 | -4; readonly mipmap: boolean }
+  | {
+      readonly kind: "world";
+      readonly world: ShaderWorldIdentity;
+      readonly lightmapIndex: number;
+      readonly lightmap: RendererImage | null;
+      readonly baseTexture: SceneTexture | null;
+    };
 
 export interface SourceSceneMaterials {
   readonly default: RegisteredSceneMaterial;
@@ -21,8 +35,15 @@ export interface SourceSceneMaterials {
   readonly flare: RegisteredSceneMaterial;
   readonly sun: RegisteredSceneMaterial;
 }
-interface PreparedSceneMaterial { readonly compiled: CompiledMaterial; readonly defaulted: boolean; }
-interface ShaderCompileEffects { sun(value: RegisteredSun): void; sky(height: number): void; warning(message: string): void; }
+interface PreparedSceneMaterial {
+  readonly compiled: CompiledMaterial;
+  readonly defaulted: boolean;
+}
+interface ShaderCompileEffects {
+  sun(value: RegisteredSun): void;
+  sky(height: number): void;
+  warning(message: string): void;
+}
 export interface PreparedSceneRemap {
   readonly materials: readonly RegisteredSceneMaterial[];
   readonly accepted: boolean;
@@ -67,21 +88,32 @@ export class SceneShaderRegistry {
   private readonly pendingSourceWorlds: SourceMaterialRecord[] = [];
   private sourceReplacementCount: number | null = null;
 
-  constructor(public textures: SceneTextureLoader, readonly registrations: ProviderShaderRegistrations, readonly profile: FinishShaderProfile = DEFAULT_SHADER_PROFILE,
+  constructor(
+    public textures: SceneTextureLoader,
+    readonly registrations: ProviderShaderRegistrations,
+    readonly profile: FinishShaderProfile = DEFAULT_SHADER_PROFILE,
     private readonly playCinematic: (name: string) => Promise<RegisteredShaderVideo | null> = async () => null,
-    private readonly family: "q1" | "q2" | "q3" = "q3", private stage: ShaderReplacementStage | null = null) {}
+    private readonly family: "q1" | "q2" | "q3" = "q3",
+    private stage: ShaderReplacementStage | null = null,
+  ) {}
 
-  private pushSourceRecord(record: SourceMaterialRecord): void { this.sourceRecords.push(record); this.sourceRecordIndex = null; }
+  private pushSourceRecord(record: SourceMaterialRecord): void {
+    this.sourceRecords.push(record);
+    this.sourceRecordIndex = null;
+  }
 
   get sourceMaterials(): SourceSceneMaterials {
     if (this.sourceMaterialsValue === null) throw new Error("Source materials have not finished initialization");
     return this.sourceMaterialsValue;
   }
-  get preparingReplacement(): boolean { return this.stage !== null; }
+  get preparingReplacement(): boolean {
+    return this.stage !== null;
+  }
   sourceWorldMaterial(material: RegisteredSceneMaterial): RegisteredSceneMaterial {
     if (this.sourceRecordIndex === null) {
       this.sourceRecordIndex = new Map<unknown, SourceMaterialRecord>();
-      for (const value of this.sourceRecords) if (!this.sourceRecordIndex.has(value.material.registration)) this.sourceRecordIndex.set(value.material.registration, value);
+      for (const value of this.sourceRecords)
+        if (!this.sourceRecordIndex.has(value.material.registration)) this.sourceRecordIndex.set(value.material.registration, value);
     }
     return this.sourceRecordIndex.get(material.registration)?.defaulted === true ? this.sourceMaterials.default : material;
   }
@@ -89,9 +121,19 @@ export class SceneShaderRegistry {
   initializeSourceMaterials(loadScripts: () => Promise<void>): Promise<void> {
     if (this.sourceInitialization !== null) return this.sourceInitialization;
     const publish = (name: string, kind: "default" | "stencil-shadow"): RegisteredSceneMaterial => {
-      const request = this.sourceRequest++, logical: ShaderLogicalKey = { name: this.key(name), binding: { kind: "source", request } };
-      const publisher = this.stage ?? this.registrations, material = publisher.publish(publisher.reserve(logical), this.compileInternal(kind));
-      this.pushSourceRecord({ logical, order: this.sourceRecords.length, name, kind, binding: { kind: "unlit", lightmapIndex: -1, mipmap: true }, material, defaulted: false });
+      const request = this.sourceRequest++,
+        logical: ShaderLogicalKey = { name: this.key(name), binding: { kind: "source", request } };
+      const publisher = this.stage ?? this.registrations,
+        material = publisher.publish(publisher.reserve(logical), this.compileInternal(kind));
+      this.pushSourceRecord({
+        logical,
+        order: this.sourceRecords.length,
+        name,
+        kind,
+        binding: { kind: "unlit", lightmapIndex: -1, mipmap: true },
+        material,
+        defaulted: false,
+      });
       return material;
     };
     const defaultMaterial = publish("<default>", "default");
@@ -107,7 +149,9 @@ export class SceneShaderRegistry {
     return this.sourceInitialization;
   }
 
-  addScript(text: string, source = "<shader>"): void { this.addScriptFiles([{ text, source }]); }
+  addScript(text: string, source = "<shader>"): void {
+    this.addScriptFiles([{ text, source }]);
+  }
 
   /**
    * Files arrive in FS_ListFilteredFiles order. id (tr_shader.c ScanAndLoadShaderFiles) hashes the first shader of every
@@ -119,11 +163,18 @@ export class SceneShaderRegistry {
       // no shaders and must not abort loading the remaining scripts or the game.
       // Arbitrary binary bytes do lex, as tokens, and can register a shader named
       // by their first token.
-      try { return inspectShaderScript(file.text, file.source).entries; } catch { return []; }
+      try {
+        return inspectShaderScript(file.text, file.source).entries;
+      } catch {
+        return [];
+      }
     });
     const ordered: (typeof parsed)[number][number][] = [];
-    for (let index = 0; index < parsed.length - 1; index++) { const head = parsed[index]?.[0]; if (head !== undefined) ordered.push(head); }
-    for (let index = parsed.length - 1; index >= 0; index--) ordered.push(...parsed[index] ?? []);
+    for (let index = 0; index < parsed.length - 1; index++) {
+      const head = parsed[index]?.[0];
+      if (head !== undefined) ordered.push(head);
+    }
+    for (let index = parsed.length - 1; index >= 0; index--) ordered.push(...(parsed[index] ?? []));
     for (const entry of ordered) {
       const name = this.key(entry.name);
       if (!this.programs.has(name)) {
@@ -134,38 +185,85 @@ export class SceneShaderRegistry {
     }
   }
 
-  hasAuthored(name: string): boolean { return this.programs.has(this.key(name)); }
-  hasCinematic(name: string): boolean { return this.cinematicPrograms.has(this.key(name)); }
+  hasAuthored(name: string): boolean {
+    return this.programs.has(this.key(name));
+  }
+  hasCinematic(name: string): boolean {
+    return this.cinematicPrograms.has(this.key(name));
+  }
 
-  materialBindings(): readonly { readonly material: RegisteredSceneMaterial; readonly binding: SceneShaderBinding }[] { return [...this.bindings.values()]; }
+  materialBindings(): readonly { readonly material: RegisteredSceneMaterial; readonly binding: SceneShaderBinding }[] {
+    return [...this.bindings.values()];
+  }
 
   async prepareRemapMaterials(name: string, bindings: readonly SceneShaderBinding[]): Promise<PreparedSceneRemap> {
-    const parent = this.stage, stage = parent ?? this.registrations.beginReplacement(), textures = this.textures;
-    const materials: RegisteredSceneMaterial[] = [], effects: (() => void)[] = [];
-    let finished = false, accepted = true;
+    const parent = this.stage,
+      stage = parent ?? this.registrations.beginReplacement(),
+      textures = this.textures;
+    const materials: RegisteredSceneMaterial[] = [],
+      effects: (() => void)[] = [];
+    let finished = false,
+      accepted = true;
     const current = (): boolean => !finished && this.textures === textures && this.stage === parent;
     try {
       for (const binding of bindings) {
-        const lightmap = binding.kind === "world" ? binding.lightmap : null, base = binding.kind === "world" ? binding.baseTexture : null;
-        const logical: ShaderLogicalKey = { name: this.key(name), binding: binding.kind === "unlit"
-          ? { kind: "unlit", lightmapIndex: binding.lightmapIndex }
-          : { kind: "world", world: binding.world, lightmapIndex: binding.lightmapIndex, baseTextureName: base?.name ?? null } };
-        const compiled = await this.compile(name, lightmap, binding.lightmapIndex, base,
+        const lightmap = binding.kind === "world" ? binding.lightmap : null,
+          base = binding.kind === "world" ? binding.baseTexture : null;
+        const logical: ShaderLogicalKey = {
+          name: this.key(name),
+          binding:
+            binding.kind === "unlit"
+              ? { kind: "unlit", lightmapIndex: binding.lightmapIndex }
+              : { kind: "world", world: binding.world, lightmapIndex: binding.lightmapIndex, baseTextureName: base?.name ?? null },
+        };
+        const compiled = await this.compile(
+          name,
+          lightmap,
+          binding.lightmapIndex,
+          base,
           binding.kind === "unlit" ? binding.mipmap : binding.lightmapIndex !== -4,
-          { sun: value => { effects.push(() => { this.sun = value; }); }, sky: height => {
-            if (!Number.isFinite(Math.fround(height))) throw new RangeError("Sky cloud height must be finite float32");
-            effects.push(() => { this.sky.initializeCloudCoordinates(height); }); },
-            warning: message => { effects.push(() => { this.warnings.push(message); }); } });
+          {
+            sun: value => {
+              effects.push(() => {
+                this.sun = value;
+              });
+            },
+            sky: height => {
+              if (!Number.isFinite(Math.fround(height))) throw new RangeError("Sky cloud height must be finite float32");
+              effects.push(() => {
+                this.sky.initializeCloudCoordinates(height);
+              });
+            },
+            warning: message => {
+              effects.push(() => {
+                this.warnings.push(message);
+              });
+            },
+          },
+        );
         accepted &&= !compiled.defaulted;
         materials.push(stage.publish(stage.reserve(logical), compiled.compiled));
       }
-    } catch (error) { if (parent === null) stage.discard(); throw error; }
-    return { materials, accepted, current, commit: () => {
-      if (!current()) throw new Error("Prepared shader remap belongs to retired images");
-      if (parent === null) stage.commit();
-      for (const effect of effects) effect();
-      finished = true;
-    }, discard: () => { if (finished) return; if (parent === null) stage.discard(); finished = true; } };
+    } catch (error) {
+      if (parent === null) stage.discard();
+      throw error;
+    }
+    return {
+      materials,
+      accepted,
+      current,
+      commit: () => {
+        if (!current()) throw new Error("Prepared shader remap belongs to retired images");
+        if (parent === null) stage.commit();
+        for (const effect of effects) effect();
+        finished = true;
+      },
+      discard: () => {
+        if (finished) return;
+        if (parent === null) stage.discard();
+        finished = true;
+      },
+    };
   }
 
   private readonly registerPromises = new WeakMap<Promise<RegisteredSceneMaterial>, Promise<RegisteredSceneMaterial>>();
@@ -175,7 +273,9 @@ export class SceneShaderRegistry {
     if (existing !== undefined) return existing;
     const pending = this.registerBound(materialPromise, binding);
     this.registerPromises.set(materialPromise, pending);
-    void pending.catch(() => { this.registerPromises.delete(materialPromise); });
+    void pending.catch(() => {
+      this.registerPromises.delete(materialPromise);
+    });
     return pending;
   }
 
@@ -187,8 +287,14 @@ export class SceneShaderRegistry {
       if (this.stage === null) {
         const prepared = this.registrations.owner.bindMaterial(this, material, binding);
         this.bindingPreparations.set(material.registration, prepared);
-        try { await prepared; } catch (error) { this.bindings.delete(material.registration); throw error; }
-        finally { this.bindingPreparations.delete(material.registration); }
+        try {
+          await prepared;
+        } catch (error) {
+          this.bindings.delete(material.registration);
+          throw error;
+        } finally {
+          this.bindingPreparations.delete(material.registration);
+        }
       }
     } else {
       const pending = this.bindingPreparations.get(material.registration);
@@ -200,20 +306,30 @@ export class SceneShaderRegistry {
   private registerMaterial(name: string, binding: SceneShaderBinding): Promise<RegisteredSceneMaterial> {
     if ((name.length === 0 || name[0] === "\0") && this.sourceDefault !== null) return Promise.resolve(this.sourceDefault);
     if (this.sourceDefault !== null) return this.registerSource(name, binding);
-    const lightmap = binding.kind === "world" ? binding.lightmap : null, baseTexture = binding.kind === "world" ? binding.baseTexture : null;
-    const lightmapIndex = binding.lightmapIndex, mipmap = binding.kind === "unlit" ? binding.mipmap : lightmapIndex !== -4;
-    const logical: ShaderLogicalKey = { name: this.key(name), binding: binding.kind === "unlit"
-      ? { kind: "unlit", lightmapIndex: binding.lightmapIndex } : { kind: "world", world: binding.world, lightmapIndex, baseTextureName: baseTexture?.name ?? null } };
+    const lightmap = binding.kind === "world" ? binding.lightmap : null,
+      baseTexture = binding.kind === "world" ? binding.baseTexture : null;
+    const lightmapIndex = binding.lightmapIndex,
+      mipmap = binding.kind === "unlit" ? binding.mipmap : lightmapIndex !== -4;
+    const logical: ShaderLogicalKey = {
+      name: this.key(name),
+      binding:
+        binding.kind === "unlit"
+          ? { kind: "unlit", lightmapIndex: binding.lightmapIndex }
+          : { kind: "world", world: binding.world, lightmapIndex, baseTextureName: baseTexture?.name ?? null },
+    };
     const key = `${this.registrations.key(logical)}\0${lightmap?.ordinal ?? -1}\0${baseTexture?.image.ordinal ?? -1}`;
     const previous = this.compiled.get(key);
     if (previous !== undefined) return previous;
     if (binding.kind === "unlit") this.imageRequests.set(key, { name, binding });
-    const publisher = this.stage ?? this.registrations, registration = publisher.reserve(logical);
+    const publisher = this.stage ?? this.registrations,
+      registration = publisher.reserve(logical);
     const pending = this.compile(name, lightmap, lightmapIndex, baseTexture, mipmap)
       .then(current => {
-        if (current.defaulted) this.defaulted.add(key); else this.defaulted.delete(key);
+        if (current.defaulted) this.defaulted.add(key);
+        else this.defaulted.delete(key);
         return publisher.publish(registration, current.compiled);
-      }).catch((error: unknown) => {
+      })
+      .catch((error: unknown) => {
         if (this.compiled.get(key) === pending) this.compiled.delete(key);
         throw error;
       });
@@ -222,37 +338,60 @@ export class SceneShaderRegistry {
   }
 
   private compileInternal(kind: "default" | "stencil-shadow"): CompiledMaterial {
-    return compileImplicitMaterial({ kind, name: kind === "default" ? "*default" : "<stencil shadow>", profile: this.profile,
-      baseImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: this.textures.missing.image } } } } });
+    return compileImplicitMaterial({
+      kind,
+      name: kind === "default" ? "*default" : "<stencil shadow>",
+      profile: this.profile,
+      baseImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: this.textures.missing.image } } } },
+    });
   }
 
   private prepareSource(name: string, binding: SceneShaderBinding): Promise<PreparedSceneMaterial> {
-    return this.compile(name, binding.kind === "world" ? binding.lightmap : null, binding.lightmapIndex,
-      binding.kind === "world" ? binding.baseTexture : null, binding.kind === "unlit" ? binding.mipmap : binding.lightmapIndex !== -4);
+    return this.compile(
+      name,
+      binding.kind === "world" ? binding.lightmap : null,
+      binding.lightmapIndex,
+      binding.kind === "world" ? binding.baseTexture : null,
+      binding.kind === "unlit" ? binding.mipmap : binding.lightmapIndex !== -4,
+    );
   }
 
   private registerSource(name: string, binding: SceneShaderBinding): Promise<RegisteredSceneMaterial> {
-    const key = this.key(name), request = this.sourceRequest++, publisher = this.stage ?? this.registrations;
-    const logical: ShaderLogicalKey = { name: key, binding: { kind: "source", request } }, reservation = publisher.reserve(logical);
+    const key = this.key(name),
+      request = this.sourceRequest++,
+      publisher = this.stage ?? this.registrations;
+    const logical: ShaderLogicalKey = { name: key, binding: { kind: "source", request } },
+      reservation = publisher.reserve(logical);
     this.sourcePending++;
     const pending = this.sourcePreparations.then(async () => {
-      const reboundIndex = this.pendingSourceWorlds.findIndex(record => this.key(record.name) === key && binding.kind === "world"
-        && record.binding.kind === "world" && record.binding.world === binding.world && record.binding.lightmapIndex === binding.lightmapIndex
-        && record.binding.baseTexture?.name === binding.baseTexture?.name);
+      const reboundIndex = this.pendingSourceWorlds.findIndex(
+        record =>
+          this.key(record.name) === key &&
+          binding.kind === "world" &&
+          record.binding.kind === "world" &&
+          record.binding.world === binding.world &&
+          record.binding.lightmapIndex === binding.lightmapIndex &&
+          record.binding.baseTexture?.name === binding.baseTexture?.name,
+      );
       const rebound = this.pendingSourceWorlds[reboundIndex];
       if (rebound !== undefined) {
         publisher.cancel(logical, reservation);
-        const prepared = await this.prepareSource(name, binding), material = publisher.publish(publisher.reserve(rebound.logical), prepared.compiled);
+        const prepared = await this.prepareSource(name, binding),
+          material = publisher.publish(publisher.reserve(rebound.logical), prepared.compiled);
         this.pendingSourceWorlds.splice(reboundIndex, 1);
         this.pushSourceRecord({ ...rebound, binding, material, defaulted: prepared.defaulted });
         return material;
       }
       let previous: SourceMaterialRecord | undefined;
       for (const record of this.sourceRecords) {
-        if (this.key(record.name) !== key || previous !== undefined && previous.order > record.order) continue;
+        if (this.key(record.name) !== key || (previous !== undefined && previous.order > record.order)) continue;
         const index = record.material.finished.lightmapIndex;
-        if (record.defaulted || index === binding.lightmapIndex && (index < 0 || binding.kind === "world"
-          && record.binding.kind === "world" && record.binding.world === binding.world)) previous = record;
+        if (
+          record.defaulted ||
+          (index === binding.lightmapIndex &&
+            (index < 0 || (binding.kind === "world" && record.binding.kind === "world" && record.binding.world === binding.world)))
+        )
+          previous = record;
       }
       if (previous !== undefined) {
         publisher.cancel(logical, reservation);
@@ -266,12 +405,26 @@ export class SceneShaderRegistry {
         }
         return previous.material;
       }
-      const prepared = await this.prepareSource(name, binding), material = publisher.publish(reservation, prepared.compiled);
-      this.pushSourceRecord({ logical, order: this.sourceRecords.length + this.pendingSourceWorlds.length, name, kind: "ordinary", binding, material, defaulted: prepared.defaulted });
+      const prepared = await this.prepareSource(name, binding),
+        material = publisher.publish(reservation, prepared.compiled);
+      this.pushSourceRecord({
+        logical,
+        order: this.sourceRecords.length + this.pendingSourceWorlds.length,
+        name,
+        kind: "ordinary",
+        binding,
+        material,
+        defaulted: prepared.defaulted,
+      });
       return material;
     });
-    const completed = pending.finally(() => { this.sourcePending--; });
-    this.sourcePreparations = completed.then(() => {}, () => {});
+    const completed = pending.finally(() => {
+      this.sourcePending--;
+    });
+    this.sourcePreparations = completed.then(
+      () => {},
+      () => {},
+    );
     return completed;
   }
 
@@ -292,9 +445,14 @@ export class SceneShaderRegistry {
       replacement.sourceReplacementCount = this.sourceRecords.length;
       for (const record of this.sourceRecords) {
         const registration = publisher.reserve(record.logical);
-        if (record.binding.kind === "world") { replacement.pendingSourceWorlds.push(record); continue; }
-        const prepared = record.kind === "ordinary" ? await replacement.prepareSource(record.name, record.binding)
-          : { compiled: replacement.compileInternal(record.kind), defaulted: false };
+        if (record.binding.kind === "world") {
+          replacement.pendingSourceWorlds.push(record);
+          continue;
+        }
+        const prepared =
+          record.kind === "ordinary"
+            ? await replacement.prepareSource(record.name, record.binding)
+            : { compiled: replacement.compileInternal(record.kind), defaulted: false };
         const material = publisher.publish(registration, prepared.compiled);
         replacement.pushSourceRecord({ ...record, material, defaulted: prepared.defaulted });
         replacement.bindings.set(material.registration, { material, binding: record.binding });
@@ -305,19 +463,25 @@ export class SceneShaderRegistry {
         return record.material;
       };
       const source = this.sourceMaterialsValue;
-      replacement.sourceMaterialsValue = { default: rebound(source.default), stencilShadow: rebound(source.stencilShadow),
-        projectionShadow: rebound(source.projectionShadow), flare: rebound(source.flare), sun: rebound(source.sun) };
+      replacement.sourceMaterialsValue = {
+        default: rebound(source.default),
+        stencilShadow: rebound(source.stencilShadow),
+        projectionShadow: rebound(source.projectionShadow),
+        flare: rebound(source.flare),
+        sun: rebound(source.sun),
+      };
       replacement.sourceDefault = replacement.sourceMaterialsValue.default;
       replacement.sourceInitialization = Promise.resolve();
     }
-    for (const request of this.imageRequests.values())
-      await replacement.register(request.name, request.binding);
+    for (const request of this.imageRequests.values()) await replacement.register(request.name, request.binding);
   }
 
   validateReplacement(replacement: SceneShaderRegistry): void {
-    if (replacement.registrations !== this.registrations || replacement.stage === null) throw new Error("Shader replacement belongs to another provider or is already complete");
+    if (replacement.registrations !== this.registrations || replacement.stage === null)
+      throw new Error("Shader replacement belongs to another provider or is already complete");
     if (this.sourcePending !== 0) throw new Error("Source shader requests are pending during replacement");
-    if (replacement.sourceReplacementCount !== null && replacement.sourceReplacementCount !== this.sourceRecords.length) throw new Error("Source shader allocations changed during replacement");
+    if (replacement.sourceReplacementCount !== null && replacement.sourceReplacementCount !== this.sourceRecords.length)
+      throw new Error("Source shader allocations changed during replacement");
     replacement.stage.validate();
   }
 
@@ -325,21 +489,35 @@ export class SceneShaderRegistry {
     this.validateReplacement(replacement);
     const stage = replacement.stage;
     if (stage === null) throw new Error("Shader replacement lost its stage");
-    stage.commit(); replacement.stage = null;
+    stage.commit();
+    replacement.stage = null;
     if (replacement.sourceMaterialsValue !== null) {
-      const source = replacement.sourceMaterialsValue, retained = (material: RegisteredSceneMaterial) => this.registrations.owner.retained(material.registration);
-      this.sourceMaterialsValue = { default: retained(source.default), stencilShadow: retained(source.stencilShadow),
-        projectionShadow: retained(source.projectionShadow), flare: retained(source.flare), sun: retained(source.sun) };
+      const source = replacement.sourceMaterialsValue,
+        retained = (material: RegisteredSceneMaterial) => this.registrations.owner.retained(material.registration);
+      this.sourceMaterialsValue = {
+        default: retained(source.default),
+        stencilShadow: retained(source.stencilShadow),
+        projectionShadow: retained(source.projectionShadow),
+        flare: retained(source.flare),
+        sun: retained(source.sun),
+      };
       this.sourceDefault = this.sourceMaterialsValue.default;
-      replacement.sourceMaterialsValue = this.sourceMaterialsValue; replacement.sourceDefault = this.sourceDefault;
+      replacement.sourceMaterialsValue = this.sourceMaterialsValue;
+      replacement.sourceDefault = this.sourceDefault;
       this.sourceRequest = Math.max(this.sourceRequest, replacement.sourceRequest);
-      this.sourceRecords = [...replacement.sourceRecords].sort((a, b) => a.order - b.order)
+      this.sourceRecords = [...replacement.sourceRecords]
+        .sort((a, b) => a.order - b.order)
         .map((record, order) => ({ ...record, order, material: retained(record.material) }));
-      replacement.sourceRecords = [...this.sourceRecords]; replacement.sourceRequest = this.sourceRequest;
-      this.sourceRecordIndex = null; replacement.sourceRecordIndex = null;
+      replacement.sourceRecords = [...this.sourceRecords];
+      replacement.sourceRequest = this.sourceRequest;
+      this.sourceRecordIndex = null;
+      replacement.sourceRecordIndex = null;
     }
     for (const [key, pending] of replacement.compiled)
-      replacement.compiled.set(key, pending.then(material => this.registrations.owner.retained(material.registration)));
+      replacement.compiled.set(
+        key,
+        pending.then(material => this.registrations.owner.retained(material.registration)),
+      );
     this.textures = replacement.textures;
     this.generatedTextures.clear();
     for (const [key, texture] of replacement.generatedTextures) this.generatedTextures.set(key, texture);
@@ -351,12 +529,15 @@ export class SceneShaderRegistry {
     for (const [key, request] of replacement.imageRequests) this.imageRequests.set(key, request);
     this.sun = replacement.sun;
     this.bindings.clear();
-    for (const [registration, value] of replacement.bindings) this.bindings.set(registration, { ...value, material: this.registrations.owner.retained(registration) });
+    for (const [registration, value] of replacement.bindings)
+      this.bindings.set(registration, { ...value, material: this.registrations.owner.retained(registration) });
   }
 
   discardReplacement(): void {
     if (this.stage === null) throw new Error("Live shader registry cannot be discarded as a replacement");
-    this.stage.discard(); this.compiled.clear(); this.imageRequests.clear();
+    this.stage.discard();
+    this.compiled.clear();
+    this.imageRequests.clear();
   }
 
   async registerPicture(name: string, mipmap = false): Promise<MaterialPicture> {
@@ -366,10 +547,11 @@ export class SceneShaderRegistry {
 
   async registerGeneratedPicture(name: string, image: RenderImage): Promise<MaterialPicture> {
     const key = this.key(name);
-    for (const [requestKey, request] of this.imageRequests) if (this.key(request.name) === key) {
-      await this.compiled.get(requestKey);
-      if (this.defaulted.has(requestKey)) this.compiled.delete(requestKey);
-    }
+    for (const [requestKey, request] of this.imageRequests)
+      if (this.key(request.name) === key) {
+        await this.compiled.get(requestKey);
+        if (this.defaulted.has(requestKey)) this.compiled.delete(requestKey);
+      }
     if (!this.generatedPictures.has(key)) this.generatedPictures.set(key, image);
     return this.registerPicture(name);
   }
@@ -380,18 +562,41 @@ export class SceneShaderRegistry {
     return this.picture(name, compiled);
   }
 
-  get sourceDefaultPicture(): MaterialPicture { return this.picture("*default", this.sourceMaterials.default); }
+  get sourceDefaultPicture(): MaterialPicture {
+    return this.picture("*default", this.sourceMaterials.default);
+  }
 
   private picture(name: string, compiled: RegisteredSceneMaterial): MaterialPicture {
     let order = this.pictureOrders.get(compiled.registration);
-    if (order === undefined) { order = this.pictureOrders.size + 1; this.pictureOrders.set(compiled.registration, order); }
+    if (order === undefined) {
+      order = this.pictureOrders.size + 1;
+      this.pictureOrders.set(compiled.registration, order);
+    }
     return { kind: "material", name, material: { order, compiled } };
   }
 
-  private key(name: string): string { return normalizeShaderName(stripShaderExtension(name)); }
+  private key(name: string): string {
+    return normalizeShaderName(stripShaderExtension(name));
+  }
 
-  private async compile(name: string, lightmap: RendererImage | null, lightmapIndex: number, baseTexture: SceneTexture | null, mipmap: boolean,
-    effects: ShaderCompileEffects = { sun: value => { this.sun = value; }, sky: height => { this.sky.initializeCloudCoordinates(height); }, warning: message => { this.warnings.push(message); } }): Promise<PreparedSceneMaterial> {
+  private async compile(
+    name: string,
+    lightmap: RendererImage | null,
+    lightmapIndex: number,
+    baseTexture: SceneTexture | null,
+    mipmap: boolean,
+    effects: ShaderCompileEffects = {
+      sun: value => {
+        this.sun = value;
+      },
+      sky: height => {
+        this.sky.initializeCloudCoordinates(height);
+      },
+      warning: message => {
+        this.warnings.push(message);
+      },
+    },
+  ): Promise<PreparedSceneMaterial> {
     const registered = (image: RendererImage, tmu: 0 | 1 = 0): RegisteredImage => ({ frame: { image }, tmu });
     const generated = this.generatedPictures.get(this.key(name));
     if (generated !== undefined) {
@@ -400,34 +605,97 @@ export class SceneShaderRegistry {
         texture = this.textures.register(name, generated, { wrap: "clamp", filter: "linear" });
         this.generatedTextures.set(this.key(name), texture);
       }
-      return { defaulted: false, compiled: compileImplicitMaterial({ kind: "picture", name, profile: this.profile,
-        baseImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } } }) };
+      return {
+        defaulted: false,
+        compiled: compileImplicitMaterial({
+          kind: "picture",
+          name,
+          profile: this.profile,
+          baseImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } },
+        }),
+      };
     }
     const program = this.programs.get(this.key(name));
     if (program !== undefined) {
-      const result = await program.register({ whiteImage: registered(this.textures.white.image), defaultImage: registered(this.textures.missing.image),
+      const result = await program.register({
+        whiteImage: registered(this.textures.white.image),
+        defaultImage: registered(this.textures.missing.image),
         lightmapImage: registered(lightmap ?? this.textures.white.image, 1),
         findImage: async request => {
-          if (baseTexture !== null && (this.key(request.name) === this.key(baseTexture.name)
-            || this.key(request.name) === this.key(`textures/${baseTexture.name}`)))
+          if (
+            baseTexture !== null &&
+            (this.key(request.name) === this.key(baseTexture.name) || this.key(request.name) === this.key(`textures/${baseTexture.name}`))
+          )
             return registered((await this.textures.sampleSurface(baseTexture, request)).image);
-          const texture = await this.textures.load(request.name, { mipmap: request.mipmap, wrap: request.wrap, family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" });
+          const texture = await this.textures.load(request.name, {
+            mipmap: request.mipmap,
+            wrap: request.wrap,
+            family: this.family,
+            usage: lightmapIndex === -4 ? "picture" : "wall",
+          });
           return texture === null ? null : registered(texture.image);
-        }, playShaderCinematic: this.playCinematic, applySun: effects.sun,
-        initializeSkyTexCoords: effects.sky, printWarning: effects.warning });
-      return { defaulted: result.kind === "defaulted", compiled: { registered: result, material: shaderRenderMaterial(result.definition), finished: finishShader({ definition: result.definition,
-        images: result.stages, lightmapIndex, profile: this.profile }) } };
+        },
+        playShaderCinematic: this.playCinematic,
+        applySun: effects.sun,
+        initializeSkyTexCoords: effects.sky,
+        printWarning: effects.warning,
+      });
+      return {
+        defaulted: result.kind === "defaulted",
+        compiled: {
+          registered: result,
+          material: shaderRenderMaterial(result.definition),
+          finished: finishShader({ definition: result.definition, images: result.stages, lightmapIndex, profile: this.profile }),
+        },
+      };
     }
-    const loaded = await this.textures.load(name, { mipmap, wrap: mipmap ? "repeat" : "clamp", family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" }), texture = loaded ?? this.textures.missing;
-    const implicitImage = { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } } satisfies Parameters<typeof compileImplicitMaterial>[0]["baseImage"];
+    const loaded = await this.textures.load(name, {
+        mipmap,
+        wrap: mipmap ? "repeat" : "clamp",
+        family: this.family,
+        usage: lightmapIndex === -4 ? "picture" : "wall",
+      }),
+      texture = loaded ?? this.textures.missing;
+    const implicitImage = {
+      kind: "loaded",
+      tmu: 0,
+      binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } },
+    } satisfies Parameters<typeof compileImplicitMaterial>[0]["baseImage"];
     if (loaded === null) {
       effects.warning(`${name}: missing shader image, using the source default material`);
       return { defaulted: true, compiled: compileImplicitMaterial({ kind: "default", name, baseImage: implicitImage, profile: this.profile }) };
     }
-    if (lightmap !== null) return { defaulted: false, compiled: compileImplicitMaterial({ kind: "lightmap", name, baseImage: implicitImage, lightmapIndex, profile: this.profile,
-      lightmapImage: { kind: "loaded", tmu: 1, binding: { kind: "images", playback: { kind: "single", image: { image: lightmap } } } } }) };
-    if (lightmapIndex === -2) return { defaulted: false, compiled: compileImplicitMaterial({ kind: "white", name, baseImage: implicitImage, profile: this.profile,
-      whiteImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: this.textures.white.image } } } } }) };
-    return { defaulted: false, compiled: compileImplicitMaterial({ kind: lightmapIndex === -4 ? "picture" : lightmapIndex === -3 ? "vertex" : "dynamic", name, baseImage: implicitImage, profile: this.profile }) };
+    if (lightmap !== null)
+      return {
+        defaulted: false,
+        compiled: compileImplicitMaterial({
+          kind: "lightmap",
+          name,
+          baseImage: implicitImage,
+          lightmapIndex,
+          profile: this.profile,
+          lightmapImage: { kind: "loaded", tmu: 1, binding: { kind: "images", playback: { kind: "single", image: { image: lightmap } } } },
+        }),
+      };
+    if (lightmapIndex === -2)
+      return {
+        defaulted: false,
+        compiled: compileImplicitMaterial({
+          kind: "white",
+          name,
+          baseImage: implicitImage,
+          profile: this.profile,
+          whiteImage: { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: this.textures.white.image } } } },
+        }),
+      };
+    return {
+      defaulted: false,
+      compiled: compileImplicitMaterial({
+        kind: lightmapIndex === -4 ? "picture" : lightmapIndex === -3 ? "vertex" : "dynamic",
+        name,
+        baseImage: implicitImage,
+        profile: this.profile,
+      }),
+    };
   }
 }

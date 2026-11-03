@@ -1,10 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* MD5 v10 mesh, animation, scales and skinning adapted from the Q1/Q2
  * rerelease ports and q2repro refresh/models.c and mesh.c. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { Md5Joint, Md5Model, ModelVertex, SkeletonJointPose } from "../../contracts/scene.ts";
 import { add3, scale3, vec3 } from "../../core/math.ts";
 import { at, indexedRecords, ModelTokens } from "./text.ts";
-import { conjugateQuaternion, md5Quaternion, multiplyQuaternion, normalizeQuaternion, rotateQuaternion, quaternionRotationRows, rotateQuaternionRows, slerpQuaternion } from "./quaternion.ts";
+import {
+  conjugateQuaternion,
+  md5Quaternion,
+  multiplyQuaternion,
+  normalizeQuaternion,
+  rotateQuaternion,
+  quaternionRotationRows,
+  rotateQuaternionRows,
+  slerpQuaternion,
+} from "./quaternion.ts";
 
 import type { QuaternionRotationRows } from "./quaternion.ts";
 
@@ -17,7 +27,10 @@ export interface Md5MeshFile {
   readonly bindPose: readonly SkeletonJointPose[];
   readonly meshes: readonly Md5Mesh[];
 }
-export interface Md5HierarchyJoint extends Md5Joint { readonly flags: number; readonly startIndex: number; }
+export interface Md5HierarchyJoint extends Md5Joint {
+  readonly flags: number;
+  readonly startIndex: number;
+}
 export interface Md5AnimationFrame {
   readonly bounds: Bounds;
   readonly components: readonly number[];
@@ -41,15 +54,22 @@ export interface DecodedMd5Model extends Md5Model {
   readonly bindPose: readonly SkeletonJointPose[];
   readonly animation: Md5Animation;
 }
-export interface Md5ScaleSource { readonly source: string; readonly text: string; }
+export interface Md5ScaleSource {
+  readonly source: string;
+  readonly text: string;
+}
 
 function header(tokens: ModelTokens): string {
-  tokens.expect("MD5Version"); tokens.expect("10"); tokens.expect("commandline");
+  tokens.expect("MD5Version");
+  tokens.expect("10");
+  tokens.expect("commandline");
   return tokens.token();
 }
 
 function readMesh(tokens: ModelTokens, joints: readonly SkeletonJointPose[]): Md5Mesh {
-  tokens.expect("mesh"); tokens.expect("{"); tokens.expect("shader");
+  tokens.expect("mesh");
+  tokens.expect("{");
+  tokens.expect("shader");
   const shader = tokens.token();
   tokens.expect("numverts");
   const vertexCount = tokens.integer(0, 65535);
@@ -61,7 +81,11 @@ function readMesh(tokens: ModelTokens, joints: readonly SkeletonJointPose[]): Md
   });
   tokens.expect("numtris");
   const triangleCount = tokens.integer(0, 65535);
-  const triangles = indexedRecords(tokens, triangleCount, "tri", () => [tokens.integer(0, vertexCount - 1), tokens.integer(0, vertexCount - 1), tokens.integer(0, vertexCount - 1)]);
+  const triangles = indexedRecords(tokens, triangleCount, "tri", () => [
+    tokens.integer(0, vertexCount - 1),
+    tokens.integer(0, vertexCount - 1),
+    tokens.integer(0, vertexCount - 1),
+  ]);
   tokens.expect("numweights");
   const weightCount = tokens.integer(0, 1048576);
   const weights = indexedRecords(tokens, weightCount, "weight", () => {
@@ -81,9 +105,12 @@ function readMesh(tokens: ModelTokens, joints: readonly SkeletonJointPose[]): Md
 export function parseMd5Mesh(text: string, source = "<md5mesh>"): Md5MeshFile {
   const tokens = new ModelTokens(text, source);
   const commandLine = header(tokens);
-  tokens.expect("numJoints"); const jointCount = tokens.integer(1, 256);
-  tokens.expect("numMeshes"); const meshCount = tokens.integer(1, 32);
-  tokens.expect("joints"); tokens.expect("{");
+  tokens.expect("numJoints");
+  const jointCount = tokens.integer(1, 256);
+  tokens.expect("numMeshes");
+  const meshCount = tokens.integer(1, 32);
+  tokens.expect("joints");
+  tokens.expect("{");
   const joints: Md5Joint[] = [];
   const bindPose: SkeletonJointPose[] = [];
   for (let i = 0; i < jointCount; i++) {
@@ -151,32 +178,57 @@ function objectEntries(value: unknown): [string, unknown][] | null {
 }
 
 /** Optional scale failures are diagnostics, matching q2repro's fallback to unit scales. */
-function parseScales(source: Md5ScaleSource | null, hierarchy: readonly Md5HierarchyJoint[], frameCount: number): {
-  readonly hierarchy: readonly Md5HierarchyJoint[]; readonly scales: ReadonlyMap<number, number>; readonly diagnostics: readonly string[];
+function parseScales(
+  source: Md5ScaleSource | null,
+  hierarchy: readonly Md5HierarchyJoint[],
+  frameCount: number,
+): {
+  readonly hierarchy: readonly Md5HierarchyJoint[];
+  readonly scales: ReadonlyMap<number, number>;
+  readonly diagnostics: readonly string[];
 } {
   const scales = new Map<number, number>();
   const scalePositions = new Set<number>();
   const diagnostics: string[] = [];
   if (source !== null) {
     let root: unknown;
-    try { root = JSON.parse(source.text); } catch { root = null; }
+    try {
+      root = JSON.parse(source.text);
+    } catch {
+      root = null;
+    }
     const entries = objectEntries(root);
     if (entries === null) diagnostics.push(`${source.source}: Invalid JSON scale object`);
-    else for (const [name, entry] of entries) {
-      const joint = hierarchy.findIndex(value => value.name === name);
-      const values = objectEntries(entry);
-      if (values === null) { diagnostics.push(`${source.source}: Invalid scale entry for ${name}`); break; }
-      if (joint < 0) { diagnostics.push(`${source.source}: No such joint ${name}`); continue; }
-      for (const [key, value] of values) {
-        if (key === "scale_positions") { if (value === true) scalePositions.add(joint); }
-        else {
-          const frame = Number(key);
-          if (key.length > 0 && Number.isInteger(frame) && frame >= 0 && frame < frameCount && typeof value === "number" && Number.isFinite(Math.fround(value))) {
-            scales.set(frame * hierarchy.length + joint, Math.fround(value));
-          } else diagnostics.push(`${source.source}: Invalid frame scale ${name}/${key}`);
+    else
+      for (const [name, entry] of entries) {
+        const joint = hierarchy.findIndex(value => value.name === name);
+        const values = objectEntries(entry);
+        if (values === null) {
+          diagnostics.push(`${source.source}: Invalid scale entry for ${name}`);
+          break;
+        }
+        if (joint < 0) {
+          diagnostics.push(`${source.source}: No such joint ${name}`);
+          continue;
+        }
+        for (const [key, value] of values) {
+          if (key === "scale_positions") {
+            if (value === true) scalePositions.add(joint);
+          } else {
+            const frame = Number(key);
+            if (
+              key.length > 0 &&
+              Number.isInteger(frame) &&
+              frame >= 0 &&
+              frame < frameCount &&
+              typeof value === "number" &&
+              Number.isFinite(Math.fround(value))
+            ) {
+              scales.set(frame * hierarchy.length + joint, Math.fround(value));
+            } else diagnostics.push(`${source.source}: Invalid frame scale ${name}/${key}`);
+          }
         }
       }
-    }
   }
   return { hierarchy: hierarchy.map((joint, index) => ({ ...joint, scalePositions: scalePositions.has(index) })), scales, diagnostics };
 }
@@ -184,13 +236,18 @@ function parseScales(source: Md5ScaleSource | null, hierarchy: readonly Md5Hiera
 export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md5ScaleSource | null = null): Md5Animation {
   const tokens = new ModelTokens(text, source);
   const commandLine = header(tokens);
-  tokens.expect("numFrames"); const frameCount = tokens.integer(1, 65535);
-  tokens.expect("numJoints"); const jointCount = tokens.integer(1, 256);
-  tokens.expect("frameRate"); const frameRate = tokens.integer(1, 1000);
-  tokens.expect("numAnimatedComponents"); const componentCount = tokens.integer(0, jointCount * 6);
+  tokens.expect("numFrames");
+  const frameCount = tokens.integer(1, 65535);
+  tokens.expect("numJoints");
+  const jointCount = tokens.integer(1, 256);
+  tokens.expect("frameRate");
+  const frameRate = tokens.integer(1, 1000);
+  tokens.expect("numAnimatedComponents");
+  const componentCount = tokens.integer(0, jointCount * 6);
   // Each frame expands into per-joint pose objects, so bound the expansion by the input and by an absolute budget.
   if (frameCount * jointCount > Math.min(500_000, Math.max(4096, text.length))) tokens.fail("animation expands far beyond its data");
-  tokens.expect("hierarchy"); tokens.expect("{");
+  tokens.expect("hierarchy");
+  tokens.expect("{");
   const rawHierarchy: Md5HierarchyJoint[] = [];
   for (let i = 0; i < jointCount; i++) {
     const name = tokens.token();
@@ -202,9 +259,13 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
     if (startIndex + count > componentCount) tokens.fail("animated joint components exceed frame");
     rawHierarchy.push({ name, parent, flags, startIndex, scalePositions: false });
   }
-  tokens.expect("}"); tokens.expect("bounds"); tokens.expect("{");
+  tokens.expect("}");
+  tokens.expect("bounds");
+  tokens.expect("{");
   const bounds = Array.from({ length: frameCount }, () => ({ min: tokens.vector(), max: tokens.vector() }));
-  tokens.expect("}"); tokens.expect("baseframe"); tokens.expect("{");
+  tokens.expect("}");
+  tokens.expect("baseframe");
+  tokens.expect("{");
   const baseFrame = Array.from({ length: jointCount }, () => ({ position: tokens.vector(), orientation: md5Quaternion(tokens.vector()), scale: 1 }));
   tokens.expect("}");
   const { hierarchy, scales, diagnostics } = parseScales(scaleSource, rawHierarchy, frameCount);
@@ -222,7 +283,7 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
       const info = at(hierarchy, i, "hierarchy joint");
       const base = at(baseFrame, i, "base joint");
       let component = info.startIndex;
-      const animated = (bit: number, fallback: number): number => (info.flags & bit) === 0 ? fallback : at(components, component++, "animated component");
+      const animated = (bit: number, fallback: number): number => ((info.flags & bit) === 0 ? fallback : at(components, component++, "animated component"));
       const position = vec3(animated(1, base.position.x), animated(2, base.position.y), animated(4, base.position.z));
       const orientation = md5Quaternion(vec3(animated(8, base.orientation.x), animated(16, base.orientation.y), animated(32, base.orientation.z)));
       const scale = scales.get(frame * hierarchy.length + i) ?? 1;
@@ -231,7 +292,11 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
       if (info.parent < 0) joints.push({ position: scaledPosition, orientation, scale });
       else {
         const parent = at(joints, info.parent, "parent joint");
-        joints.push({ position: add3(parent.position, rotateQuaternion(parent.orientation, scaledPosition)), orientation: normalizeQuaternion(multiplyQuaternion(parent.orientation, orientation)), scale });
+        joints.push({
+          position: add3(parent.position, rotateQuaternion(parent.orientation, scaledPosition)),
+          orientation: normalizeQuaternion(multiplyQuaternion(parent.orientation, orientation)),
+          scale,
+        });
       }
     }
     return { bounds: at(bounds, frame, "frame bounds"), components, localJoints, joints };
@@ -239,22 +304,41 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
   return { source, commandLine, frameRate, hierarchy, baseFrame, frames, scaleSource: scaleSource?.source ?? null, diagnostics };
 }
 
-export function createMd5Model(mesh: Md5MeshFile, animation: Md5Animation, skinSelection: Md5Model["skinSelection"] = { kind: "mesh-shaders" }): DecodedMd5Model {
+export function createMd5Model(
+  mesh: Md5MeshFile,
+  animation: Md5Animation,
+  skinSelection: Md5Model["skinSelection"] = { kind: "mesh-shaders" },
+): DecodedMd5Model {
   if (mesh.joints.length !== animation.hierarchy.length) throw new RangeError(`${mesh.source}: mesh and animation joint counts differ`);
-  return { kind: "md5", meshSource: mesh.source, meshCommandLine: mesh.commandLine, meshJoints: mesh.joints,
-    bindPose: mesh.bindPose, animation, joints: animation.hierarchy, meshes: mesh.meshes,
-    frameRate: animation.frameRate, frames: animation.frames, skinSelection };
+  return {
+    kind: "md5",
+    meshSource: mesh.source,
+    meshCommandLine: mesh.commandLine,
+    meshJoints: mesh.joints,
+    bindPose: mesh.bindPose,
+    animation,
+    joints: animation.hierarchy,
+    meshes: mesh.meshes,
+    frameRate: animation.frameRate,
+    frames: animation.frames,
+    skinSelection,
+  };
 }
 
 /** Interpolate positions and orientations; Q2 uses the new frame's scale directly. */
 export function sampleMd5Pose(model: Md5Model, frame: number, previousFrame = frame, backLerp = 0): readonly SkeletonJointPose[] {
-  if (!Number.isInteger(frame) || frame < 0 || !Number.isInteger(previousFrame) || previousFrame < 0 || !Number.isFinite(backLerp)) throw new RangeError("Invalid MD5 frame selection");
+  if (!Number.isInteger(frame) || frame < 0 || !Number.isInteger(previousFrame) || previousFrame < 0 || !Number.isFinite(backLerp))
+    throw new RangeError("Invalid MD5 frame selection");
   const current = at(model.frames, frame % model.frames.length, "MD5 frame").joints;
   if (backLerp === 0 || frame === previousFrame) return current;
   const previous = at(model.frames, previousFrame % model.frames.length, "MD5 previous frame").joints;
   return current.map((joint, index) => {
     const old = at(previous, index, "previous joint");
-    const position = vec3(old.position.x * backLerp + joint.position.x * (1 - backLerp), old.position.y * backLerp + joint.position.y * (1 - backLerp), old.position.z * backLerp + joint.position.z * (1 - backLerp));
+    const position = vec3(
+      old.position.x * backLerp + joint.position.x * (1 - backLerp),
+      old.position.y * backLerp + joint.position.y * (1 - backLerp),
+      old.position.z * backLerp + joint.position.z * (1 - backLerp),
+    );
     return { position, orientation: slerpQuaternion(old.orientation, joint.orientation, backLerp), scale: joint.scale };
   });
 }
@@ -268,7 +352,10 @@ export function skinMd5Mesh(mesh: Md5Mesh, joints: readonly SkeletonJointPose[])
       const weight = at(mesh.weights, vertex.weights.first + i, "weight");
       const joint = at(joints, weight.joint, "joint");
       let rows = rotations[weight.joint];
-      if (rows === undefined) { rows = quaternionRotationRows(joint.orientation); rotations[weight.joint] = rows; }
+      if (rows === undefined) {
+        rows = quaternionRotationRows(joint.orientation);
+        rotations[weight.joint] = rows;
+      }
       const rotated = rotateQuaternionRows(rows, weight.position);
       const point = vec3(joint.position.x + joint.scale * rotated.x, joint.position.y + joint.scale * rotated.y, joint.position.z + joint.scale * rotated.z);
       const direction = rotateQuaternionRows(rows, vertex.normal);

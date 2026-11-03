@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { decodePng } from "../../src/formats/images/png.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -28,54 +29,109 @@ import { trackedTempDirectories } from "../support/temp-directories.ts";
 const tempDirectory = trackedTempDirectories();
 
 function masterPacket(addresses: readonly Ipv4Address[], complete: boolean): Uint8Array {
-  return Uint8Array.from([255, 255, 255, 255, ...new TextEncoder().encode("getserversResponse"),
-    ...addresses.flatMap(address => [92, ...address.host, address.port >>> 8, address.port & 255]), 92, ...complete ? [69, 79, 84] : []]);
+  return Uint8Array.from([
+    255,
+    255,
+    255,
+    255,
+    ...new TextEncoder().encode("getserversResponse"),
+    ...addresses.flatMap(address => [92, ...address.host, address.port >>> 8, address.port & 255]),
+    92,
+    ...(complete ? [69, 79, 84] : []),
+  ]);
 }
 
 test("Q3 browser source reads reuse one scan until membership changes", async () => {
-  const root = await tempDirectory("quake-browser-read-reuse-"), browser = await StartupServerBrowser.open(new ConfigStore(root));
-  const core = browser.q3Core, endpoint = ipv4Address([127, 0, 0, 1], 27960), extra = ipv4Address([127, 0, 0, 1], 27961);
+  const root = await tempDirectory("quake-browser-read-reuse-"),
+    browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const core = browser.q3Core,
+    endpoint = ipv4Address([127, 0, 0, 1], 27960),
+    extra = ipv4Address([127, 0, 0, 1], 27961);
   browser.addQ3(2, endpoint);
-  const scans = spyOn(core, "list"), packets: Uint8Array[] = [];
-  const send = spyOn(core.transport, "send").mockImplementation((_to, bytes) => { packets.push(bytes); return true; });
+  const scans = spyOn(core, "list"),
+    packets: Uint8Array[] = [];
+  const send = spyOn(core.transport, "send").mockImplementation((_to, bytes) => {
+    packets.push(bytes);
+    return true;
+  });
   try {
     const first = browser.q3List(2).addresses;
     let shared = true;
     for (let index = 0; index < 1024; index++) shared = browser.q3List(2).addresses === first && shared;
     expect(shared).toBe(true);
     expect(scans).toHaveBeenCalledTimes(1);
-    const handle = core.request(endpoint, 0, "status"), packet = packets[0];
+    const handle = core.request(endpoint, 0, "status"),
+      packet = packets[0];
     if (handle === null || packet === undefined) throw new Error("No counted browser query");
-    const challenge = decodeConnectionless(packet, "server").arguments[0]; if (challenge === undefined) throw new Error("No browser challenge");
+    const challenge = decodeConnectionless(packet, "server").arguments[0];
+    if (challenge === undefined) throw new Error("No browser challenge");
     const reply = decodeQ3ServerStatus(encodeQ3Status(`\\challenge\\${challenge}\\sv_hostname\\Updated status\\mapname\\q3dm1\\sv_maxclients\\8`, []));
-    expect(core.receive(endpoint, reply.status, reply.challenge, 10)).toBe(true); core.releaseRequest(handle);
-    expect(browser.q3List(2).addresses).toBe(first); expect(scans).toHaveBeenCalledTimes(1);
+    expect(core.receive(endpoint, reply.status, reply.challenge, 10)).toBe(true);
+    core.releaseRequest(handle);
+    expect(browser.q3List(2).addresses).toBe(first);
+    expect(scans).toHaveBeenCalledTimes(1);
     expect(core.entry(endpoint)?.status?.name).toBe("Updated status");
-    browser.addQ3(2, extra); scans.mockClear();
-    const second = browser.q3List(2).addresses; expect(second).toEqual([endpoint, extra]); expect(second).not.toBe(first);
+    browser.addQ3(2, extra);
+    scans.mockClear();
+    const second = browser.q3List(2).addresses;
+    expect(second).toEqual([endpoint, extra]);
+    expect(second).not.toBe(first);
     for (let index = 0; index < 1024; index++) browser.q3List(2);
     expect(scans).toHaveBeenCalledTimes(1);
-    browser.addQ3(3, endpoint); scans.mockClear(); expect(browser.q3List(2).addresses).toBe(second); expect(scans).not.toHaveBeenCalled();
-    browser.removeQ3(2, extra); scans.mockClear(); expect(browser.q3List(2).addresses).toEqual([endpoint]); expect(scans).toHaveBeenCalledTimes(1);
-  } finally { scans.mockRestore(); send.mockRestore(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+    browser.addQ3(3, endpoint);
+    scans.mockClear();
+    expect(browser.q3List(2).addresses).toBe(second);
+    expect(scans).not.toHaveBeenCalled();
+    browser.removeQ3(2, extra);
+    scans.mockClear();
+    expect(browser.q3List(2).addresses).toEqual([endpoint]);
+    expect(scans).toHaveBeenCalledTimes(1);
+  } finally {
+    scans.mockRestore();
+    send.mockRestore();
+    await browser.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Q3 browser snapshot invalidates an optimistic favorite when a deferred write rolls back", async () => {
-  const root = await tempDirectory("quake-browser-read-rollback-"), config = new ConfigStore(root), browser = await StartupServerBrowser.open(config);
-  let release = (): void => { throw new Error("Missing write gate"); }, writing = false;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const dump = spyOn(config, "dump").mockImplementation(async () => { writing = true; await gate; throw new Error("Deferred favorite failure"); });
-  browser.choose("q3"); browser.address = "127.0.0.1:27960";
+  const root = await tempDirectory("quake-browser-read-rollback-"),
+    config = new ConfigStore(root),
+    browser = await StartupServerBrowser.open(config);
+  let release = (): void => {
+      throw new Error("Missing write gate");
+    },
+    writing = false;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const dump = spyOn(config, "dump").mockImplementation(async () => {
+    writing = true;
+    await gate;
+    throw new Error("Deferred favorite failure");
+  });
+  browser.choose("q3");
+  browser.address = "127.0.0.1:27960";
   expect(browser.q3List(3).addresses).toEqual([]);
   const pending = browser.favorite();
   try {
     for (let attempt = 0; attempt < 100 && !writing; attempt++) await Bun.sleep(1);
     expect(writing).toBe(true);
-    const optimistic = browser.q3List(3).addresses; expect(optimistic).toHaveLength(1);
-    release(); await expect(pending).rejects.toThrow("Deferred favorite failure");
-    const rolledBack = browser.q3List(3).addresses; expect(rolledBack).toEqual([]); expect(rolledBack).not.toBe(optimistic);
+    const optimistic = browser.q3List(3).addresses;
+    expect(optimistic).toHaveLength(1);
+    release();
+    await expect(pending).rejects.toThrow("Deferred favorite failure");
+    const rolledBack = browser.q3List(3).addresses;
+    expect(rolledBack).toEqual([]);
+    expect(rolledBack).not.toBe(optimistic);
     expect(browser.q3List(3).addresses).toBe(rolledBack);
-  } finally { release(); await pending.catch(() => undefined); dump.mockRestore(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    release();
+    await pending.catch(() => undefined);
+    dump.mockRestore();
+    await browser.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Q3 browser facade retains final EOT at the 256-record packet boundary", () => {
@@ -85,144 +141,296 @@ test("Q3 browser facade retains final EOT at the 256-record packet boundary", ()
 });
 
 test("Q3 browser facade cache retains global overflow addresses beyond the 4096-row UI capacity", () => {
-  const entries = Array.from({ length: 8192 }, (_, index) => ({ address: ipv4Address([127, 0, 0, 1], 20000 + index),
-    sources: ["master"] satisfies readonly import("../../src/network/services/discovery.ts").DiscoverySource[], status: null, pingMilliseconds: null, updatedAt: 0 }));
+  const entries = Array.from({ length: 8192 }, (_, index) => ({
+    address: ipv4Address([127, 0, 0, 1], 20000 + index),
+    sources: ["master"] satisfies readonly import("../../src/network/services/discovery.ts").DiscoverySource[],
+    status: null,
+    pingMilliseconds: null,
+    updatedAt: 0,
+  }));
   expect(readQ3BrowserCache(writeQ3BrowserCache(entries, null)).entries).toHaveLength(8192);
-  expect(() => writeQ3BrowserCache([...entries, { address: ipv4Address([127, 0, 0, 2], 27960), sources: ["master"], status: null, pingMilliseconds: null, updatedAt: 0 }], null)).toThrow("master entries");
+  expect(() =>
+    writeQ3BrowserCache(
+      [...entries, { address: ipv4Address([127, 0, 0, 2], 27960), sources: ["master"], status: null, pingMilliseconds: null, updatedAt: 0 }],
+      null,
+    ),
+  ).toThrow("master entries");
 });
 
 test("Q3 browser facade correlates master packets, exposes partial lists and persists canonical status with UI metadata", async () => {
-  const root = await tempDirectory("quake-browser-facade-"), config = new ConfigStore(root);
-  const peer = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }), stranger = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
+  const root = await tempDirectory("quake-browser-facade-"),
+    config = new ConfigStore(root);
+  const peer = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }),
+    stranger = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
   let browser = await StartupServerBrowser.open(config);
   try {
-    const first = ipv4Address([127, 0, 0, 1], 20001), second = ipv4Address([127, 0, 0, 1], 20002);
+    const first = ipv4Address([127, 0, 0, 1], 20001),
+      second = ipv4Address([127, 0, 0, 1], 20002);
     const receive = async () => {
-      for (let attempt = 0; attempt < 100; attempt++) { const event = peer.poll(); if (event?.kind === "packet") return event; await Bun.sleep(1); }
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const event = peer.poll();
+        if (event?.kind === "packet") return event;
+        await Bun.sleep(1);
+      }
       throw new Error("No browser master request");
     };
-    const poll = async () => { await Bun.sleep(3); browser.poll(); };
+    const poll = async () => {
+      await Bun.sleep(3);
+      browser.poll();
+    };
     const initial = browser.q3List(2).generation;
     await browser.requestQ3Master(2, `127.0.0.1:${peer.address.port}`, 71, ["empty", "full"]);
-    const request = await receive(); expect(decodeConnectionless(request.payload, "server").line).toBe("getservers 71 empty full");
+    const request = await receive();
+    expect(decodeConnectionless(request.payload, "server").line).toBe("getservers 71 empty full");
     expect(browser.q3List(2).pending).toBe(true);
-    stranger.send(request.from, masterPacket([first], true)); await poll(); expect(browser.q3List(2).addresses).toHaveLength(0);
-    peer.send(request.from, masterPacket([first], false)); await poll();
-    expect(browser.q3List(2).addresses).toEqual([first]); expect(browser.q3List(2).pending).toBe(false);
-    peer.send(request.from, masterPacket([second], true)); await poll();
-    expect(browser.q3List(2).addresses).toEqual([first, second]); expect(browser.q3List(2).generation).toBeGreaterThan(initial);
+    stranger.send(request.from, masterPacket([first], true));
+    await poll();
+    expect(browser.q3List(2).addresses).toHaveLength(0);
+    peer.send(request.from, masterPacket([first], false));
+    await poll();
+    expect(browser.q3List(2).addresses).toEqual([first]);
+    expect(browser.q3List(2).pending).toBe(false);
+    peer.send(request.from, masterPacket([second], true));
+    await poll();
+    expect(browser.q3List(2).addresses).toEqual([first, second]);
+    expect(browser.q3List(2).generation).toBeGreaterThan(initial);
     await browser.requestQ3Master(1, `127.0.0.1:${peer.address.port}`, 68, []);
     const secondary = await receive();
     if (peer.address.kind !== "ipv4") throw new Error("Fixture requires IPv4");
-    peer.send(secondary.from, masterPacket([peer.address], true)); await poll();
-    expect(browser.q3List(1).addresses).toEqual([peer.address]); expect(browser.q3List(2).addresses).toEqual([first, second]);
+    peer.send(secondary.from, masterPacket([peer.address], true));
+    await poll();
+    expect(browser.q3List(1).addresses).toEqual([peer.address]);
+    expect(browser.q3List(2).addresses).toEqual([first, second]);
     browser.addQ3(3, peer.address);
-    const status = browser.q3Core.request(peer.address, performance.now(), "status"); if (status === null) throw new Error("No status request");
-    const query = await receive(), challenge = decodeConnectionless(query.payload, "server").arguments[0];
+    const status = browser.q3Core.request(peer.address, performance.now(), "status");
+    if (status === null) throw new Error("No status request");
+    const query = await receive(),
+      challenge = decodeConnectionless(query.payload, "server").arguments[0];
     if (challenge === undefined) throw new Error("No status challenge");
-    peer.send(query.from, encodeQ3Status(`\\challenge\\${challenge}\\sv_hostname\\Actual status\\mapname\\q3dm1\\sv_maxclients\\8`, [{ name: "Player", score: 4, ping: 12 }])); await poll();
-    expect(browser.q3Core.requestResult(status)?.kind).toBe("completed"); browser.q3Core.releaseRequest(status);
-    const view: Q3BrowserCacheView = { lists: [
-      { source: 1, rows: [{ address: peer.address, name: "Authored name", visible: 7, ping: 23 }] },
-      { source: 2, rows: [second, first].map(address => ({ address, name: "Global", visible: 1, ping: -1 })) },
-      { source: 3, rows: [{ address: peer.address, name: "Favorite", visible: 3, ping: 24 }] },
-    ] };
+    peer.send(
+      query.from,
+      encodeQ3Status(`\\challenge\\${challenge}\\sv_hostname\\Actual status\\mapname\\q3dm1\\sv_maxclients\\8`, [{ name: "Player", score: 4, ping: 12 }]),
+    );
+    await poll();
+    expect(browser.q3Core.requestResult(status)?.kind).toBe("completed");
+    browser.q3Core.releaseRequest(status);
+    const view: Q3BrowserCacheView = {
+      lists: [
+        { source: 1, rows: [{ address: peer.address, name: "Authored name", visible: 7, ping: 23 }] },
+        { source: 2, rows: [second, first].map(address => ({ address, name: "Global", visible: 1, ping: -1 })) },
+        { source: 3, rows: [{ address: peer.address, name: "Favorite", visible: 3, ping: 24 }] },
+      ],
+    };
     await browser.saveQ3Cache(view);
-    const newer = browser.q3Core.request(peer.address, performance.now(), "status"); if (newer === null) throw new Error("No refresh request");
-    const freshQuery = await receive(), freshChallenge = decodeConnectionless(freshQuery.payload, "server").arguments[0];
+    const newer = browser.q3Core.request(peer.address, performance.now(), "status");
+    if (newer === null) throw new Error("No refresh request");
+    const freshQuery = await receive(),
+      freshChallenge = decodeConnectionless(freshQuery.payload, "server").arguments[0];
     if (freshChallenge === undefined) throw new Error("No refreshed status challenge");
-    peer.send(freshQuery.from, encodeQ3Status(`\\challenge\\${freshChallenge}\\sv_hostname\\New live status\\mapname\\q3dm1\\sv_maxclients\\8`, [{ name: "Player", score: 4, ping: 12 }])); await poll();
-    await browser.loadQ3Cache(); expect(browser.q3Core.entry(peer.address)?.status?.name).toBe("New live status"); browser.q3Core.releaseRequest(newer);
-    browser.choose("q3"); browser.address = "127.0.0.1:20003"; await browser.favorite();
-    const saved = await config.loadText("servers-cache-q3"); if (saved === null) throw new Error("Cache was not saved");
+    peer.send(
+      freshQuery.from,
+      encodeQ3Status(`\\challenge\\${freshChallenge}\\sv_hostname\\New live status\\mapname\\q3dm1\\sv_maxclients\\8`, [
+        { name: "Player", score: 4, ping: 12 },
+      ]),
+    );
+    await poll();
+    await browser.loadQ3Cache();
+    expect(browser.q3Core.entry(peer.address)?.status?.name).toBe("New live status");
+    browser.q3Core.releaseRequest(newer);
+    browser.choose("q3");
+    browser.address = "127.0.0.1:20003";
+    await browser.favorite();
+    const saved = await config.loadText("servers-cache-q3");
+    if (saved === null) throw new Error("Cache was not saved");
     expect(readQ3BrowserCache(saved).view?.lists[0]?.rows[0]?.name).toBe("Authored name");
     expect(readQ3BrowserCache(saved).view?.lists[1]?.rows.map(row => row.address)).toEqual([second, first]);
     const entries = browser.q3Core.list();
-    expect(() => writeQ3BrowserCache(entries, { lists: [{ source: 1, rows: [{ address: first, name: "Wrong source", visible: 1, ping: 0 }] }, { source: 2, rows: [] }, { source: 3, rows: [] }] })).toThrow("membership");
-    expect(() => writeQ3BrowserCache(entries, { lists: [{ source: 1, rows: [] }, { source: 2, rows: [{ address: first, name: "A", visible: 1, ping: 0 }, { address: first, name: "B", visible: 1, ping: 0 }] }, { source: 3, rows: [] }] })).toThrow("membership");
-    await browser.close(); browser = await StartupServerBrowser.open(config);
+    expect(() =>
+      writeQ3BrowserCache(entries, {
+        lists: [
+          { source: 1, rows: [{ address: first, name: "Wrong source", visible: 1, ping: 0 }] },
+          { source: 2, rows: [] },
+          { source: 3, rows: [] },
+        ],
+      }),
+    ).toThrow("membership");
+    expect(() =>
+      writeQ3BrowserCache(entries, {
+        lists: [
+          { source: 1, rows: [] },
+          {
+            source: 2,
+            rows: [
+              { address: first, name: "A", visible: 1, ping: 0 },
+              { address: first, name: "B", visible: 1, ping: 0 },
+            ],
+          },
+          { source: 3, rows: [] },
+        ],
+      }),
+    ).toThrow("membership");
+    await browser.close();
+    browser = await StartupServerBrowser.open(config);
     expect(browser.q3List(2).addresses).toEqual([first, second]);
     expect(browser.q3Core.entry(peer.address)?.status?.playerDetails).toEqual([{ name: "Player", score: 4, ping: 12 }]);
     expect(browser.q3Core.entry(peer.address)?.status?.rules.get("mapname")).toBe("q3dm1");
     expect(browser.q3List(3).addresses.map(address => addressKey(address))).toContain("127.0.0.1:20003");
-    const before = browser.q3List(2), load = config.loadText.bind(config);
-    let unblock = (): void => { throw new Error("Cache gate was not initialized"); };
-    const gate = new Promise<void>(resolve => { unblock = resolve; });
-    const reading = spyOn(config, "loadText").mockImplementation(async name => { await gate; return load(name); });
+    const before = browser.q3List(2),
+      load = config.loadText.bind(config);
+    let unblock = (): void => {
+      throw new Error("Cache gate was not initialized");
+    };
+    const gate = new Promise<void>(resolve => {
+      unblock = resolve;
+    });
+    const reading = spyOn(config, "loadText").mockImplementation(async name => {
+      await gate;
+      return load(name);
+    });
     let cacheCurrent = true;
     try {
-      const pendingLoad = browser.loadQ3Cache(() => { if (!cacheCurrent) throw new Error("Retired cache view"); });
-      await Promise.resolve(); cacheCurrent = false; unblock();
-      await expect(pendingLoad).rejects.toThrow("Retired cache view"); expect(browser.q3List(2)).toEqual(before);
-    } finally { unblock(); reading.mockRestore(); }
+      const pendingLoad = browser.loadQ3Cache(() => {
+        if (!cacheCurrent) throw new Error("Retired cache view");
+      });
+      await Promise.resolve();
+      cacheCurrent = false;
+      unblock();
+      await expect(pendingLoad).rejects.toThrow("Retired cache view");
+      expect(browser.q3List(2)).toEqual(before);
+    } finally {
+      unblock();
+      reading.mockRestore();
+    }
     let current = true;
-    const retired = browser.requestQ3Master(2, "localhost:27950", 68, [], () => { if (!current) throw new Error("Retired UI"); });
-    current = false; await expect(retired).rejects.toThrow("Retired UI");
-    const pending = browser.resolveQ3("localhost"), close = browser.close();
-    expect(browser.close()).toBe(close); await expect(pending).rejects.toThrow("retired"); await close;
-  } finally { await browser.close(); peer.close(); stranger.close(); await rm(root, { recursive: true, force: true }); }
+    const retired = browser.requestQ3Master(2, "localhost:27950", 68, [], () => {
+      if (!current) throw new Error("Retired UI");
+    });
+    current = false;
+    await expect(retired).rejects.toThrow("Retired UI");
+    const pending = browser.resolveQ3("localhost"),
+      close = browser.close();
+    expect(browser.close()).toBe(close);
+    await expect(pending).rejects.toThrow("retired");
+    await close;
+  } finally {
+    await browser.close();
+    peer.close();
+    stranger.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 async function openMenu(config: ConfigStore) {
-  const browser = await StartupServerBrowser.open(config), catalog = await discoverInstalledContent({ corpusRoot: config.root, discoverMods: false });
+  const browser = await StartupServerBrowser.open(config),
+    catalog = await discoverInstalledContent({ corpusRoot: config.root, discoverMods: false });
   const command = parseApplicationCommand(["--content-root", config.root]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected menu options");
-  const model = new StartupSelectionModel(catalog, command.options), identity = createIdentityOwner("browser-persistence"), seat = identity.seat(0);
+  const model = new StartupSelectionModel(catalog, command.options),
+    identity = createIdentityOwner("browser-persistence"),
+    seat = identity.seat(0);
   const images = new SceneImageRegistry({ identity: Symbol("browser menu"), session: identity.session, generation: 0 });
-  const font: TextFontSelection = { kind: "classic", classic: classicCharset(images.allocate(128, 128, { kind: "generated", name: "browser font" })), unicode: null };
-  const art = await loadNativeUiArt("resource:test:browser-font", images, async path => decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path));
+  const font: TextFontSelection = {
+    kind: "classic",
+    classic: classicCharset(images.allocate(128, 128, { kind: "generated", name: "browser font" })),
+    unicode: null,
+  };
+  const art = await loadNativeUiArt("resource:test:browser-font", images, async path =>
+    decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path),
+  );
   const connections: BrowserConnection[] = [];
-  const menu = new StartupMenu({ seat, model, art, font, titleFont: font, browser, now: () => 0, connect: connection => { connections.push(connection); },
-    play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,
-    quit: () => undefined });
+  const menu = new StartupMenu({
+    seat,
+    model,
+    art,
+    font,
+    titleFont: font,
+    browser,
+    now: () => 0,
+    connect: connection => {
+      connections.push(connection);
+    },
+    play: () => undefined,
+    load: () => undefined,
+    saves: () => ({ rows: [], error: null }),
+    refreshSaves: () => undefined,
+    quit: () => undefined,
+  });
   const click = (x: number, y: number): void => {
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
-  const key = (code: number, down: boolean): void => { menu.input({ seat, timeMilliseconds: 0, kind: "key", code, down, repeat: false }); };
+  const key = (code: number, down: boolean): void => {
+    menu.input({ seat, timeMilliseconds: 0, kind: "key", code, down, repeat: false });
+  };
   const address = (text: string): void => {
-    click(100, 158); key(KeyCode.Control, true); key(117, true); key(117, false); key(KeyCode.Control, false);
+    click(100, 158);
+    key(KeyCode.Control, true);
+    key(117, true);
+    key(117, false);
+    key(KeyCode.Control, false);
     menu.input({ seat, timeMilliseconds: 0, kind: "text", text });
   };
-  click(100, 130); click(100, 232);
+  click(100, 130);
+  click(100, 232);
   expect(menu.controller.activeMenu).toBe("menu:startup:session");
-  key(KeyCode.Escape, true); key(KeyCode.Escape, false);
+  key(KeyCode.Escape, true);
+  key(KeyCode.Escape, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
-  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
+  key(KeyCode.Enter, true);
+  key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:session");
   for (let i = 0; i < 80; i++) {
     const current = menu.controller.state().focus;
     if (current.kind === "menu" && current.control === "ui:startup:back") break;
-    key(KeyCode.Tab, true); key(KeyCode.Tab, false);
+    key(KeyCode.Tab, true);
+    key(KeyCode.Tab, false);
   }
-  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
+  key(KeyCode.Enter, true);
+  key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
   click(100, 436);
   expect(menu.controller.activeMenu).toBe("menu:startup:main");
-  click(100, 130); click(100, 232);
+  click(100, 130);
+  click(100, 232);
   for (let i = 0; i < 80; i++) {
     const current = menu.controller.state().focus;
     if (current.kind === "menu" && current.control === "ui:startup:browse") break;
-    key(KeyCode.Tab, true); key(KeyCode.Tab, false);
+    key(KeyCode.Tab, true);
+    key(KeyCode.Tab, false);
   }
-  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
+  key(KeyCode.Enter, true);
+  key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:servers");
   for (let i = 0; i < 4 && browser.protocol !== "q2"; i++) click(400, 122);
   expect(browser.protocol).toBe("q2");
-  return { browser, menu, connections, click, address,
-    async close() { menu.close(); await browser.close(); art.close(); images.close(); } };
+  return {
+    browser,
+    menu,
+    connections,
+    click,
+    address,
+    async close() {
+      menu.close();
+      await browser.close();
+      art.close();
+      images.close();
+    },
+  };
 }
 
 test("normal browser menu persists favorites, removal, selected addresses and direct connect across immediate close", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "quake-browser-menu-")), config = new ConfigStore(directory);
+  const directory = await mkdtemp(resolve(tmpdir(), "quake-browser-menu-")),
+    config = new ConfigStore(directory);
   try {
     const first = await openMenu(config);
     try {
       first.address("127.0.0.1:27911");
       expect(first.browser.address).toBe("127.0.0.1:27911");
       first.click(460, 194);
-    } finally { await first.close(); }
+    } finally {
+      await first.close();
+    }
     const savedFavorite = await config.loadText("servers-q2");
     expect(savedFavorite).toBe('[{"kind":"ipv4","host":[127,0,0,1],"port":27911}]');
 
@@ -233,7 +441,9 @@ test("normal browser menu persists favorites, removal, selected addresses and di
       expect(second.browser.selected).toBe("127.0.0.1:27911");
       expect(second.browser.address).toBe("127.0.0.1:27911");
       second.click(460, 194);
-    } finally { await second.close(); }
+    } finally {
+      await second.close();
+    }
     expect(await config.loadText("servers-q2")).toBe("[]");
 
     const third = await openMenu(config);
@@ -241,7 +451,9 @@ test("normal browser menu persists favorites, removal, selected addresses and di
       expect(third.browser.rows()).toHaveLength(0);
       third.address("localhost:27912");
       third.click(100, 409);
-    } finally { await third.close(); }
+    } finally {
+      await third.close();
+    }
     expect(third.connections).toEqual([{ protocol: "q2", remote: "localhost:27912" }]);
     const direct = await config.loadText("servers-direct-q2");
     expect(direct === null ? [] : readDirectServers(direct).map(server => server.remote)).toEqual(["localhost:27912"]);
@@ -255,15 +467,20 @@ test("normal browser menu persists favorites, removal, selected addresses and di
       expect(fourth.browser.address).toBe("localhost:27912");
       fourth.click(100, 409);
       fourth.click(460, 194);
-    } finally { await fourth.close(); }
+    } finally {
+      await fourth.close();
+    }
     expect(fourth.connections).toEqual([{ protocol: "q2", remote: "localhost:27912" }]);
     const reconnected = await config.loadText("servers-direct-q2");
     expect(reconnected === null ? [] : readDirectServers(reconnected).map(server => server.remote)).toEqual(["localhost:27912"]);
     const fifth = await openMenu(config);
     try {
       expect(fifth.browser.rows()[0]?.sources).toEqual(["favorite", "direct"]);
-      fifth.click(100, 265); fifth.click(460, 194);
-    } finally { await fifth.close(); }
+      fifth.click(100, 265);
+      fifth.click(460, 194);
+    } finally {
+      await fifth.close();
+    }
     const sixth = await openMenu(config);
     try {
       expect(sixth.browser.rows()[0]?.sources).toEqual(["direct"]);
@@ -271,26 +488,49 @@ test("normal browser menu persists favorites, removal, selected addresses and di
       expect(sixth.browser.rows()).toHaveLength(0);
       sixth.click(400, 372);
       expect(sixth.browser.rows()).toHaveLength(1);
-    } finally { await sixth.close(); }
-  } finally { await rm(directory, { recursive: true, force: true }); }
+    } finally {
+      await sixth.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }, 30000);
 
 test("direct address recall is protocol-specific and failed favorite writes leave the list unchanged", async () => {
-  const directory = await tempDirectory("quake-browser-addresses-"), config = new ConfigStore(directory);
+  const directory = await tempDirectory("quake-browser-addresses-"),
+    config = new ConfigStore(directory);
   let browser = await StartupServerBrowser.open(config);
   try {
-    browser.choose("q2"); browser.address = "127.0.0.1:27911"; await browser.connection();
-    browser.choose("q3"); browser.address = "127.0.0.1:27961"; await browser.connection();
-    browser.choose("q2"); expect(browser.address).toBe("127.0.0.1:27911");
-    browser.address = "127.0.0.1:27912"; await browser.connection();
-    await browser.close(); browser = await StartupServerBrowser.open(config); browser.choose("q2");
+    browser.choose("q2");
+    browser.address = "127.0.0.1:27911";
+    await browser.connection();
+    browser.choose("q3");
+    browser.address = "127.0.0.1:27961";
+    await browser.connection();
+    browser.choose("q2");
+    expect(browser.address).toBe("127.0.0.1:27911");
+    browser.address = "127.0.0.1:27912";
+    await browser.connection();
+    await browser.close();
+    browser = await StartupServerBrowser.open(config);
+    browser.choose("q2");
     expect(browser.address).toBe("127.0.0.1:27912");
     expect(browser.rows()).toHaveLength(2);
-    browser.choose("q3"); expect(browser.address).toBe("127.0.0.1:27961"); expect(browser.rows()).toHaveLength(1);
-    browser.choose("q1"); expect(browser.address).toBe("localhost:26000"); expect(browser.rows()).toHaveLength(0);
-    browser.address = ""; await expect(browser.connection()).rejects.toThrow("Invalid direct server address");
-    await rm(directory, { recursive: true }); await Bun.write(directory, "not a settings directory");
-    browser.address = "127.0.0.1:26001"; await expect(browser.favorite()).rejects.toThrow();
+    browser.choose("q3");
+    expect(browser.address).toBe("127.0.0.1:27961");
+    expect(browser.rows()).toHaveLength(1);
+    browser.choose("q1");
+    expect(browser.address).toBe("localhost:26000");
     expect(browser.rows()).toHaveLength(0);
-  } finally { await browser.close(); await rm(directory, { recursive: true, force: true }); }
+    browser.address = "";
+    await expect(browser.connection()).rejects.toThrow("Invalid direct server address");
+    await rm(directory, { recursive: true });
+    await Bun.write(directory, "not a settings directory");
+    browser.address = "127.0.0.1:26001";
+    await expect(browser.favorite()).rejects.toThrow();
+    expect(browser.rows()).toHaveLength(0);
+  } finally {
+    await browser.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

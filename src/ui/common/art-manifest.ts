@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export interface MenuArtFile {
   readonly file: string;
   readonly width: number;
@@ -14,28 +15,54 @@ export interface MenuArtFrame extends MenuArtFile {
   readonly borderScale: number;
 }
 export const menuBackground: MenuArtFile = {
-  file: "assets/ui/menu-background.png", width: 1536, height: 1024,
+  file: "assets/ui/menu-background.png",
+  width: 1536,
+  height: 1024,
   sha256: "04c4fd787c4b47f1ba27ec293c361cdf1c87406fe4d1f0005b8ba6fbe1287ffa",
 };
 export const menuPanel: MenuArtFrame = {
-  file: "assets/ui/menu-panel.png", width: 1254, height: 1254,
+  file: "assets/ui/menu-panel.png",
+  width: 1254,
+  height: 1254,
   sha256: "179d84c501384fc88443a9a415a06195270306706eb7e4ca5dc68ed06043f2a0",
-  region: { width: 1254, height: 1254, uv: [{ x: 0, y: 0 }, { x: 1, y: 1 }] },
-  border: { left: 160, top: 160, right: 160, bottom: 160 }, borderScale: 0.2,
+  region: {
+    width: 1254,
+    height: 1254,
+    uv: [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ],
+  },
+  border: { left: 160, top: 160, right: 160, bottom: 160 },
+  borderScale: 0.2,
 };
 export const menuFocus: MenuArtFrame = {
-  file: "assets/ui/menu-focus.png", width: 2172, height: 724,
+  file: "assets/ui/menu-focus.png",
+  width: 2172,
+  height: 724,
   sha256: "65b98e03aaba9f26edc36ffa0e769e2932b5b85ea994a09447edf3bfc6ba4312",
-  region: { width: 2172, height: 633, uv: [{ x: 0, y: 68 / 724 }, { x: 1, y: 701 / 724 }] },
-  border: { left: 96, top: 96, right: 96, bottom: 96 }, borderScale: 0.0625,
+  region: {
+    width: 2172,
+    height: 633,
+    uv: [
+      { x: 0, y: 68 / 724 },
+      { x: 1, y: 701 / 724 },
+    ],
+  },
+  border: { left: 96, top: 96, right: 96, bottom: 96 },
+  borderScale: 0.0625,
 };
 export const mainMenuBackground: MenuArtFile = {
-  file: "assets/ui/main-menu-background.png", width: 1672, height: 941,
+  file: "assets/ui/main-menu-background.png",
+  width: 1672,
+  height: 941,
   sha256: "53630f6ca2d86492e983f7e54b54ce913cbebe58df6bd847c316753ef306a718",
 };
 /** Drawn by the splash window only; listed here so its hash and size are checked with the other art. */
 export const splashTitle: MenuArtFile = {
-  file: "assets/ui/title.png", width: 1536, height: 1024,
+  file: "assets/ui/title.png",
+  width: 1536,
+  height: 1024,
   sha256: "ca15d94fcdcd748449eddb73dd280a8af267f9d7d3aadd036de6e704f5988708",
 };
 export const menuArtFiles: readonly MenuArtFile[] = [menuBackground, menuPanel, menuFocus, mainMenuBackground, splashTitle];

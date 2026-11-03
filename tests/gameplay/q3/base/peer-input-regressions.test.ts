@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { swingAngles } from "../../../../src/content/q3/foundation/player-pose.ts";
 import { PlayerAnimationParseError, parsePlayerAnimationConfig } from "../../../../src/content/q3/foundation/animation-config.ts";
@@ -27,16 +28,24 @@ test("shader remap names of 64 or more bytes are cut to fit the source slot", ()
 });
 
 test("a follower's snapshot takes position and stores from the followed client", () => {
-  const spectator = new GameClient("baseq3"), target = new GameClient("baseq3"), own = spectator.ps, followed = target.ps;
-  own.clientNum = 1; followed.origin = { x: 900, y: -700, z: 50 };
-  const clientAt = (number: number): GameClient => { if (number !== 1) throw new Error("Missing client"); return target; };
+  const spectator = new GameClient("baseq3"),
+    target = new GameClient("baseq3"),
+    own = spectator.ps,
+    followed = target.ps;
+  own.clientNum = 1;
+  followed.origin = { x: 900, y: -700, z: 50 };
+  const clientAt = (number: number): GameClient => {
+    if (number !== 1) throw new Error("Missing client");
+    return target;
+  };
   expect(snapshotViewSource(own, clientAt)).toBe(own);
   own.pmFlags |= MoveFlags.FOLLOW;
   expect(snapshotViewSource(own, clientAt)).toBe(followed);
 });
 
 test("rerelease item rows carry the game_x64.dll values for body armor", () => {
-  const classic = createQ2ItemModule(hooks), rerelease = createQ2ItemModule({ ...hooks, edition: "rerelease" });
+  const classic = createQ2ItemModule(hooks),
+    rerelease = createQ2ItemModule({ ...hooks, edition: "rerelease" });
   const names = new Set(["item_armor_body"]);
   expect(classic.resourcePaths(names)).toContain("sound/misc/ar1_pkup.wav");
   expect(rerelease.resourcePaths(names)).toContain("sound/misc/ar3_pkup.wav");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../src/contracts/execution.ts";
@@ -8,11 +9,23 @@ import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../
 import { readRereleaseWeaponBehaviorCheckpoint } from "../../src/app/bootstrap/simulation/rerelease-weapon-checkpoint.ts";
 
 const module: ModuleIdentity = { id: "test:native", artifactPath: "game_x64.dll", digest: q2EaksWeaponDigest, revision: q2EaksWeaponDigest };
-const declaration = builtInRereleaseWeaponDeclaration(module), definition = rereleaseWeaponDefinition(module);
+const declaration = builtInRereleaseWeaponDeclaration(module),
+  definition = rereleaseWeaponDefinition(module);
 if (declaration === null || definition === null) throw new Error("Missing legacy native profile");
 const sourceSave = { native: new TextEncoder().encode("{}"), deferredDamage: [], projections: [] };
-const saved = { version: 1, definition, declaration, map: { map: "base1", entities: "{}", spawnPoint: "" },
-  time: 0, cvars: new Uint8Array(), game: sourceSave, level: sourceSave, configstrings: [], retired: [], bindings: [] };
+const saved = {
+  version: 1,
+  definition,
+  declaration,
+  map: { map: "base1", entities: "{}", spawnPoint: "" },
+  time: 0,
+  cvars: new Uint8Array(),
+  game: sourceSave,
+  level: sourceSave,
+  configstrings: [],
+  retired: [],
+  bindings: [],
+};
 const reader = (value: unknown) => new SaveReader(decodeCheckpointValue(encodeCheckpointValue(value)), "native");
 
 test("native checkpoint retains complete layout identity and accepts only its exact legacy fallback", () => {

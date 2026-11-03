@@ -5,11 +5,20 @@ import type { ModCallbackInput } from "../../contracts/mod-callbacks.ts";
 export function modCallbackInputs(call: { readonly stage: string; readonly operation: string }): Set<ModCallbackInput> {
   const available = new Set<ModCallbackInput>(["self", "time"]);
   if (call.stage === "observe") available.add("result");
-  const additional: readonly ModCallbackInput[] = call.operation === "damage" ? ["attacker", "inflictor", "amount", "knockback", "direction", "point", "normal"]
-    : call.operation === "inventory.give" || call.operation === "inventory.consume" ? ["item", "amount"]
-    : call.operation === "actor.use" ? ["other", "activator"] : call.operation === "actor.touch" ? ["other"]
-    : call.operation === "actor.think" ? ["elapsed"] : call.operation === "actor.pain" ? ["attacker", "amount", "knockback"]
-    : ["attacker", "inflictor", "amount", "knockback", "point"];
+  const additional: readonly ModCallbackInput[] =
+    call.operation === "damage"
+      ? ["attacker", "inflictor", "amount", "knockback", "direction", "point", "normal"]
+      : call.operation === "inventory.give" || call.operation === "inventory.consume"
+        ? ["item", "amount"]
+        : call.operation === "actor.use"
+          ? ["other", "activator"]
+          : call.operation === "actor.touch"
+            ? ["other"]
+            : call.operation === "actor.think"
+              ? ["elapsed"]
+              : call.operation === "actor.pain"
+                ? ["attacker", "amount", "knockback"]
+                : ["attacker", "inflictor", "amount", "knockback", "point"];
   for (const name of additional) available.add(name);
   return available;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Adapted from the reference port and the reference port botdata readers.
 // Schemas follow the installed Q1 2021 and Q2 2023 rerelease bots/*.txt files.
 // KEX's reader is closed; this parses documented source data, not recovered engine code.
@@ -53,7 +54,7 @@ export interface CharactersResult {
 
 export function parseCharacters(text: string): CharactersResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: CharacterEntry[] = [];
 
   for (const block of blocks) {
@@ -106,8 +107,7 @@ export function parseCharacters(text: string): CharactersResult {
 // weapons.txt
 //=============================================================================
 
-export type BotWeaponIdentity = { readonly kind: "q1-bit"; readonly bit: number }
-  | { readonly kind: "q2-classname"; readonly classname: string };
+export type BotWeaponIdentity = { readonly kind: "q1-bit"; readonly bit: number } | { readonly kind: "q2-classname"; readonly classname: string };
 
 export class WeaponEntry extends BotSourceEntry {
   identity: BotWeaponIdentity = { kind: "q1-bit", bit: 0 };
@@ -139,7 +139,7 @@ export interface WeaponsResult {
 
 export function parseWeapons(text: string, format: BotDataFormat = "q1"): WeaponsResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: WeaponEntry[] = [];
 
   for (const block of blocks) {
@@ -280,7 +280,7 @@ export interface ItemsResult {
 
 export function parseItems(text: string): ItemsResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: ItemEntry[] = [];
 
   for (const block of blocks) {
@@ -351,7 +351,7 @@ export interface MonstersResult {
 
 export function parseMonsters(text: string): MonstersResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: MonsterEntry[] = [];
 
   for (const block of blocks) {
@@ -404,7 +404,7 @@ export interface InteractablesResult {
 
 export function parseInteractables(text: string): InteractablesResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: InteractableEntry[] = [];
 
   for (const block of blocks) {
@@ -467,7 +467,10 @@ export function parseInteractables(text: string): InteractablesResult {
 // game_rules.txt
 //=============================================================================
 
-export interface BotRuleCondition { readonly cvar: string; readonly value: number; }
+export interface BotRuleCondition {
+  readonly cvar: string;
+  readonly value: number;
+}
 export class GameRuleEntry extends BotSourceEntry {
   conditions: BotRuleCondition[] = [];
   onlyGameType: string | undefined;
@@ -489,28 +492,38 @@ export interface GameRulesResult {
 
 export function parseGameRules(text: string): GameRulesResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: GameRuleEntry[] = [];
 
   for (const block of blocks) {
     const entry = new GameRuleEntry();
     entry.source = block;
-    const cvars: string[] = [], values: number[] = [];
+    const cvars: string[] = [],
+      values: number[] = [];
     for (const f of block.fields) {
       switch (f.key) {
         case "cvar": {
           const s = expectString(errors, f.key, f.values, f.line);
-          if (s !== undefined) { entry.cvar = s; cvars.push(s); }
+          if (s !== undefined) {
+            entry.cvar = s;
+            cvars.push(s);
+          }
           break;
         }
         case "value": {
           const n = expectNumber(errors, f.key, f.values, f.line);
-          if (n !== undefined) { entry.value = n; values.push(n); }
+          if (n !== undefined) {
+            entry.value = n;
+            values.push(n);
+          }
           break;
         }
         case "weapon_stay": {
           const b = expectBool(errors, f.key, f.values, f.line);
-          if (b !== undefined) { entry.weaponStay = b; entry.weaponStaySpecified = true; }
+          if (b !== undefined) {
+            entry.weaponStay = b;
+            entry.weaponStaySpecified = true;
+          }
           break;
         }
         case "has_teams": {
@@ -550,7 +563,10 @@ export function parseGameRules(text: string): GameRulesResult {
       }
     }
     if (cvars.length !== values.length || cvars.length > 2) errors.push(`line ${block.line}: game rule expects one or two paired cvar/value entries`);
-    cvars.forEach((cvar, index) => { const value = values[index]; if (value !== undefined) entry.conditions.push({ cvar, value }); });
+    cvars.forEach((cvar, index) => {
+      const value = values[index];
+      if (value !== undefined) entry.conditions.push({ cvar, value });
+    });
     entries.push(entry);
   }
 
@@ -573,7 +589,7 @@ export interface TeamsResult {
 
 export function parseTeams(text: string): TeamsResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: TeamEntry[] = [];
 
   for (const block of blocks) {
@@ -621,7 +637,7 @@ export interface ChatsResult {
 
 export function parseChats(text: string): ChatsResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const entries: ChatEntry[] = [];
 
   for (const block of blocks) {
@@ -999,7 +1015,7 @@ function parseSkillBlock(block: Block, errors: string[]): BotSkillSettings | und
  */
 export function parseBotSettings(text: string): BotSettingsResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map((e) => `line ${e.line}: ${e.message}`);
+  const errors = blockErrors.map(e => `line ${e.line}: ${e.message}`);
   const skills: BotSkillSettings[] = [];
 
   for (const block of blocks) {
@@ -1016,12 +1032,17 @@ export class DangerEntry extends BotSourceEntry {
   sightDist = 3.4028234663852886e38;
   flags: string[] = [];
 }
-export interface DangersResult { entries: DangerEntry[]; errors: string[]; }
+export interface DangersResult {
+  entries: DangerEntry[];
+  errors: string[];
+}
 export function parseDangers(text: string): DangersResult {
   const { blocks, errors: blockErrors } = parseBlocks(text);
-  const errors = blockErrors.map(error => `line ${error.line}: ${error.message}`), entries: DangerEntry[] = [];
+  const errors = blockErrors.map(error => `line ${error.line}: ${error.message}`),
+    entries: DangerEntry[] = [];
   for (const block of blocks) {
-    const entry = new DangerEntry(); entry.source = block;
+    const entry = new DangerEntry();
+    entry.source = block;
     for (const field of block.fields) {
       if (field.key === "name") {
         const value = expectString(errors, field.key, field.values, field.line);
@@ -1030,7 +1051,10 @@ export function parseDangers(text: string): DangersResult {
         const value = expectNumber(errors, field.key, field.values, field.line);
         if (value !== undefined) entry.sightDist = value;
       } else if (field.key === "flags") entry.flags = fieldFlagList(field.values);
-      else { entry.unknown.push(field); unknownKey(errors, field.key, field.line); }
+      else {
+        entry.unknown.push(field);
+        unknownKey(errors, field.key, field.line);
+      }
     }
     entries.push(entry);
   }

@@ -4,10 +4,26 @@ import { isIP } from "node:net";
 import { isUnknownArray } from "./value.ts";
 
 export type Ipv4Host = readonly [number, number, number, number];
-export interface Ipv4Address { readonly kind: "ipv4"; readonly host: Ipv4Host; readonly port: number; }
-export interface Ipv6Address { readonly kind: "ipv6"; readonly host: string; readonly port: number; }
-export interface LoopbackAddress { readonly kind: "loopback"; readonly id: string; }
-export interface IpxAddress { readonly kind: "ipx"; readonly network: number; readonly node: readonly [number, number, number, number, number, number]; readonly port: number; }
+export interface Ipv4Address {
+  readonly kind: "ipv4";
+  readonly host: Ipv4Host;
+  readonly port: number;
+}
+export interface Ipv6Address {
+  readonly kind: "ipv6";
+  readonly host: string;
+  readonly port: number;
+}
+export interface LoopbackAddress {
+  readonly kind: "loopback";
+  readonly id: string;
+}
+export interface IpxAddress {
+  readonly kind: "ipx";
+  readonly network: number;
+  readonly node: readonly [number, number, number, number, number, number];
+  readonly port: number;
+}
 export type IpAddress = Ipv4Address | Ipv6Address;
 export type NetworkAddress = IpAddress | LoopbackAddress | IpxAddress;
 
@@ -38,29 +54,43 @@ export function ipAddress(host: string, port: number, allowZero = false): IpAddr
 }
 
 export function ipxAddress(network: number, node: IpxAddress["node"], port: number): IpxAddress {
-  if (!Number.isInteger(network) || network < 0 || network > 0xffffffff || node.some(value => !Number.isInteger(value) || value < 0 || value > 255)) throw new RangeError("Invalid IPX address");
+  if (!Number.isInteger(network) || network < 0 || network > 0xffffffff || node.some(value => !Number.isInteger(value) || value < 0 || value > 255))
+    throw new RangeError("Invalid IPX address");
   const copy: IpxAddress["node"] = [node[0], node[1], node[2], node[3], node[4], node[5]];
   return Object.freeze({ kind: "ipx", network, node: Object.freeze(copy), port: portNumber(port) });
 }
 
-export function addressHost(address: IpAddress): string { return address.kind === "ipv4" ? address.host.join(".") : address.host; }
+export function addressHost(address: IpAddress): string {
+  return address.kind === "ipv4" ? address.host.join(".") : address.host;
+}
 export function addressKey(address: NetworkAddress, includePort = true): string {
   switch (address.kind) {
-    case "loopback": return `loopback:${address.id}`;
-    case "ipv4": return `${address.host.join(".")}${includePort ? `:${address.port}` : ""}`;
-    case "ipv6": return `[${address.host}]${includePort ? `:${address.port}` : ""}`;
-    case "ipx": return `ipx:${address.network.toString(16).padStart(8, "0")}:${address.node.map(value => value.toString(16).padStart(2, "0")).join("")}${includePort ? `:${address.port}` : ""}`;
+    case "loopback":
+      return `loopback:${address.id}`;
+    case "ipv4":
+      return `${address.host.join(".")}${includePort ? `:${address.port}` : ""}`;
+    case "ipv6":
+      return `[${address.host}]${includePort ? `:${address.port}` : ""}`;
+    case "ipx":
+      return `ipx:${address.network.toString(16).padStart(8, "0")}:${address.node.map(value => value.toString(16).padStart(2, "0")).join("")}${includePort ? `:${address.port}` : ""}`;
   }
 }
 /** Field comparison with the same equivalence as addressKey, without formatting keys. */
 export function sameAddress(left: NetworkAddress, right: NetworkAddress, includePort = true): boolean {
   if (left.kind !== right.kind) return false;
   switch (left.kind) {
-    case "loopback": return right.kind === "loopback" && left.id === right.id;
+    case "loopback":
+      return right.kind === "loopback" && left.id === right.id;
     case "ipv4": {
       if (right.kind !== "ipv4") return false;
       const other = right;
-      return left.host[0] === other.host[0] && left.host[1] === other.host[1] && left.host[2] === other.host[2] && left.host[3] === other.host[3] && (!includePort || left.port === other.port);
+      return (
+        left.host[0] === other.host[0] &&
+        left.host[1] === other.host[1] &&
+        left.host[2] === other.host[2] &&
+        left.host[3] === other.host[3] &&
+        (!includePort || left.port === other.port)
+      );
     }
     case "ipv6": {
       if (right.kind !== "ipv6") return false;
@@ -70,7 +100,7 @@ export function sameAddress(left: NetworkAddress, right: NetworkAddress, include
     case "ipx": {
       if (right.kind !== "ipx") return false;
       const other = right;
-      if (left.network !== other.network || includePort && left.port !== other.port) return false;
+      if (left.network !== other.network || (includePort && left.port !== other.port)) return false;
       for (let index = 0; index < 6; index++) if (left.node[index] !== other.node[index]) return false;
       return true;
     }
@@ -80,7 +110,8 @@ export function sameAddress(left: NetworkAddress, right: NetworkAddress, include
 /** Boundary for saved favorites and configured service endpoints. */
 export function parseNetworkAddress(value: unknown): NetworkAddress {
   if (typeof value !== "object" || value === null || !("kind" in value)) throw new RangeError("Invalid network address record");
-  if (value.kind === "loopback" && "id" in value && typeof value.id === "string" && value.id.length > 0) return Object.freeze({ kind: "loopback", id: value.id });
+  if (value.kind === "loopback" && "id" in value && typeof value.id === "string" && value.id.length > 0)
+    return Object.freeze({ kind: "loopback", id: value.id });
   if (!("port" in value) || typeof value.port !== "number") throw new RangeError("Network address has no port");
   if (value.kind === "ipv6" && "host" in value && typeof value.host === "string") {
     const address = ipAddress(value.host, value.port);
@@ -90,18 +121,29 @@ export function parseNetworkAddress(value: unknown): NetworkAddress {
   if (value.kind === "ipv4" && "host" in value && isUnknownArray(value.host)) {
     const bytes: readonly unknown[] = value.host;
     const [a, b, c, d] = bytes;
-    if (bytes.length === 4 && typeof a === "number" && typeof b === "number" && typeof c === "number" && typeof d === "number") return ipv4Address([a, b, c, d], value.port);
+    if (bytes.length === 4 && typeof a === "number" && typeof b === "number" && typeof c === "number" && typeof d === "number")
+      return ipv4Address([a, b, c, d], value.port);
   }
   if (value.kind === "ipx" && "node" in value && isUnknownArray(value.node) && "network" in value && typeof value.network === "number") {
     const bytes: readonly unknown[] = value.node;
     const [a, b, c, d, e, f] = bytes;
-    if (bytes.length === 6 && typeof a === "number" && typeof b === "number" && typeof c === "number" && typeof d === "number" && typeof e === "number" && typeof f === "number") return ipxAddress(value.network, [a, b, c, d, e, f], value.port);
+    if (
+      bytes.length === 6 &&
+      typeof a === "number" &&
+      typeof b === "number" &&
+      typeof c === "number" &&
+      typeof d === "number" &&
+      typeof e === "number" &&
+      typeof f === "number"
+    )
+      return ipxAddress(value.network, [a, b, c, d, e, f], value.port);
   }
   throw new RangeError("Invalid network address fields");
 }
 
 export async function resolveAddress(text: string, defaultPort: number, family: 0 | 4 | 6 = 0): Promise<IpAddress> {
-  let host = text, port = defaultPort;
+  let host = text,
+    port = defaultPort;
   if (text.startsWith("[")) {
     const end = text.indexOf("]");
     if (end < 0) throw new RangeError("Unclosed IPv6 address");
@@ -134,13 +176,27 @@ export function isPrivateHost(hostname: string): boolean {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
   const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
   if (v4 !== null) {
-    const a = Number(v4[1]), b = Number(v4[2]);
-    return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127;
+    const a = Number(v4[1]),
+      b = Number(v4[2]);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
   }
   if (host.includes(":")) return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith("::ffff:");
   return false;
 }
 /** IPX is a link-layer network, so it counts as a trusted local network. */
 export function isPrivateNetworkAddress(address: NetworkAddress): boolean {
-  return address.kind === "loopback" || address.kind === "ipx" || address.kind === "ipv4" && isPrivateHost(address.host.join(".")) || address.kind === "ipv6" && isPrivateHost(address.host);
+  return (
+    address.kind === "loopback" ||
+    address.kind === "ipx" ||
+    (address.kind === "ipv4" && isPrivateHost(address.host.join("."))) ||
+    (address.kind === "ipv6" && isPrivateHost(address.host))
+  );
 }

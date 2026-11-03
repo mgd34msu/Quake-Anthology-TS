@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Allocation-free scalar byte conversion, following the shared C foundation
  * (include/qa/binary.h): loads/stores are plain arithmetic on caller bytes and
@@ -60,8 +61,7 @@ export function loadU16LE(data: Uint8Array, offset: number): number {
 }
 
 export function loadU32LE(data: Uint8Array, offset: number): number {
-  return (byteAt(data, offset) | (byteAt(data, offset + 1) << 8)
-    | (byteAt(data, offset + 2) << 16) | (byteAt(data, offset + 3) << 24)) >>> 0;
+  return (byteAt(data, offset) | (byteAt(data, offset + 1) << 8) | (byteAt(data, offset + 2) << 16) | (byteAt(data, offset + 3) << 24)) >>> 0;
 }
 
 export function loadI32LE(data: Uint8Array, offset: number): number {

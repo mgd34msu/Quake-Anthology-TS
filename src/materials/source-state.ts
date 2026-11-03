@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // GL_State and GLS_* from id Software's renderer/tr_backend.c and tr_local.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { CommonError } from "../core/common-error.ts";
@@ -35,8 +36,7 @@ export enum SourceStateBit {
 }
 
 export type SourceBlendSourceFactor = Exclude<BlendFactor, "src-color" | "one-minus-src-color">;
-export type SourceBlendDestinationFactor = Exclude<BlendFactor,
-  "dst-color" | "one-minus-dst-color" | "src-alpha-saturate">;
+export type SourceBlendDestinationFactor = Exclude<BlendFactor, "dst-color" | "one-minus-dst-color" | "src-alpha-saturate">;
 
 export interface SourceStateInput {
   readonly depthTest: "less-equal" | "equal";
@@ -48,8 +48,7 @@ export interface SourceStateInput {
 export type SourceStateChange =
   | { readonly kind: "depth-function"; readonly value: SourceStateInput["depthTest"] }
   | { readonly kind: "blend"; readonly enabled: false }
-  | { readonly kind: "blend"; readonly enabled: true;
-      readonly source: SourceBlendSourceFactor; readonly destination: SourceBlendDestinationFactor }
+  | { readonly kind: "blend"; readonly enabled: true; readonly source: SourceBlendSourceFactor; readonly destination: SourceBlendDestinationFactor }
   | { readonly kind: "depth-write"; readonly value: boolean }
   | { readonly kind: "polygon-mode"; readonly value: "fill" | "line" }
   | { readonly kind: "depth-test"; readonly enabled: boolean }
@@ -84,12 +83,15 @@ const ALPHA_TEST_BITS: Readonly<Record<RenderState["alphaTest"], number>> = {
 };
 
 /** Null blend encodes disabled blending; explicit one/zero still enables GL_BLEND. */
-export function sourceStateBits(input: SourceStateInput, polygonMode: "fill" | "line" = "fill",
-  depthTestEnabled = true): number {
+export function sourceStateBits(input: SourceStateInput, polygonMode: "fill" | "line" = "fill", depthTestEnabled = true): number {
   let bits: number;
   switch (input.depthTest) {
-    case "less-equal": bits = 0; break;
-    case "equal": bits = SourceStateBit.DEPTHFUNC_EQUAL; break;
+    case "less-equal":
+      bits = 0;
+      break;
+    case "equal":
+      bits = SourceStateBit.DEPTHFUNC_EQUAL;
+      break;
     default: {
       const invalid: never = input.depthTest;
       throw new RangeError(`GL_State cannot encode depth function '${invalid}'`);
@@ -104,30 +106,49 @@ export function sourceStateBits(input: SourceStateInput, polygonMode: "fill" | "
 
 function sourceBlendFactor(bits: number): SourceBlendSourceFactor {
   switch (bits) {
-    case SourceStateBit.SRCBLEND_ZERO: return "zero";
-    case SourceStateBit.SRCBLEND_ONE: return "one";
-    case SourceStateBit.SRCBLEND_DST_COLOR: return "dst-color";
-    case SourceStateBit.SRCBLEND_ONE_MINUS_DST_COLOR: return "one-minus-dst-color";
-    case SourceStateBit.SRCBLEND_SRC_ALPHA: return "src-alpha";
-    case SourceStateBit.SRCBLEND_ONE_MINUS_SRC_ALPHA: return "one-minus-src-alpha";
-    case SourceStateBit.SRCBLEND_DST_ALPHA: return "dst-alpha";
-    case SourceStateBit.SRCBLEND_ONE_MINUS_DST_ALPHA: return "one-minus-dst-alpha";
-    case SourceStateBit.SRCBLEND_ALPHA_SATURATE: return "src-alpha-saturate";
-    default: throw new CommonError("drop", "GL_State: invalid src blend state bits\n");
+    case SourceStateBit.SRCBLEND_ZERO:
+      return "zero";
+    case SourceStateBit.SRCBLEND_ONE:
+      return "one";
+    case SourceStateBit.SRCBLEND_DST_COLOR:
+      return "dst-color";
+    case SourceStateBit.SRCBLEND_ONE_MINUS_DST_COLOR:
+      return "one-minus-dst-color";
+    case SourceStateBit.SRCBLEND_SRC_ALPHA:
+      return "src-alpha";
+    case SourceStateBit.SRCBLEND_ONE_MINUS_SRC_ALPHA:
+      return "one-minus-src-alpha";
+    case SourceStateBit.SRCBLEND_DST_ALPHA:
+      return "dst-alpha";
+    case SourceStateBit.SRCBLEND_ONE_MINUS_DST_ALPHA:
+      return "one-minus-dst-alpha";
+    case SourceStateBit.SRCBLEND_ALPHA_SATURATE:
+      return "src-alpha-saturate";
+    default:
+      throw new CommonError("drop", "GL_State: invalid src blend state bits\n");
   }
 }
 
 function destinationBlendFactor(bits: number): SourceBlendDestinationFactor {
   switch (bits) {
-    case SourceStateBit.DSTBLEND_ZERO: return "zero";
-    case SourceStateBit.DSTBLEND_ONE: return "one";
-    case SourceStateBit.DSTBLEND_SRC_COLOR: return "src-color";
-    case SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR: return "one-minus-src-color";
-    case SourceStateBit.DSTBLEND_SRC_ALPHA: return "src-alpha";
-    case SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA: return "one-minus-src-alpha";
-    case SourceStateBit.DSTBLEND_DST_ALPHA: return "dst-alpha";
-    case SourceStateBit.DSTBLEND_ONE_MINUS_DST_ALPHA: return "one-minus-dst-alpha";
-    default: throw new CommonError("drop", "GL_State: invalid dst blend state bits\n");
+    case SourceStateBit.DSTBLEND_ZERO:
+      return "zero";
+    case SourceStateBit.DSTBLEND_ONE:
+      return "one";
+    case SourceStateBit.DSTBLEND_SRC_COLOR:
+      return "src-color";
+    case SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR:
+      return "one-minus-src-color";
+    case SourceStateBit.DSTBLEND_SRC_ALPHA:
+      return "src-alpha";
+    case SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA:
+      return "one-minus-src-alpha";
+    case SourceStateBit.DSTBLEND_DST_ALPHA:
+      return "dst-alpha";
+    case SourceStateBit.DSTBLEND_ONE_MINUS_DST_ALPHA:
+      return "one-minus-dst-alpha";
+    default:
+      throw new CommonError("drop", "GL_State: invalid dst blend state bits\n");
   }
 }
 
@@ -161,12 +182,21 @@ export function* sourceStateChanges(previous: number | null, next: number): Gene
   }
   if (diff & SourceStateBit.ATEST_BITS) {
     switch (next & SourceStateBit.ATEST_BITS) {
-      case 0: yield { kind: "alpha-test", value: "none" }; break;
-      case SourceStateBit.ATEST_GT_0: yield { kind: "alpha-test", value: "gt0" }; break;
-      case SourceStateBit.ATEST_LT_80: yield { kind: "alpha-test", value: "lt128" }; break;
-      case SourceStateBit.ATEST_GE_80: yield { kind: "alpha-test", value: "ge128" }; break;
+      case 0:
+        yield { kind: "alpha-test", value: "none" };
+        break;
+      case SourceStateBit.ATEST_GT_0:
+        yield { kind: "alpha-test", value: "gt0" };
+        break;
+      case SourceStateBit.ATEST_LT_80:
+        yield { kind: "alpha-test", value: "lt128" };
+        break;
+      case SourceStateBit.ATEST_GE_80:
+        yield { kind: "alpha-test", value: "ge128" };
+        break;
       // The source default is assert(0), a no-op in its NDEBUG release profile.
-      default: break;
+      default:
+        break;
     }
   }
 }

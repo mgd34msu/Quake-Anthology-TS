@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /* BSP topology and area connectivity translated from id Software's cm_test.c,
  * cm_load.c and q_math.c. Copyright (C) 1999-2005 Id Software, Inc.
@@ -26,24 +27,32 @@ function at<T>(values: readonly T[], index: number): T {
   if (value === undefined) throw new RangeError(`collision topology index ${index} out of range`);
   return value;
 }
-function finite(point: Vec3): boolean { return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z); }
+function finite(point: Vec3): boolean {
+  return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
+}
 function boxSide(bounds: Bounds, plane: CollisionPlane): 0 | 1 | 2 | 3 {
   const normal = plane.normal;
   if (plane.type === 0) return plane.distance <= bounds.min.x ? 1 : plane.distance >= bounds.max.x ? 2 : 3;
   if (plane.type === 1) return plane.distance <= bounds.min.y ? 1 : plane.distance >= bounds.max.y ? 2 : 3;
   if (plane.type === 2) return plane.distance <= bounds.min.z ? 1 : plane.distance >= bounds.max.z ? 2 : 3;
   const signs = plane.signbits;
-  const far = signs < 8 ? dot3(normal, {
-    x: (signs & 1) !== 0 ? bounds.min.x : bounds.max.x,
-    y: (signs & 2) !== 0 ? bounds.min.y : bounds.max.y,
-    z: (signs & 4) !== 0 ? bounds.min.z : bounds.max.z,
-  }) : 0;
-  const near = signs < 8 ? dot3(normal, {
-    x: (signs & 1) !== 0 ? bounds.max.x : bounds.min.x,
-    y: (signs & 2) !== 0 ? bounds.max.y : bounds.min.y,
-    z: (signs & 4) !== 0 ? bounds.max.z : bounds.min.z,
-  }) : 0;
-  return far >= plane.distance ? near < plane.distance ? 3 : 1 : near < plane.distance ? 2 : 0;
+  const far =
+    signs < 8
+      ? dot3(normal, {
+          x: (signs & 1) !== 0 ? bounds.min.x : bounds.max.x,
+          y: (signs & 2) !== 0 ? bounds.min.y : bounds.max.y,
+          z: (signs & 4) !== 0 ? bounds.min.z : bounds.max.z,
+        })
+      : 0;
+  const near =
+    signs < 8
+      ? dot3(normal, {
+          x: (signs & 1) !== 0 ? bounds.max.x : bounds.min.x,
+          y: (signs & 2) !== 0 ? bounds.max.y : bounds.min.y,
+          z: (signs & 4) !== 0 ? bounds.max.z : bounds.min.z,
+        })
+      : 0;
+  return far >= plane.distance ? (near < plane.distance ? 3 : 1) : near < plane.distance ? 2 : 0;
 }
 
 export class CollisionTopology {
@@ -55,7 +64,10 @@ export class CollisionTopology {
   #floodValid = 0;
   #noAreas = false;
 
-  constructor(map: CollisionMapData, private readonly counters = new CollisionCounters()) {
+  constructor(
+    map: CollisionMapData,
+    private readonly counters = new CollisionCounters(),
+  ) {
     this.#map = map;
     this.areaCount = map.areas.length;
     this.clusterCount = map.clusterCount;
@@ -65,9 +77,13 @@ export class CollisionTopology {
   }
 
   capturePortalCheckpoint() {
-    return { version: 1, floodValid: this.#floodValid, noAreas: this.#noAreas,
+    return {
+      version: 1,
+      floodValid: this.#floodValid,
+      noAreas: this.#noAreas,
       areas: this.#map.areas.map(area => ({ flood: area.flood, floodValid: area.floodValid })),
-      portals: Array.from({ length: this.areaCount * this.areaCount }, (_, index) => this.#portals.at(index)) };
+      portals: Array.from({ length: this.areaCount * this.areaCount }, (_, index) => this.#portals.at(index)),
+    };
   }
 
   restorePortalCheckpoint(value: unknown): void {
@@ -78,7 +94,8 @@ export class CollisionTopology {
       if (value > 0x7fffffff) field.fail("expected a signed 32-bit source word");
       return value;
     };
-    const floodValid = word(reader.field("floodValid")), noAreas = reader.field("noAreas").boolean();
+    const floodValid = word(reader.field("floodValid")),
+      noAreas = reader.field("noAreas").boolean();
     const areas = reader.field("areas").list(area => ({ flood: word(area.field("flood")), floodValid: word(area.field("floodValid")) }));
     const portals = reader.field("portals").list(word);
     if (areas.length !== this.areaCount || portals.length !== this.areaCount * this.areaCount) reader.fail("portal checkpoint belongs to another area table");
@@ -89,10 +106,12 @@ export class CollisionTopology {
     }
     for (const [index, area] of areas.entries()) {
       const target = at(this.#map.areas, index);
-      target.flood = area.flood; target.floodValid = area.floodValid;
+      target.flood = area.flood;
+      target.floodValid = area.floodValid;
     }
     for (const [index, count] of portals.entries()) this.#portals.set(index, count);
-    this.#floodValid = floodValid; this.#noAreas = noAreas;
+    this.#floodValid = floodValid;
+    this.#noAreas = noAreas;
   }
 
   pointLeafnum(point: Vec3): number {
@@ -100,9 +119,11 @@ export class CollisionTopology {
     if (this.#map.nodes.length === 0) return 0;
     let index = 0;
     while (index >= 0) {
-      const node = at(this.#map.nodes, index), plane = at(this.#map.planes, node.plane);
-      const distance = Math.fround((plane.type === 0 ? point.x : plane.type === 1 ? point.y
-        : plane.type === 2 ? point.z : dot3(point, plane.normal)) - plane.distance);
+      const node = at(this.#map.nodes, index),
+        plane = at(this.#map.planes, node.plane);
+      const distance = Math.fround(
+        (plane.type === 0 ? point.x : plane.type === 1 ? point.y : plane.type === 2 ? point.z : dot3(point, plane.normal)) - plane.distance,
+      );
       index = node.children[distance < 0 ? 1 : 0];
     }
     this.counters.c_pointcontents = (this.counters.c_pointcontents + 1) | 0;
@@ -110,11 +131,13 @@ export class CollisionTopology {
   }
 
   boxLeafnums(bounds: Bounds, maxLeaves = 1024): BoxLeafList {
-    if (!finite(bounds.min) || !finite(bounds.max) || bounds.min.x > bounds.max.x || bounds.min.y > bounds.max.y || bounds.min.z > bounds.max.z) throw new RangeError("box leaf query requires finite ordered bounds");
+    if (!finite(bounds.min) || !finite(bounds.max) || bounds.min.x > bounds.max.x || bounds.min.y > bounds.max.y || bounds.min.z > bounds.max.z)
+      throw new RangeError("box leaf query requires finite ordered bounds");
     if (!Number.isSafeInteger(maxLeaves) || maxLeaves < 0) throw new RangeError("leaf capacity must be a nonnegative integer");
     this.#map.checkCount = (this.#map.checkCount + 1) | 0;
     const leaves: number[] = [];
-    let lastLeaf = 0, overflowed = false;
+    let lastLeaf = 0,
+      overflowed = false;
     const topnode = this.visitLeaves(bounds, leafnum => {
       if (at(this.#map.leaves, leafnum).cluster !== -1) lastLeaf = leafnum;
       if (leaves.length === maxLeaves) overflowed = true;
@@ -125,7 +148,8 @@ export class CollisionTopology {
 
   /** CM_BoxBrushes returns borrowed brush pointers, including their mutable checkcount. */
   boxBrushes(bounds: Bounds, maxBrushes = 1024): readonly CollisionBrush[] {
-    if (!Number.isInteger(maxBrushes) || maxBrushes < -0x80000000 || maxBrushes > 0x7fffffff) throw new RangeError("brush capacity must be a source signed integer");
+    if (!Number.isInteger(maxBrushes) || maxBrushes < -0x80000000 || maxBrushes > 0x7fffffff)
+      throw new RangeError("brush capacity must be a source signed integer");
     const map = this.#map;
     map.checkCount = (map.checkCount + 1) | 0;
     const query = { min: vec3(bounds.min.x, bounds.min.y, bounds.min.z), max: vec3(bounds.max.x, bounds.max.y, bounds.max.z) };
@@ -137,9 +161,15 @@ export class CollisionTopology {
         if (brush.checkCount === map.checkCount) continue;
         brush.checkCount = map.checkCount;
         const brushBounds = brush.bounds;
-        if (brushBounds.min.x >= query.max.x || brushBounds.max.x <= query.min.x
-          || brushBounds.min.y >= query.max.y || brushBounds.max.y <= query.min.y
-          || brushBounds.min.z >= query.max.z || brushBounds.max.z <= query.min.z) continue;
+        if (
+          brushBounds.min.x >= query.max.x ||
+          brushBounds.max.x <= query.min.x ||
+          brushBounds.min.y >= query.max.y ||
+          brushBounds.max.y <= query.min.y ||
+          brushBounds.min.z >= query.max.z ||
+          brushBounds.max.z <= query.min.z
+        )
+          continue;
         // CM_StoreBrushes stops only this leaf; the BSP walker continues its siblings.
         if (brushes.length >= maxBrushes) return;
         brushes.push(brush);
@@ -191,7 +221,8 @@ export class CollisionTopology {
       byteAt(offset: number): number {
         if (!Number.isSafeInteger(offset)) throw new RangeError("PVS byte offset must be a safe integer");
         const bytes = map.visibility;
-        const index = baseOffset + offset, byte = bytes[index];
+        const index = baseOffset + offset,
+          byte = bytes[index];
         if (byte === undefined) throw new RangeError(`PVS byte ${index} outside stored visibility allocation of ${bytes.length} bytes`);
         return byte;
       },
@@ -205,7 +236,9 @@ export class CollisionTopology {
     return (byte & (1 << (to & 7))) !== 0;
   }
 
-  setNoAreas(enabled: boolean): void { this.#noAreas = enabled; }
+  setNoAreas(enabled: boolean): void {
+    this.#noAreas = enabled;
+  }
 
   #checkArea(area: number): void {
     if (!Number.isInteger(area) || area < 0 || area >= this.areaCount) throw new RangeError(`invalid area ${area}`);
@@ -217,7 +250,8 @@ export class CollisionTopology {
     if (area1 >= this.areaCount || area2 >= this.areaCount) {
       throw new CommonError("drop", "CM_ChangeAreaPortalState: bad area number");
     }
-    const index1 = area1 * this.areaCount + area2, index2 = area2 * this.areaCount + area1;
+    const index1 = area1 * this.areaCount + area2,
+      index2 = area2 * this.areaCount + area1;
     const amount = open ? 1 : -1;
     this.#portals.set(index1, (this.#portals.at(index1) + amount) | 0);
     this.#portals.set(index2, (this.#portals.at(index2) + amount) | 0);
@@ -261,12 +295,16 @@ export class CollisionTopology {
   writeAreaBits(buffer: Uint8Array, area: number, noAreas = this.#noAreas): number {
     const bytes = (this.areaCount + 7) >> 3;
     if (buffer.length < bytes) throw new RangeError(`area bits need ${bytes} bytes`);
-    if (noAreas || area === -1) { buffer.fill(255, 0, bytes); return bytes; }
+    if (noAreas || area === -1) {
+      buffer.fill(255, 0, bytes);
+      return bytes;
+    }
     this.#checkArea(area);
     const flood = at(this.#map.areas, area).flood;
     for (let other = 0; other < this.areaCount; other++) {
       if (at(this.#map.areas, other).flood !== flood) continue;
-      const index = other >> 3, byte = buffer[index];
+      const index = other >> 3,
+        byte = buffer[index];
       if (byte === undefined) throw new Error("area bit buffer invariant");
       buffer[index] = byte | (1 << (other & 7));
     }

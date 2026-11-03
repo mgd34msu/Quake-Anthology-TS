@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
@@ -9,11 +10,14 @@ import ts from "typescript";
 export const unreachableModulesFile = "tools/unreachable-modules.json";
 export const applicationEntry = "src/main.ts";
 
-export interface PendingModule { readonly reason: string; }
+export interface PendingModule {
+  readonly reason: string;
+}
 export type PendingModules = ReadonlyMap<string, PendingModule>;
 
 export function loadPendingModules(root: string): PendingModules {
-  const path = resolve(root, unreachableModulesFile), pending = new Map<string, PendingModule>();
+  const path = resolve(root, unreachableModulesFile),
+    pending = new Map<string, PendingModule>();
   if (!existsSync(path)) return pending;
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error(`${unreachableModulesFile} must map project paths to a reason.`);
@@ -45,9 +49,11 @@ const moduleUrl = /new URL\(\s*["'](\.[^"']+\.ts)["']/g;
 
 /** Project-relative src files not reachable from the entry through static imports, re-exports, dynamic imports with literal names and `new URL("./x.ts", import.meta.url)` worker URLs. */
 export function unreachableModules(root: string, entry = applicationEntry): string[] {
-  const sources = listSources(resolve(root, "src")), start = resolve(root, entry);
+  const sources = listSources(resolve(root, "src")),
+    start = resolve(root, entry);
   if (!existsSync(start)) return [];
-  const seen = new Set<string>(), queue = [start];
+  const seen = new Set<string>(),
+    queue = [start];
   while (queue.length !== 0) {
     const file = queue.pop();
     if (file === undefined || seen.has(file)) continue;
@@ -62,20 +68,33 @@ export function unreachableModules(root: string, entry = applicationEntry): stri
       if (target !== undefined) queue.push(target);
     }
   }
-  return sources.filter(file => !seen.has(file)).map(file => relative(root, file).replaceAll("\\", "/")).sort();
+  return sources
+    .filter(file => !seen.has(file))
+    .map(file => relative(root, file).replaceAll("\\", "/"))
+    .sort();
 }
 
-export interface UnreachableDiagnostic { readonly file: string; readonly message: string; }
+export interface UnreachableDiagnostic {
+  readonly file: string;
+  readonly message: string;
+}
 
 /** Unlisted unreachable modules, plus list entries that are reachable again or no longer exist, so the list cannot go stale. */
 export function auditUnreachable(root: string): UnreachableDiagnostic[] {
   if (!existsSync(resolve(root, applicationEntry))) return [];
-  const pending = loadPendingModules(root), unreachable = unreachableModules(root), found = new Set(unreachable), problems: UnreachableDiagnostic[] = [];
+  const pending = loadPendingModules(root),
+    unreachable = unreachableModules(root),
+    found = new Set(unreachable),
+    problems: UnreachableDiagnostic[] = [];
   for (const file of unreachable) {
     if (!pending.has(file)) problems.push({ file, message: `${file} is not reachable from ${applicationEntry}; wire it into a user path or delete it.` });
   }
   for (const file of pending.keys()) {
-    if (!found.has(file)) problems.push({ file: unreachableModulesFile, message: `${file} is listed as pending but is ${existsSync(resolve(root, file)) ? "reachable" : "missing"}; remove it from the list.` });
+    if (!found.has(file))
+      problems.push({
+        file: unreachableModulesFile,
+        message: `${file} is listed as pending but is ${existsSync(resolve(root, file)) ? "reachable" : "missing"}; remove it from the list.`,
+      });
   }
   return problems;
 }

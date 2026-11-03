@@ -12,9 +12,15 @@ export interface DebugGraphSettings {
   readonly scale: number;
   readonly shift: number;
 }
-export interface DebugGraphBar { readonly rect: Rect; readonly color: number; }
+export interface DebugGraphBar {
+  readonly rect: Rect;
+  readonly color: number;
+}
 export function debugGraphColor(palette: Palette, index: number): Vec4 {
-  const offset = (index & 255) * 3, r = palette.colors[offset], g = palette.colors[offset + 1], b = palette.colors[offset + 2];
+  const offset = (index & 255) * 3,
+    r = palette.colors[offset],
+    g = palette.colors[offset + 1],
+    b = palette.colors[offset + 2];
   if (r === undefined || g === undefined || b === undefined) throw new Error("Incomplete debug graph palette");
   return { x: r / 255, y: g / 255, z: b / 255, w: 1 };
 }

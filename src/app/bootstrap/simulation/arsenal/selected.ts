@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SelectedPickupWeapon } from "../../../../world/gameplay/pickups.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";

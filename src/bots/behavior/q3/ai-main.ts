@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Game bot lifecycle and scheduling translated from id Software's game/ai_main.c.
@@ -32,9 +33,16 @@ import { MAX_CLIENTS, MAX_GENTITIES } from "../../../content/q3/base/game/state.
 const f = Math.fround;
 const CS_PLAYERS = 544;
 const CS_BOTINFO = 25;
-const setupCvars: readonly (readonly [string, string])[] = [["bot_thinktime", "100"], ["bot_memorydump", "0"],
-  ["bot_saveroutingcache", "0"], ["bot_pause", "0"], ["bot_report", "0"], ["bot_testsolid", "0"],
-  ["bot_testclusters", "0"], ["bot_developer", "0"]];
+const setupCvars: readonly (readonly [string, string])[] = [
+  ["bot_thinktime", "100"],
+  ["bot_memorydump", "0"],
+  ["bot_saveroutingcache", "0"],
+  ["bot_pause", "0"],
+  ["bot_report", "0"],
+  ["bot_testsolid", "0"],
+  ["bot_testclusters", "0"],
+  ["bot_developer", "0"],
+];
 
 function asciiEqual(first: string, second: string): boolean {
   return first.replace(/[A-Z]/g, c => c.toLowerCase()) === second.replace(/[A-Z]/g, c => c.toLowerCase());
@@ -47,7 +55,10 @@ export function removeColorEscapeSequences(text: string): string {
     const character = text.charCodeAt(index);
     if (character === 0) break;
     const next = text.charCodeAt(index + 1);
-    if (character === 94 && Number.isFinite(next) && next !== 0 && next !== 94) { index++; continue; }
+    if (character === 94 && Number.isFinite(next) && next !== 0 && next !== 94) {
+      index++;
+      continue;
+    }
     // The VM's signed char values above 127 pass this source comparison.
     if (character < 128 && character > 0x7e) continue;
     result += text.charAt(index);
@@ -63,7 +74,7 @@ function inventory(state: BotState, index: BotInventory): number {
 
 function carrying(context: GameAiContext, state: BotState, colored: boolean): string {
   const team = botTeam(context, state);
-  const prefix = colored ? team === Team.TEAM_RED ? "^1" : "^4" : "";
+  const prefix = colored ? (team === Team.TEAM_RED ? "^1" : "^4") : "";
   if (context.gameType === GameType.GT_CTF && botCTFCarryingFlag(context, state) !== 0) return `${prefix}F `;
   if (context.game.options.product === "missionpack") {
     if (context.gameType === GameType.GT_1FCTF && bot1FCTFCarryingFlag(context, state)) return `${prefix}F `;
@@ -76,18 +87,31 @@ function carrying(context: GameAiContext, state: BotState, colored: boolean): st
 
 function actionDescription(context: GameAiContext, state: BotState, withGoal: boolean): string {
   switch (state.ltgType) {
-    case BotLongTermGoal.TEAMHELP: return `helping ${easyClientName(context, state.teammate, 256)}`;
-    case BotLongTermGoal.TEAMACCOMPANY: return `accompanying ${easyClientName(context, state.teammate, 256)}`;
-    case BotLongTermGoal.DEFENDKEYAREA: return `defending ${context.library.goals.goalName(state.teamGoal.number)}`;
-    case BotLongTermGoal.GETITEM: return `getting item ${context.library.goals.goalName(state.teamGoal.number)}`;
-    case BotLongTermGoal.KILL: return `killing ${clientName(context, state.teamGoal.entity, 256)}`;
-    case BotLongTermGoal.CAMP: case BotLongTermGoal.CAMPORDER: return "camping";
-    case BotLongTermGoal.PATROL: return "patrolling";
-    case BotLongTermGoal.GETFLAG: return "capturing flag";
-    case BotLongTermGoal.RUSHBASE: return "rushing base";
-    case BotLongTermGoal.RETURNFLAG: return "returning flag";
-    case BotLongTermGoal.ATTACKENEMYBASE: return "attacking the enemy base";
-    case BotLongTermGoal.HARVEST: return "harvesting";
+    case BotLongTermGoal.TEAMHELP:
+      return `helping ${easyClientName(context, state.teammate, 256)}`;
+    case BotLongTermGoal.TEAMACCOMPANY:
+      return `accompanying ${easyClientName(context, state.teammate, 256)}`;
+    case BotLongTermGoal.DEFENDKEYAREA:
+      return `defending ${context.library.goals.goalName(state.teamGoal.number)}`;
+    case BotLongTermGoal.GETITEM:
+      return `getting item ${context.library.goals.goalName(state.teamGoal.number)}`;
+    case BotLongTermGoal.KILL:
+      return `killing ${clientName(context, state.teamGoal.entity, 256)}`;
+    case BotLongTermGoal.CAMP:
+    case BotLongTermGoal.CAMPORDER:
+      return "camping";
+    case BotLongTermGoal.PATROL:
+      return "patrolling";
+    case BotLongTermGoal.GETFLAG:
+      return "capturing flag";
+    case BotLongTermGoal.RUSHBASE:
+      return "rushing base";
+    case BotLongTermGoal.RETURNFLAG:
+      return "returning flag";
+    case BotLongTermGoal.ATTACKENEMYBASE:
+      return "attacking the enemy base";
+    case BotLongTermGoal.HARVEST:
+      return "harvesting";
     default: {
       if (!withGoal) return "roaming";
       const goal = context.library.goals.getTopGoal(state.gs);
@@ -99,7 +123,13 @@ function actionDescription(context: GameAiContext, state: BotState, withGoal: bo
 
 export function botReportStatus(context: GameAiContext, state: BotState): void {
   const name = clientName(context, state.client, 256);
-  context.game.options.engine.print(gameFormat("%-20s%s%s: %s\n", [name, asciiEqual(name, state.teamLeader) ? "L" : " ", carrying(context, state, true), actionDescription(context, state, false)], 2048));
+  context.game.options.engine.print(
+    gameFormat(
+      "%-20s%s%s: %s\n",
+      [name, asciiEqual(name, state.teamLeader) ? "L" : " ", carrying(context, state, true), actionDescription(context, state, false)],
+      2048,
+    ),
+  );
 }
 
 export function botTeamplayReport(context: GameAiContext): void {
@@ -115,7 +145,8 @@ export function botTeamplayReport(context: GameAiContext): void {
 }
 
 export function botTestAAS(context: GameAiContext, origin: Vec3): void {
-  const solid = context.cvar("bot_testsolid"), clusters = context.cvar("bot_testclusters");
+  const solid = context.cvar("bot_testsolid"),
+    clusters = context.cvar("bot_testclusters");
   solid.update();
   clusters.update();
   if (solid.integerValue !== 0) {
@@ -142,7 +173,10 @@ export function botUpdateInfoConfigStrings(context: GameAiContext): void {
     const info = context.game.options.configstrings.get(CS_PLAYERS + index).slice(0, 1023);
     if (info.length === 0 || clientInfoValue(info, "n").length === 0) continue;
     const leader = asciiEqual(clientName(context, state.client, 256), state.teamLeader) ? "L" : " ";
-    context.game.options.configstrings.set(CS_BOTINFO + state.client, `l\\${leader}\\c\\${carrying(context, state, false)}\\a\\${actionDescription(context, state, true).slice(0, 255)}`);
+    context.game.options.configstrings.set(
+      CS_BOTINFO + state.client,
+      `l\\${leader}\\c\\${carrying(context, state, false)}\\a\\${actionDescription(context, state, true).slice(0, 255)}`,
+    );
   }
 }
 
@@ -157,14 +191,18 @@ function readSessionInteger(text: string, cursor: { offset: number }): number {
   let index = cursor.offset;
   if (index > text.length) throw new RangeError("Bot session scan reads past its source string");
   while (index < text.length) {
-    const byte = text.charCodeAt(index), signed = byte < 128 ? byte : byte - 256;
+    const byte = text.charCodeAt(index),
+      signed = byte < 128 ? byte : byte - 256;
     if (signed > 32) break;
     if (byte === 0) return 0;
     index++;
   }
   if (index === text.length) return 0;
   let sign = 1;
-  if (text.charAt(index) === "-" || text.charAt(index) === "+") { if (text.charAt(index) === "-") sign = -1; index++; }
+  if (text.charAt(index) === "-" || text.charAt(index) === "+") {
+    if (text.charAt(index) === "-") sign = -1;
+    index++;
+  }
   let value = 0;
   while (true) {
     if (index > text.length) throw new RangeError("Bot session integer scan reads past its source string");
@@ -179,7 +217,8 @@ function readSessionInteger(text: string, cursor: { offset: number }): number {
 
 function readSession(context: GameAiContext, state: BotState): void {
   const text = (context.game.options.cvars.find(`botsession${state.client}`)?.value ?? "").slice(0, 1023);
-  const cursor = { offset: 0 }, goal = state.lastGoalTeamGoal;
+  const cursor = { offset: 0 },
+    goal = state.lastGoalTeamGoal;
   state.lastGoalDecisionmaker = readSessionInteger(text, cursor);
   state.lastGoalLtgType = readSessionInteger(text, cursor);
   state.lastGoalTeammate = readSessionInteger(text, cursor);
@@ -188,24 +227,49 @@ function readSession(context: GameAiContext, state: BotState): void {
   goal.flags = readSessionInteger(text, cursor);
   goal.itemInfo = readSessionInteger(text, cursor);
   goal.number = readSessionInteger(text, cursor);
-  function next(): number { const result = scanGameFloat(text, cursor.offset); cursor.offset = result.nextOffset; return result.value; }
+  function next(): number {
+    const result = scanGameFloat(text, cursor.offset);
+    cursor.offset = result.nextOffset;
+    return result.value;
+  }
   for (const vector of [goal.origin, goal.mins, goal.maxs]) {
     Object.assign(vector, { x: next() });
     Object.assign(vector, { y: next() });
     Object.assign(vector, { z: next() });
   }
   if (isSourceGoalNumber(goal.number)) {
-    goal.clear(); state.lastGoalLtgType = BotLongTermGoal.NONE;
-    state.lastGoalDecisionmaker = 0; state.lastGoalTeammate = 0;
+    goal.clear();
+    state.lastGoalLtgType = BotLongTermGoal.NONE;
+    state.lastGoalDecisionmaker = 0;
+    state.lastGoalTeammate = 0;
   }
 }
 
 function writeSession(context: GameAiContext, state: BotState): void {
   const goal = state.lastGoalTeamGoal;
-  const text = gameFormat("%i %i %i %i %i %i %i %i %f %f %f %f %f %f %f %f %f", [
-    state.lastGoalDecisionmaker, state.lastGoalLtgType, state.lastGoalTeammate, goal.area, goal.entity, goal.flags, goal.itemInfo, goal.number,
-    goal.origin.x, goal.origin.y, goal.origin.z, goal.mins.x, goal.mins.y, goal.mins.z, goal.maxs.x, goal.maxs.y, goal.maxs.z,
-  ], 32000);
+  const text = gameFormat(
+    "%i %i %i %i %i %i %i %i %f %f %f %f %f %f %f %f %f",
+    [
+      state.lastGoalDecisionmaker,
+      state.lastGoalLtgType,
+      state.lastGoalTeammate,
+      goal.area,
+      goal.entity,
+      goal.flags,
+      goal.itemInfo,
+      goal.number,
+      goal.origin.x,
+      goal.origin.y,
+      goal.origin.z,
+      goal.mins.x,
+      goal.mins.y,
+      goal.mins.z,
+      goal.maxs.x,
+      goal.maxs.y,
+      goal.maxs.z,
+    ],
+    32000,
+  );
   context.game.options.cvars.set(`botsession${state.client}`, text, true);
 }
 
@@ -220,14 +284,25 @@ export class GameAi {
     this.context = new GameAiContext(game, library, host);
   }
 
-  captureSaveState() { return { localTime: this.localTime, botlibResidual: this.botlibResidual, lastBotThinkTime: this.lastBotThinkTime, context: this.context.captureSaveState() }; }
+  captureSaveState() {
+    return {
+      localTime: this.localTime,
+      botlibResidual: this.botlibResidual,
+      lastBotThinkTime: this.lastBotThinkTime,
+      context: this.context.captureSaveState(),
+    };
+  }
   restoreSaveState(value: unknown, remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
     const reader = new SaveReader(value, "bot.ai");
-    this.localTime = reader.field("localTime").number(); this.botlibResidual = reader.field("botlibResidual").number(); this.lastBotThinkTime = reader.field("lastBotThinkTime").number();
+    this.localTime = reader.field("localTime").number();
+    this.botlibResidual = reader.field("botlibResidual").number();
+    this.lastBotThinkTime = reader.field("lastBotThinkTime").number();
     this.context.restoreSaveState(reader.field("context").value, remapObservation);
   }
 
-  testAas(origin: Vec3): void { botTestAAS(this.context, origin); }
+  testAas(origin: Vec3): void {
+    botTestAAS(this.context, origin);
+  }
 
   setup(restart: boolean): boolean {
     const context = this.context;
@@ -248,19 +323,37 @@ export class GameAi {
     const read = (name: string): string => (game.options.cvars.find(name)?.value ?? "").slice(0, 143);
     library.variables.set("maxclients", read("sv_maxclients") || "8");
     library.variables.set("maxentities", String(MAX_GENTITIES));
-    for (const name of ["sv_mapChecksum", "max_aaslinks", "max_levelitems"]) { const value = read(name); if (value.length !== 0) library.variables.set(name, value); }
+    for (const name of ["sv_mapChecksum", "max_aaslinks", "max_levelitems"]) {
+      const value = read(name);
+      if (value.length !== 0) library.variables.set(name, value);
+    }
     const gameType = read("g_gametype") || "0";
     library.variables.set("g_gametype", gameType);
     library.variables.set("bot_developer", this.context.cvar("bot_developer").value);
     library.variables.set("log", gameType);
     if (read("bot_nochat").length !== 0) library.variables.set("nochat", "0");
-    const forwarding: readonly (readonly [string, string])[] = [["bot_visualizejumppads", "bot_visualizejumppads"],
-      ["bot_forceclustering", "forceclustering"], ["bot_forcereachability", "forcereachability"], ["bot_forcewrite", "forcewrite"],
-      ["bot_aasoptimize", "aasoptimize"], ["bot_saveroutingcache", "saveroutingcache"]];
-    for (const [source, destination] of forwarding) { const value = read(source); if (value.length !== 0) library.variables.set(destination, value); }
+    const forwarding: readonly (readonly [string, string])[] = [
+      ["bot_visualizejumppads", "bot_visualizejumppads"],
+      ["bot_forceclustering", "forceclustering"],
+      ["bot_forcereachability", "forcereachability"],
+      ["bot_forcewrite", "forcewrite"],
+      ["bot_aasoptimize", "aasoptimize"],
+      ["bot_saveroutingcache", "saveroutingcache"],
+    ];
+    for (const [source, destination] of forwarding) {
+      const value = read(source);
+      if (value.length !== 0) library.variables.set(destination, value);
+    }
     library.variables.set("bot_reloadcharacters", read("bot_reloadcharacters") || "0");
-    const directories: readonly (readonly [string, string])[] = [["fs_basepath", "basedir"], ["fs_game", "gamedir"], ["fs_cdpath", "cddir"]];
-    for (const [source, destination] of directories) { const value = read(source); if (value.length !== 0) library.variables.set(destination, value); }
+    const directories: readonly (readonly [string, string])[] = [
+      ["fs_basepath", "basedir"],
+      ["fs_game", "gamedir"],
+      ["fs_cdpath", "cddir"],
+    ];
+    for (const [source, destination] of directories) {
+      const value = read(source);
+      if (value.length !== 0) library.variables.set(destination, value);
+    }
     if (game.options.product === "missionpack") library.globals.add("MISSIONPACK");
     return library.setup();
   }
@@ -283,8 +376,13 @@ export class GameAi {
   }
 
   setupClient(client: number, settings: BotSettings, restart: boolean): boolean {
-    const context = this.context, library = context.library, state = context.states.acquire(client, context.game.memory);
-    if (state.inuse) { context.game.options.engine.print(`^1Fatal: BotAISetupClient: client ${client} already setup\n`); return false; }
+    const context = this.context,
+      library = context.library,
+      state = context.states.acquire(client, context.game.memory);
+    if (state.inuse) {
+      context.game.options.engine.print(`^1Fatal: BotAISetupClient: client ${client} already setup\n`);
+      return false;
+    }
     state.setup = { kind: "setting-up", stage: "allocated" };
     if (!context.navigation.ready) {
       context.game.options.engine.print("^1Fatal: AAS not initialized\n");
@@ -346,7 +444,10 @@ export class GameAi {
     state.setup = { kind: "setting-up", stage: "walker" };
     context.numBots = (context.numBots + 1) | 0;
     state.setup = { kind: "setting-up", stage: "counted" };
-    if ((context.game.options.cvars.find("bot_testichat")?.integerValue ?? 0) !== 0) { library.variables.set("bot_testichat", "1"); botChatTest(context, state); }
+    if ((context.game.options.cvars.find("bot_testichat")?.integerValue ?? 0) !== 0) {
+      library.variables.set("bot_testichat", "1");
+      botChatTest(context, state);
+    }
     this.scheduleThink();
     state.setup = { kind: "setting-up", stage: "scheduled" };
     if (context.interbreed) library.goals.mutateGoalFuzzyLogic(state.gs, 1);
@@ -357,7 +458,9 @@ export class GameAi {
   }
 
   shutdownClient(client: number, restart: boolean): boolean {
-    const context = this.context, library = context.library, state = context.states.get(client);
+    const context = this.context,
+      library = context.library,
+      state = context.states.get(client);
     if (state === null || !state.inuse) return false;
     if (restart) writeSession(context, state);
     if (botChatExitGame(context, state)) library.chat.enterChat(state.cs, state.client, ChatDestination.All);
@@ -396,18 +499,24 @@ export class GameAi {
   }
 
   private ai(client: number, thinkTime: number): boolean {
-    const context = this.context, library = context.library;
+    const context = this.context,
+      library = context.library;
     library.actions.resetInput(client);
     const state = context.states.get(client);
-    if (state === null || !state.inuse) { context.game.options.engine.print(`^1Fatal: BotAI: client ${client} is not setup\n`); return false; }
+    if (state === null || !state.inuse) {
+      context.game.options.engine.print(`^1Fatal: BotAI: client ${client} is not setup\n`);
+      return false;
+    }
     const entity = context.game.entity(client);
     if (entity.present && entity.player !== null) copyBotPlayerState(state.curPs, entity.player.state);
     while (true) {
       const command = context.host.getConsoleMessage(client);
       if (command === null) break;
-      const buffer = command.slice(0, 1023), split = buffer.indexOf(" ");
+      const buffer = command.slice(0, 1023),
+        split = buffer.indexOf(" ");
       if (split < 0) continue;
-      const verb = buffer.slice(0, split), argumentsText = removeColorEscapeSequences(buffer.slice(split + 1));
+      const verb = buffer.slice(0, split),
+        argumentsText = removeColorEscapeSequences(buffer.slice(split + 1));
       if (asciiEqual(verb, "print") || asciiEqual(verb, "chat") || asciiEqual(verb, "tchat")) {
         if (argumentsText.length < 2) continue;
         library.chat.queueConsoleMessage(state.cs, asciiEqual(verb, "print") ? 0 : 1, argumentsText.slice(1, -1));
@@ -432,16 +541,32 @@ export class GameAi {
 
   startFrame(time: number): boolean {
     if (!Number.isInteger(time) || time < -2147483648 || time > 2147483647) throw new RangeError("Bot frame time must be signed 32-bit milliseconds");
-    const context = this.context, library = context.library;
+    const context = this.context,
+      library = context.library;
     context.host.checkBotSpawn();
-    for (const name of ["bot_rocketjump", "bot_grapple", "bot_fastchat", "bot_nochat", "bot_testrchat", "bot_thinktime", "bot_memorydump", "bot_saveroutingcache", "bot_pause", "bot_report"]) context.cvar(name).update();
+    for (const name of [
+      "bot_rocketjump",
+      "bot_grapple",
+      "bot_fastchat",
+      "bot_nochat",
+      "bot_testrchat",
+      "bot_thinktime",
+      "bot_memorydump",
+      "bot_saveroutingcache",
+      "bot_pause",
+      "bot_report",
+    ])
+      context.cvar(name).update();
     if (context.cvar("bot_report").integerValue !== 0) botUpdateInfoConfigStrings(context);
     if (context.cvar("bot_pause").integerValue !== 0) {
       for (let index = 0; index < MAX_CLIENTS; index++) {
         const state = context.states.get(index);
         if (state === null || !state.inuse || !this.connected(index)) continue;
-        state.lastUcmd.forwardmove = 0; state.lastUcmd.rightmove = 0; state.lastUcmd.upmove = 0;
-        state.lastUcmd.buttons = 0; state.lastUcmd.serverTime = time;
+        state.lastUcmd.forwardmove = 0;
+        state.lastUcmd.rightmove = 0;
+        state.lastUcmd.upmove = 0;
+        state.lastUcmd.buttons = 0;
+        state.lastUcmd.serverTime = time;
         context.host.userCommand(state.client, state.lastUcmd);
       }
       return true;
@@ -455,7 +580,10 @@ export class GameAi {
     this.interbreeding();
     const botThinkTime = context.cvar("bot_thinktime").integerValue;
     if (botThinkTime > 200) context.game.options.cvars.set("bot_thinktime", "200", true);
-    if (botThinkTime !== this.lastBotThinkTime) { this.lastBotThinkTime = botThinkTime; this.scheduleThink(); }
+    if (botThinkTime !== this.lastBotThinkTime) {
+      this.lastBotThinkTime = botThinkTime;
+      this.scheduleThink();
+    }
     const elapsed = (time - this.localTime) | 0;
     this.localTime = time;
     this.botlibResidual = (this.botlibResidual + elapsed) | 0;
@@ -499,20 +627,38 @@ export class GameAi {
   private entityObservation(index: number): BotEntityUpdate | null {
     const game = this.context.game;
     if (!game.observable(index)) return null;
-    const entity = game.entity(index), source = entity.state;
+    const entity = game.entity(index),
+      source = entity.state;
     if (!entity.present || !entity.linked || entity.hidden) return null;
     if (source.eType === EntityType.ET_MISSILE && source.weapon !== Weapon.WP_GRAPPLING_HOOK) return null;
     if (source.eType > EntityType.ET_EVENTS) return null;
     if (game.options.product === "missionpack" && entity.contents === 0x40000000 && entity.proximityTrigger) return null;
-    return { generation: entity.generation, type: source.eType, flags: source.eFlags, origin: entity.origin, angles: index < MAX_CLIENTS ? source.apos.base : entity.angles,
-      oldOrigin: source.origin2, mins: entity.bounds.min, maxs: entity.bounds.max, groundEntity: source.groundEntityNum,
-      solid: entity.inlineModel !== null ? 3 : 2, modelIndex: source.modelindex, modelIndex2: source.modelindex2, frame: source.frame,
-      event: source.event, eventParameter: source.eventParm, powerups: source.powerups, weapon: source.weapon,
-      legsAnimation: source.legsAnim, torsoAnimation: source.torsoAnim };
+    return {
+      generation: entity.generation,
+      type: source.eType,
+      flags: source.eFlags,
+      origin: entity.origin,
+      angles: index < MAX_CLIENTS ? source.apos.base : entity.angles,
+      oldOrigin: source.origin2,
+      mins: entity.bounds.min,
+      maxs: entity.bounds.max,
+      groundEntity: source.groundEntityNum,
+      solid: entity.inlineModel !== null ? 3 : 2,
+      modelIndex: source.modelindex,
+      modelIndex2: source.modelindex2,
+      frame: source.frame,
+      event: source.event,
+      eventParameter: source.eventParm,
+      powerups: source.powerups,
+      weapon: source.weapon,
+      legsAnimation: source.legsAnim,
+      torsoAnimation: source.torsoAnim,
+    };
   }
 
   private interbreeding(): void {
-    const context = this.context, variable = context.cvar("bot_interbreedchar");
+    const context = this.context,
+      variable = context.cvar("bot_interbreedchar");
     variable.update();
     if (variable.value.length === 0) return;
     if (context.gameType !== GameType.GT_TOURNAMENT) {
@@ -541,11 +687,15 @@ export class GameAi {
     const output = context.cvar("bot_interbreedwrite");
     output.update();
     if (output.value.length !== 0) {
-      let best: BotState | null = null, bestRank = 0;
+      let best: BotState | null = null,
+        bestRank = 0;
       for (let index = 0; index < MAX_CLIENTS; index++) {
         const state = context.states.get(index);
         const rank = state !== null && state.inuse ? f((Math.imul(state.numKills, 2) - state.numDeaths) | 0) : -1;
-        if (rank > bestRank) { bestRank = rank; best = state; }
+        if (rank > bestRank) {
+          bestRank = rank;
+          best = state;
+        }
       }
       if (best !== null) context.library.goals.saveGoalFuzzyLogic(best.gs, output.value);
       context.game.options.cvars.set("bot_interbreedwrite", "", true);
@@ -557,14 +707,19 @@ export class GameAi {
     }
     const selection = context.library.geneticSelection(ranks);
     if (selection.kind === "selected") {
-      const first = context.states.get(selection.parent1), second = context.states.get(selection.parent2), child = context.states.get(selection.child);
+      const first = context.states.get(selection.parent1),
+        second = context.states.get(selection.parent2),
+        child = context.states.get(selection.child);
       if (first === null || second === null || child === null) throw new Error("Bot interbreeding selected an unallocated bot state");
       context.library.goals.interbreedGoalFuzzyLogic(first.gs, second.gs, child.gs);
       context.library.goals.mutateGoalFuzzyLogic(child.gs, 1);
     }
     for (let index = 0; index < MAX_CLIENTS; index++) {
       const state = context.states.get(index);
-      if (state !== null && state.inuse) { state.numKills = 0; state.numDeaths = 0; }
+      if (state !== null && state.inuse) {
+        state.numKills = 0;
+        state.numDeaths = 0;
+      }
     }
   }
 }

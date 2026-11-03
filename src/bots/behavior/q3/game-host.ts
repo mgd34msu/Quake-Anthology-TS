@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { PickupSupplyObservation, PickupSupplyPreview } from "../../../contracts/pickups.ts";

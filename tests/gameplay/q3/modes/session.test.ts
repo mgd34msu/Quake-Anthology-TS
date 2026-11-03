@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { GameClient, ConnectionState, SpectatorState } from "../../../../src/content/q3/base/game/state.ts";
 import { GameType, Team } from "../../../../src/content/q3/base/shared/definitions.ts";
@@ -8,21 +9,40 @@ import { clientIntermissionThink } from "../../../../src/content/q3/team-arena/c
 import { checkObjectivePlacements } from "../../../../src/content/q3/team-arena/objective-placement.ts";
 
 test("team autojoin uses population then source team score and persists sessions", () => {
-  const red = new GameClient("missionpack"), blue = new GameClient("missionpack"), joining = new GameClient("missionpack");
+  const red = new GameClient("missionpack"),
+    blue = new GameClient("missionpack"),
+    joining = new GameClient("missionpack");
   red.pers.connected = blue.pers.connected = ConnectionState.CONNECTED;
   red.sess.sessionTeam = Team.TEAM_RED;
   blue.sess.sessionTeam = Team.TEAM_BLUE;
   const teamScores = new PlayerStateSlots(4);
   teamScores.set(Team.TEAM_BLUE, 2);
-  const world: SessionWorldState = { clients: [red, blue, joining], maxClients: 3, teamScores,
-    gameType: GameType.GT_CTF, teamAutoJoin: true, maxGameClients: 0, time: 24000,
-    numNonSpectatorClients: 2, newSession: false };
+  const world: SessionWorldState = {
+    clients: [red, blue, joining],
+    maxClients: 3,
+    teamScores,
+    gameType: GameType.GT_CTF,
+    teamAutoJoin: true,
+    maxGameClients: 0,
+    time: 24000,
+    numNonSpectatorClients: 2,
+    newSession: false,
+  };
   const values = new Map<SessionCvarName, string>();
   const broadcasts: number[] = [];
   const manager = new GameSessionManager(world, {
-    cvars: { get: name => values.get(name) ?? "", set: (name, value) => { values.set(name, value); } },
-    print: () => { throw new Error("Unexpected session warning"); },
-    broadcastTeamChange: clientNum => { broadcasts.push(clientNum); },
+    cvars: {
+      get: name => values.get(name) ?? "",
+      set: (name, value) => {
+        values.set(name, value);
+      },
+    },
+    print: () => {
+      throw new Error("Unexpected session warning");
+    },
+    broadcastTeamChange: clientNum => {
+      broadcasts.push(clientNum);
+    },
   });
   expect(pickTeam(world, -1)).toBe(Team.TEAM_RED);
   manager.initializeClient(2, { valueForKey: () => "" });
@@ -40,12 +60,23 @@ test("team autojoin uses population then source team score and persists sessions
 
 test("duel admission queues the third player and intermission waits for a new button press", () => {
   const client = new GameClient("baseq3");
-  const world: SessionWorldState = { clients: [client], maxClients: 1, teamScores: new PlayerStateSlots(4),
-    gameType: GameType.GT_TOURNAMENT, teamAutoJoin: false, maxGameClients: 0, time: 100,
-    numNonSpectatorClients: 2, newSession: false };
+  const world: SessionWorldState = {
+    clients: [client],
+    maxClients: 1,
+    teamScores: new PlayerStateSlots(4),
+    gameType: GameType.GT_TOURNAMENT,
+    teamAutoJoin: false,
+    maxGameClients: 0,
+    time: 100,
+    numNonSpectatorClients: 2,
+    newSession: false,
+  };
   const manager = new GameSessionManager(world, {
     cvars: { get: () => "", set: () => {} },
-    print: () => {}, broadcastTeamChange: () => { throw new Error("Unexpected team broadcast"); },
+    print: () => {},
+    broadcastTeamChange: () => {
+      throw new Error("Unexpected team broadcast");
+    },
   });
   manager.initializeClient(0, { valueForKey: () => "" });
   expect(client.sess.sessionTeam).toBe(Team.TEAM_SPECTATOR);
@@ -65,12 +96,14 @@ test("foreign-map objective requirements stay explicit for each Team Arena mode"
   const flags = [{ classname: "team_CTF_redflag" }, { classname: "team_CTF_blueflag" }];
   expect(checkObjectivePlacements("baseq3", GameType.GT_CTF, flags)).toEqual({ kind: "ready" });
   expect(checkObjectivePlacements("missionpack", GameType.GT_1FCTF, flags)).toEqual({
-    kind: "missing-objectives", classnames: ["team_CTF_neutralflag"],
+    kind: "missing-objectives",
+    classnames: ["team_CTF_neutralflag"],
   });
   const obelisks = [{ classname: "team_redobelisk" }, { classname: "team_blueobelisk" }];
   expect(checkObjectivePlacements("missionpack", GameType.GT_OBELISK, obelisks)).toEqual({ kind: "ready" });
   expect(checkObjectivePlacements("missionpack", GameType.GT_HARVESTER, obelisks)).toEqual({
-    kind: "missing-objectives", classnames: ["team_neutralobelisk"],
+    kind: "missing-objectives",
+    classnames: ["team_neutralobelisk"],
   });
   expect(checkObjectivePlacements("baseq3", GameType.GT_HARVESTER, obelisks).kind).toBe("unsupported-mode");
 });

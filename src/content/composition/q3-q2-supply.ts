@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
@@ -37,10 +38,13 @@ export const Q3_Q2_SUPPLY_PROFILE: PickupSupplyProfile = {
 };
 
 export function q3Q2SupplyLoadout(): { readonly weapon: ItemId; readonly inventory: readonly { readonly item: ItemId; readonly count: number }[] } {
-  return { weapon: "q2:weapon_machinegun", inventory: [
-    { item: "q2:weapon_blaster", count: 1 },
-    { item: "q2:weapon_machinegun", count: 1 },
-    { item: "q2:weapon_chaingun", count: 1 },
-    { item: "q2:ammo_bullets", count: 100 },
-  ] };
+  return {
+    weapon: "q2:weapon_machinegun",
+    inventory: [
+      { item: "q2:weapon_blaster", count: 1 },
+      { item: "q2:weapon_machinegun", count: 1 },
+      { item: "q2:weapon_chaingun", count: 1 },
+      { item: "q2:ammo_bullets", count: 100 },
+    ],
+  };
 }

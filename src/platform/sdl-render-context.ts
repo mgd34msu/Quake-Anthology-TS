@@ -24,22 +24,27 @@ export interface SdlRenderContextTransfer {
 }
 
 function loadSdlRenderContext() {
-  return openNativeLibrary("sdl2", path => dlopen(path, {
-    SDL_GetError: { args: [], returns: "cstring" },
-    SDL_GetWindowFromID: { args: ["u32"], returns: "ptr" },
-    SDL_SetWindowData: { args: ["ptr", "buffer", "ptr"], returns: "ptr" },
-    SDL_GetWindowData: { args: ["ptr", "buffer"], returns: "ptr" },
-    SDL_GL_MakeCurrent: { args: ["ptr", "ptr"], returns: "i32" },
-    SDL_GL_GetCurrentContext: { args: [], returns: "ptr" },
-    SDL_GL_GetDrawableSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
-    SDL_GL_GetProcAddress: { args: ["buffer"], returns: "ptr" },
-    SDL_GL_SwapWindow: { args: ["ptr"], returns: "void" },
-    SDL_GL_SetSwapInterval: { args: ["i32"], returns: "i32" },
-    SDL_GL_GetSwapInterval: { args: [], returns: "i32" },
-  }));
+  return openNativeLibrary("sdl2", path =>
+    dlopen(path, {
+      SDL_GetError: { args: [], returns: "cstring" },
+      SDL_GetWindowFromID: { args: ["u32"], returns: "ptr" },
+      SDL_SetWindowData: { args: ["ptr", "buffer", "ptr"], returns: "ptr" },
+      SDL_GetWindowData: { args: ["ptr", "buffer"], returns: "ptr" },
+      SDL_GL_MakeCurrent: { args: ["ptr", "ptr"], returns: "i32" },
+      SDL_GL_GetCurrentContext: { args: [], returns: "ptr" },
+      SDL_GL_GetDrawableSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+      SDL_GL_GetProcAddress: { args: ["buffer"], returns: "ptr" },
+      SDL_GL_SwapWindow: { args: ["ptr"], returns: "void" },
+      SDL_GL_SetSwapInterval: { args: ["i32"], returns: "i32" },
+      SDL_GL_GetSwapInterval: { args: [], returns: "i32" },
+    }),
+  );
 }
 let library: ReturnType<typeof loadSdlRenderContext> | null = null;
-function sdl() { library ??= loadSdlRenderContext(); return library.symbols; }
+function sdl() {
+  library ??= loadSdlRenderContext();
+  return library.symbols;
+}
 function checked(result: number, operation: string): void {
   if (result < 0) throw new Error(`${operation}: ${sdl().SDL_GetError()}`);
 }
@@ -47,16 +52,29 @@ function pointer(value: Pointer | null, operation: string): Pointer {
   if (value === null) throw new Error(`${operation}: ${sdl().SDL_GetError()}`);
   return value;
 }
-function cString(value: string): Buffer { return Buffer.from(`${value}\0`); }
+function cString(value: string): Buffer {
+  return Buffer.from(`${value}\0`);
+}
 
-const offered = 0, adopted = 1, released = 2, restoring = 3, restored = 4, parked = 5;
+const offered = 0,
+  adopted = 1,
+  released = 2,
+  restoring = 3,
+  restored = 4,
+  parked = 5;
 
 /** The window owner keeps this lease until cancellation or worker release. */
 export class SdlRenderContextLease {
-  private constructor(private readonly window: Pointer, private readonly context: Pointer,
-    readonly transfer: SdlRenderContextTransfer, private readonly state: Int32Array) {}
+  private constructor(
+    private readonly window: Pointer,
+    private readonly context: Pointer,
+    readonly transfer: SdlRenderContextTransfer,
+    private readonly state: Int32Array,
+  ) {}
 
-  get parked(): boolean { return Atomics.load(this.state, 0) === parked; }
+  get parked(): boolean {
+    return Atomics.load(this.state, 0) === parked;
+  }
 
   static detach(window: Pointer, context: Pointer, windowId: number): SdlRenderContextLease {
     if (!isMainThread) throw new Error("SDL window lifetime belongs to the main thread");
@@ -66,7 +84,9 @@ export class SdlRenderContextLease {
     const api = sdl();
     if (api.SDL_GL_GetCurrentContext() !== context) throw new Error("SDL context must be current before detach");
     const transfer = { windowId, key: `quake-render-${crypto.randomUUID()}`, ownership: new SharedArrayBuffer(4) };
-    const state = new Int32Array(transfer.ownership), key = cString(transfer.key), ownerKey = cString(`${transfer.key}-owner`);
+    const state = new Int32Array(transfer.ownership),
+      key = cString(transfer.key),
+      ownerKey = cString(`${transfer.key}-owner`);
     api.SDL_SetWindowData(window, key, context);
     api.SDL_SetWindowData(window, ownerKey, ptr(transfer.ownership));
     try {
@@ -76,7 +96,8 @@ export class SdlRenderContextLease {
       Atomics.store(state, 0, offered);
       return new SdlRenderContextLease(window, context, transfer, state);
     } catch (error) {
-      api.SDL_SetWindowData(window, key, null); api.SDL_SetWindowData(window, ownerKey, null);
+      api.SDL_SetWindowData(window, key, null);
+      api.SDL_SetWindowData(window, ownerKey, null);
       throw error;
     }
   }
@@ -101,10 +122,21 @@ export class SdlRenderContextLease {
 }
 
 function parseTransfer(value: unknown): SdlRenderContextTransfer {
-  if (typeof value !== "object" || value === null || !("windowId" in value) || !("key" in value) || !("ownership" in value)
-    || typeof value.windowId !== "number" || !Number.isInteger(value.windowId) || value.windowId <= 0 || value.windowId > 0xffffffff
-    || typeof value.key !== "string" || !/^quake-render-[0-9a-f-]{36}$/.test(value.key)
-    || !(value.ownership instanceof SharedArrayBuffer) || value.ownership.byteLength !== 4)
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("windowId" in value) ||
+    !("key" in value) ||
+    !("ownership" in value) ||
+    typeof value.windowId !== "number" ||
+    !Number.isInteger(value.windowId) ||
+    value.windowId <= 0 ||
+    value.windowId > 0xffffffff ||
+    typeof value.key !== "string" ||
+    !/^quake-render-[0-9a-f-]{36}$/.test(value.key) ||
+    !(value.ownership instanceof SharedArrayBuffer) ||
+    value.ownership.byteLength !== 4
+  )
     throw new Error("Invalid SDL render context transfer");
   return { windowId: value.windowId, key: value.key, ownership: value.ownership };
 }
@@ -114,14 +146,17 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
   private closed = false;
   private renderEnabled = true;
   private procedureLeases = 0;
-  private constructor(private readonly window: Pointer, private readonly context: Pointer, private readonly state: Int32Array) {}
+  private constructor(
+    private readonly window: Pointer,
+    private readonly context: Pointer,
+    private readonly state: Int32Array,
+  ) {}
 
   static adopt(value: unknown): SdlWorkerRenderContext {
     const transfer = parseTransfer(value);
     if (isMainThread) throw new Error("SDL render context adoption requires a worker thread");
     const state = new Int32Array(transfer.ownership);
-    if (Atomics.compareExchange(state, 0, offered, adopted) !== offered)
-      throw new Error("SDL render context transfer was already consumed");
+    if (Atomics.compareExchange(state, 0, offered, adopted) !== offered) throw new Error("SDL render context transfer was already consumed");
     try {
       const api = sdl();
       if (api.SDL_GL_GetCurrentContext() !== null) throw new Error("Worker already has a current SDL context");
@@ -154,13 +189,18 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
   resume(): void {
     if (this.closed) throw new Error("SDL worker render context is released");
     if (Atomics.load(this.state, 0) === adopted) return;
-    if (Atomics.compareExchange(this.state, 0, parked, adopted) !== parked)
-      throw new Error("SDL worker render context is not parked");
-    try { checked(sdl().SDL_GL_MakeCurrent(this.window, this.renderEnabled ? this.context : null), "SDL_GL_MakeCurrent worker resume"); }
-    catch (error) { Atomics.store(this.state, 0, parked); throw error; }
+    if (Atomics.compareExchange(this.state, 0, parked, adopted) !== parked) throw new Error("SDL worker render context is not parked");
+    try {
+      checked(sdl().SDL_GL_MakeCurrent(this.window, this.renderEnabled ? this.context : null), "SDL_GL_MakeCurrent worker resume");
+    } catch (error) {
+      Atomics.store(this.state, 0, parked);
+      throw error;
+    }
   }
 
-  get renderingEnabled(): boolean { return this.renderEnabled; }
+  get renderingEnabled(): boolean {
+    return this.renderEnabled;
+  }
 
   setRenderingEnabled(enabled: boolean): void {
     if (this.closed || Atomics.load(this.state, 0) !== adopted) throw new Error("SDL worker render context is released");
@@ -170,9 +210,11 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
 
   get drawableSize(): { readonly width: number; readonly height: number } {
     this.makeCurrent();
-    const width = new Int32Array(1), height = new Int32Array(1);
+    const width = new Int32Array(1),
+      height = new Int32Array(1);
     sdl().SDL_GL_GetDrawableSize(this.window, width, height);
-    const w = width[0], h = height[0];
+    const w = width[0],
+      h = height[0];
     if (w === undefined || h === undefined || w <= 0 || h <= 0) throw new Error("SDL returned invalid drawable dimensions");
     return { width: w, height: h };
   }
@@ -223,5 +265,7 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
     Atomics.notify(this.state, 0);
   }
 
-  [Symbol.dispose](): void { this.release(); }
+  [Symbol.dispose](): void {
+    this.release();
+  }
 }

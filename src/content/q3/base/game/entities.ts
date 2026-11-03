@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_utils.c and g_main.c event/think timing.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -57,8 +58,7 @@ export function initGameEntity(entity: GameEntity): void {
 
 /** G_SetOrigin stores a fixed trajectory and current collision origin; linking is separate. */
 export function setOrigin(entity: GameEntity, origin: Vec3): void {
-  entity.s.pos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0,
-    base: vec3(origin.x, origin.y, origin.z), delta: vec3(0, 0, 0) };
+  entity.s.pos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0, base: vec3(origin.x, origin.y, origin.z), delta: vec3(0, 0, 0) };
   entity.r.currentOrigin = vec3(origin.x, origin.y, origin.z);
 }
 
@@ -75,7 +75,7 @@ export class EntityPool {
   readonly callbacks = new Q3CallbackCatalog();
   readonly clients: readonly GameClient[];
   readonly utilities: GameUtilityScratch;
-    #numEntities = MAX_CLIENTS;
+  #numEntities = MAX_CLIENTS;
   #maxClients: number;
 
   constructor(readonly options: EntityPoolOptions) {
@@ -95,15 +95,29 @@ export class EntityPool {
 
   activateClient(slot: number): GameEntity {
     if (slot < 0 || slot >= this.maxClients) throw new RangeError("Client slot outside configured clients");
-    const entity = this.options.records.activate(slot); entity.client = this.clientAt(slot); return entity;
+    const entity = this.options.records.activate(slot);
+    entity.client = this.clientAt(slot);
+    return entity;
   }
-  deactivateClient(slot: number): void { this.options.records.deactivateClient(slot); }
-  get numEntities(): number { return this.#numEntities; }
-  get maxClients(): number { return this.#maxClients; }
+  deactivateClient(slot: number): void {
+    this.options.records.deactivateClient(slot);
+  }
+  get numEntities(): number {
+    return this.#numEntities;
+  }
+  get maxClients(): number {
+    return this.#maxClients;
+  }
 
   restoreCounts(state: { readonly numEntities: number; readonly maxClients: number }): void {
-    if (!Number.isInteger(state.numEntities) || state.numEntities < MAX_CLIENTS || state.numEntities > ENTITYNUM_WORLD
-      || !Number.isInteger(state.maxClients) || state.maxClients < 1 || state.maxClients > MAX_CLIENTS) {
+    if (
+      !Number.isInteger(state.numEntities) ||
+      state.numEntities < MAX_CLIENTS ||
+      state.numEntities > ENTITYNUM_WORLD ||
+      !Number.isInteger(state.maxClients) ||
+      state.maxClients < 1 ||
+      state.maxClients > MAX_CLIENTS
+    ) {
       throw new Error("Invalid restored Q3 pool counts");
     }
     this.#numEntities = state.numEntities;
@@ -111,10 +125,16 @@ export class EntityPool {
   }
 
   /** These counts live in level, separately from the retained entity/client arrays. */
-  clearLevel(): void { this.#numEntities = 0; this.#maxClients = 0; }
+  clearLevel(): void {
+    this.#numEntities = 0;
+    this.#maxClients = 0;
+  }
 
   clearEntities(): void {
-    for (let slot = 0; slot < MAX_GENTITIES; slot++) { const entity = this.get(slot); if (entity?.inuse) this.options.records.release(entity); }
+    for (let slot = 0; slot < MAX_GENTITIES; slot++) {
+      const entity = this.get(slot);
+      if (entity?.inuse) this.options.records.release(entity);
+    }
   }
 
   initializeClients(maxClients: number): void {
@@ -123,11 +143,13 @@ export class EntityPool {
     }
     this.#maxClients = maxClients;
     for (const client of this.clients) {
-      const fresh = new GameClient(this.options.product), { ps, pers, sess, ammoTimes } = client;
+      const fresh = new GameClient(this.options.product),
+        { ps, pers, sess, ammoTimes } = client;
       const teamState = pers.teamState;
       ps.copyFrom(fresh.ps);
       Object.assign(teamState, fresh.pers.teamState);
-      Object.assign(pers, fresh.pers, { teamState }); Object.assign(sess, fresh.sess);
+      Object.assign(pers, fresh.pers, { teamState });
+      Object.assign(sess, fresh.sess);
       for (let index = 0; index < ammoTimes.length; index++) ammoTimes.set(index, 0);
       Object.assign(client, fresh, { ps, pers, sess, ammoTimes });
     }
@@ -135,7 +157,9 @@ export class EntityPool {
     this.#numEntities = MAX_CLIENTS;
   }
 
-  get(number: number): GameEntity | undefined { return this.options.records.get(number); }
+  get(number: number): GameEntity | undefined {
+    return this.options.records.get(number);
+  }
 
   at(number: number): GameEntity {
     const entity = this.get(number);
@@ -247,7 +271,10 @@ export class EntityPool {
         entity.s.event = 0;
         if (entity.client !== null) entity.client.ps.externalEvent = 0;
       }
-      if (entity.freeAfterEvent) { this.free(entity); return entity.inuse ? "waiting" : "freed"; }
+      if (entity.freeAfterEvent) {
+        this.free(entity);
+        return entity.inuse ? "waiting" : "freed";
+      }
       if (entity.unlinkAfterEvent) {
         entity.unlinkAfterEvent = false;
         this.options.unlink(entity);

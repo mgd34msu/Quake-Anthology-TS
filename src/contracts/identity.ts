@@ -1,16 +1,30 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Stable implementation name, separate from its session-owned actor handles. */
 export type ProviderId = `${string}:${string}`;
 export type CallbackId = `${string}:${string}`;
 
 class SessionIdentity {
   readonly #token: symbol;
-  constructor(readonly name: string, token: symbol) { this.#token = token; Object.freeze(this); }
-  belongsTo(token: symbol): boolean { return this.#token === token; }
+  constructor(
+    readonly name: string,
+    token: symbol,
+  ) {
+    this.#token = token;
+    Object.freeze(this);
+  }
+  belongsTo(token: symbol): boolean {
+    return this.#token === token;
+  }
 }
 
 class ActorIdentity {
   readonly #token: symbol;
-  constructor(readonly session: SessionId, readonly slot: number, readonly generation: number, token: symbol) {
+  constructor(
+    readonly session: SessionId,
+    readonly slot: number,
+    readonly generation: number,
+    token: symbol,
+  ) {
     this.#token = token;
     Object.freeze(this);
   }
@@ -21,16 +35,27 @@ class ActorIdentity {
 
 class SeatIdentity {
   readonly #token: symbol;
-  constructor(readonly session: SessionId, readonly index: number, token: symbol) {
+  constructor(
+    readonly session: SessionId,
+    readonly index: number,
+    token: symbol,
+  ) {
     this.#token = token;
     Object.freeze(this);
   }
-  equals(other: SeatIdentity): boolean { return this.#token === other.#token && this.index === other.index; }
+  equals(other: SeatIdentity): boolean {
+    return this.#token === other.#token && this.index === other.index;
+  }
 }
 
 class ClientIdentity {
   readonly #token: symbol;
-  constructor(readonly session: SessionId, readonly slot: number, readonly generation: number, token: symbol) {
+  constructor(
+    readonly session: SessionId,
+    readonly slot: number,
+    readonly generation: number,
+    token: symbol,
+  ) {
     this.#token = token;
     Object.freeze(this);
   }
@@ -41,11 +66,17 @@ class ClientIdentity {
 
 class OwnedActorReference {
   readonly #token: symbol;
-  constructor(readonly id: ActorId, readonly owner: ProviderId, token: symbol) {
+  constructor(
+    readonly id: ActorId,
+    readonly owner: ProviderId,
+    token: symbol,
+  ) {
     this.#token = token;
     Object.freeze(this);
   }
-  belongsTo(token: symbol): boolean { return this.#token === token; }
+  belongsTo(token: symbol): boolean {
+    return this.#token === token;
+  }
 }
 
 export type SessionId = SessionIdentity;
@@ -89,7 +120,9 @@ export function createIdentityOwner(name: string): IdentityOwner {
     client(slot, generation) {
       return new ClientIdentity(session, natural(slot, "Client slot"), natural(generation, "Client generation"), token);
     },
-    owns(id) { return id.session.belongsTo(token); },
+    owns(id) {
+      return id.session.belongsTo(token);
+    },
   };
 }
 

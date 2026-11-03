@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActivePowerupTimer } from "../../../contracts/gameplay.ts";
 import type { Q2PlayerPowerups } from "../../../content/q2/foundation/items.ts";
 import type { Q2MissionPackPowerups } from "../../../content/q2/missionpacks/items.ts";
@@ -6,7 +7,11 @@ import type { GameClient } from "../../../content/q3/base/game/state.ts";
 import { Powerup } from "../../../content/q3/base/shared/definitions.ts";
 import { MoveFlags } from "../../../content/q3/base/shared/player-state.ts";
 
-export function q2PowerupTimers(base: Readonly<Q2PlayerPowerups>, expansion: Readonly<Q2MissionPackPowerups> | undefined, now: number): readonly ActivePowerupTimer[] {
+export function q2PowerupTimers(
+  base: Readonly<Q2PlayerPowerups>,
+  expansion: Readonly<Q2MissionPackPowerups> | undefined,
+  now: number,
+): readonly ActivePowerupTimer[] {
   const timers: readonly ActivePowerupTimer[] = [
     { item: "q2:item_quad", label: "Quad Damage", remainingSeconds: base.quadUntil - now },
     { item: "q2:item_quadfire", label: "DualFire Damage", remainingSeconds: (expansion?.quadFireUntil ?? 0) - now },
@@ -39,7 +44,7 @@ const q1Timers: Readonly<Record<Q1Powerup, { readonly item: ActivePowerupTimer["
 };
 
 export function q1PowerupTimers(powerups: ReadonlyMap<Q1Powerup, number>, nowSeconds: number): readonly ActivePowerupTimer[] {
-  return [...powerups].flatMap(([kind, expires]) => expires > nowSeconds ? [{ ...q1Timers[kind], remainingSeconds: expires - nowSeconds }] : []);
+  return [...powerups].flatMap(([kind, expires]) => (expires > nowSeconds ? [{ ...q1Timers[kind], remainingSeconds: expires - nowSeconds }] : []));
 }
 
 const q3Timers = [
@@ -52,11 +57,16 @@ const q3Timers = [
 ] satisfies readonly { readonly powerup: Powerup; readonly item: ActivePowerupTimer["item"]; readonly label: string }[];
 
 export function q3PublicPowerupTimers(expires: (powerup: number) => number, nowMilliseconds: number): readonly ActivePowerupTimer[] {
-  return q3Timers.map(({ powerup, ...timer }) => ({ ...timer, remainingSeconds: (expires(powerup) - nowMilliseconds) / 1000 }))
+  return q3Timers
+    .map(({ powerup, ...timer }) => ({ ...timer, remainingSeconds: (expires(powerup) - nowMilliseconds) / 1000 }))
     .filter(timer => timer.remainingSeconds > 0);
 }
 
-export function q3PowerupTimers(client: Readonly<GameClient>, nowMilliseconds: number, clientAt: (clientNumber: number) => Readonly<GameClient>): readonly ActivePowerupTimer[] {
+export function q3PowerupTimers(
+  client: Readonly<GameClient>,
+  nowMilliseconds: number,
+  clientAt: (clientNumber: number) => Readonly<GameClient>,
+): readonly ActivePowerupTimer[] {
   const viewed = (client.ps.pmFlags & MoveFlags.FOLLOW) !== 0 ? clientAt(client.ps.clientNum) : client;
   const timers: ActivePowerupTimer[] = [...q3PublicPowerupTimers(powerup => viewed.ps.powerups.get(powerup), nowMilliseconds)];
   timers.push({ item: "q3:holdable_invulnerability", label: "Invulnerability", remainingSeconds: (viewed.invulnerabilityTime - nowMilliseconds) / 1000 });

@@ -1,13 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source refEntity_t presentation records. id Software, GPL-2.0-or-later.
 import type { Axis, Vec2, Vec3, Vec4, Bounds } from "../../../contracts/math.ts";
 import type { DecodedModel, DecodedWorld } from "../../../contracts/scene.ts";
 import type { ResolvedResourceReference } from "../../../contracts/content.ts";
-export interface SceneDefaultModel { readonly kind: "default"; readonly path: "*default"; }
-export interface SceneLoadedModel { readonly kind: "model"; readonly path: string; readonly model: DecodedModel; readonly resource: ResolvedResourceReference; }
-export interface SceneInlineModel { readonly kind: "inline"; readonly path: string; readonly index: number; readonly geometry: DecodedWorld; readonly resource: ResolvedResourceReference; readonly bounds: Bounds; }
+export interface SceneDefaultModel {
+  readonly kind: "default";
+  readonly path: "*default";
+}
+export interface SceneLoadedModel {
+  readonly kind: "model";
+  readonly path: string;
+  readonly model: DecodedModel;
+  readonly resource: ResolvedResourceReference;
+}
+export interface SceneInlineModel {
+  readonly kind: "inline";
+  readonly path: string;
+  readonly index: number;
+  readonly geometry: DecodedWorld;
+  readonly resource: ResolvedResourceReference;
+  readonly bounds: Bounds;
+}
 export type SceneModel = SceneDefaultModel | SceneLoadedModel | SceneInlineModel;
-export interface SceneShader { readonly name: string; }
-export interface SceneSkin { readonly path: string; readonly surfaces: readonly { readonly name: string; readonly shader: string }[]; }
+export interface SceneShader {
+  readonly name: string;
+}
+export interface SceneSkin {
+  readonly path: string;
+  readonly surfaces: readonly { readonly name: string; readonly shader: string }[];
+}
 export const DEFAULT_MODEL: SceneDefaultModel = Object.freeze({ kind: "default", path: "*default" });
 export const RF_MINLIGHT = 1;
 export const RF_THIRD_PERSON = 2;
@@ -116,7 +137,7 @@ const SCENE_COORDINATE_LIMIT = 1e9;
 const sceneCoordinate = (value: number): boolean => Number.isFinite(value) && Math.abs(value) <= SCENE_COORDINATE_LIMIT;
 const sceneVector = (vector: Vec3): boolean => sceneCoordinate(vector.x) && sceneCoordinate(vector.y) && sceneCoordinate(vector.z);
 export function refEntityIsAdmissible(entity: Q3AdmittedRefEntity): boolean {
-  if (!sceneVector(entity.origin) || "oldOrigin" in entity && !sceneVector(entity.oldOrigin)) return false;
+  if (!sceneVector(entity.origin) || ("oldOrigin" in entity && !sceneVector(entity.oldOrigin))) return false;
   if ("axis" in entity && !entity.axis.every(sceneVector)) return false;
   if ("lightingOrigin" in entity && !sceneVector(entity.lightingOrigin)) return false;
   if ("radius" in entity && !Number.isFinite(entity.radius)) return false;
@@ -131,14 +152,32 @@ export function refPolyIsAdmissible(poly: RefPoly): boolean {
   return poly.vertices.every(vertex => sceneVector(vertex.position) && Number.isFinite(vertex.texCoord.x) && Number.isFinite(vertex.texCoord.y));
 }
 
-function zero(): Vec3 { return { x: 0, y: 0, z: 0 }; }
-function zeroAxis(): Axis { return [zero(), zero(), zero()]; }
+function zero(): Vec3 {
+  return { x: 0, y: 0, z: 0 };
+}
+function zeroAxis(): Axis {
+  return [zero(), zero(), zero()];
+}
 function shading(): ShadedEntity {
   return { renderFlags: 0, customShader: null, shaderRGBA: { x: 0, y: 0, z: 0, w: 0 }, shaderTexCoord: { x: 0, y: 0 }, shaderTime: 0 };
 }
 export function createModelEntity(model: SceneModel = DEFAULT_MODEL): RefModelEntity {
-  return { ...shading(), kind: "model", model, origin: zero(), oldOrigin: zero(), axis: zeroAxis(), nonNormalizedAxes: false,
-    lightingOrigin: zero(), shadowPlane: 0, frame: 0, oldFrame: 0, backLerp: 0, skinNum: 0, customSkin: null };
+  return {
+    ...shading(),
+    kind: "model",
+    model,
+    origin: zero(),
+    oldOrigin: zero(),
+    axis: zeroAxis(),
+    nonNormalizedAxes: false,
+    lightingOrigin: zero(),
+    shadowPlane: 0,
+    frame: 0,
+    oldFrame: 0,
+    backLerp: 0,
+    skinNum: 0,
+    customSkin: null,
+  };
 }
 export function createSpriteEntity(): RefSpriteEntity {
   return { ...shading(), kind: "sprite", origin: zero(), radius: 0, rotation: 0 };
@@ -160,21 +199,51 @@ export function createPortalEntity(): RefPortalEntity {
 export function copyRefEntity(entity: RefEntity): RefEntity;
 export function copyRefEntity(entity: Q3AdmittedRefEntity): Q3AdmittedRefEntity;
 export function copyRefEntity(entity: Q3AdmittedRefEntity): Q3AdmittedRefEntity {
-  if (entity.kind === "poly") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, lightingOrigin: { ...entity.lightingOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: { ...entity.shaderRGBA }, shaderTexCoord: { ...entity.shaderTexCoord } };
-  if (entity.kind === "portal-surface") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }] };
-  const color = { ...entity.shaderRGBA }, texCoord = { ...entity.shaderTexCoord };
+  if (entity.kind === "poly")
+    return {
+      ...entity,
+      origin: { ...entity.origin },
+      oldOrigin: { ...entity.oldOrigin },
+      lightingOrigin: { ...entity.lightingOrigin },
+      axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }],
+      shaderRGBA: { ...entity.shaderRGBA },
+      shaderTexCoord: { ...entity.shaderTexCoord },
+    };
+  if (entity.kind === "portal-surface")
+    return {
+      ...entity,
+      origin: { ...entity.origin },
+      oldOrigin: { ...entity.oldOrigin },
+      axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }],
+    };
+  const color = { ...entity.shaderRGBA },
+    texCoord = { ...entity.shaderTexCoord };
   if (entity.kind === "sprite") return { ...entity, origin: { ...entity.origin }, shaderRGBA: color, shaderTexCoord: texCoord };
-  if (entity.kind === "beam") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: color, shaderTexCoord: texCoord };
-  if (entity.kind !== "model") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, shaderRGBA: color, shaderTexCoord: texCoord };
-  return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, lightingOrigin: { ...entity.lightingOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: color, shaderTexCoord: texCoord };
+  if (entity.kind === "beam")
+    return {
+      ...entity,
+      origin: { ...entity.origin },
+      oldOrigin: { ...entity.oldOrigin },
+      axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }],
+      shaderRGBA: color,
+      shaderTexCoord: texCoord,
+    };
+  if (entity.kind !== "model")
+    return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, shaderRGBA: color, shaderTexCoord: texCoord };
+  return {
+    ...entity,
+    origin: { ...entity.origin },
+    oldOrigin: { ...entity.oldOrigin },
+    lightingOrigin: { ...entity.lightingOrigin },
+    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }],
+    shaderRGBA: color,
+    shaderTexCoord: texCoord,
+  };
 }
 
-
 export function copyRefPoly(poly: RefPoly): RefPoly {
-  return { shader: poly.shader, vertices: poly.vertices.map(vertex => ({ position: { ...vertex.position },
-    texCoord: { ...vertex.texCoord }, color: { ...vertex.color } })) };
+  return {
+    shader: poly.shader,
+    vertices: poly.vertices.map(vertex => ({ position: { ...vertex.position }, texCoord: { ...vertex.texCoord }, color: { ...vertex.color } })),
+  };
 }

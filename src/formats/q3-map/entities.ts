@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Text parsing translated from Quake III Arena's q_shared.c and cmd.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../persistence/value.ts";
 /*
  * Script storage from Quake III Arena botlib/l_script.c and l_script.h.
@@ -10,8 +11,12 @@ export interface ScriptMemoryAllocation {
   readonly bytes: Uint8Array;
 }
 
-export interface ScriptMemoryCapture { reference(allocation: ScriptMemoryAllocation): number }
-export interface ScriptMemoryRestore { allocation(id: number): ScriptMemoryAllocation }
+export interface ScriptMemoryCapture {
+  reference(allocation: ScriptMemoryAllocation): number;
+}
+export interface ScriptMemoryRestore {
+  allocation(id: number): ScriptMemoryAllocation;
+}
 
 /** Supplied by the actual bot memory owner in runtime compositions. */
 export interface ScriptMemory {
@@ -59,7 +64,11 @@ export class SourceScriptStorage {
 
   captureSaveState(capture: ScriptMemoryCapture) {
     if (this.disposed) throw new Error("Cannot checkpoint disposed script storage");
-    return { allocation: capture.reference(this.allocation), punctuationTable: this.punctuationTable === null ? null : capture.reference(this.punctuationTable), token: this.token.captureSaveState() };
+    return {
+      allocation: capture.reference(this.allocation),
+      punctuationTable: this.punctuationTable === null ? null : capture.reference(this.punctuationTable),
+      token: this.token.captureSaveState(),
+    };
   }
   static restoreSaveState(value: unknown, memory: ScriptMemory, restore: ScriptMemoryRestore): SourceScriptStorage {
     const reader = new SaveReader(value, "script.storage");
@@ -67,9 +76,11 @@ export class SourceScriptStorage {
     if (allocation.bytes.length < SOURCE_SCRIPT_BYTES + 1) reader.fail("invalid script storage extent");
     const script = new SourceScriptStorage(memory, allocation);
     script.punctuationTable = reader.field("punctuationTable").nullable(cell => restore.allocation(cell.integer(0)));
-    if (script.punctuationTable !== null && script.punctuationTable.bytes.length !== SOURCE_PUNCTUATION_TABLE_BYTES) reader.fail("invalid punctuation table extent");
+    if (script.punctuationTable !== null && script.punctuationTable.bytes.length !== SOURCE_PUNCTUATION_TABLE_BYTES)
+      reader.fail("invalid punctuation table extent");
     script.token.restoreSaveState(reader.field("token").value, true);
-    void script.buffer; void script.path;
+    void script.buffer;
+    void script.path;
     return script;
   }
 
@@ -160,27 +171,54 @@ export class SourceScriptStorage {
     return bytes.subarray(start, end);
   }
 
-  get length(): number { return this.view.getInt32(LENGTH, true); }
-  get nextScript(): number { return this.view.getUint32(NEXT_SCRIPT, true); }
-  set nextScript(value: number) { this.view.setUint32(NEXT_SCRIPT, value, true); }
-  get offset(): number { return this.view.getUint32(SCRIPT_POINTER, true) - SOURCE_SCRIPT_BYTES; }
-  set offset(value: number) { this.view.setUint32(SCRIPT_POINTER, SOURCE_SCRIPT_BYTES + value, true); }
-  get lastOffset(): number { return this.view.getUint32(LAST_SCRIPT_POINTER, true) - SOURCE_SCRIPT_BYTES; }
-  get linesCrossed(): number { return this.line - this.view.getInt32(LAST_LINE, true); }
+  get length(): number {
+    return this.view.getInt32(LENGTH, true);
+  }
+  get nextScript(): number {
+    return this.view.getUint32(NEXT_SCRIPT, true);
+  }
+  set nextScript(value: number) {
+    this.view.setUint32(NEXT_SCRIPT, value, true);
+  }
+  get offset(): number {
+    return this.view.getUint32(SCRIPT_POINTER, true) - SOURCE_SCRIPT_BYTES;
+  }
+  set offset(value: number) {
+    this.view.setUint32(SCRIPT_POINTER, SOURCE_SCRIPT_BYTES + value, true);
+  }
+  get lastOffset(): number {
+    return this.view.getUint32(LAST_SCRIPT_POINTER, true) - SOURCE_SCRIPT_BYTES;
+  }
+  get linesCrossed(): number {
+    return this.line - this.view.getInt32(LAST_LINE, true);
+  }
   nextWhitespaceChar(): number {
-    const view = this.view, pointer = view.getUint32(WHITESPACE_POINTER, true);
+    const view = this.view,
+      pointer = view.getUint32(WHITESPACE_POINTER, true);
     if (pointer === view.getUint32(END_WHITESPACE_POINTER, true)) return 0;
     const byte = this.bytes[pointer];
     if (byte === undefined || pointer < SOURCE_SCRIPT_BYTES) throw new RangeError("script whitespace pointer exceeds its source allocation");
     view.setUint32(WHITESPACE_POINTER, pointer + 1, true);
     return byte < 128 ? byte : byte - 256;
   }
-  get line(): number { return this.view.getInt32(LINE, true); }
-  set line(value: number) { this.view.setInt32(LINE, value, true); }
-  get flags(): number { return this.view.getInt32(FLAGS, true); }
-  set flags(value: number) { this.view.setInt32(FLAGS, value, true); }
-  get tokenAvailable(): boolean { return this.view.getInt32(TOKEN_AVAILABLE, true) !== 0; }
-  set tokenAvailable(value: boolean) { this.view.setInt32(TOKEN_AVAILABLE, value ? 1 : 0, true); }
+  get line(): number {
+    return this.view.getInt32(LINE, true);
+  }
+  set line(value: number) {
+    this.view.setInt32(LINE, value, true);
+  }
+  get flags(): number {
+    return this.view.getInt32(FLAGS, true);
+  }
+  set flags(value: number) {
+    this.view.setInt32(FLAGS, value, true);
+  }
+  get tokenAvailable(): boolean {
+    return this.view.getInt32(TOKEN_AVAILABLE, true) !== 0;
+  }
+  set tokenAvailable(value: boolean) {
+    this.view.setInt32(TOKEN_AVAILABLE, value ? 1 : 0, true);
+  }
 
   beginToken(): void {
     const view = this.view;
@@ -197,8 +235,7 @@ export class SourceScriptStorage {
 
   punctuationHead(character: number): number {
     const view = this.view;
-    if (view.getUint32(PUNCTUATIONS, true) !== 1 || view.getUint32(PUNCTUATION_TABLE, true) !== 1
-      || this.punctuationTable === null) {
+    if (view.getUint32(PUNCTUATIONS, true) !== 1 || view.getUint32(PUNCTUATION_TABLE, true) !== 1 || this.punctuationTable === null) {
       throw new RangeError("script punctuation pointer does not identify its default table");
     }
     if (!Number.isInteger(character) || character < 0 || character > 255) {
@@ -246,8 +283,15 @@ export class SourceScriptStorage {
         whitespace = true;
         input++;
       } else {
-        if (newline) { bytes[output++] = 10; newline = false; whitespace = false; }
-        if (whitespace) { bytes[output++] = 32; whitespace = false; }
+        if (newline) {
+          bytes[output++] = 10;
+          newline = false;
+          whitespace = false;
+        }
+        if (whitespace) {
+          bytes[output++] = 32;
+          whitespace = false;
+        }
         bytes[output++] = read(input++);
         if (byte === 34) {
           while ((byte = read(input)) !== 0 && byte !== 34) bytes[output++] = read(input++);
@@ -303,8 +347,11 @@ export class SourceScriptStorage {
 
 /** COM_Compress over a string: comments out, whitespace runs reduced to one space or newline, quoted text kept. */
 export function compressScriptText(text: string): string {
-  let output = "", newline = false, whitespace = false, index = 0;
-  const at = (offset: number): number => offset < text.length ? text.charCodeAt(offset) : 0;
+  let output = "",
+    newline = false,
+    whitespace = false,
+    index = 0;
+  const at = (offset: number): number => (offset < text.length ? text.charCodeAt(offset) : 0);
   let byte: number;
   while ((byte = at(index)) !== 0) {
     if (byte === 47 && at(index + 1) === 47) {
@@ -313,12 +360,21 @@ export function compressScriptText(text: string): string {
       while (at(index) !== 0 && (at(index) !== 42 || at(index + 1) !== 47)) index++;
       if (at(index) !== 0) index += 2;
     } else if (byte === 10 || byte === 13) {
-      newline = true; index++;
+      newline = true;
+      index++;
     } else if (byte === 32 || byte === 9) {
-      whitespace = true; index++;
+      whitespace = true;
+      index++;
     } else {
-      if (newline) { output += "\n"; newline = false; whitespace = false; }
-      if (whitespace) { output += " "; whitespace = false; }
+      if (newline) {
+        output += "\n";
+        newline = false;
+        whitespace = false;
+      }
+      if (whitespace) {
+        output += " ";
+        whitespace = false;
+      }
       output += text[index++];
       if (byte === 34) {
         while ((byte = at(index)) !== 0 && byte !== 34) output += text[index++];

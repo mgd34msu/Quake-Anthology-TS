@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { normalize, subtract } from "../../foundation/fields.ts";
 import { enemyBody, enemyEye, projectFlash, targetDistance } from "../../foundation/monsters/ai.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -13,11 +14,19 @@ function run(context: MonsterContext): undefined {
 }
 
 export const arachnidDefinition: Q2MonsterDefinition = {
-  classname: "monster_arachnid", kind: "arachnid", model: "models/monsters/arachnid/tris.md2",
-  health: 1000, gibHealth: -200, mass: 450, scale: 1,
+  classname: "monster_arachnid",
+  kind: "arachnid",
+  model: "models/monsters/arachnid/tris.md2",
+  health: 1000,
+  gibHealth: -200,
+  mass: 450,
+  scale: 1,
   bounds: { min: { x: -48, y: -48, z: -20 }, max: { x: 48, y: 48, z: 48 } },
-  initialMove: "arachnid_move_stand", moves: arachnidMoves,
-  stand: move("arachnid_move_stand"), walk: move("arachnid_move_walk"), run,
+  initialMove: "arachnid_move_stand",
+  moves: arachnidMoves,
+  stand: move("arachnid_move_stand"),
+  walk: move("arachnid_move_walk"),
+  run,
   sight: sound("arachnid/sight.wav"),
   attack(context) {
     const enemy = enemyBody(context);
@@ -39,11 +48,16 @@ export const arachnidDefinition: Q2MonsterDefinition = {
       for (let i = 0; i < 2; i++) throwGib(entity, game, "models/objects/gibs/bone/tris.md2", reaction.damage);
       for (let i = 0; i < 4; i++) throwGib(entity, game, "models/objects/gibs/sm_meat/tris.md2", reaction.damage);
       throwGib(entity, game, "models/objects/gibs/head2/tris.md2", reaction.damage, { head: true });
-      state.dead = true; state.gibbed = true; return undefined;
+      state.dead = true;
+      state.gibbed = true;
+      return undefined;
     }
     if (state.dead) return undefined;
-    game.sound(entity, "arachnid/death.wav", 2); state.dead = true; state.canTakeDamage = true;
-    game.host.combat.setTraits(entity.actor, { canTakeDamage: true }); return context.setMove("arachnid_move_death");
+    game.sound(entity, "arachnid/death.wav", 2);
+    state.dead = true;
+    state.canTakeDamage = true;
+    game.host.combat.setTraits(entity.actor, { canTakeDamage: true });
+    return context.setMove("arachnid_move_death");
   },
   callbacks: {
     arachnid_run: run,
@@ -62,9 +76,14 @@ export const arachnidDefinition: Q2MonsterDefinition = {
     },
     arachnid_rail(context) {
       const frame = context.entity.frame;
-      const flash = frame === arachnidFrame.rails8 ? rereleaseFlash.ARACHNID_RAIL2
-        : frame === arachnidFrame.rails_up7 ? rereleaseFlash.ARACHNID_RAIL_UP1
-          : frame === arachnidFrame.rails_up11 ? rereleaseFlash.ARACHNID_RAIL_UP2 : rereleaseFlash.ARACHNID_RAIL1;
+      const flash =
+        frame === arachnidFrame.rails8
+          ? rereleaseFlash.ARACHNID_RAIL2
+          : frame === arachnidFrame.rails_up7
+            ? rereleaseFlash.ARACHNID_RAIL_UP1
+            : frame === arachnidFrame.rails_up11
+              ? rereleaseFlash.ARACHNID_RAIL_UP2
+              : rereleaseFlash.ARACHNID_RAIL1;
       const start = projectFlash(context, muzzleOffset("rerelease", flash));
       const direction = normalize(subtract(context.entity.pos1, start));
       context.weapons.fireRail(context.entity, context.game, start, direction, 35, 100);

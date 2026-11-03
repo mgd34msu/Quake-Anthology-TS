@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export * from "./save-image.ts";
 export { encodeCheckpointValue, decodeCheckpointValue, SaveFormatError, SaveReader } from "./value.ts";
 export * from "./q1.ts";

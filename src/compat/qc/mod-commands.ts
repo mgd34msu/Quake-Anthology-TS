@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModConsoleCommand, ModConsoleValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
 import { nativeAtof } from "../../core/numeric.ts";
 
@@ -9,10 +10,17 @@ export function qcConsoleCall(command: ModConsoleCommand, argv: readonly string[
         const text = argv[value.index] ?? "";
         return value.type === "string" ? { kind: "string", value: text } : { kind: "float", value: nativeAtof(text) };
       }
-      case "arguments-text": return { kind: "string", value: argsText };
-      case "argument-count": return { kind: "float", value: argv.length };
-      default: return value;
+      case "arguments-text":
+        return { kind: "string", value: argsText };
+      case "argument-count":
+        return { kind: "float", value: argv.length };
+      default:
+        return value;
     }
   };
-  return { function: command.function, arguments: command.arguments.map(resolve), globals: command.globals.map(global => ({ name: global.name, value: resolve(global.value) })) };
+  return {
+    function: command.function,
+    arguments: command.arguments.map(resolve),
+    globals: command.globals.map(global => ({ name: global.name, value: resolve(global.value) })),
+  };
 }

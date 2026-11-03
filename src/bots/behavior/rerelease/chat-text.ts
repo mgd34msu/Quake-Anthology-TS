@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { randomIndex, type BotRandomT } from "./rng.ts";
 
 /** Q1 chats.txt names numbered localization families, selected from the bot's saved random stream. */

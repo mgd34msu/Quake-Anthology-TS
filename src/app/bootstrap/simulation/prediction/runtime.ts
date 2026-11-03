@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { BoundedQueue } from "../../../../foundation/bounded-queue.ts";
 import { relativeMovementCommand } from "../q3-commands.ts";
 import type { UserCommand } from "../../../../contracts/protocol.ts";
@@ -8,10 +9,15 @@ import type { MovementPredictionOptions, MovementPredictionResult, MovementPredi
 
 export function copyPredictionCommand(command: UserCommand): UserCommand {
   switch (command.kind) {
-    case "q1-netquake": return { ...command, viewAngles: { ...command.viewAngles } };
-    case "q1-quakeworld": case "q2-rerelease": return { ...command, angles: { ...command.angles } };
-    case "q2-classic": return { ...command, angleShorts: [...command.angleShorts] };
-    case "q3": return { ...command, angleWords: [...command.angleWords] };
+    case "q1-netquake":
+      return { ...command, viewAngles: { ...command.viewAngles } };
+    case "q1-quakeworld":
+    case "q2-rerelease":
+      return { ...command, angles: { ...command.angles } };
+    case "q2-classic":
+      return { ...command, angleShorts: [...command.angleShorts] };
+    case "q3":
+      return { ...command, angleWords: [...command.angleWords] };
   }
 }
 
@@ -21,7 +27,10 @@ export class SelectedMovementPrediction {
   private snapshot: MovementPredictionSnapshot;
   private readonly commands = new BoundedQueue<PredictionCommand>(64);
   private discardedSequence = -1;
-  constructor(readonly options: MovementPredictionOptions, initial: MovementPredictionSnapshot) {
+  constructor(
+    readonly options: MovementPredictionOptions,
+    initial: MovementPredictionSnapshot,
+  ) {
     if (options.actor.id.session !== options.seat.session) throw new Error("Prediction actor and seat belong to different sessions");
     if (initial.state.kind !== options.profile.kind) throw new Error("Prediction snapshot does not match selected movement");
     this.snapshot = copyPredictionSnapshot(initial);
@@ -33,10 +42,11 @@ export class SelectedMovementPrediction {
     return undefined;
   }
   submit(entry: PredictionCommand): undefined {
-    if (!Number.isSafeInteger(entry.sequence) || !Number.isFinite(entry.timeMilliseconds)) throw new RangeError("Prediction command needs a finite clock and integer sequence");
+    if (!Number.isSafeInteger(entry.sequence) || !Number.isFinite(entry.timeMilliseconds))
+      throw new RangeError("Prediction command needs a finite clock and integer sequence");
     if (entry.command.kind !== this.options.profile.kind) throw new Error("Prediction command does not match selected movement");
     const previous = this.commands.peekNewest();
-    if (entry.sequence <= this.snapshot.sequence || previous !== undefined && entry.sequence <= previous.sequence) return undefined;
+    if (entry.sequence <= this.snapshot.sequence || (previous !== undefined && entry.sequence <= previous.sequence)) return undefined;
     if (this.commands.length >= 64) {
       const dropped = this.commands.peekOldest();
       if (dropped !== undefined) this.discardedSequence = dropped.sequence;
@@ -48,15 +58,28 @@ export class SelectedMovementPrediction {
     let player = copyPredictionSnapshot(this.snapshot);
     const effects: OrderedMovementEffect[] = [];
     if ((player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease") && (player.state.flags & 64) !== 0) {
-      const latest = this.commands.peekNewest(), state = player.state;
+      const latest = this.commands.peekNewest(),
+        state = player.state;
       const command = latest === undefined ? undefined : relativeMovementCommand(latest, state).command;
-      const shortAngle = (word: number): number => (word << 16 >> 16) * 360 / 65536;
-      if (state.kind === "q2-classic" && command?.kind === "q2-classic") player = { ...player, viewAngles: {
-        x: shortAngle(command.angleShorts[0]) + shortAngle(state.deltaAngleShorts[0]),
-        y: shortAngle(command.angleShorts[1]) + shortAngle(state.deltaAngleShorts[1]),
-        z: shortAngle(command.angleShorts[2]) + shortAngle(state.deltaAngleShorts[2]) } };
-      else if (state.kind === "q2-rerelease" && command?.kind === "q2-rerelease") player = { ...player, viewAngles: {
-        x: command.angles.x + state.deltaAngles.x, y: command.angles.y + state.deltaAngles.y, z: command.angles.z + state.deltaAngles.z } };
+      const shortAngle = (word: number): number => (((word << 16) >> 16) * 360) / 65536;
+      if (state.kind === "q2-classic" && command?.kind === "q2-classic")
+        player = {
+          ...player,
+          viewAngles: {
+            x: shortAngle(command.angleShorts[0]) + shortAngle(state.deltaAngleShorts[0]),
+            y: shortAngle(command.angleShorts[1]) + shortAngle(state.deltaAngleShorts[1]),
+            z: shortAngle(command.angleShorts[2]) + shortAngle(state.deltaAngleShorts[2]),
+          },
+        };
+      else if (state.kind === "q2-rerelease" && command?.kind === "q2-rerelease")
+        player = {
+          ...player,
+          viewAngles: {
+            x: command.angles.x + state.deltaAngles.x,
+            y: command.angles.y + state.deltaAngles.y,
+            z: command.angles.z + state.deltaAngles.z,
+          },
+        };
       return { status: "disabled", player, effects };
     }
     if (this.discardedSequence > player.sequence || (this.commands.peekNewest()?.sequence ?? player.sequence) - player.sequence >= 63)
@@ -64,11 +87,19 @@ export class SelectedMovementPrediction {
     const profile = this.options.profile;
     let first = true;
     this.commands.forEach(entry => {
-      const output = predictMovementCommand(this.options, player, entry, { scene: this.options.scene,
+      const output = predictMovementCommand(this.options, player, entry, {
+        scene: this.options.scene,
         rereleaseMovement: this.rereleaseMovement,
         fixedMilliseconds: profile.kind === "q3" ? profile.fixedMilliseconds : null,
-        noFootsteps: profile.kind === "q3" && profile.noFootsteps, ladders: profile.kind === "q3" && profile.ladders !== false, gauntletHit: false, traceMask: null, firstCommand: first });
-      player = output.player; effects.push(...output.result.effects); first = false;
+        noFootsteps: profile.kind === "q3" && profile.noFootsteps,
+        ladders: profile.kind === "q3" && profile.ladders !== false,
+        gauntletHit: false,
+        traceMask: null,
+        firstCommand: first,
+      });
+      player = output.player;
+      effects.push(...output.result.effects);
+      first = false;
       if (observe !== undefined) observe(copyPredictionSnapshot(player));
     });
     return { status: first ? "unchanged" : "predicted", player, effects };

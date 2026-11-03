@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 

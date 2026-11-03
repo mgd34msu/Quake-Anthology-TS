@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../contracts/identity.ts";
 
 export interface Q1HordeServices {

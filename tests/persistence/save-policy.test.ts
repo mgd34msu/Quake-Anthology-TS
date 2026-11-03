@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,8 @@ import { containedSaveName, saveCommandPath, saveUnavailable, writeContainedSave
 test("console save names resolve in the save directory and preserve explicit import paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "save-command-"));
   try {
-    const directory = join(root, "saves"), path = saveCommandPath(directory, "quicksave");
+    const directory = join(root, "saves"),
+      path = saveCommandPath(directory, "quicksave");
     expect(path).toBe(join(directory, "quicksave.sav"));
     expect(saveCommandPath(directory, "quicksave.sav")).toBe(path);
     expect(saveCommandPath(directory, "campaign/manual")).toBe(join(directory, "campaign", "manual.sav"));
@@ -19,14 +21,24 @@ test("console save names resolve in the save directory and preserve explicit imp
     expect(() => saveCommandPath(directory, "")).toThrow("save name");
     await writeContainedSave(directory, path, Uint8Array.of(7, 3));
     expect(new Uint8Array(await readFile(saveCommandPath(directory, "quicksave")))).toEqual(Uint8Array.of(7, 3));
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("public saves reject dead players, deathmatch, intermission and network authority", () => {
-  const state = { family: "q2", authority: "offline", mode: "coop", active: true, intermission: false, playerHealth: [100, 40] } satisfies Parameters<typeof saveUnavailable>[0];
+  const state = { family: "q2", authority: "offline", mode: "coop", active: true, intermission: false, playerHealth: [100, 40] } satisfies Parameters<
+    typeof saveUnavailable
+  >[0];
   expect(saveUnavailable(state, "manual")).toBeNull();
   expect(saveUnavailable({ ...state, family: "q3", mode: "deathmatch", playerHealth: [0], intermission: true }, "manual")).toBeNull();
-  for (const change of [{ playerHealth: [100, 0] }, { mode: "deathmatch" }, { intermission: true }, { authority: "server" }, { authority: "remote" }] satisfies readonly Partial<Parameters<typeof saveUnavailable>[0]>[])
+  for (const change of [
+    { playerHealth: [100, 0] },
+    { mode: "deathmatch" },
+    { intermission: true },
+    { authority: "server" },
+    { authority: "remote" },
+  ] satisfies readonly Partial<Parameters<typeof saveUnavailable>[0]>[])
     expect(saveUnavailable({ ...state, ...change }, "manual")).not.toBeNull();
   expect(saveUnavailable({ ...state, authority: "server", playerHealth: [] }, "transition")).toBeNull();
   expect(saveUnavailable({ ...state, authority: "remote" }, "transition")).not.toBeNull();
@@ -35,7 +47,8 @@ test("public saves reject dead players, deathmatch, intermission and network aut
 test("contained atomic save cannot follow a linked parent or overwrite reserved transition state", async () => {
   const root = await mkdtemp(join(tmpdir(), "save-policy-"));
   try {
-    const directory = join(root, "saves"), outside = join(root, "outside");
+    const directory = join(root, "saves"),
+      outside = join(root, "outside");
     await mkdir(outside);
     const path = join(directory, "game", "manual.sav");
     await writeContainedSave(directory, path, Uint8Array.of(1, 2));
@@ -46,5 +59,7 @@ test("contained atomic save cannot follow a linked parent or overwrite reserved 
     await symlink(outside, join(directory, "escape"));
     await expect(writeContainedSave(directory, join(directory, "escape", "bad.sav"), Uint8Array.of(9))).rejects.toThrow("ENOTDIR");
     expect(await Bun.file(join(outside, "bad.sav")).exists()).toBe(false);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

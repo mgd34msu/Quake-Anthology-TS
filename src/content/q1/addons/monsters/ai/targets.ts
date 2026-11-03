@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* quakec_mg3/ai.qc path_corner and path control targets. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
@@ -15,7 +16,7 @@ function destination(game: Q1EntityServices, mover: Q1Actor, name: string): bool
   mover.references.set("goalentity", target);
   mover.references.set("movetarget", target);
   if (mover.monster !== null) mover.monster.path = target === null ? "" : name;
-  mover.idealYaw = yawFor(vsub(target === null ? ZERO : game.host.bodies.read(target)?.origin ?? ZERO, game.body(mover).origin));
+  mover.idealYaw = yawFor(vsub(target === null ? ZERO : (game.host.bodies.read(target)?.origin ?? ZERO), game.body(mover).origin));
   return target !== null;
 }
 function pause(mover: Q1Actor, until: number): undefined {
@@ -26,7 +27,12 @@ function pause(mover: Q1Actor, until: number): undefined {
 }
 function moveTarget(game: Q1EntityServices, corner: Q1Actor, other: ActorId): undefined {
   const mover = game.entity(other);
-  if (mover === null || !same(mover.references.get("movetarget") ?? null, corner.actor.id) || (mover.monster?.enemy ?? mover.references.get("enemy") ?? null) !== null) return undefined;
+  if (
+    mover === null ||
+    !same(mover.references.get("movetarget") ?? null, corner.actor.id) ||
+    (mover.monster?.enemy ?? mover.references.get("enemy") ?? null) !== null
+  )
+    return undefined;
   corner.owner = other;
   const previous = game.entity(mover.references.get("dmg_inflictor") ?? null);
   if (previous?.classname === "path_corner" && same(previous.owner, previous.actor.id)) previous.owner = null;
@@ -60,28 +66,39 @@ function switchPath(game: Q1EntityServices, trigger: Q1Actor): undefined {
 }
 export function registerMg3PathTargets(context: Q1AddonContext): undefined {
   const { game } = context;
-  game.registerStateExtension({ id: "mg3:world-words",
+  game.registerStateExtension({
+    id: "mg3:world-words",
     capture: () => encodeCheckpointValue([...game.sourceWorldWords].map(([name, value]) => ({ name, value }))),
     restore: bytes => {
       game.sourceWorldWords.clear();
-      new SaveReader(decodeCheckpointValue(bytes), "mg3:world-words").list(reader => { game.sourceWorldWords.set(reader.field("name").string(), reader.field("value").number()); return undefined; });
+      new SaveReader(decodeCheckpointValue(bytes), "mg3:world-words").list(reader => {
+        game.sourceWorldWords.set(reader.field("name").string(), reader.field("value").number());
+        return undefined;
+      });
       return undefined;
     },
-    restoreAbsent: () => { game.sourceWorldWords.clear(); return undefined; } });
+    restoreAbsent: () => {
+      game.sourceWorldWords.clear();
+      return undefined;
+    },
+  });
   game.named.register("mg3:t_movetarget", { touch: moveTarget });
   game.named.register("mg3:target_cancelpause_use", { use: cancelPause });
   game.named.register("mg3:target_switchpath_use", { use: switchPath });
   game.registerSpawn("path_corner", (_game, entity) => {
     if (entity.targetname === "") throw new Error("path_corner with no targetname.");
     if (entity.wait < 0) entity.wait = 999999;
-    entity.solid = "trigger"; entity.touch = game.named.touch(entity, "mg3:t_movetarget");
+    entity.solid = "trigger";
+    entity.touch = game.named.touch(entity, "mg3:t_movetarget");
     return game.setBounds(entity, { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } });
   });
-  for (const classname of ["target_cancelpause", "target_switchpath"]) game.registerSpawn(classname, (_game, entity) => {
-    if (entity.target === "") throw new Error(`${classname} with no target given.`);
-    if (entity.targetname === "") throw new Error(`${classname} with no targetname given.`);
-    if (classname === "target_switchpath" && entity.text("netname") === "") throw new Error("target_switchtarget with no netname given.");
-    entity.use = game.named.use(entity, `mg3:${classname}_use`); return undefined;
-  });
+  for (const classname of ["target_cancelpause", "target_switchpath"])
+    game.registerSpawn(classname, (_game, entity) => {
+      if (entity.target === "") throw new Error(`${classname} with no target given.`);
+      if (entity.targetname === "") throw new Error(`${classname} with no targetname given.`);
+      if (classname === "target_switchpath" && entity.text("netname") === "") throw new Error("target_switchtarget with no netname given.");
+      entity.use = game.named.use(entity, `mg3:${classname}_use`);
+      return undefined;
+    });
   return undefined;
 }

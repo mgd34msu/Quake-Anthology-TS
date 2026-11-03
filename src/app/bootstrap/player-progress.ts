@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ProviderId } from "../../contracts/identity.ts";
@@ -6,28 +7,62 @@ import { isRecord, isUnknownArray } from "../../network/common/value.ts";
 export type PlayerProgressEvent =
   | { readonly kind: "achievement"; readonly source: "q1" | "q2"; readonly participant: string; readonly event: string; readonly award: string }
   | { readonly kind: "level-completed"; readonly source: "q1" | "q2"; readonly participant: string; readonly event: string; readonly map: string }
-  | { readonly kind: "match-completed"; readonly source: "q1" | "q2" | "q3"; readonly participant: string; readonly event: string; readonly map: string; readonly score: number }
+  | {
+      readonly kind: "match-completed";
+      readonly source: "q1" | "q2" | "q3";
+      readonly participant: string;
+      readonly event: string;
+      readonly map: string;
+      readonly score: number;
+    }
   /** One ranked player's result in a finished match; the participant is the local ranking account name. Added in file version 2. */
-  | { readonly kind: "ranked-match"; readonly source: "q1" | "q2" | "q3"; readonly participant: string; readonly event: string; readonly map: string; readonly score: number; readonly won: boolean; readonly rules: ProviderId };
+  | {
+      readonly kind: "ranked-match";
+      readonly source: "q1" | "q2" | "q3";
+      readonly participant: string;
+      readonly event: string;
+      readonly map: string;
+      readonly score: number;
+      readonly won: boolean;
+      readonly rules: ProviderId;
+    };
 
-function isProviderId(value: unknown): value is ProviderId { return typeof value === "string" && value.includes(":"); }
+function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && value.includes(":");
+}
 
 function decode(value: unknown): PlayerProgressEvent {
-  if (!isRecord(value) || (value["source"] !== "q1" && value["source"] !== "q2" && value["source"] !== "q3")
-    || typeof value["participant"] !== "string" || value["participant"].length === 0
-    || typeof value["event"] !== "string" || value["event"].length === 0) throw new Error("Invalid player progress identity");
-  const source = value["source"], participant = value["participant"], event = value["event"];
+  if (
+    !isRecord(value) ||
+    (value["source"] !== "q1" && value["source"] !== "q2" && value["source"] !== "q3") ||
+    typeof value["participant"] !== "string" ||
+    value["participant"].length === 0 ||
+    typeof value["event"] !== "string" ||
+    value["event"].length === 0
+  )
+    throw new Error("Invalid player progress identity");
+  const source = value["source"],
+    participant = value["participant"],
+    event = value["event"];
   if (value["kind"] === "achievement" && source !== "q3" && typeof value["award"] === "string" && value["award"].length > 0)
     return { kind: "achievement", source, participant, event, award: value["award"] };
   if (typeof value["map"] !== "string" || value["map"].length === 0) throw new Error("Invalid player progress map");
   if (value["kind"] === "level-completed" && source !== "q3") return { kind: "level-completed", source, participant, event, map: value["map"] };
   if (value["kind"] === "match-completed" && typeof value["score"] === "number" && Number.isFinite(value["score"]))
     return { kind: "match-completed", source, participant, event, map: value["map"], score: value["score"] };
-  if (value["kind"] === "ranked-match" && typeof value["score"] === "number" && Number.isFinite(value["score"]) && typeof value["won"] === "boolean" && isProviderId(value["rules"]))
+  if (
+    value["kind"] === "ranked-match" &&
+    typeof value["score"] === "number" &&
+    Number.isFinite(value["score"]) &&
+    typeof value["won"] === "boolean" &&
+    isProviderId(value["rules"])
+  )
     return { kind: "ranked-match", source, participant, event, map: value["map"], score: value["score"], won: value["won"], rules: value["rules"] };
   throw new Error("Invalid player progress event");
 }
-function identity(event: PlayerProgressEvent): string { return JSON.stringify([event.source, event.participant, event.event]); }
+function identity(event: PlayerProgressEvent): string {
+  return JSON.stringify([event.source, event.participant, event.event]);
+}
 
 /** One application-owned writer; duplicate restored events retain their original durable result. */
 export class PlayerProgressStore {
@@ -37,24 +72,40 @@ export class PlayerProgressStore {
   static async open(file: string): Promise<PlayerProgressStore> {
     const store = new PlayerProgressStore(file);
     let text: string;
-    try { text = await readFile(file, "utf8"); }
-    catch (error) { if (isRecord(error) && error["code"] === "ENOENT") return store; throw error; }
+    try {
+      text = await readFile(file, "utf8");
+    } catch (error) {
+      if (isRecord(error) && error["code"] === "ENOENT") return store;
+      throw error;
+    }
     // Torn or foreign text opens as empty progress, like the absent file;
     // parsed documents still face the shape checks below.
     let value: unknown;
-    try { value = JSON.parse(text); } catch { return store; }
     try {
-      if (!isRecord(value) || (value["version"] !== 1 && value["version"] !== 2) || !isUnknownArray(value["events"])) throw new Error("Invalid player progress file");
+      value = JSON.parse(text);
+    } catch {
+      return store;
+    }
+    try {
+      if (!isRecord(value) || (value["version"] !== 1 && value["version"] !== 2) || !isUnknownArray(value["events"]))
+        throw new Error("Invalid player progress file");
       for (const item of value["events"]) {
-        const event = decode(item), key = identity(event);
+        const event = decode(item),
+          key = identity(event);
         if (store.events.has(key)) throw new Error("Duplicate player progress event");
         store.events.set(key, event);
       }
-    } catch { store.events.clear(); } // Unreadable progress starts empty, like the absent file; it is rewritten on the next event.
+    } catch {
+      store.events.clear();
+    } // Unreadable progress starts empty, like the absent file; it is rewritten on the next event.
     return store;
   }
-  all(): readonly PlayerProgressEvent[] { return [...this.events.values()]; }
-  list(participant: string): readonly PlayerProgressEvent[] { return [...this.events.values()].filter(event => event.participant === participant); }
+  all(): readonly PlayerProgressEvent[] {
+    return [...this.events.values()];
+  }
+  list(participant: string): readonly PlayerProgressEvent[] {
+    return [...this.events.values()].filter(event => event.participant === participant);
+  }
   record(input: PlayerProgressEvent): Promise<boolean> {
     const event = decode(input);
     const operation = this.tail.then(async () => {
@@ -68,8 +119,13 @@ export class PlayerProgressStore {
       this.events.set(key, event);
       return true;
     });
-    this.tail = operation.then(() => undefined, () => undefined);
+    this.tail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
     return operation;
   }
-  async flush(): Promise<void> { await this.tail; }
+  async flush(): Promise<void> {
+    await this.tail;
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { qvmEvent, qvmEntityType, qvmPowerupBits } from "./legacy-presentation.ts";
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // Port of id Software's code/game/q_shared.h trajectory_t and entityState_t.
@@ -8,12 +9,13 @@ import type { Vec3 } from "../../core/math.ts";
 // The selected 32-bit QVM ABI has four-byte int, enum, float and alignment.
 export const QVM_ENTITY_STATE_BYTES = 208;
 
-export function qvmEntityStateBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? 208 : 204; }
+export function qvmEntityStateBytes(profile: QvmAbiProfile): number {
+  return profile === "q3-modern" ? 208 : 204;
+}
 function requireRecord(view: DataView, profile: QvmAbiProfile): void {
   const QVM_ENTITY_STATE_BYTES = qvmEntityStateBytes(profile);
   if (view.byteLength < QVM_ENTITY_STATE_BYTES) {
-    throw new BinaryError("QVM entityState_t", 0,
-      `record requires ${QVM_ENTITY_STATE_BYTES} bytes, received ${view.byteLength}`);
+    throw new BinaryError("QVM entityState_t", 0, `record requires ${QVM_ENTITY_STATE_BYTES} bytes, received ${view.byteLength}`);
   }
 }
 
@@ -51,63 +53,181 @@ function writeTrajectory(view: DataView, offset: number, value: QvmTrajectory): 
 
 /** Borrows live fields; immutable vectors and trajectories are sampled on access. */
 class BorrowedEntityState implements QvmEntityState {
-  constructor(private readonly view: DataView, private readonly profile: QvmAbiProfile = "q3-modern", private readonly source = false, private readonly lenient = false) {}
+  constructor(
+    private readonly view: DataView,
+    private readonly profile: QvmAbiProfile = "q3-modern",
+    private readonly source = false,
+    private readonly lenient = false,
+  ) {}
 
-  get number(): number { return this.view.getInt32(0, true); }
-  set number(value: number) { this.view.setInt32(0, value, true); }
-  get eType(): number { const value = this.view.getInt32(4, true); return this.source ? value : qvmEntityType(value, this.profile); }
-  set eType(value: number) { this.view.setInt32(4, this.source ? value : qvmEntityType(value, this.profile, true, this.lenient), true); }
-  get eFlags(): number { return this.view.getInt32(8, true); }
-  set eFlags(value: number) { this.view.setInt32(8, value, true); }
-  get pos(): QvmTrajectory { return readTrajectory(this.view, 12); }
-  set pos(value: QvmTrajectory) { writeTrajectory(this.view, 12, value); }
-  get apos(): QvmTrajectory { return readTrajectory(this.view, 48); }
-  set apos(value: QvmTrajectory) { writeTrajectory(this.view, 48, value); }
-  get time(): number { return this.view.getInt32(84, true); }
-  set time(value: number) { this.view.setInt32(84, value, true); }
-  get time2(): number { return this.view.getInt32(88, true); }
-  set time2(value: number) { this.view.setInt32(88, value, true); }
-  get origin(): Vec3 { return readVector(this.view, 92); }
-  set origin(value: Vec3) { writeVector(this.view, 92, value); }
-  get origin2(): Vec3 { return readVector(this.view, 104); }
-  set origin2(value: Vec3) { writeVector(this.view, 104, value); }
-  get angles(): Vec3 { return readVector(this.view, 116); }
-  set angles(value: Vec3) { writeVector(this.view, 116, value); }
-  get angles2(): Vec3 { return readVector(this.view, 128); }
-  set angles2(value: Vec3) { writeVector(this.view, 128, value); }
-  get otherEntityNum(): number { return this.view.getInt32(140, true); }
-  set otherEntityNum(value: number) { this.view.setInt32(140, value, true); }
-  get otherEntityNum2(): number { return this.view.getInt32(144, true); }
-  set otherEntityNum2(value: number) { this.view.setInt32(144, value, true); }
-  get groundEntityNum(): number { return this.view.getInt32(148, true); }
-  set groundEntityNum(value: number) { this.view.setInt32(148, value, true); }
-  get constantLight(): number { return this.view.getInt32(152, true); }
-  set constantLight(value: number) { this.view.setInt32(152, value, true); }
-  get loopSound(): number { return this.view.getInt32(156, true); }
-  set loopSound(value: number) { this.view.setInt32(156, value, true); }
-  get modelindex(): number { return this.view.getInt32(160, true); }
-  set modelindex(value: number) { this.view.setInt32(160, value, true); }
-  get modelindex2(): number { return this.view.getInt32(164, true); }
-  set modelindex2(value: number) { this.view.setInt32(164, value, true); }
-  get clientNum(): number { return this.view.getInt32(168, true); }
-  set clientNum(value: number) { this.view.setInt32(168, value, true); }
-  get frame(): number { return this.view.getInt32(172, true); }
-  set frame(value: number) { this.view.setInt32(172, value, true); }
-  get solid(): number { return this.view.getInt32(176, true); }
-  set solid(value: number) { this.view.setInt32(176, value, true); }
-  get event(): number { const value = this.view.getInt32(180, true); return this.source ? value : qvmEvent(value, this.profile); }
-  set event(value: number) { this.view.setInt32(180, this.source ? value : qvmEvent(value, this.profile, true, this.lenient), true); }
-  get eventParm(): number { return this.view.getInt32(184, true); }
-  set eventParm(value: number) { this.view.setInt32(184, value, true); }
-  get powerups(): number { const value = this.view.getInt32(188, true); return this.source ? value : qvmPowerupBits(value, this.profile); }
-  set powerups(value: number) { this.view.setInt32(188, this.source ? value : qvmPowerupBits(value, this.profile, this.lenient), true); }
-  get weapon(): number { return this.view.getInt32(192, true); }
-  set weapon(value: number) { this.view.setInt32(192, value, true); }
-  get legsAnim(): number { return this.view.getInt32(196, true); }
-  set legsAnim(value: number) { this.view.setInt32(196, value, true); }
-  get torsoAnim(): number { return this.view.getInt32(200, true); }
-  set torsoAnim(value: number) { this.view.setInt32(200, value, true); }
-  get generic1(): number { return this.profile === "q3-modern" ? this.view.getInt32(204, true) : 0; }
+  get number(): number {
+    return this.view.getInt32(0, true);
+  }
+  set number(value: number) {
+    this.view.setInt32(0, value, true);
+  }
+  get eType(): number {
+    const value = this.view.getInt32(4, true);
+    return this.source ? value : qvmEntityType(value, this.profile);
+  }
+  set eType(value: number) {
+    this.view.setInt32(4, this.source ? value : qvmEntityType(value, this.profile, true, this.lenient), true);
+  }
+  get eFlags(): number {
+    return this.view.getInt32(8, true);
+  }
+  set eFlags(value: number) {
+    this.view.setInt32(8, value, true);
+  }
+  get pos(): QvmTrajectory {
+    return readTrajectory(this.view, 12);
+  }
+  set pos(value: QvmTrajectory) {
+    writeTrajectory(this.view, 12, value);
+  }
+  get apos(): QvmTrajectory {
+    return readTrajectory(this.view, 48);
+  }
+  set apos(value: QvmTrajectory) {
+    writeTrajectory(this.view, 48, value);
+  }
+  get time(): number {
+    return this.view.getInt32(84, true);
+  }
+  set time(value: number) {
+    this.view.setInt32(84, value, true);
+  }
+  get time2(): number {
+    return this.view.getInt32(88, true);
+  }
+  set time2(value: number) {
+    this.view.setInt32(88, value, true);
+  }
+  get origin(): Vec3 {
+    return readVector(this.view, 92);
+  }
+  set origin(value: Vec3) {
+    writeVector(this.view, 92, value);
+  }
+  get origin2(): Vec3 {
+    return readVector(this.view, 104);
+  }
+  set origin2(value: Vec3) {
+    writeVector(this.view, 104, value);
+  }
+  get angles(): Vec3 {
+    return readVector(this.view, 116);
+  }
+  set angles(value: Vec3) {
+    writeVector(this.view, 116, value);
+  }
+  get angles2(): Vec3 {
+    return readVector(this.view, 128);
+  }
+  set angles2(value: Vec3) {
+    writeVector(this.view, 128, value);
+  }
+  get otherEntityNum(): number {
+    return this.view.getInt32(140, true);
+  }
+  set otherEntityNum(value: number) {
+    this.view.setInt32(140, value, true);
+  }
+  get otherEntityNum2(): number {
+    return this.view.getInt32(144, true);
+  }
+  set otherEntityNum2(value: number) {
+    this.view.setInt32(144, value, true);
+  }
+  get groundEntityNum(): number {
+    return this.view.getInt32(148, true);
+  }
+  set groundEntityNum(value: number) {
+    this.view.setInt32(148, value, true);
+  }
+  get constantLight(): number {
+    return this.view.getInt32(152, true);
+  }
+  set constantLight(value: number) {
+    this.view.setInt32(152, value, true);
+  }
+  get loopSound(): number {
+    return this.view.getInt32(156, true);
+  }
+  set loopSound(value: number) {
+    this.view.setInt32(156, value, true);
+  }
+  get modelindex(): number {
+    return this.view.getInt32(160, true);
+  }
+  set modelindex(value: number) {
+    this.view.setInt32(160, value, true);
+  }
+  get modelindex2(): number {
+    return this.view.getInt32(164, true);
+  }
+  set modelindex2(value: number) {
+    this.view.setInt32(164, value, true);
+  }
+  get clientNum(): number {
+    return this.view.getInt32(168, true);
+  }
+  set clientNum(value: number) {
+    this.view.setInt32(168, value, true);
+  }
+  get frame(): number {
+    return this.view.getInt32(172, true);
+  }
+  set frame(value: number) {
+    this.view.setInt32(172, value, true);
+  }
+  get solid(): number {
+    return this.view.getInt32(176, true);
+  }
+  set solid(value: number) {
+    this.view.setInt32(176, value, true);
+  }
+  get event(): number {
+    const value = this.view.getInt32(180, true);
+    return this.source ? value : qvmEvent(value, this.profile);
+  }
+  set event(value: number) {
+    this.view.setInt32(180, this.source ? value : qvmEvent(value, this.profile, true, this.lenient), true);
+  }
+  get eventParm(): number {
+    return this.view.getInt32(184, true);
+  }
+  set eventParm(value: number) {
+    this.view.setInt32(184, value, true);
+  }
+  get powerups(): number {
+    const value = this.view.getInt32(188, true);
+    return this.source ? value : qvmPowerupBits(value, this.profile);
+  }
+  set powerups(value: number) {
+    this.view.setInt32(188, this.source ? value : qvmPowerupBits(value, this.profile, this.lenient), true);
+  }
+  get weapon(): number {
+    return this.view.getInt32(192, true);
+  }
+  set weapon(value: number) {
+    this.view.setInt32(192, value, true);
+  }
+  get legsAnim(): number {
+    return this.view.getInt32(196, true);
+  }
+  set legsAnim(value: number) {
+    this.view.setInt32(196, value, true);
+  }
+  get torsoAnim(): number {
+    return this.view.getInt32(200, true);
+  }
+  set torsoAnim(value: number) {
+    this.view.setInt32(200, value, true);
+  }
+  get generic1(): number {
+    return this.profile === "q3-modern" ? this.view.getInt32(204, true) : 0;
+  }
   set generic1(value: number) {
     if (this.profile === "q3-modern") this.view.setInt32(204, value, true);
     else if (value !== 0 && !this.lenient) throw new Error("Legacy QVM entity has no generic1 field");
@@ -146,7 +266,12 @@ export function writeSourceQvmEntityState(view: DataView, state: Readonly<QvmEnt
 }
 
 /** Writes exactly one source ABI record, checking its extent before mutation. */
-export function writeQvmEntityState(view: DataView, state: Readonly<QvmEntityStateFields>, profile: QvmAbiProfile = "q3-modern", unmapped: "throw" | "ignore" = "throw"): void {
+export function writeQvmEntityState(
+  view: DataView,
+  state: Readonly<QvmEntityStateFields>,
+  profile: QvmAbiProfile = "q3-modern",
+  unmapped: "throw" | "ignore" = "throw",
+): void {
   writeEntityState(view, state, profile, false, unmapped === "ignore");
 }
 function writeEntityState(view: DataView, state: Readonly<QvmEntityStateFields>, profile: QvmAbiProfile, source: boolean, lenient = false): void {
@@ -182,7 +307,13 @@ function writeEntityState(view: DataView, state: Readonly<QvmEntityStateFields>,
   target.generic1 = state.generic1;
 }
 
-export interface QvmTrajectory { readonly type: number; readonly time: number; readonly duration: number; readonly base: Vec3; readonly delta: Vec3; }
+export interface QvmTrajectory {
+  readonly type: number;
+  readonly time: number;
+  readonly duration: number;
+  readonly base: Vec3;
+  readonly delta: Vec3;
+}
 export interface QvmEntityStateFields {
   number: number;
   eType: number;
@@ -213,4 +344,7 @@ export interface QvmEntityStateFields {
   torsoAnim: number;
   generic1: number;
 }
-export interface QvmEntityState extends QvmEntityStateFields { copy(): QvmEntityState; copyFrom(source: Readonly<QvmEntityStateFields>): void; }
+export interface QvmEntityState extends QvmEntityStateFields {
+  copy(): QvmEntityState;
+  copyFrom(source: Readonly<QvmEntityStateFields>): void;
+}

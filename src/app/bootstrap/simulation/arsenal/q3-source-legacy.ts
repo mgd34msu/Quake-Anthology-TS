@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import { Q1_Q3_SUPPLY_PROFILE } from "../../../../content/composition/q1-q3-supply.ts";
@@ -19,46 +20,90 @@ import { TrajectoryType } from "../../../../content/q3/base/shared/trajectory.ts
 import type { Q3SelectedArsenalCheckpoint } from "./q3.ts";
 import type { Q3SelectedSource } from "./q3-source.ts";
 
-export interface Q3WeaponStatistics extends Q3RailStatistics { readonly actor: OwnedActor; readonly shots: number; }
+export interface Q3WeaponStatistics extends Q3RailStatistics {
+  readonly actor: OwnedActor;
+  readonly shots: number;
+}
 
 export interface Q3ProjectileState extends Q3Projectile {
   readonly expires: number;
-  phase: { readonly kind: "flight" } | { readonly kind: "event"; readonly time: number; readonly impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }> }
+  phase:
+    | { readonly kind: "flight" }
+    | { readonly kind: "event"; readonly time: number; readonly impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }> }
     | { readonly kind: "attached"; readonly target: ActorId | null; readonly nextThink: number };
 }
 
-export function readQ3ProjectileStates(reader: SaveReader, actor: (reader: SaveReader) => OwnedActor,
-  reference: (saved: SavedActorId) => ActorId): readonly Q3ProjectileState[] {
+export function readQ3ProjectileStates(
+  reader: SaveReader,
+  actor: (reader: SaveReader) => OwnedActor,
+  reference: (saved: SavedActorId) => ActorId,
+): readonly Q3ProjectileState[] {
   const identity = (value: SaveReader): ActorId => reference(readSavedActor(value));
   return reader.list(value => {
-    const trajectory = value.field("trajectory"), phaseReader = value.field("phase");
+    const trajectory = value.field("trajectory"),
+      phaseReader = value.field("phase");
     const type = trajectory.field("type").choice(TrajectoryType.TR_STATIONARY, TrajectoryType.TR_LINEAR, TrajectoryType.TR_GRAVITY);
     const kind = phaseReader.field("kind").choice("flight", "event", "attached");
-    const phase: Q3ProjectileState["phase"] = kind === "flight" ? { kind } : kind === "attached"
-      ? { kind, target: phaseReader.field("target").nullable(identity), nextThink: phaseReader.field("nextThink").integer(0) } : {
-      kind: "event", time: phaseReader.field("time").integer(), impact: { kind: phaseReader.field("impact").field("kind").choice("impact"),
-        normal: readVector(phaseReader.field("impact").field("normal")), target: phaseReader.field("impact").field("target").nullable(identity),
-        flesh: phaseReader.field("impact").field("flesh").boolean(), surfaceFlags: phaseReader.field("impact").field("surfaceFlags").integer() } };
-    return { actor: actor(value.field("actor")), owner: identity(value.field("owner")), pass: value.field("pass").nullable(identity), phase,
-      damagePoint: readVector(value.field("damagePoint")), flags: value.field("flags").integer(), weapon: value.field("weapon").choice(4, 5, 8, 9, 10, 11),
-      direct: value.field("direct").integer(0), splash: value.field("splash").integer(0), radius: value.field("radius").finite(),
-      method: value.field("method").integer(0), splashMethod: value.field("splashMethod").integer(0), expires: value.field("expires").finite(),
-      trajectory: { type, time: trajectory.field("time").finite(), duration: trajectory.field("duration").finite(),
-        base: readVector(trajectory.field("base")), delta: readVector(trajectory.field("delta")) } };
+    const phase: Q3ProjectileState["phase"] =
+      kind === "flight"
+        ? { kind }
+        : kind === "attached"
+          ? { kind, target: phaseReader.field("target").nullable(identity), nextThink: phaseReader.field("nextThink").integer(0) }
+          : {
+              kind: "event",
+              time: phaseReader.field("time").integer(),
+              impact: {
+                kind: phaseReader.field("impact").field("kind").choice("impact"),
+                normal: readVector(phaseReader.field("impact").field("normal")),
+                target: phaseReader.field("impact").field("target").nullable(identity),
+                flesh: phaseReader.field("impact").field("flesh").boolean(),
+                surfaceFlags: phaseReader.field("impact").field("surfaceFlags").integer(),
+              },
+            };
+    return {
+      actor: actor(value.field("actor")),
+      owner: identity(value.field("owner")),
+      pass: value.field("pass").nullable(identity),
+      phase,
+      damagePoint: readVector(value.field("damagePoint")),
+      flags: value.field("flags").integer(),
+      weapon: value.field("weapon").choice(4, 5, 8, 9, 10, 11),
+      direct: value.field("direct").integer(0),
+      splash: value.field("splash").integer(0),
+      radius: value.field("radius").finite(),
+      method: value.field("method").integer(0),
+      splashMethod: value.field("splashMethod").integer(0),
+      expires: value.field("expires").finite(),
+      trajectory: {
+        type,
+        time: trajectory.field("time").finite(),
+        duration: trajectory.field("duration").finite(),
+        base: readVector(trajectory.field("base")),
+        delta: readVector(trajectory.field("delta")),
+      },
+    };
   });
 }
 
 export function readQ3WeaponStatistics(reader: SaveReader, actor: (reader: SaveReader) => OwnedActor): readonly Q3WeaponStatistics[] {
-  return reader.list(value => ({ actor: actor(value.field("actor")), shots: value.field("shots").integer(), hits: value.field("hits").integer(),
-    streak: value.field("streak").integer(), impressiveCount: value.field("impressiveCount").integer(), rewardUntil: value.field("rewardUntil").integer() }));
+  return reader.list(value => ({
+    actor: actor(value.field("actor")),
+    shots: value.field("shots").integer(),
+    hits: value.field("hits").integer(),
+    streak: value.field("streak").integer(),
+    impressiveCount: value.field("impressiveCount").integer(),
+    rewardUntil: value.field("rewardUntil").integer(),
+  }));
 }
 
-export function readLegacyQ3Source(reader: SaveReader, owner: (reader: SaveReader) => OwnedActor,
-  reference: (saved: SavedActorId) => ActorId) {
-  return { milliseconds: reader.field("milliseconds").finite(), randomSeed: reader.field("randomSeed").integer(),
+export function readLegacyQ3Source(reader: SaveReader, owner: (reader: SaveReader) => OwnedActor, reference: (saved: SavedActorId) => ActorId) {
+  return {
+    milliseconds: reader.field("milliseconds").finite(),
+    randomSeed: reader.field("randomSeed").integer(),
     projectiles: readQ3ProjectileStates(reader.field("projectiles"), owner, reference),
     statistics: readQ3WeaponStatistics(reader.field("weaponStatistics"), owner),
-    hookHeld: reader.field("hookHeld").value === undefined ? [] : reader.field("hookHeld").list(owner) };
+    hookHeld: reader.field("hookHeld").value === undefined ? [] : reader.field("hookHeld").list(owner),
+  };
 }
 export type LegacyQ3Source = ReturnType<typeof readLegacyQ3Source>;
 
@@ -70,16 +115,27 @@ export function migrateLegacyQ3Arsenal(checkpoint: Q3SelectedArsenalCheckpoint, 
 }
 
 /** One-time checkpoint import; all subsequent execution belongs to the original MissileRuntime. */
-export function restoreLegacyQ3Source(source: Pick<Q3SelectedSource, "host" | "records" | "pool" | "missiles" | "random">,
-  saved: LegacyQ3Source, project: (actor: ActorId) => GameEntity | null): void {
+export function restoreLegacyQ3Source(
+  source: Pick<Q3SelectedSource, "host" | "records" | "pool" | "missiles" | "random">,
+  saved: LegacyQ3Source,
+  project: (actor: ActorId) => GameEntity | null,
+): void {
   const { host, records, pool } = source;
   if (host.product !== "baseq3") throw new Error("Legacy ballistics require the base Q3 source");
-  const actors = new Set<OwnedActor>(), hooks = new Set<ActorId>(), references = new Set<ActorId>();
+  const actors = new Set<OwnedActor>(),
+    hooks = new Set<ActorId>(),
+    references = new Set<ActorId>();
   for (const state of saved.projectiles) {
     host.actors.assertOwned(state.actor);
-    if (state.actor.owner !== host.provider || actors.has(state.actor) || records.nativeByActor(state.actor.id) !== null
-      || host.bodies.read(state.actor.id) === null) throw new Error("Legacy projectile has no unique owned body");
-    actors.add(state.actor); references.add(state.owner);
+    if (
+      state.actor.owner !== host.provider ||
+      actors.has(state.actor) ||
+      records.nativeByActor(state.actor.id) !== null ||
+      host.bodies.read(state.actor.id) === null
+    )
+      throw new Error("Legacy projectile has no unique owned body");
+    actors.add(state.actor);
+    references.add(state.owner);
     if (state.pass !== null) references.add(state.pass);
     if (state.phase.kind === "attached" && state.weapon !== 10) throw new Error("Only a legacy grappling hook can be attached");
     if (state.weapon === 10) {
@@ -94,60 +150,97 @@ export function restoreLegacyQ3Source(source: Pick<Q3SelectedSource, "host" | "r
       throw new Error("Legacy Q3 client continuation has no unique live player");
     for (const actor of entries) references.add(actor.id);
   }
-  const foreign = [...references].filter(actor => host.actors.isLive(actor) && records.nativeByActor(actor) === null
-    && ![...actors].some(owned => owned.id.equals(actor)));
+  const foreign = [...references].filter(
+    actor => host.actors.isLive(actor) && records.nativeByActor(actor) === null && ![...actors].some(owned => owned.id.equals(actor)),
+  );
   if (foreign.some(actor => host.bodies.read(actor) === null)) throw new Error("Legacy Q3 reference has no body");
   const slots = Array.from({ length: 1022 - MAX_CLIENTS }, (_, index) => index + MAX_CLIENTS).filter(slot => !pool.at(slot).inuse);
   if (slots.length < actors.size + foreign.filter(actor => host.player(actor) === null).length)
     throw new Error("Legacy Q3 projectiles exceed original source entity capacity");
   const entities = saved.projectiles.map((state, index) => {
-    const slot = slots[index]; if (slot === undefined) throw new Error("Legacy Q3 entity slot is missing");
+    const slot = slots[index];
+    if (slot === undefined) throw new Error("Legacy Q3 entity slot is missing");
     const entity = records.adopt(slot, state.actor);
     if (slot >= pool.numEntities) pool.restoreCounts({ numEntities: slot + 1, maxClients: host.maxClients });
     return entity;
   });
   for (const actor of references) project(actor);
   const continuations = saved.projectiles.map((state, index) => {
-    const entity = entities[index]; if (entity === undefined) throw new Error("Legacy Q3 entity is missing");
-    const owner = records.nativeByActor(state.owner), phase = state.phase;
-    entity.classname = state.weapon === 4 ? "grenade" : state.weapon === 5 ? "rocket" : state.weapon === 8 ? "plasma"
-      : state.weapon === 9 ? "bfg" : state.weapon === 10 ? "hook" : "nail";
-    entity.s.weapon = state.weapon; entity.s.eFlags = state.flags;
-    entity.s.eType = EntityType.ET_MISSILE; entity.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN;
-    entity.r.ownerNum = owner?.slot ?? ENTITYNUM_NONE; entity.clipmask = 0x6000001;
-    entity.damage = state.direct; entity.splashDamage = state.splash; entity.splashRadius = state.radius;
-    entity.methodOfDeath = state.method; entity.splashMethodOfDeath = state.splashMethod;
+    const entity = entities[index];
+    if (entity === undefined) throw new Error("Legacy Q3 entity is missing");
+    const owner = records.nativeByActor(state.owner),
+      phase = state.phase;
+    entity.classname =
+      state.weapon === 4
+        ? "grenade"
+        : state.weapon === 5
+          ? "rocket"
+          : state.weapon === 8
+            ? "plasma"
+            : state.weapon === 9
+              ? "bfg"
+              : state.weapon === 10
+                ? "hook"
+                : "nail";
+    entity.s.weapon = state.weapon;
+    entity.s.eFlags = state.flags;
+    entity.s.eType = EntityType.ET_MISSILE;
+    entity.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN;
+    entity.r.ownerNum = owner?.slot ?? ENTITYNUM_NONE;
+    entity.clipmask = 0x6000001;
+    entity.damage = state.direct;
+    entity.splashDamage = state.splash;
+    entity.splashRadius = state.radius;
+    entity.methodOfDeath = state.method;
+    entity.splashMethodOfDeath = state.splashMethod;
     entity.s.origin = { ...state.damagePoint };
     entity.s.pos = { ...state.trajectory, base: { ...state.trajectory.base }, delta: { ...state.trajectory.delta } };
     entity.think = pool.callbacks.think.resolve(state.weapon === 10 ? "q3.base.game.missile.fireGrapple.think" : "q3.base.game.missile.launch.think");
     entity.nextthink = state.expires;
     if (state.weapon === 10) {
       if (owner?.client == null) throw new Error("Legacy hook owner lost its source client");
-      entity.parent = owner; entity.s.otherEntityNum = owner.slot; owner.client.hook = entity;
+      entity.parent = owner;
+      entity.s.otherEntityNum = owner.slot;
+      owner.client.hook = entity;
       if (phase.kind === "attached") {
         entity.s.eType = EntityType.ET_GRAPPLE;
-        entity.think = pool.callbacks.think.resolve("q3.base.game.missile.hookThink"); entity.nextthink = phase.nextThink;
-        owner.client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL; owner.client.ps.grapplePoint = { ...entity.r.currentOrigin };
+        entity.think = pool.callbacks.think.resolve("q3.base.game.missile.hookThink");
+        entity.nextthink = phase.nextThink;
+        owner.client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
+        owner.client.ps.grapplePoint = { ...entity.r.currentOrigin };
       }
     }
     if (phase.kind === "event") {
-      entity.freeAfterEvent = true; entity.s.eType = EntityType.ET_GENERAL; entity.eventTime = phase.time;
-      entity.s.event = phase.impact.flesh ? EntityEvent.EV_MISSILE_HIT : phase.impact.surfaceFlags & 0x1000
-        ? EntityEvent.EV_MISSILE_MISS_METAL : EntityEvent.EV_MISSILE_MISS;
+      entity.freeAfterEvent = true;
+      entity.s.eType = EntityType.ET_GENERAL;
+      entity.eventTime = phase.time;
+      entity.s.event = phase.impact.flesh
+        ? EntityEvent.EV_MISSILE_HIT
+        : phase.impact.surfaceFlags & 0x1000
+          ? EntityEvent.EV_MISSILE_MISS_METAL
+          : EntityEvent.EV_MISSILE_MISS;
       entity.s.eventParm = directionToByte(phase.impact.normal);
       entity.s.otherEntityNum = records.nativeByActor(phase.impact.target)?.slot ?? ENTITYNUM_NONE;
     }
-    return { entity: entity.slot, actor: savedActorId(state.actor.id), owner: savedActorId(state.owner),
-      pass: state.pass === null ? null : savedActorId(state.pass), trigger: null,
-      attachment: phase.kind === "attached" && phase.target !== null ? { kind: "player", actor: savedActorId(phase.target) } : { kind: "none" } };
+    return {
+      entity: entity.slot,
+      actor: savedActorId(state.actor.id),
+      owner: savedActorId(state.owner),
+      pass: state.pass === null ? null : savedActorId(state.pass),
+      trigger: null,
+      attachment: phase.kind === "attached" && phase.target !== null ? { kind: "player", actor: savedActorId(phase.target) } : { kind: "none" },
+    };
   });
   source.missiles.restoreSaveState(continuations, actor => host.actors.referenceSaved(actor));
   source.random.reset(saved.randomSeed);
   for (const state of saved.statistics) {
     const client = records.nativeByActor(state.actor.id)?.client;
     if (client == null) throw new Error("Legacy statistics lost their source client");
-    client.accuracyShots = state.shots; client.accuracyHits = state.hits; client.accurateCount = state.streak;
-    client.ps.persistant.set(PersistentIndex.PERS_IMPRESSIVE_COUNT, state.impressiveCount); client.rewardTime = state.rewardUntil;
+    client.accuracyShots = state.shots;
+    client.accuracyHits = state.hits;
+    client.accurateCount = state.streak;
+    client.ps.persistant.set(PersistentIndex.PERS_IMPRESSIVE_COUNT, state.impressiveCount);
+    client.rewardTime = state.rewardUntil;
     if (state.rewardUntil > saved.milliseconds) client.ps.eFlags |= 0x8000;
   }
   for (const actor of saved.hookHeld) {

@@ -5,9 +5,13 @@ import type { Q2Monsters } from "../../../src/content/q2/foundation/monsters/ind
 
 test("the rerelease gekk carries game_x64.dll's two blocked jump moves and callbacks", () => {
   const definition = createGekkDefinition({} as Q2Monsters);
-  const jump = definition.moves.find(move => move.name === "gekk_move_jump"), jump2 = definition.moves.find(move => move.name === "gekk_move_jump2");
+  const jump = definition.moves.find(move => move.name === "gekk_move_jump"),
+    jump2 = definition.moves.find(move => move.name === "gekk_move_jump2");
   for (const move of [jump, jump2]) {
-    expect(move?.firstFrame).toBe(74); expect(move?.lastFrame).toBe(81); expect(move?.end).toBe("gekk_run"); expect(move?.frames).toHaveLength(8);
+    expect(move?.firstFrame).toBe(74);
+    expect(move?.lastFrame).toBe(81);
+    expect(move?.end).toBe("gekk_run");
+    expect(move?.frames).toHaveLength(8);
     expect(move?.frames[6]?.actions).toEqual(["gekk_jump_wait_land"]);
   }
   expect(jump?.frames[0]?.actions).toEqual(["gekk_jump_down"]);

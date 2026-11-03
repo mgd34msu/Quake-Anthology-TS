@@ -5,14 +5,19 @@ import { SdlWorkerRenderContext } from "../../src/platform/sdl-render-context.ts
 import { loadGl } from "../../src/platform/gl.ts";
 
 if (!isMainThread) {
-  const port = parentPort, transfer: unknown = workerData;
+  const port = parentPort,
+    transfer: unknown = workerData;
   if (port === null) throw new Error("Context worker requires its parent port");
   let context: SdlWorkerRenderContext | null = null;
   let native: ReturnType<typeof loadGl> | null = null;
   const release = (): void => {
     context?.resume();
-    try { native?.close(); }
-    finally { context?.release(); context?.release(); }
+    try {
+      native?.close();
+    } finally {
+      context?.release();
+      context?.release();
+    }
     port.postMessage({ kind: "released" });
     port.close();
   };
@@ -25,14 +30,26 @@ if (!isMainThread) {
     native.symbols.glReadPixels(0, 0, 4, 4, 0x1908, 0x1401, pixels);
     context.swap();
     let resourceProtected = false;
-    try { context.release(); }
-    catch (error) { resourceProtected = error instanceof Error && error.message.includes("procedure tables"); }
+    try {
+      context.release();
+    } catch (error) {
+      resourceProtected = error instanceof Error && error.message.includes("procedure tables");
+    }
     port.on("message", (message: unknown) => {
       if (message === "park") {
         context?.park();
-        let currentRejected = false, readRejected = false;
-        try { context?.makeCurrent(); } catch { currentRejected = true; }
-        try { void context?.drawableSize; } catch { readRejected = true; }
+        let currentRejected = false,
+          readRejected = false;
+        try {
+          context?.makeCurrent();
+        } catch {
+          currentRejected = true;
+        }
+        try {
+          void context?.drawableSize;
+        } catch {
+          readRejected = true;
+        }
         port.postMessage({ kind: "parked", currentRejected, readRejected });
       } else if (message === "resume") {
         context?.resume();
@@ -61,8 +78,9 @@ if (!isMainThread) {
       worker.once("exit", () => resolve());
     });
     return {
-      worker, exited,
-      receive: (): Promise<unknown> => messages.length > 0 ? Promise.resolve(messages.shift()) : new Promise(resolve => receivers.push(resolve)),
+      worker,
+      exited,
+      receive: (): Promise<unknown> => (messages.length > 0 ? Promise.resolve(messages.shift()) : new Promise(resolve => receivers.push(resolve))),
     };
   }
 
@@ -72,15 +90,17 @@ if (!isMainThread) {
   });
 
   test.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1" || process.env["SDL_VIDEODRIVER"] !== "x11")(
-    "real render worker adopts one context, draws, rejects duplicates and releases before cleanup", async () => {
+    "real render worker adopts one context, draws, rejects duplicates and releases before cleanup",
+    async () => {
       expect(process.env["DISPLAY"]).toBe(process.env["QUAKE_OWNED_DISPLAY"]);
       expect(process.env["WAYLAND_DISPLAY"]).toBeUndefined();
       const window = SdlWindow.open({ title: "worker context", width: 4, height: 4, backend: "gl", hidden: true });
       try {
         for (let iteration = 0; iteration < 3; iteration++) {
-          const transfer = window.detachRenderContext(), first = spawnContext(transfer);
+          const transfer = window.detachRenderContext(),
+            first = spawnContext(transfer);
           try {
-            const expected = Uint8Array.from({ length: 64 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0);
+            const expected = Uint8Array.from({ length: 64 }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0));
             expect(await first.receive()).toEqual({ kind: "ready", pixels: expected, resourceProtected: true, error: 0 });
             expect(() => window.makeCurrent()).toThrow("worker");
             expect(() => window.close()).toThrow("worker");
@@ -112,13 +132,19 @@ if (!isMainThread) {
             native.symbols.glGetFloatv(0x0c22, clear);
             expect(clear).toEqual(new Float32Array([0, 1, 0, 1]));
             window.swap();
-          } finally { native.close(); }
+          } finally {
+            native.close();
+          }
           const stale = spawnContext(transfer);
           expect(await stale.receive()).toEqual({ kind: "error", message: "SDL render context transfer was already consumed" });
           expect(await stale.receive()).toEqual({ kind: "released" });
           await stale.exited;
         }
-      } finally { window.close(); window.close(); }
-    }, 20_000,
+      } finally {
+        window.close();
+        window.close();
+      }
+    },
+    20_000,
   );
 }

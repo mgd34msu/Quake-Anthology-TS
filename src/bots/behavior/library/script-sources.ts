@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import type { ScriptMemoryCapture, ScriptMemoryRestore } from "../../../content/legacy-script/memory.ts";
 /*
@@ -9,8 +10,14 @@ import { allocateScriptSource } from "../../../content/legacy-script/lexer.ts";
 import type { ScriptMemory } from "../../../content/legacy-script/memory.ts";
 import type { SourceTokenMemory } from "../../../content/legacy-script/token-memory.ts";
 import { ScriptSourceReader } from "../../../content/legacy-script/preprocessor.ts";
-import type { IncludeRequest, IncludeResolver, ScriptGlobalDefines, ScriptSource,
-  ScriptSourcePosition, ScriptTokenRecord } from "../../../content/legacy-script/preprocessor.ts";
+import type {
+  IncludeRequest,
+  IncludeResolver,
+  ScriptGlobalDefines,
+  ScriptSource,
+  ScriptSourcePosition,
+  ScriptTokenRecord,
+} from "../../../content/legacy-script/preprocessor.ts";
 import { BotMemory } from "./memory.ts";
 
 const MAX_SOURCE_FILES = 64;
@@ -32,9 +39,7 @@ function sourceString(text: string): string {
 }
 
 export class BotScriptSources implements BotScriptReader {
-  private readonly sourceFiles: (ScriptSourceReader | undefined)[] = Array.from(
-    { length: MAX_SOURCE_FILES }, (): ScriptSourceReader | undefined => undefined,
-  );
+  private readonly sourceFiles: (ScriptSourceReader | undefined)[] = Array.from({ length: MAX_SOURCE_FILES }, (): ScriptSourceReader | undefined => undefined);
   private baseFolder = "";
   private terminal = false;
 
@@ -48,25 +53,44 @@ export class BotScriptSources implements BotScriptReader {
   ) {}
 
   captureSaveState(capture: ScriptMemoryCapture) {
-    return { baseFolder: this.baseFolder, terminal: this.terminal, globals: this.globals.captureSaveState(capture),
-      sourceFiles: this.sourceFiles.map(source => source?.captureSaveState(capture) ?? null) };
+    return {
+      baseFolder: this.baseFolder,
+      terminal: this.terminal,
+      globals: this.globals.captureSaveState(capture),
+      sourceFiles: this.sourceFiles.map(source => source?.captureSaveState(capture) ?? null),
+    };
   }
   restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
     if (this.sourceFiles.some(source => source !== undefined)) throw new Error("Script restore requires an empty handle owner");
-    const reader = new SaveReader(value, "bot.sources"), folder = reader.field("baseFolder").string(), terminal = reader.field("terminal").boolean();
+    const reader = new SaveReader(value, "bot.sources"),
+      folder = reader.field("baseFolder").string(),
+      terminal = reader.field("terminal").boolean();
     if (folder.length >= MAX_SOURCE_PATH || sourceString(folder) !== folder) reader.fail("invalid script base folder");
     const files = reader.field("sourceFiles").list(cell => cell.nullable(entry => entry.value));
     if (files.length !== MAX_SOURCE_FILES || files[0] !== null || (terminal && files.some(value => value !== null))) reader.fail("invalid script handle table");
     this.globals.restoreSaveState(reader.field("globals").value, restore);
     for (const [handle, saved] of files.entries()) {
       if (saved === null) continue;
-      this.sourceFiles[handle] = ScriptSourceReader.restoreSaveState(saved, this, { memory: this.memory,
-        ...(this.debugEval === undefined ? {} : { debugEval: this.debugEval }),
-        report: diagnostic => { this.requireLive(); this.print(diagnostic.severity === "warning" ? 2 : 3,
-          `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`); this.requireLive(); },
-      }, restore);
+      this.sourceFiles[handle] = ScriptSourceReader.restoreSaveState(
+        saved,
+        this,
+        {
+          memory: this.memory,
+          ...(this.debugEval === undefined ? {} : { debugEval: this.debugEval }),
+          report: diagnostic => {
+            this.requireLive();
+            this.print(
+              diagnostic.severity === "warning" ? 2 : 3,
+              `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`,
+            );
+            this.requireLive();
+          },
+        },
+        restore,
+      );
     }
-    this.baseFolder = folder; this.terminal = terminal;
+    this.baseFolder = folder;
+    this.terminal = terminal;
   }
 
   /** Bot consumers pair PC_SetBaseFolder("botfiles") with LoadSourceFile. */
@@ -108,8 +132,7 @@ export class BotScriptSources implements BotScriptReader {
       ...(this.debugEval === undefined ? {} : { debugEval: this.debugEval }),
       report: diagnostic => {
         this.requireLive();
-        this.print(diagnostic.severity === "warning" ? 2 : 3,
-          `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
+        this.print(diagnostic.severity === "warning" ? 2 : 3, `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
         this.requireLive();
       },
     });
@@ -140,8 +163,9 @@ export class BotScriptSources implements BotScriptReader {
     if (handle < 1 || handle >= MAX_SOURCE_FILES) return undefined;
     const source = this.sourceFiles[handle];
     if (source === undefined) return undefined;
-    try { return { read: source.next() !== undefined, token: source.rawToken }; }
-    catch (error) {
+    try {
+      return { read: source.next() !== undefined, token: source.rawToken };
+    } catch (error) {
       if (source.isSourceFailure(error)) return { read: false, token: source.rawToken };
       throw error;
     }

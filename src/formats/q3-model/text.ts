@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* MD5 token grammar derived from q2repro models.c. GPL-2.0-or-later. */
 import type { Vec3 } from "../../contracts/math.ts";
 
@@ -10,14 +11,22 @@ export class ModelTextError extends Error {
 
 export class ModelTokens {
   private offset = 0;
-  constructor(private readonly text: string, readonly source: string) {}
+  constructor(
+    private readonly text: string,
+    readonly source: string,
+  ) {}
 
-  fail(message: string): never { throw new ModelTextError(this.source, this.offset, message); }
+  fail(message: string): never {
+    throw new ModelTextError(this.source, this.offset, message);
+  }
 
   next(): string | null {
     while (this.offset < this.text.length) {
       const character = this.text.charAt(this.offset);
-      if (/\s/.test(character)) { this.offset++; continue; }
+      if (/\s/.test(character)) {
+        this.offset++;
+        continue;
+      }
       if (this.text.startsWith("//", this.offset)) {
         const end = this.text.indexOf("\n", this.offset + 2);
         this.offset = end < 0 ? this.text.length : end + 1;
@@ -45,7 +54,9 @@ export class ModelTokens {
     return this.text.slice(start, this.offset);
   }
 
-  token(): string { return this.next() ?? this.fail("unexpected end of model text"); }
+  token(): string {
+    return this.next() ?? this.fail("unexpected end of model text");
+  }
   expect(expected: string): void {
     const actual = this.token();
     if (actual !== expected) this.fail(`expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -72,7 +83,9 @@ export class ModelTokens {
     this.expect(")");
     return result;
   }
-  end(): void { if (this.next() !== null) this.fail("unexpected trailing token"); }
+  end(): void {
+    if (this.next() !== null) this.fail("unexpected trailing token");
+  }
 }
 
 export function at<T>(values: readonly T[], index: number, label: string): T {

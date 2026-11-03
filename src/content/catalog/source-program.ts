@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId, ExecutableRecipe, ExecutionModule } from "../../contracts/content.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { CatalogProduct, InstalledCatalog } from "./index.ts";
@@ -6,8 +7,12 @@ import { expectedProducts, type ProductExpectation } from "./products.ts";
 export function sourceProgramProduct(catalog: InstalledCatalog, content: ContentId | string): CatalogProduct {
   let product = catalog.require(content);
   const visited = new Set<ContentId>();
-  while (!expectedProducts.some(builtin => builtin.id === product.expectation.id)
-    && product.expectation.requiredPrograms.length === 0 && (product.expectation.nativePrograms?.length ?? 0) === 0 && product.expectation.baseProduct !== null) {
+  while (
+    !expectedProducts.some(builtin => builtin.id === product.expectation.id) &&
+    product.expectation.requiredPrograms.length === 0 &&
+    (product.expectation.nativePrograms?.length ?? 0) === 0 &&
+    product.expectation.baseProduct !== null
+  ) {
     if (visited.has(product.id)) throw new Error("Cyclic source program dependency");
     visited.add(product.id);
     const base = catalog.require(product.expectation.baseProduct);
@@ -22,13 +27,19 @@ export function sourceProgramImplementation(product: ProductExpectation): Provid
   return `${product.family}:source/${product.edition}/${product.campaign}`;
 }
 
-export function selectedSourceProgram(recipe: { readonly execution: readonly ExecutionModule<unknown>[]; readonly map: Pick<ExecutableRecipe["map"], "entities"> }): string | undefined {
+export function selectedSourceProgram(recipe: {
+  readonly execution: readonly ExecutionModule<unknown>[];
+  readonly map: Pick<ExecutableRecipe["map"], "entities">;
+}): string | undefined {
   const owner = recipe.map.entities;
-  const module = recipe.execution.find(module => module.role === "server-game" && module.owner.provider === owner.provider && module.owner.content === owner.content);
+  const module = recipe.execution.find(
+    module => module.role === "server-game" && module.owner.provider === owner.provider && module.owner.content === owner.content,
+  );
   if (module?.kind !== "typescript" || module.implementation === owner.provider) return owner.content.split(":")[2];
   const [family, edition] = owner.content.split(":");
-  const product = expectedProducts.find(product => product.family === family && product.edition === edition
-    && sourceProgramImplementation(product) === module.implementation);
+  const product = expectedProducts.find(
+    product => product.family === family && product.edition === edition && sourceProgramImplementation(product) === module.implementation,
+  );
   if (product === undefined) throw new Error(`Unsupported source implementation ${module.implementation}`);
   return product.campaign;
 }

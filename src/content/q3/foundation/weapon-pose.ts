@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* CG_CalculateWeaponPosition, CG_MapTorsoToWeaponFrame and CG_MachinegunSpinAngle.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -60,7 +61,11 @@ export class Q3WeaponBarrel {
       angle = f(this.angle + f(f(delta) * speed));
     }
     const stopped = this.spinning && !firing;
-    if (this.spinning !== firing) { this.time = timeMilliseconds; this.angle = qvmAngleMod(angle); this.spinning = firing; }
+    if (this.spinning !== firing) {
+      this.time = timeMilliseconds;
+      this.angle = qvmAngleMod(angle);
+      this.spinning = firing;
+    }
     return { angle, stopped };
   }
 }

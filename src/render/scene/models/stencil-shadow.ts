@@ -32,20 +32,38 @@ export function stencilShadowVolume(positions: readonly Vec3[], indices: readonl
     edgeFacing[from * MAX_EDGE_DEFS + used] = facing;
     edgeCounts[from] = used + 1;
   };
-  const triangles = indices.length / 3, facingTriangles = new Uint8Array(triangles);
+  const triangles = indices.length / 3,
+    facingTriangles = new Uint8Array(triangles);
   for (let triangle = 0; triangle < triangles; triangle++) {
-    const i1 = indices[triangle * 3], i2 = indices[triangle * 3 + 1], i3 = indices[triangle * 3 + 2];
-    const v1 = i1 === undefined ? undefined : positions[i1], v2 = i2 === undefined ? undefined : positions[i2], v3 = i3 === undefined ? undefined : positions[i3];
+    const i1 = indices[triangle * 3],
+      i2 = indices[triangle * 3 + 1],
+      i3 = indices[triangle * 3 + 2];
+    const v1 = i1 === undefined ? undefined : positions[i1],
+      v2 = i2 === undefined ? undefined : positions[i2],
+      v3 = i3 === undefined ? undefined : positions[i3];
     if (i1 === undefined || i2 === undefined || i3 === undefined || v1 === undefined || v2 === undefined || v3 === undefined) return null;
-    const d1x = f(v2.x - v1.x), d1y = f(v2.y - v1.y), d1z = f(v2.z - v1.z), d2x = f(v3.x - v1.x), d2y = f(v3.y - v1.y), d2z = f(v3.z - v1.z);
-    const nx = f(f(d1y * d2z) - f(d1z * d2y)), ny = f(f(d1z * d2x) - f(d1x * d2z)), nz = f(f(d1x * d2y) - f(d1y * d2x));
+    const d1x = f(v2.x - v1.x),
+      d1y = f(v2.y - v1.y),
+      d1z = f(v2.z - v1.z),
+      d2x = f(v3.x - v1.x),
+      d2y = f(v3.y - v1.y),
+      d2z = f(v3.z - v1.z);
+    const nx = f(f(d1y * d2z) - f(d1z * d2y)),
+      ny = f(f(d1z * d2x) - f(d1x * d2z)),
+      nz = f(f(d1x * d2y) - f(d1y * d2x));
     const facing = f(f(f(nx * lightDir.x) + f(ny * lightDir.y)) + f(nz * lightDir.z)) > 0 ? 1 : 0;
     facingTriangles[triangle] = facing;
-    addEdge(i1, i2, facing); addEdge(i2, i3, facing); addEdge(i3, i1, facing);
+    addEdge(i1, i2, facing);
+    addEdge(i2, i3, facing);
+    addEdge(i3, i1, facing);
   }
   const volume: Vec3[] = positions.slice();
-  for (const position of positions) volume.push({ x: f(position.x + f(-SHADOW_EXTRUSION * lightDir.x)), y: f(position.y + f(-SHADOW_EXTRUSION * lightDir.y)),
-    z: f(position.z + f(-SHADOW_EXTRUSION * lightDir.z)) });
+  for (const position of positions)
+    volume.push({
+      x: f(position.x + f(-SHADOW_EXTRUSION * lightDir.x)),
+      y: f(position.y + f(-SHADOW_EXTRUSION * lightDir.y)),
+      z: f(position.z + f(-SHADOW_EXTRUSION * lightDir.z)),
+    });
   const result: number[] = [];
   for (let vertex = 0; vertex < count; vertex++) {
     for (let edge = 0; edge < (edgeCounts[vertex] ?? 0); edge++) {

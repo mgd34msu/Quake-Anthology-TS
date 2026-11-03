@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Think dispatch follows Q1/QW sv_phys, Q2 g_phys, and Q3 g_main: clear before calling.
 import { sameActor } from "../contracts/identity.ts";
 import type { ActorId, CallbackId, OwnedActor, ProviderId } from "../contracts/identity.ts";
@@ -24,8 +25,12 @@ interface PendingThink extends ScheduledThink {
 }
 
 /** Deadlines select eligibility; source traversal, rather than deadline sorting, selects execution order. */
-export function compareInvocationOrder(ordering: FrameOrdering, left: InvocationOrder, right: InvocationOrder,
-  sourceSlot: (actor: ActorId) => number = actor => actor.slot): number {
+export function compareInvocationOrder(
+  ordering: FrameOrdering,
+  left: InvocationOrder,
+  right: InvocationOrder,
+  sourceSlot: (actor: ActorId) => number = actor => actor.slot,
+): number {
   if (ordering.kind === "mixed") {
     const leftProvider = ordering.providers.indexOf(left.provider);
     const rightProvider = ordering.providers.indexOf(right.provider);
@@ -47,13 +52,19 @@ export function thinkCallbackTime(profile: ClockProfile, due: SourceTime, frame:
   if (due.kind !== (seconds ? "seconds" : "milliseconds")) throw new RangeError("Think clock has the wrong source unit");
   if (due.value <= 0) return null;
   switch (profile.kind) {
-    case "q1-netquake": case "q1-quakeworld":
-      return due.value > frame.time.value + frame.elapsed.value ? null
-        : copyTime({ kind: due.kind, value: Math.max(due.value, frame.time.value) });
-    case "q2-classic": return due.value > frame.time.value + 0.001 ? null : copyTime(frame.time);
-    case "q2-rerelease": return due.value > frame.time.value ? null : copyTime(frame.time);
-    case "q3": return Math.fround(due.value) > frame.time.value ? null : copyTime(frame.time);
-    default: { const exhaustive: never = profile; return exhaustive; }
+    case "q1-netquake":
+    case "q1-quakeworld":
+      return due.value > frame.time.value + frame.elapsed.value ? null : copyTime({ kind: due.kind, value: Math.max(due.value, frame.time.value) });
+    case "q2-classic":
+      return due.value > frame.time.value + 0.001 ? null : copyTime(frame.time);
+    case "q2-rerelease":
+      return due.value > frame.time.value ? null : copyTime(frame.time);
+    case "q3":
+      return Math.fround(due.value) > frame.time.value ? null : copyTime(frame.time);
+    default: {
+      const exhaustive: never = profile;
+      return exhaustive;
+    }
   }
 }
 
@@ -65,9 +76,10 @@ export class FrameScheduler implements ActorSchedule {
   private closed = false;
 
   constructor(private readonly options: SchedulerOptions) {
-    this.ordering = options.ordering.kind === "mixed"
-      ? Object.freeze({ ...options.ordering, providers: Object.freeze([...options.ordering.providers]) })
-      : Object.freeze({ ...options.ordering, clock: Object.freeze({ ...options.ordering.clock }) });
+    this.ordering =
+      options.ordering.kind === "mixed"
+        ? Object.freeze({ ...options.ordering, providers: Object.freeze([...options.ordering.providers]) })
+        : Object.freeze({ ...options.ordering, clock: Object.freeze({ ...options.ordering.clock }) });
     for (const { provider, profile } of options.clocks) {
       if (this.profiles.has(provider)) throw new Error(`Duplicate scheduler clock: ${provider}`);
       this.profiles.set(provider, Object.freeze({ ...profile }));
@@ -87,17 +99,27 @@ export class FrameScheduler implements ActorSchedule {
     const executionProvider = timing.executionProvider ?? actor.owner;
     const registered = this.options.executionProvider?.(actor.id) ?? actor.owner;
     if (executionProvider !== registered) throw new RangeError("Think execution provider disagrees with the actor's registered continuation");
-    if (executionProvider !== actor.owner && !this.profiles.has(executionProvider)) throw new RangeError("Selected execution requires its registered source clock");
+    if (executionProvider !== actor.owner && !this.profiles.has(executionProvider))
+      throw new RangeError("Selected execution requires its registered source clock");
     this.profile(executionProvider);
     validateTime(timing.due);
-    if (!sameActor(actor.id, timing.order.actor) || actor.owner !== timing.order.provider) throw new RangeError("Think order must name its owning actor and provider");
-    if (!Number.isSafeInteger(timing.order.sequence) || timing.order.sequence < 0) throw new RangeError("Think invocation sequence must be a nonnegative safe integer");
+    if (!sameActor(actor.id, timing.order.actor) || actor.owner !== timing.order.provider)
+      throw new RangeError("Think order must name its owning actor and provider");
+    if (!Number.isSafeInteger(timing.order.sequence) || timing.order.sequence < 0)
+      throw new RangeError("Think invocation sequence must be a nonnegative safe integer");
     const providerRank = this.ordering.kind === "mixed" ? this.providerRanks.get(actor.owner) : 0;
     if (providerRank === undefined) throw new RangeError("Provider is absent from mixed frame ordering");
     const sourceSlot = this.options.sourceSlot?.(actor.id) ?? actor.id.slot;
     if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
-    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback,
-      timing: Object.freeze({ ...timing, due: copyTime(timing.due), order: Object.freeze({ ...timing.order }) }) }));
+    this.scheduled.set(
+      actor.id.slot,
+      Object.freeze({
+        actor: actor.id,
+        owned: actor,
+        callback,
+        timing: Object.freeze({ ...timing, due: copyTime(timing.due), order: Object.freeze({ ...timing.order }) }),
+      }),
+    );
     return undefined;
   }
 
@@ -115,7 +137,10 @@ export class FrameScheduler implements ActorSchedule {
     this.assertOpen();
     const pending = this.scheduled.get(actor.slot);
     if (pending === undefined || !sameActor(pending.actor, actor)) return null;
-    if (!this.options.actors.isLive(actor)) { this.scheduled.delete(actor.slot); return null; }
+    if (!this.options.actors.isLive(actor)) {
+      this.scheduled.delete(actor.slot);
+      return null;
+    }
     return Object.freeze({ actor: pending.actor, callback: pending.callback, timing: pending.timing });
   }
 
@@ -146,7 +171,11 @@ export class FrameScheduler implements ActorSchedule {
     }
   }
 
-  close(): undefined { this.closed = true; this.scheduled.clear(); return undefined; }
+  close(): undefined {
+    this.closed = true;
+    this.scheduled.clear();
+    return undefined;
+  }
 
   private result(invocations: number, actor: ActorId, reason: Extract<ThinkResult, { readonly kind: "not-run" }>["reason"]): ThinkResult {
     return invocations === 0 ? { kind: "not-run", reason } : { kind: "ran", invocations, alive: this.options.actors.isLive(actor) };

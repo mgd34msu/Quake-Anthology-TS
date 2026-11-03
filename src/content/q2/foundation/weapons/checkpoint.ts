@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Q2WeaponInput, Q2WeaponState } from "./types.ts";
 

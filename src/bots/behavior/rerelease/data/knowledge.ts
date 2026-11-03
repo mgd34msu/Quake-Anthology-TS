@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Normalized Q1/Q2 rerelease source data for the shared TypeScript behavior.
 // Selection rules follow each shipped file's comments; KEX behavior itself is closed.
 
@@ -163,7 +164,8 @@ export interface BotKnowledgeOptions {
 export class BotKnowledge {
   replaceWeapons(weapons: readonly BotWeaponT[]): void {
     this.weapons.splice(0, this.weapons.length, ...weapons);
-    this.weaponsByNumber.clear(); this.weaponsByName.clear();
+    this.weaponsByNumber.clear();
+    this.weaponsByName.clear();
     for (const weapon of weapons) {
       if (weapon.number !== 0) this.weaponsByNumber.set(weapon.number, weapon);
       this.weaponsByName.set(weapon.name, weapon);
@@ -231,7 +233,7 @@ export class BotKnowledge {
         isWeapon: flags.has(ITEM_FLAG.weapon),
         isPowerup: flags.has(ITEM_FLAG.powerup),
         isMega: flags.has(ITEM_FLAG.megaItem),
-        megaSpawnflag: it.spawnflags.find((sf) => sf.name === ITEM_FLAG.megaItem)?.bit ?? 0,
+        megaSpawnflag: it.spawnflags.find(sf => sf.name === ITEM_FLAG.megaItem)?.bit ?? 0,
       });
       this.items.push(compiled);
       this.itemsByName.set(it.name, compiled);
@@ -282,7 +284,7 @@ export class BotKnowledge {
 
   /** The skill names in file order, which is the order they get harder. */
   skillNames(): string[] {
-    return this.skills.map((s) => s.skill);
+    return this.skills.map(s => s.skill);
   }
 
   item(classname: string): BotItemT | undefined {
@@ -293,9 +295,13 @@ export class BotKnowledge {
     return this.monstersByClass.get(classname);
   }
 
-  weaponByName(name: string): BotWeaponT | undefined { return this.weaponsByName.get(name); }
+  weaponByName(name: string): BotWeaponT | undefined {
+    return this.weaponsByName.get(name);
+  }
 
-  danger(classname: string): DangerEntry | undefined { return this.dangersByName.get(classname); }
+  danger(classname: string): DangerEntry | undefined {
+    return this.dangersByName.get(classname);
+  }
 
   weaponByNumber(number: number): BotWeaponT | undefined {
     return this.weaponsByNumber.get(number);
@@ -314,7 +320,7 @@ export class BotKnowledge {
   }
 
   chatsOfType(type: string): ChatEntry[] {
-    return this.chats.filter((c) => c.type === type);
+    return this.chats.filter(c => c.type === type);
   }
 
   //--------------------------------------------------------------------------
@@ -332,10 +338,22 @@ export class BotKnowledge {
         if (rule.notGameType !== undefined && mode.gameType === rule.notGameType) continue;
         const matches = rule.conditions.map(condition => cvarValue(condition.cvar) === condition.value);
         if (matches.length === 0 || !(rule.logicOp === "and" ? matches.every(Boolean) : matches.some(Boolean))) continue;
-        if (rule.gameType !== "" && !assigned.has("gameType")) { mode.gameType = rule.gameType; assigned.add("gameType"); }
-        if (rule.weaponStaySpecified && !assigned.has("weaponStay")) { mode.weaponStay = rule.weaponStay; assigned.add("weaponStay"); }
-        if (rule.hasTeams !== undefined && !assigned.has("hasTeams")) { mode.hasTeams = rule.hasTeams; assigned.add("hasTeams"); }
-        if (rule.teamDamage !== undefined && !assigned.has("teamDamage")) { mode.teamDamage = rule.teamDamage; assigned.add("teamDamage"); }
+        if (rule.gameType !== "" && !assigned.has("gameType")) {
+          mode.gameType = rule.gameType;
+          assigned.add("gameType");
+        }
+        if (rule.weaponStaySpecified && !assigned.has("weaponStay")) {
+          mode.weaponStay = rule.weaponStay;
+          assigned.add("weaponStay");
+        }
+        if (rule.hasTeams !== undefined && !assigned.has("hasTeams")) {
+          mode.hasTeams = rule.hasTeams;
+          assigned.add("hasTeams");
+        }
+        if (rule.teamDamage !== undefined && !assigned.has("teamDamage")) {
+          mode.teamDamage = rule.teamDamage;
+          assigned.add("teamDamage");
+        }
       }
       return mode;
     }
@@ -367,7 +385,7 @@ export class BotKnowledge {
       if (entry.targetname !== undefined) conditions.push(entry.targetname === ent.hasTargetname);
 
       if (conditions.length === 0) return entry.interaction;
-      const ok = entry.logicOp === "or" ? conditions.some((c) => c) : conditions.every((c) => c);
+      const ok = entry.logicOp === "or" ? conditions.some(c => c) : conditions.every(c => c);
       if (ok) return entry.interaction;
     }
     return null;

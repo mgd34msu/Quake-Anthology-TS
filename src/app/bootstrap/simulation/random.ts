@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Instance-owned glibc TYPE_3 rand/srand, adapted from the Q3 donor native-random.ts.
  * Copyright (C) Free Software Foundation, Inc. SPDX-License-Identifier: LGPL-2.1-or-later */
 import type { RandomSource, RandomState } from "../../../contracts/numeric.ts";
@@ -25,8 +26,15 @@ export class SourceRandom implements RandomSource {
     for (let count = 0; count < 310; count++) this.draw();
   }
 
-  nextInteger(): number { if (this.rerelease !== null) return this.rerelease.nextUint32(); this.draws++; return this.draw(); }
-  nextUnit(): number { if (this.rerelease !== null) return this.rerelease.float(); return Math.fround((this.nextInteger() & 0x7fff) / 0x7fff); }
+  nextInteger(): number {
+    if (this.rerelease !== null) return this.rerelease.nextUint32();
+    this.draws++;
+    return this.draw();
+  }
+  nextUnit(): number {
+    if (this.rerelease !== null) return this.rerelease.float();
+    return Math.fround((this.nextInteger() & 0x7fff) / 0x7fff);
+  }
 
   checkpoint(): Extract<RandomState, { readonly kind: "glibc-random" | "q2-rerelease-mt19937" }> {
     if (this.rerelease !== null) return this.rerelease.checkpoint();
@@ -41,12 +49,16 @@ export class SourceRandom implements RandomSource {
     if (this.rerelease !== null) throw new Error("Classic random state cannot restore a rerelease source stream");
     if (state.words.length !== this.words.length || state.front < 0 || state.front >= this.words.length || state.rear < 0 || state.rear >= this.words.length)
       throw new RangeError("Invalid source random state");
-    this.words.set(state.words); this.front = state.front; this.rear = state.rear; this.draws = state.draws;
+    this.words.set(state.words);
+    this.front = state.front;
+    this.rear = state.rear;
+    this.draws = state.draws;
     return undefined;
   }
 
   private draw(): number {
-    const first = this.words[this.front], second = this.words[this.rear];
+    const first = this.words[this.front],
+      second = this.words[this.rear];
     if (first === undefined || second === undefined) throw new Error("Source random cursor is outside its state");
     const sum = (first + (second >>> 0)) >>> 0;
     this.words[this.front] = sum | 0;

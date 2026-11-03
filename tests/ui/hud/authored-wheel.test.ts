@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { parseQ1WeaponWheel } from "../../../src/ui/hud/q1-wheel.ts";
 import { q1WheelSlotItem } from "../../../src/app/bootstrap/q1-wheel.ts";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { MovementProfile, MovementState } from "../../../contracts/movement.ts";
 import type { UserCommand } from "../../../contracts/protocol.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
@@ -13,7 +14,13 @@ export function movementApplicationAim(command: UserCommand, state: MovementStat
   if (command.kind === "q1-quakeworld") return command.angles;
   if (command.kind === "q2-rerelease" && state.kind === command.kind) {
     const view: [number, number, number] = [0, 0, 0];
-    rereleaseViewAngles(view, [command.angles.x, command.angles.y, command.angles.z], [state.deltaAngles.x, state.deltaAngles.y, state.deltaAngles.z], state.flags, numeric);
+    rereleaseViewAngles(
+      view,
+      [command.angles.x, command.angles.y, command.angles.z],
+      [state.deltaAngles.x, state.deltaAngles.y, state.deltaAngles.z],
+      state.flags,
+      numeric,
+    );
     return { x: view[0], y: view[1], z: view[2] };
   }
   if (command.kind === "q2-classic" && state.kind === command.kind) {

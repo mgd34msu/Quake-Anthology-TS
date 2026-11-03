@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, mock } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import * as realOs from "node:os";
@@ -26,7 +27,7 @@ const { contentRootCandidates: realCandidates, resolveDefaultContentRoot: realRe
 type Search = Parameters<typeof realCandidates>[0];
 const corpusRoot = process.env["QTS_TEST_CORPUS"] ?? "";
 /** Launches that pass no --content-root resolve against the corpus, not the checkout or a Steam install. */
-const searchIn = (search: Search = {}): Search => corpusRoot === "" || search.ownDirectory !== undefined ? search : { ...search, ownDirectory: corpusRoot };
+const searchIn = (search: Search = {}): Search => (corpusRoot === "" || search.ownDirectory !== undefined ? search : { ...search, ownDirectory: corpusRoot });
 mock.module("../../src/content/roots.ts", () => ({
   ...realRoots,
   contentRootCandidates: (search: Search = {}, steamOnly = false) => realCandidates(searchIn(search), steamOnly),
@@ -37,7 +38,8 @@ function leaked(directory: string): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...leaked(path)); else found.push(path);
+    if (entry.isDirectory()) found.push(...leaked(path));
+    else found.push(path);
   }
   return found;
 }

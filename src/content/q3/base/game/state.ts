@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_local.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -20,20 +21,35 @@ export const MAX_CLIENTS = 64;
 export const MAX_GENTITIES = 1024;
 
 export enum ConnectionState {
-  DISCONNECTED = 0, CONNECTING = 1, CONNECTED = 2,
+  DISCONNECTED = 0,
+  CONNECTING = 1,
+  CONNECTED = 2,
 }
 export enum SpectatorState {
-  NOT = 0, FREE = 1, FOLLOW = 2, SCOREBOARD = 3,
+  NOT = 0,
+  FREE = 1,
+  FOLLOW = 2,
+  SCOREBOARD = 3,
 }
 export enum TeamState {
-  BEGIN = 0, ACTIVE = 1,
+  BEGIN = 0,
+  ACTIVE = 1,
 }
 export enum MoverState {
-  POS1 = 0, POS2 = 1, ONE_TO_TWO = 2, TWO_TO_ONE = 3,
+  POS1 = 0,
+  POS2 = 1,
+  ONE_TO_TWO = 2,
+  TWO_TO_ONE = 3,
 }
 export enum GameFlags {
-  GODMODE = 0x10, NOTARGET = 0x20, TEAMSLAVE = 0x400, NO_KNOCKBACK = 0x800,
-  DROPPED_ITEM = 0x1000, NO_BOTS = 0x2000, NO_HUMANS = 0x4000, FORCE_GESTURE = 0x8000,
+  GODMODE = 0x10,
+  NOTARGET = 0x20,
+  TEAMSLAVE = 0x400,
+  NO_KNOCKBACK = 0x800,
+  DROPPED_ITEM = 0x1000,
+  NO_BOTS = 0x2000,
+  NO_HUMANS = 0x4000,
+  FORCE_GESTURE = 0x8000,
 }
 
 export class PlayerTeamState {
@@ -65,8 +81,7 @@ export class ClientSession {
 /** Source clientPersistant_t survives respawn, but not ClientBegin reset. */
 export class ClientPersistant {
   connected = ConnectionState.DISCONNECTED;
-  cmd: UserCommand = { serverTime: 0, angles: vec3(0, 0, 0), buttons: 0,
-    weapon: Weapon.WP_NONE, forwardmove: 0, rightmove: 0, upmove: 0 };
+  cmd: UserCommand = { serverTime: 0, angles: vec3(0, 0, 0), buttons: 0, weapon: Weapon.WP_NONE, forwardmove: 0, rightmove: 0, upmove: 0 };
   localClient = false;
   initialSpawn = false;
   predictItemPickup = false;
@@ -129,25 +144,28 @@ export class GameClient {
 export type EntityThink = (self: GameEntity) => void;
 export type EntityBlocked = (self: GameEntity, other: DamageParticipant) => void;
 export type EntityTouch = (self: GameEntity, other: DamageParticipant, contact: TouchContact) => void;
-export type DamageParticipant = GameEntity | {
-  readonly kind: "shared-actor";
-  readonly actor: ActorId;
-  origin(): Vec3 | null;
-};
+export type DamageParticipant =
+  | GameEntity
+  | {
+      readonly kind: "shared-actor";
+      readonly actor: ActorId;
+      origin(): Vec3 | null;
+    };
 export type UseParticipant = DamageParticipant;
 export type EntityUse = (self: GameEntity, other: UseParticipant | null, activator: UseParticipant | null) => void;
 export type EntityPain = (self: GameEntity, attacker: DamageParticipant, damage: number) => void;
 export type DamageInflictor = DamageParticipant;
-export type EntityDie = (self: GameEntity, inflictor: DamageInflictor, attacker: DamageParticipant,
-  damage: number, methodOfDeath: number) => void;
+export type EntityDie = (self: GameEntity, inflictor: DamageInflictor, attacker: DamageParticipant, damage: number, methodOfDeath: number) => void;
 
 /** Source-zero gentity_t; slot is owned-table metadata independent of memset-zero s.number. */
 export interface GameEntityBinding {
   readonly body: EntityBodyBinding;
   actor(): OwnedActor;
   active(): boolean;
-  health(): number; setHealth(value: number): void;
-  takedamage(): boolean; setTakedamage(value: boolean): void;
+  health(): number;
+  setHealth(value: number): void;
+  takedamage(): boolean;
+  setTakedamage(value: boolean): void;
   schedule(nextthink: number): void;
   runThink(timeMilliseconds: number): void;
 }
@@ -155,18 +173,28 @@ export class GameEntity implements SharedEntity {
   s = new EntityState();
   r: EntityShared;
   client: GameClient | null = null;
-  get inuse(): boolean { return this.binding.active(); }
-  get actor(): OwnedActor { return this.binding.actor(); }
+  get inuse(): boolean {
+    return this.binding.active();
+  }
+  get actor(): OwnedActor {
+    return this.binding.actor();
+  }
   private classnameState: { kind: "value"; value: string | null } | { kind: "client-name"; client: GameClient } = { kind: "value", value: null };
   get classname(): string | null {
     return this.classnameState.kind === "value" ? this.classnameState.value : this.classnameState.client.pers.netname;
   }
-  set classname(value: string | null) { this.classnameState = { kind: "value", value }; }
-  bindClientName(client: GameClient): void { this.classnameState = { kind: "client-name", client }; }
+  set classname(value: string | null) {
+    this.classnameState = { kind: "value", value };
+  }
+  bindClientName(client: GameClient): void {
+    this.classnameState = { kind: "client-name", client };
+  }
   captureClassname(): { readonly kind: "value"; readonly value: string | null } | { readonly kind: "client-name"; readonly client: GameClient } {
     return this.classnameState.kind === "value" ? { ...this.classnameState } : { kind: "client-name", client: this.classnameState.client };
   }
-  restoreNextThink(value: number): void { this.nextThinkValue = value; }
+  restoreNextThink(value: number): void {
+    this.nextThinkValue = value;
+  }
   spawnflags = 0;
   neverFree = false;
   flags = 0;
@@ -202,8 +230,13 @@ export class GameEntity implements SharedEntity {
   speed = 0;
   movedir = vec3(0, 0, 0);
   private nextThinkValue = 0;
-  get nextthink(): number { return this.nextThinkValue; }
-  set nextthink(value: number) { this.nextThinkValue = value; this.binding.schedule(value); }
+  get nextthink(): number {
+    return this.nextThinkValue;
+  }
+  set nextthink(value: number) {
+    this.nextThinkValue = value;
+    this.binding.schedule(value);
+  }
   think: EntityThink | null = null;
   reached: EntityThink | null = null;
   blocked: EntityBlocked | null = null;
@@ -214,10 +247,18 @@ export class GameEntity implements SharedEntity {
   painDebounceTime = 0;
   flySoundDebounceTime = 0;
   lastMoveTime = 0;
-  get health(): number { return this.binding.health(); }
-  set health(value: number) { this.binding.setHealth(value); }
-  get takedamage(): boolean { return this.binding.takedamage(); }
-  set takedamage(value: boolean) { this.binding.setTakedamage(value); }
+  get health(): number {
+    return this.binding.health();
+  }
+  set health(value: number) {
+    this.binding.setHealth(value);
+  }
+  get takedamage(): boolean {
+    return this.binding.takedamage();
+  }
+  set takedamage(value: boolean) {
+    this.binding.setTakedamage(value);
+  }
   damage = 0;
   splashDamage = 0;
   splashRadius = 0;
@@ -239,9 +280,11 @@ export class GameEntity implements SharedEntity {
   random = 0;
   item: ItemDefinition | null = null;
 
-  constructor(readonly slot: number, readonly binding: GameEntityBinding) {
+  constructor(
+    readonly slot: number,
+    readonly binding: GameEntityBinding,
+  ) {
     this.r = new EntityShared(binding.body);
     if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_GENTITIES) throw new RangeError("Game entity slot outside 0..1023");
   }
 }
-

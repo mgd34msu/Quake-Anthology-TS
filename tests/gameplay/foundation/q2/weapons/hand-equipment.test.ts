@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../../src/contracts/identity.ts";
@@ -24,14 +25,43 @@ import { q2TestHost } from "../../../../support/q2-host.ts";
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const plane = { normal: { x: -1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 1 };
 function clearTrace(request: Q2TraceRequest): TraceResult {
-  return { kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null, sourcePlane: plane, secondary: null };
+  return {
+    kind: "q2",
+    fraction: 1,
+    startSolid: false,
+    allSolid: false,
+    end: request.end,
+    contact: { kind: "none" },
+    hit: { kind: "none" },
+    contents: 0,
+    surface: null,
+    sourcePlane: plane,
+    secondary: null,
+  };
 }
 
 const loadout = { enabled: true, initialAmmo: 1, capacity: 50, infiniteAmmo: false };
 const input: Q2WeaponInput = {
-  attack: true, latchedAttack: false, holster: false, angles: zero, ducked: false, spectator: false,
-  notarget: false, hand: "right", animatePlayer: false, quadUntil: 0, doubleUntil: 0, quadFireUntil: 0,
-  haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
+  attack: true,
+  latchedAttack: false,
+  holster: false,
+  angles: zero,
+  ducked: false,
+  spectator: false,
+  notarget: false,
+  hand: "right",
+  animatePlayer: false,
+  quadUntil: 0,
+  doubleUntil: 0,
+  quadFireUntil: 0,
+  haste: false,
+  noStackDouble: false,
+  instantSwitch: false,
+  quickSwitch: true,
+  infiniteAmmo: false,
+  playersCollide: true,
+  gravity: 800,
+  weaponThunk: false,
 };
 
 function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2WeaponHooks, "quadMultiplier" | "sourceDamageMultiplier" | "firingInterval"> = {}) {
@@ -43,62 +73,203 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2Weapo
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-  const outcomes: DamageOutcome[] = [], events: Q2WeaponEvent[] = [];
+  const outcomes: DamageOutcome[] = [],
+    events: Q2WeaponEvent[] = [];
   const combat = new GameplayAuthority(actors, callbacks, {
     impulse: (actor, impulse) => {
       const body = bodies.read(actor.id);
-      if (body !== null) bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } });
+      if (body !== null)
+        bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } });
       return undefined;
-    }, beforeReaction: (actor, decision) => { if (actor.id === player.id && decision.reaction === "death") reaction.death(); return undefined; }, confirmed: outcome => { outcomes.push(outcome); return undefined; },
+    },
+    beforeReaction: (actor, decision) => {
+      if (actor.id === player.id && decision.reaction === "death") reaction.death();
+      return undefined;
+    },
+    confirmed: outcome => {
+      outcomes.push(outcome);
+      return undefined;
+    },
   });
-  combat.register(createQ2CombatPolicy({ id: "q2:combat", context: request => ({ arithmetic: "binary64", player: request.target.equals(player.id), monster: !request.target.equals(player.id), attackerPlayer: request.attack.attacker?.equals(player.id) ?? false,
-    hasEnemy: true, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: true, nuke: false, noKnockback: false, movable: true, rejectTeamDamage: false, suppressPain: false }),
-    armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64" })) }));
+  combat.register(
+    createQ2CombatPolicy({
+      id: "q2:combat",
+      context: request => ({
+        arithmetic: "binary64",
+        player: request.target.equals(player.id),
+        monster: !request.target.equals(player.id),
+        attackerPlayer: request.attack.attacker?.equals(player.id) ?? false,
+        hasEnemy: true,
+        easySkill: false,
+        deathmatch: false,
+        defenderSphere: false,
+        teamDamageEnabled: false,
+        friendlyFire: true,
+        nuke: false,
+        noKnockback: false,
+        movable: true,
+        rejectTeamDamage: false,
+        suppressPain: false,
+      }),
+      armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64" })),
+    }),
+  );
   const inventory = new SharedInventoryTable(actors);
   const player = actors.allocate("q3:character", "q3:sarge");
-  bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  bodies.create(player, {
+    origin: zero,
+    angles: zero,
+    velocity: zero,
+    bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
+    ground: null,
+  });
+  combat.create(player, {
+    health: 100,
+    armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+    mass: 200,
+    canTakeDamage: true,
+    invulnerable: false,
+    team: null,
+  });
   inventory.create(player, [{ item: "q3:weapon/railgun", count: 1, capacity: 1 }]);
-  const primary = new PlayerState("baseq3"); primary.weapon = Weapon.WP_RAILGUN;
+  const primary = new PlayerState("baseq3");
+  primary.weapon = Weapon.WP_RAILGUN;
   const monsters = new Set<ActorId>();
   const tracing = { trace: clearTrace };
-  const { host, events: presentation } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: () => undefined }, {
-    now: () => now, frameSeconds: () => frameSeconds, random: () => { randomCalls.push(0.5); return 0.5; },
-    trace: request => tracing.trace(request),
-    nearby: (origin, radius) => [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")].map(actor => actor.id).filter(actor => {
-      const body = bodies.read(actor);
-      return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
-    }), isMonster: actor => monsters.has(actor),
-    playerViewState: actor => actor.equals(player.id) ? { viewAngles: input.angles, oldVelocity: bodies.read(actor)?.velocity ?? zero } : null,
-    diagnostic: message => { throw new Error(message); },
-  });
+  const { host, events: presentation } = q2TestHost(
+    { actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: () => undefined },
+    {
+      now: () => now,
+      frameSeconds: () => frameSeconds,
+      random: () => {
+        randomCalls.push(0.5);
+        return 0.5;
+      },
+      trace: request => tracing.trace(request),
+      nearby: (origin, radius) =>
+        [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")]
+          .map(actor => actor.id)
+          .filter(actor => {
+            const body = bodies.read(actor);
+            return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
+          }),
+      isMonster: actor => monsters.has(actor),
+      playerViewState: actor => (actor.equals(player.id) ? { viewAngles: input.angles, oldVelocity: bodies.read(actor)?.velocity ?? zero } : null),
+      diagnostic: message => {
+        throw new Error(message);
+      },
+    },
+  );
 
-  const game = new Q2EntityServices(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1,
-    provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
-  const weapons = new Q2Weapons({ ...modifiers, emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
-    lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
+  const game = new Q2EntityServices(
+    host,
+    {
+      edition,
+      mapName: "weapon-check",
+      skill: 1,
+      mode: "singleplayer",
+      deathmatchFlags: 0,
+      maxClients: 1,
+      provider: "q2:game",
+      campaign: "q2:campaign",
+      combatProvider: "q2:combat",
+      inventoryProvider: "q2:inventory",
+      movementProvider: "q1:movement",
+    },
+    [],
+  );
+  const weapons = new Q2Weapons({
+    ...modifiers,
+    emit: event => {
+      events.push(event);
+      return undefined;
+    },
+    noise: () => undefined,
+    dodge: () => undefined,
+    lagCompensation: { kind: "current-world" },
+    ammoChanged: () => undefined,
+    canTarget: () => true,
+  });
   const equipment = new Q2HandGrenadeEquipment(game, weapons);
   equipment.configure(player.id, loadout);
   const project: HandGrenadeEquipmentInput["project"] = (angles, offset) => {
     const body = bodies.read(player.id);
     if (body === null) throw new Error("Missing test actor body");
-    const axes = angleVectorsRule(angles, "native"), eye = add(body.origin, { x: 0, y: 0, z: 22 });
+    const axes = angleVectorsRule(angles, "native"),
+      eye = add(body.origin, { x: 0, y: 0, z: 22 });
     const start = add(add(eye, scale(axes.forward, offset.x)), scale(axes.right, offset.y));
     if (edition === "classic") return { start: add(start, { x: 0, y: 0, z: offset.z }), direction: axes.forward };
     const muzzle = add(start, scale(axes.up, offset.z));
     const trace = host.trace({ start: eye, end: add(eye, scale(axes.forward, 8192)), bounds: null, ignore: player.id, mask: 0x6000003 });
     return { start: muzzle, direction: normalize(subtract(trace.end, muzzle)) };
   };
-  const handInput: HandGrenadeEquipmentInput = { angles: zero, gravity: 800, quadUntil: 0, doubleUntil: 0, quadFireUntil: 0,
-    haste: false, noStackDouble: false, playersCollide: true, pressed: false, held: true, released: false, lifecycle: "alive", project };
-  return { actors, bodies, combat, inventory, player, game, weapons, events, outcomes, presentation, tracing, monsters, callbacks, world, randomCalls, equipment, primary, handInput, reaction,
-    step(seconds: number, update: Partial<HandGrenadeEquipmentInput> = {}) { now = seconds; equipment.step(player.id, { ...handInput, ...update }); },
-    nativeStep(seconds: number, current = input) { now = seconds; const self = game.entity(player.id); if (self === null) throw new Error("Missing native test player"); weapons.tick(self, game, current); },
-    advance(seconds: number) { now = seconds; for (const entity of [...game.entities.values()]) if (entity.nextThink !== null && entity.nextThink <= now) callbacks.think(entity.actor, { frame: Math.round(now * 10), time: { kind: "seconds", value: now }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); },
+  const handInput: HandGrenadeEquipmentInput = {
+    angles: zero,
+    gravity: 800,
+    quadUntil: 0,
+    doubleUntil: 0,
+    quadFireUntil: 0,
+    haste: false,
+    noStackDouble: false,
+    playersCollide: true,
+    pressed: false,
+    held: true,
+    released: false,
+    lifecycle: "alive",
+    project,
+  };
+  return {
+    actors,
+    bodies,
+    combat,
+    inventory,
+    player,
+    game,
+    weapons,
+    events,
+    outcomes,
+    presentation,
+    tracing,
+    monsters,
+    callbacks,
+    world,
+    randomCalls,
+    equipment,
+    primary,
+    handInput,
+    reaction,
+    step(seconds: number, update: Partial<HandGrenadeEquipmentInput> = {}) {
+      now = seconds;
+      equipment.step(player.id, { ...handInput, ...update });
+    },
+    nativeStep(seconds: number, current = input) {
+      now = seconds;
+      const self = game.entity(player.id);
+      if (self === null) throw new Error("Missing native test player");
+      weapons.tick(self, game, current);
+    },
+    advance(seconds: number) {
+      now = seconds;
+      for (const entity of [...game.entities.values()])
+        if (entity.nextThink !== null && entity.nextThink <= now)
+          callbacks.think(entity.actor, {
+            frame: Math.round(now * 10),
+            time: { kind: "seconds", value: now },
+            elapsed: { kind: "seconds", value: 0.1 },
+            phase: "entity-think",
+          });
+    },
     target(x: number) {
       const target = game.create("monster_soldier");
       game.move(target, { origin: { x, y: 0, z: 0 }, bounds: { min: zero, max: zero } });
-      combat.create(target.actor, { health: 500, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+      combat.create(target.actor, {
+        health: 500,
+        armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+        mass: 200,
+        canTakeDamage: true,
+        invulnerable: false,
+        team: null,
+      });
       monsters.add(target.actor.id);
       return target;
     },
@@ -106,7 +277,8 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2Weapo
 }
 
 test("offhand action emits a real shared projectile with Q3 primary selected and no Q2 player record", () => {
-  const f = fixture("classic"), victim = f.target(20);
+  const f = fixture("classic"),
+    victim = f.target(20);
   f.step(0, { pressed: true });
   expect(f.inventory.count(f.player.id, HAND_GRENADE_AMMO)).toBe(0);
   for (let frame = 1; frame <= 12; frame++) f.step(frame / 10, { held: false, released: frame === 1 });
@@ -118,8 +290,14 @@ test("offhand action emits a real shared projectile with Q3 primary selected and
   expect(f.primary.weapon).toBe(Weapon.WP_RAILGUN);
   f.callbacks.touch({ self: grenade.actor, other: victim.actor.id, plane, surface: null });
   expect(f.combat.read(victim.actor.id)?.health).toBeLessThan(500);
-  expect(f.outcomes.some(outcome => outcome.kind === "committed" && outcome.decision.request.attack.attacker === f.player.id
-    && outcome.decision.request.attack.weapon === HAND_GRENADE_AMMO)).toBe(true);
+  expect(
+    f.outcomes.some(
+      outcome =>
+        outcome.kind === "committed" &&
+        outcome.decision.request.attack.attacker === f.player.id &&
+        outcome.decision.request.attack.weapon === HAND_GRENADE_AMMO,
+    ),
+  ).toBe(true);
   expect(f.actors.isLive(grenade.actor.id)).toBe(false);
   expect(f.primary.weapon).toBe(Weapon.WP_RAILGUN);
   expect(f.inventory.count(f.player.id, HAND_GRENADE_AMMO)).toBe(0);
@@ -127,9 +305,11 @@ test("offhand action emits a real shared projectile with Q3 primary selected and
 
 test("native grenade launcher and offhand compete for the same last unit before either admission", () => {
   for (const offhandFirst of [true, false]) {
-    const f = fixture("classic"), self = f.game.attachPlayer(f.player);
+    const f = fixture("classic"),
+      self = f.game.attachPlayer(f.player);
     const state = f.weapons.bind(self, f.game, new Q2WeaponState("grenadelauncher"));
-    state.phase = "ready"; state.frame = 17;
+    state.phase = "ready";
+    state.frame = 17;
     if (offhandFirst) f.step(0, { pressed: true });
     f.nativeStep(0);
     if (!offhandFirst) f.step(0, { pressed: true });
@@ -161,8 +341,10 @@ test("cooking checkpoint restores the debited shared inventory without replaying
   expect(restored.inventory.count(restored.player.id, HAND_GRENADE_AMMO)).toBe(0);
   restored.step(2.1, { held: false });
   expect(restored.game.entities.size).toBe(1);
-  const corrupt = { ...saved, actors: saved.actors.map(entry => ({ ...entry, state: { ...entry.state,
-    action: { kind: "preparing", frame: 12, nextAt: 1, releaseQueued: false } } })) };
+  const corrupt = {
+    ...saved,
+    actors: saved.actors.map(entry => ({ ...entry, state: { ...entry.state, action: { kind: "preparing", frame: 12, nextAt: 1, releaseQueued: false } } })),
+  };
   expect(() => decodeHandGrenadesCheckpoint(encodeCheckpointValue(corrupt))).toThrow("hold frame");
 });
 
@@ -215,9 +397,11 @@ test("disable refunds only unprimed ammunition, pre-removal resolves primed ammu
 
 test("native hand grenade and offhand reserve the same last unit before cooking in either order", () => {
   for (const nativeFirst of [true, false]) {
-    const f = fixture("classic"), self = f.game.attachPlayer(f.player);
+    const f = fixture("classic"),
+      self = f.game.attachPlayer(f.player);
     const native = f.weapons.bind(self, f.game, new Q2WeaponState("grenades"));
-    native.phase = "ready"; native.frame = 16;
+    native.phase = "ready";
+    native.frame = 16;
     if (nativeFirst) {
       f.nativeStep(0);
       for (let frame = 1; frame <= 11; frame++) f.nativeStep(frame / 10);
@@ -238,13 +422,17 @@ test("native hand grenade and offhand reserve the same last unit before cooking 
   }
 });
 
-
 test("offhand grenade reuses primary damage hooks only at emission and keeps independent stacking", () => {
   for (const noStackDouble of [false, true]) {
     let calls = 0;
-    const f = fixture("classic", 0.1, { quadMultiplier: () => 3, sourceDamageMultiplier: actor => {
-      expect(actor).toBe(f.player.id); calls++; return 2;
-    } });
+    const f = fixture("classic", 0.1, {
+      quadMultiplier: () => 3,
+      sourceDamageMultiplier: actor => {
+        expect(actor).toBe(f.player.id);
+        calls++;
+        return 2;
+      },
+    });
     f.step(0, { pressed: true });
     for (let frame = 1; frame <= 11; frame++) f.step(frame / 10);
     expect(calls).toBe(0);
@@ -264,31 +452,43 @@ test("offhand grenade reuses primary damage hooks only at emission and keeps ind
 test("complete source multiplier is independent of Quad timers and cannot emit after owner retirement", () => {
   for (const retire of [false, true]) {
     let calls = 0;
-    const f = fixture("rerelease", 0.1, { sourceDamageMultiplier: actor => {
-      expect(actor).toBe(f.player.id); calls++;
-      if (retire) f.actors.release(f.player);
-      return 6;
-    } });
+    const f = fixture("rerelease", 0.1, {
+      sourceDamageMultiplier: actor => {
+        expect(actor).toBe(f.player.id);
+        calls++;
+        if (retire) f.actors.release(f.player);
+        return 6;
+      },
+    });
     f.step(0, { pressed: true });
     for (let frame = 1; frame <= 11; frame++) f.step(frame / 10);
     expect(calls).toBe(0);
     f.step(1.2, { held: false, released: true });
     expect(calls).toBe(1);
     const grenade = [...f.game.entities.values()].find(entity => entity.classname === "hand_grenade");
-    if (retire) { expect(grenade).toBeUndefined(); expect(f.equipment.state(f.player.id)).toBeNull(); }
-    else expect(grenade?.damage).toBe(750);
+    if (retire) {
+      expect(grenade).toBeUndefined();
+      expect(f.equipment.state(f.player.id)).toBeNull();
+    } else expect(grenade?.damage).toBe(750);
     f.actors.close();
   }
 });
 
-
 test("cadence source retirement cannot republish an equipment action", () => {
   let calls = 0;
-  const f = fixture("classic", 0.1, { firingInterval: actor => {
-    expect(actor).toBe(f.player.id); calls++; f.actors.release(f.player); return 0.05;
-  } });
-  f.step(0); expect(calls).toBe(0);
-  f.step(0, { pressed: true }); expect(calls).toBe(1);
-  expect(f.equipment.state(f.player.id)).toBeNull(); expect(f.game.entities.size).toBe(0);
+  const f = fixture("classic", 0.1, {
+    firingInterval: actor => {
+      expect(actor).toBe(f.player.id);
+      calls++;
+      f.actors.release(f.player);
+      return 0.05;
+    },
+  });
+  f.step(0);
+  expect(calls).toBe(0);
+  f.step(0, { pressed: true });
+  expect(calls).toBe(1);
+  expect(f.equipment.state(f.player.id)).toBeNull();
+  expect(f.game.entities.size).toBe(0);
   f.actors.close();
 });

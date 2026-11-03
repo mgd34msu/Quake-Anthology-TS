@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -14,7 +15,10 @@ const WAVE_POOLS: readonly (readonly string[])[] = [
 ];
 const TOTAL_WAVES = 15;
 const POINT_CLASSNAMES: ReadonlySet<string> = new Set([
-  "info_monster_start", "info_monster_start_flying", "info_monster_start_ranged", "info_monster_start_boss",
+  "info_monster_start",
+  "info_monster_start_flying",
+  "info_monster_start_ranged",
+  "info_monster_start_boss",
 ]);
 
 /** The part of the Q2 game services the wave logic reads, so tests supply typed doubles instead of the full entity services. */
@@ -72,12 +76,18 @@ export class Q2Horde implements Q2SpawnModule {
   }
 
   capture(): { wave: number; spawned: number; intermission: number; monsters: SavedActorId[] } {
-    return { wave: this.wave, spawned: this.spawnedThisWave, intermission: this.intermissionTicks,
-      monsters: [...this.waveMonsters].map(id => ({ slot: id.slot, generation: id.generation })) };
+    return {
+      wave: this.wave,
+      spawned: this.spawnedThisWave,
+      intermission: this.intermissionTicks,
+      monsters: [...this.waveMonsters].map(id => ({ slot: id.slot, generation: id.generation })),
+    };
   }
 
   restore(game: Q2HordeGame, saved: { wave: number; spawned: number; intermission: number; monsters: readonly SavedActorId[] }): undefined {
-    this.wave = saved.wave; this.spawnedThisWave = saved.spawned; this.intermissionTicks = saved.intermission;
+    this.wave = saved.wave;
+    this.spawnedThisWave = saved.spawned;
+    this.intermissionTicks = saved.intermission;
     this.waveMonsters.clear();
     for (const savedId of saved.monsters) {
       this.waveMonsters.add(game.host.actors.resolveSaved(savedId)?.id ?? game.host.actors.referenceSaved(savedId));
@@ -85,15 +95,16 @@ export class Q2Horde implements Q2SpawnModule {
     // Manager/point entities are re-spawned from the restored world state;
     // re-acquire them so waves resume after a save load.
     for (const entity of game.entities.values()) {
-      if (entity.classname === "horde_manager") { this.manager = entity; game.schedule(entity, 1, this.think); }
-      else if (POINT_CLASSNAMES.has(entity.classname) && !this.points.includes(entity)) this.points.push(entity);
+      if (entity.classname === "horde_manager") {
+        this.manager = entity;
+        game.schedule(entity, 1, this.think);
+      } else if (POINT_CLASSNAMES.has(entity.classname) && !this.points.includes(entity)) this.points.push(entity);
     }
     return undefined;
   }
 
   private playersAlive(game: Q2HordeGame): boolean {
-    for (const entity of game.entities.values())
-      if (entity.classname === "player" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0) return true;
+    for (const entity of game.entities.values()) if (entity.classname === "player" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0) return true;
     return false;
   }
 
@@ -101,12 +112,15 @@ export class Q2Horde implements Q2SpawnModule {
     let alive = 0;
     for (const id of this.waveMonsters) {
       const health = game.host.combat.read(id)?.health;
-      if (health === null || health === undefined || health <= 0) this.waveMonsters.delete(id); else alive++;
+      if (health === null || health === undefined || health <= 0) this.waveMonsters.delete(id);
+      else alive++;
     }
     return alive;
   }
 
-  private waveQuota(): number { return Math.min(4 + this.wave * 2, 24); }
+  private waveQuota(): number {
+    return Math.min(4 + this.wave * 2, 24);
+  }
 
   private tick(game: Q2HordeGame): void {
     if (this.manager === null || this.points.length === 0 || this.wave > TOTAL_WAVES) return;
@@ -135,7 +149,14 @@ export class Q2Horde implements Q2SpawnModule {
       const origin = game.body(point).origin;
       const occupied = game.host.trace({ start: origin, end: origin, bounds: MONSTER_BOUNDS, ignore: point.actor.id, mask: MASK_MONSTERSOLID });
       if (occupied.startSolid || occupied.hit.kind === "actor") break;
-      const monster = game.spawn({ classname, ordinal: -1, values: new Map([["origin", `${origin.x} ${origin.y} ${origin.z}`], ["angle", "0"]]) });
+      const monster = game.spawn({
+        classname,
+        ordinal: -1,
+        values: new Map([
+          ["origin", `${origin.x} ${origin.y} ${origin.z}`],
+          ["angle", "0"],
+        ]),
+      });
       this.waveMonsters.add(monster.actor.id);
       spawned++;
     }

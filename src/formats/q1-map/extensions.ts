@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* BSPX layouts adapted from FTE specs/bspx.txt and q2repro/common/bsp.c.
  * GPL-2.0-or-later. */
 import type { Plane } from "../../contracts/math.ts";
@@ -10,7 +11,7 @@ export function readBspx(reader: BinaryReader, lumps: readonly Q1Lump[]): readon
   let end = 124;
   for (const lump of lumps) end = Math.max(end, lump.offset + lump.length);
   const candidates = [Math.ceil(end / 4) * 4];
-  if (!lumps.some((lump) => lump.length > 0 && lump.offset < 132 && lump.offset + lump.length > 124)) candidates.push(124);
+  if (!lumps.some(lump => lump.length > 0 && lump.offset < 132 && lump.offset + lump.length > 124)) candidates.push(124);
   for (const offset of candidates) {
     if (offset > reader.length - 8 || reader.section(offset, 4).fixedByteString(4) !== "BSPX") continue;
     const directory = reader.section(offset + 4, reader.length - offset - 4);
@@ -29,20 +30,29 @@ export function readBspx(reader: BinaryReader, lumps: readonly Q1Lump[]): readon
 }
 
 export function bspxData(lumps: readonly Q1BspxLump[], name: string): Uint8Array | null {
-  return lumps.find((lump) => lump.name === name)?.data ?? null;
+  return lumps.find(lump => lump.name === name)?.data ?? null;
 }
 
 export function readDecoupledLightmaps(data: Uint8Array | null, faceCount: number): readonly DecoupledLightmap[] | null {
   if (data === null) return null;
   const reader = new BinaryReader(data, "BSPX DECOUPLED_LM");
   if (data.length !== faceCount * 40) throw new BinaryError(reader.source, 0, "record count does not match faces");
-  return records(reader, 40, (r) => {
+  return records(reader, 40, r => {
     const width = r.u16();
     const height = r.u16();
     const lightingOffset = optionalOffset(r.u32());
     const s = vec4(r);
     const t = vec4(r);
-    return { width, height, lightingOffset, axes: [{ x: s.x, y: s.y, z: s.z }, { x: t.x, y: t.y, z: t.z }], offset: { x: s.w, y: t.w } };
+    return {
+      width,
+      height,
+      lightingOffset,
+      axes: [
+        { x: s.x, y: s.y, z: s.z },
+        { x: t.x, y: t.y, z: t.z },
+      ],
+      offset: { x: s.w, y: t.w },
+    };
   });
 }
 
@@ -129,11 +139,11 @@ export function readBspxMetadata(lumps: readonly Q1BspxLump[], faceCount: number
   const normals = exact("VERTEXNORMALS", vertexCount * 12);
   return {
     lightmapShifts: exact("LMSHIFT", faceCount),
-    lightmapOffsets: offsets === null ? null : records(new BinaryReader(offsets, "BSPX LMOFFSET"), 4, (r) => optionalOffset(r.u32())),
+    lightmapOffsets: offsets === null ? null : records(new BinaryReader(offsets, "BSPX LMOFFSET"), 4, r => optionalOffset(r.u32())),
     lightmapStyles: perFaceStyles(get("LMSTYLE"), faceCount, false),
     lightmapStyles16: perFaceStyles(get("LMSTYLE16"), faceCount, true),
     rgbLighting: get("RGBLIGHTING"),
-    hdrLighting: hdr === null ? null : records(new BinaryReader(hdr, "BSPX LIGHTING_E5BGR9"), 4, (r) => r.u32()),
+    hdrLighting: hdr === null ? null : records(new BinaryReader(hdr, "BSPX LIGHTING_E5BGR9"), 4, r => r.u32()),
     lightingDirections: get("LIGHTINGDIR"),
     vertexNormals: normals === null ? null : records(new BinaryReader(normals, "BSPX VERTEXNORMALS"), 12, vec3),
     faceNormals: readFaceNormals(get("FACENORMALS"), cornerCount),

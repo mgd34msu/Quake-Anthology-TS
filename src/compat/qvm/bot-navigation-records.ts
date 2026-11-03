@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q3 botlib VM records, derived from id Software and the reference port. GPL-2.0-or-later.
 import type { Vec3 } from "../../contracts/math.ts";
 import type { BotGoal } from "../../bots/behavior/library/goals.ts";
@@ -44,9 +45,15 @@ function referenceField(pointer: () => Uint8Array | null, offset: number): DataV
 
 function referenceVector(pointer: () => Uint8Array | null, offset: number): Vec3 {
   return {
-    get x(): number { return referenceField(pointer, offset).getFloat32(0, true); },
-    get y(): number { return referenceField(pointer, offset + 4).getFloat32(0, true); },
-    get z(): number { return referenceField(pointer, offset + 8).getFloat32(0, true); },
+    get x(): number {
+      return referenceField(pointer, offset).getFloat32(0, true);
+    },
+    get y(): number {
+      return referenceField(pointer, offset + 4).getFloat32(0, true);
+    },
+    get z(): number {
+      return referenceField(pointer, offset + 8).getFloat32(0, true);
+    },
   };
 }
 
@@ -54,20 +61,29 @@ function referenceVector(pointer: () => Uint8Array | null, offset: number): Vec3
 export function readQvmBotGoalReference(pointer: () => Uint8Array | null): BotGoal {
   return {
     origin: referenceVector(pointer, 0),
-    get area(): number { return referenceField(pointer, 12).getInt32(0, true); },
+    get area(): number {
+      return referenceField(pointer, 12).getInt32(0, true);
+    },
     mins: referenceVector(pointer, 16),
     maxs: referenceVector(pointer, 28),
-    get entity(): number { return referenceField(pointer, 40).getInt32(0, true); },
-    get number(): number { return referenceField(pointer, 44).getInt32(0, true); },
-    get flags(): number { return referenceField(pointer, 48).getInt32(0, true); },
-    get itemInfo(): number { return referenceField(pointer, 52).getInt32(0, true); },
+    get entity(): number {
+      return referenceField(pointer, 40).getInt32(0, true);
+    },
+    get number(): number {
+      return referenceField(pointer, 44).getInt32(0, true);
+    },
+    get flags(): number {
+      return referenceField(pointer, 48).getInt32(0, true);
+    },
+    get itemInfo(): number {
+      return referenceField(pointer, 52).getInt32(0, true);
+    },
   };
 }
 
 function requireGoalRecord(view: DataView, length: number): void {
   if (view.byteLength < length) {
-    throw new BinaryError("QVM bot_goal_t", 0,
-      `record requires ${length} bytes, received ${view.byteLength}`);
+    throw new BinaryError("QVM bot_goal_t", 0, `record requires ${length} bytes, received ${view.byteLength}`);
   }
 }
 
@@ -101,9 +117,7 @@ export function readQvmBotGoal(view: DataView): BotGoal {
 }
 
 /** Queries write only their source fields; the remaining bytes are never read. */
-export function writeQvmBotGoal(
-  view: DataView, goal: BotGoal, fields: "full" | "level-item" | "location" = "full",
-): void {
+export function writeQvmBotGoal(view: DataView, goal: BotGoal, fields: "full" | "level-item" | "location" = "full"): void {
   requireGoalRecord(view, fields === "full" ? QVM_BOT_GOAL_BYTES : fields === "level-item" ? 52 : 44);
   view.setInt32(12, goal.area, true);
   writeGoalVector(view, 0, goal.origin);
@@ -126,17 +140,22 @@ function field(pointer: Pointer, offset: number, view?: FieldView): DataView {
   const bytes = pointer();
   if (bytes === null) throw new RangeError("QVM bot movement requires a nonnull pointer");
   if (offset + 4 > bytes.byteLength) {
-    throw new BinaryError("QVM bot movement record", offset,
-      `field exceeds ${bytes.byteLength}-byte allocation`);
+    throw new BinaryError("QVM bot movement record", offset, `field exceeds ${bytes.byteLength}-byte allocation`);
   }
   return view === undefined ? new DataView(bytes.buffer, bytes.byteOffset + offset, 4) : view(bytes, offset);
 }
 
 function movementVector(pointer: Pointer, offset: number): Vec3 {
   return {
-    get x(): number { return field(pointer, offset).getFloat32(0, true); },
-    get y(): number { return field(pointer, offset + 4).getFloat32(0, true); },
-    get z(): number { return field(pointer, offset + 8).getFloat32(0, true); },
+    get x(): number {
+      return field(pointer, offset).getFloat32(0, true);
+    },
+    get y(): number {
+      return field(pointer, offset + 4).getFloat32(0, true);
+    },
+    get z(): number {
+      return field(pointer, offset + 8).getFloat32(0, true);
+    },
   };
 }
 
@@ -152,46 +171,98 @@ export function qvmBotInitMoveReference(pointer: Pointer): BotInitMove {
     origin: movementVector(pointer, 0),
     velocity: movementVector(pointer, 12),
     viewOffset: movementVector(pointer, 24),
-    get entityNum(): number { return field(pointer, 36).getInt32(0, true); },
-    get client(): number { return field(pointer, 40).getInt32(0, true); },
-    get thinkTime(): number { return field(pointer, 44).getFloat32(0, true); },
-    get presenceType(): number { return field(pointer, 48).getInt32(0, true); },
+    get entityNum(): number {
+      return field(pointer, 36).getInt32(0, true);
+    },
+    get client(): number {
+      return field(pointer, 40).getInt32(0, true);
+    },
+    get thinkTime(): number {
+      return field(pointer, 44).getFloat32(0, true);
+    },
+    get presenceType(): number {
+      return field(pointer, 48).getInt32(0, true);
+    },
     viewAngles: movementVector(pointer, 52),
-    get orMoveFlags(): number { return field(pointer, 64).getInt32(0, true); },
+    get orMoveFlags(): number {
+      return field(pointer, 64).getInt32(0, true);
+    },
   };
 }
 
 /** The source clears six words before checking the handle, leaving the tail live. */
 export function qvmBotMoveResultReference(pointer: Pointer, view: FieldView): BotMoveResult {
   return {
-    get failure(): boolean { return field(pointer, 0).getInt32(0, true) !== 0; },
-    set failure(value: boolean) { field(pointer, 0, view).setInt32(0, Number(value), true); },
-    get type(): number { return field(pointer, 4).getInt32(0, true); },
-    set type(value: number) { field(pointer, 4, view).setInt32(0, value, true); },
-    get blocked(): boolean { return field(pointer, 8).getInt32(0, true) !== 0; },
-    set blocked(value: boolean) { field(pointer, 8, view).setInt32(0, Number(value), true); },
-    get blockEntity(): number { return field(pointer, 12).getInt32(0, true); },
-    set blockEntity(value: number) { field(pointer, 12, view).setInt32(0, value, true); },
-    get travelType(): number { return field(pointer, 16).getInt32(0, true); },
-    set travelType(value: number) { field(pointer, 16, view).setInt32(0, value, true); },
-    get flags(): number { return field(pointer, 20).getInt32(0, true); },
-    set flags(value: number) { field(pointer, 20, view).setInt32(0, value, true); },
-    get weapon(): number { return field(pointer, 24).getInt32(0, true); },
-    set weapon(value: number) { field(pointer, 24, view).setInt32(0, value, true); },
-    get moveDirection(): Vec3 { return movementVector(pointer, 28); },
-    set moveDirection(value: Vec3) { writeVector(pointer, 28, value, view); },
-    get idealViewAngles(): Vec3 { return movementVector(pointer, 40); },
-    set idealViewAngles(value: Vec3) { writeVector(pointer, 40, value, view); },
+    get failure(): boolean {
+      return field(pointer, 0).getInt32(0, true) !== 0;
+    },
+    set failure(value: boolean) {
+      field(pointer, 0, view).setInt32(0, Number(value), true);
+    },
+    get type(): number {
+      return field(pointer, 4).getInt32(0, true);
+    },
+    set type(value: number) {
+      field(pointer, 4, view).setInt32(0, value, true);
+    },
+    get blocked(): boolean {
+      return field(pointer, 8).getInt32(0, true) !== 0;
+    },
+    set blocked(value: boolean) {
+      field(pointer, 8, view).setInt32(0, Number(value), true);
+    },
+    get blockEntity(): number {
+      return field(pointer, 12).getInt32(0, true);
+    },
+    set blockEntity(value: number) {
+      field(pointer, 12, view).setInt32(0, value, true);
+    },
+    get travelType(): number {
+      return field(pointer, 16).getInt32(0, true);
+    },
+    set travelType(value: number) {
+      field(pointer, 16, view).setInt32(0, value, true);
+    },
+    get flags(): number {
+      return field(pointer, 20).getInt32(0, true);
+    },
+    set flags(value: number) {
+      field(pointer, 20, view).setInt32(0, value, true);
+    },
+    get weapon(): number {
+      return field(pointer, 24).getInt32(0, true);
+    },
+    set weapon(value: number) {
+      field(pointer, 24, view).setInt32(0, value, true);
+    },
+    get moveDirection(): Vec3 {
+      return movementVector(pointer, 28);
+    },
+    set moveDirection(value: Vec3) {
+      writeVector(pointer, 28, value, view);
+    },
+    get idealViewAngles(): Vec3 {
+      return movementVector(pointer, 40);
+    },
+    set idealViewAngles(value: Vec3) {
+      writeVector(pointer, 40, value, view);
+    },
   };
 }
 
-export function qvmBotMovementVector(pointer: Pointer): Vec3 { return movementVector(pointer, 0); }
+export function qvmBotMovementVector(pointer: Pointer): Vec3 {
+  return movementVector(pointer, 0);
+}
 
 /** Target writes are visible immediately, including a route query returning false. */
 export function qvmBotMovementTarget(pointer: Pointer, view: FieldView): MovementTarget {
   return {
-    get value(): Vec3 { return movementVector(pointer, 0); },
-    set value(value: Vec3) { writeVector(pointer, 0, value, view); },
+    get value(): Vec3 {
+      return movementVector(pointer, 0);
+    },
+    set value(value: Vec3) {
+      writeVector(pointer, 0, value, view);
+    },
   };
 }
 
@@ -204,28 +275,63 @@ function entityVector(view: DataView, offset: number): Vec3 {
 /** Borrows VM fields so source host callbacks can change later reads in this update. */
 export function borrowQvmBotEntityState(view: DataView): BotEntityUpdate {
   if (view.byteLength < QVM_BOT_ENTITY_STATE_BYTES) {
-    throw new BinaryError("QVM bot_entitystate_t", 0,
-      `record requires ${QVM_BOT_ENTITY_STATE_BYTES} bytes, received ${view.byteLength}`);
+    throw new BinaryError("QVM bot_entitystate_t", 0, `record requires ${QVM_BOT_ENTITY_STATE_BYTES} bytes, received ${view.byteLength}`);
   }
   return {
-    get type(): number { return view.getInt32(0, true); },
-    get flags(): number { return view.getInt32(4, true); },
-    get origin(): Vec3 { return entityVector(view, 8); },
-    get angles(): Vec3 { return entityVector(view, 20); },
-    get oldOrigin(): Vec3 { return entityVector(view, 32); },
-    get mins(): Vec3 { return entityVector(view, 44); },
-    get maxs(): Vec3 { return entityVector(view, 56); },
-    get groundEntity(): number { return view.getInt32(68, true); },
-    get solid(): number { return view.getInt32(72, true); },
-    get modelIndex(): number { return view.getInt32(76, true); },
-    get modelIndex2(): number { return view.getInt32(80, true); },
-    get frame(): number { return view.getInt32(84, true); },
-    get event(): number { return view.getInt32(88, true); },
-    get eventParameter(): number { return view.getInt32(92, true); },
-    get powerups(): number { return view.getInt32(96, true); },
-    get weapon(): number { return view.getInt32(100, true); },
-    get legsAnimation(): number { return view.getInt32(104, true); },
-    get torsoAnimation(): number { return view.getInt32(108, true); },
+    get type(): number {
+      return view.getInt32(0, true);
+    },
+    get flags(): number {
+      return view.getInt32(4, true);
+    },
+    get origin(): Vec3 {
+      return entityVector(view, 8);
+    },
+    get angles(): Vec3 {
+      return entityVector(view, 20);
+    },
+    get oldOrigin(): Vec3 {
+      return entityVector(view, 32);
+    },
+    get mins(): Vec3 {
+      return entityVector(view, 44);
+    },
+    get maxs(): Vec3 {
+      return entityVector(view, 56);
+    },
+    get groundEntity(): number {
+      return view.getInt32(68, true);
+    },
+    get solid(): number {
+      return view.getInt32(72, true);
+    },
+    get modelIndex(): number {
+      return view.getInt32(76, true);
+    },
+    get modelIndex2(): number {
+      return view.getInt32(80, true);
+    },
+    get frame(): number {
+      return view.getInt32(84, true);
+    },
+    get event(): number {
+      return view.getInt32(88, true);
+    },
+    get eventParameter(): number {
+      return view.getInt32(92, true);
+    },
+    get powerups(): number {
+      return view.getInt32(96, true);
+    },
+    get weapon(): number {
+      return view.getInt32(100, true);
+    },
+    get legsAnimation(): number {
+      return view.getInt32(104, true);
+    },
+    get torsoAnimation(): number {
+      return view.getInt32(108, true);
+    },
   };
 }
 
@@ -261,4 +367,3 @@ export function writeQvmAasEntityInfo(view: DataView, info: AasEntityInfo): void
   view.setInt32(132, info.legsAnimation, true);
   view.setInt32(136, info.torsoAnimation, true);
 }
-

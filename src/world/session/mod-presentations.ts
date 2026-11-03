@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { MountedContent } from "../../content/mounts/index.ts";
 import type { UserFileStore } from "../../core/files/writable.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
@@ -17,8 +18,15 @@ export interface QvmModScenePublication {
   readonly gameState: SourceGameStateRecord;
   readonly gameStateRevision: number;
   readonly clients: readonly { readonly actor: ActorId; readonly slot: number; readonly state: Q3PlayerState }[];
-  readonly entities: readonly { readonly actor: ActorId; readonly state: QvmEntityStateFields; readonly owned: boolean;
-    readonly linked: boolean; readonly serverFlags: number; readonly singleClient: number; readonly bounds: Bounds }[];
+  readonly entities: readonly {
+    readonly actor: ActorId;
+    readonly state: QvmEntityStateFields;
+    readonly owned: boolean;
+    readonly linked: boolean;
+    readonly serverFlags: number;
+    readonly singleClient: number;
+    readonly bounds: Bounds;
+  }[];
   readonly commands: readonly { readonly sequence: number; readonly recipient: ActorId | null; readonly text: string }[];
 }
 

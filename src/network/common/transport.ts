@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Bun transport adapted from the reference port GPL-2.0-or-later.
 import type { udp } from "bun";
 import { BoundedQueue } from "../../foundation/bounded-queue.ts";
@@ -6,7 +7,10 @@ import type { IpAddress, NetworkAddress } from "./endpoint.ts";
 import { readSocksDatagram, socksDatagram, SocksAssociation } from "./socks.ts";
 import type { SocksOptions } from "./socks.ts";
 
-export interface DatagramLimits { readonly maxBytes: number; readonly queuePackets: number; }
+export interface DatagramLimits {
+  readonly maxBytes: number;
+  readonly queuePackets: number;
+}
 export const Q3_DATAGRAM_LIMITS: DatagramLimits = { maxBytes: 16383, queuePackets: 256 };
 export const Q2_DATAGRAM_LIMITS: DatagramLimits = { maxBytes: 4096, queuePackets: 256 };
 export const UNIFIED_DATAGRAM_LIMITS: DatagramLimits = { maxBytes: 65507, queuePackets: 256 };
@@ -29,13 +33,21 @@ export class PacketQueue<TAddress extends NetworkAddress> {
   private readonly listeners = new Set<() => void>();
   private ended = false;
   dropped = 0;
-  constructor(readonly limits: DatagramLimits, private readonly now: () => number) {
-    if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || !Number.isSafeInteger(limits.queuePackets) || limits.queuePackets < 1) throw new RangeError("Invalid datagram limits");
+  constructor(
+    readonly limits: DatagramLimits,
+    private readonly now: () => number,
+  ) {
+    if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || !Number.isSafeInteger(limits.queuePackets) || limits.queuePackets < 1)
+      throw new RangeError("Invalid datagram limits");
     this.events = new BoundedQueue<ReceiveEvent<TAddress>>(limits.queuePackets);
   }
   accept(from: TAddress, payload: Uint8Array, truncated = false): void {
     if (this.ended) return;
-    if (truncated || payload.length > this.limits.maxBytes) { this.dropped++; this.push({ kind: "dropped", reason: "oversize", from }); return; }
+    if (truncated || payload.length > this.limits.maxBytes) {
+      this.dropped++;
+      this.push({ kind: "dropped", reason: "oversize", from });
+      return;
+    }
     this.push({ kind: "packet", from, payload: payload.slice(), receivedAt: this.now() });
   }
   push(event: ReceiveEvent<TAddress>): void {
@@ -44,16 +56,22 @@ export class PacketQueue<TAddress extends NetworkAddress> {
     this.events.push(event);
     for (const listener of [...this.listeners]) if (this.listeners.has(listener)) listener();
   }
-  poll(): ReceiveEvent<TAddress> | null { return this.events.shift() ?? null; }
+  poll(): ReceiveEvent<TAddress> | null {
+    return this.events.shift() ?? null;
+  }
   subscribe(listener: () => void): () => void {
     if (this.ended) throw new Error("Packet queue is closed");
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
   close(): void {
     if (this.ended) return;
-    this.ended = true; this.events.clear();
-    const listeners = [...this.listeners]; this.listeners.clear();
+    this.ended = true;
+    this.events.clear();
+    const listeners = [...this.listeners];
+    this.listeners.clear();
     for (const listener of listeners) listener();
   }
 }
@@ -69,40 +87,72 @@ export interface UdpBindOptions {
 export class UdpTransport implements DatagramTransport<IpAddress> {
   private ended = false;
   private socks: SocksAssociation | null = null;
-  private constructor(private readonly socket: udp.Socket<"uint8array">, private readonly queue: PacketQueue<IpAddress>, readonly address: IpAddress) {}
+  private constructor(
+    private readonly socket: udp.Socket<"uint8array">,
+    private readonly queue: PacketQueue<IpAddress>,
+    readonly address: IpAddress,
+  ) {}
   static async bind(options: UdpBindOptions): Promise<UdpTransport> {
     ipAddress(options.host, options.port, true);
     const queue = new PacketQueue<IpAddress>(options.limits ?? UNIFIED_DATAGRAM_LIMITS, options.now ?? (() => performance.now()));
-    const socket = await Bun.udpSocket({ hostname: options.host, port: portNumber(options.port, true), binaryType: "uint8array", socket: {
-      data(_socket, payload, port, host, flags) {
-        let from: IpAddress;
-        // A source port of 0 cannot be answered or attributed; it is dropped rather than reported.
-        if (port === 0) return;
-        try { from = ipAddress(host, port); }
-        catch (error) { queue.push({ kind: "error", error: error instanceof Error ? error : new Error(String(error)) }); return; }
-        queue.accept(from, payload, flags.truncated);
+    const socket = await Bun.udpSocket({
+      hostname: options.host,
+      port: portNumber(options.port, true),
+      binaryType: "uint8array",
+      socket: {
+        data(_socket, payload, port, host, flags) {
+          let from: IpAddress;
+          // A source port of 0 cannot be answered or attributed; it is dropped rather than reported.
+          if (port === 0) return;
+          try {
+            from = ipAddress(host, port);
+          } catch (error) {
+            queue.push({ kind: "error", error: error instanceof Error ? error : new Error(String(error)) });
+            return;
+          }
+          queue.accept(from, payload, flags.truncated);
+        },
+        // Bun 1.3.14 runtime and declarations disagree on callback argument order.
+        error(first: unknown, second: unknown) {
+          queue.push({ kind: "error", error: first instanceof Error ? first : second instanceof Error ? second : new Error("UDP callback supplied no error") });
+        },
       },
-      // Bun 1.3.14 runtime and declarations disagree on callback argument order.
-      error(first: unknown, second: unknown) { queue.push({ kind: "error", error: first instanceof Error ? first : second instanceof Error ? second : new Error("UDP callback supplied no error") }); },
-    } });
+    });
     try {
       if (options.broadcast === true && !socket.setBroadcast(true)) throw new Error("Could not enable UDP broadcast");
       return new UdpTransport(socket, queue, ipAddress(socket.hostname, socket.port));
-    } catch (error) { socket.close(); queue.close(); throw error; }
+    } catch (error) {
+      socket.close();
+      queue.close();
+      throw error;
+    }
   }
-  get closed(): boolean { return this.ended; }
-  get droppedPackets(): number { return this.queue.dropped; }
-  private opened(): void { if (this.ended) throw new Error("UDP transport is closed"); }
+  get closed(): boolean {
+    return this.ended;
+  }
+  get droppedPackets(): number {
+    return this.queue.dropped;
+  }
+  private opened(): void {
+    if (this.ended) throw new Error("UDP transport is closed");
+  }
   async connectSocks(options: SocksOptions): Promise<void> {
     this.opened();
     if (this.address.kind !== "ipv4") throw new Error("SOCKS UDP association requires IPv4");
     this.socks?.close();
-    const association = new SocksAssociation(); this.socks = association;
-    try { await association.open(options, this.address.port); this.opened(); }
-    catch (error) { association.close(); throw error; }
+    const association = new SocksAssociation();
+    this.socks = association;
+    try {
+      await association.open(options, this.address.port);
+      this.opened();
+    } catch (error) {
+      association.close();
+      throw error;
+    }
   }
   send(to: IpAddress, payload: Uint8Array): boolean {
-    this.opened(); portNumber(to.port);
+    this.opened();
+    portNumber(to.port);
     if (payload.byteLength > this.queue.limits.maxBytes) throw new RangeError("Datagram exceeds selected transport limit");
     const relay = this.socks?.relay;
     if (this.socks !== null && (relay === null || relay === undefined || to.kind !== "ipv4")) {
@@ -116,8 +166,9 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
     // without transmitting. The failed call consumes one queued error, so
     // retry a bounded number of times before reporting the send as lost.
     for (let attempt = 0; ; attempt++) {
-      try { return this.socket.send(bytes, destination.port, addressHost(destination)); }
-      catch (error) {
+      try {
+        return this.socket.send(bytes, destination.port, addressHost(destination));
+      } catch (error) {
         if (!(error instanceof Error) || !("syscall" in error) || error.syscall !== "send") throw error;
         this.queue.push({ kind: "error", error });
         if (attempt >= 8) return false;
@@ -127,9 +178,16 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
   poll(): ReceiveEvent<IpAddress> | null {
     this.opened();
     for (;;) {
-      const event = this.queue.poll(), relay = this.socks?.relay;
-      if (event?.kind === "packet" && relay !== undefined && relay !== null && event.from.kind === "ipv4"
-        && event.from.port === relay.port && event.from.host.every((value, index) => value === relay.host[index])) {
+      const event = this.queue.poll(),
+        relay = this.socks?.relay;
+      if (
+        event?.kind === "packet" &&
+        relay !== undefined &&
+        relay !== null &&
+        event.from.kind === "ipv4" &&
+        event.from.port === relay.port &&
+        event.from.host.every((value, index) => value === relay.host[index])
+      ) {
         const decoded = readSocksDatagram(event.payload);
         // A malformed relay datagram is skipped; null must keep meaning an empty queue.
         if (decoded === null) continue;
@@ -138,15 +196,30 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
       return event;
     }
   }
-  subscribeReadable(listener: () => void): () => void { this.opened(); return this.queue.subscribe(listener); }
+  subscribeReadable(listener: () => void): () => void {
+    this.opened();
+    return this.queue.subscribe(listener);
+  }
   close(): void {
     if (this.ended) return;
-    this.ended = true; this.socks?.close(); this.socks = null;
-    try { this.queue.close(); } finally { this.socket.close(); }
+    this.ended = true;
+    this.socks?.close();
+    this.socks = null;
+    try {
+      this.queue.close();
+    } finally {
+      this.socket.close();
+    }
   }
 }
 
 /** An IPX address is retained for a future native/guest driver, never sent as UDP by accident. */
 export class UnsupportedTransportError extends Error {
-  constructor(readonly transport: "ipx-native" | "serial", detail: string) { super(`${transport}: ${detail}`); this.name = "UnsupportedTransportError"; }
+  constructor(
+    readonly transport: "ipx-native" | "serial",
+    detail: string,
+  ) {
+    super(`${transport}: ${detail}`);
+    this.name = "UnsupportedTransportError";
+  }
 }

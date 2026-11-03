@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 
@@ -16,7 +17,8 @@ test("mixed launch selections remain independent of the renderer", () => {
 });
 
 test("renderer persistence cannot override an explicit CLI backend", () => {
-  const implicit = parseApplicationCommand([]), explicit = parseApplicationCommand(["--renderer", "gl"]);
+  const implicit = parseApplicationCommand([]),
+    explicit = parseApplicationCommand(["--renderer", "gl"]);
   if (implicit.kind !== "menu" || explicit.kind !== "menu") throw new Error("Expected graphical frontend options");
   expect(implicit.options.rendererSelection).toBe("default");
   expect(explicit.options.rendererSelection).toBe("explicit");
@@ -34,7 +36,6 @@ test("native network selection preserves the requested game composition", () => 
   expect(() => parseApplicationCommand(["--bind", "127.0.0.1"])).toThrow("--bind requires --listen");
 });
 
-
 test("native listener chooses its wire from the retained game recipe", () => {
   for (const product of ["q1-classic-id1", "q2-classic-baseq2", "q3-baseq3"]) {
     const parsed = parseApplicationCommand(["--game", product, "--listen", "0", "--bind", "127.0.0.1"]);
@@ -50,12 +51,14 @@ test("native listener chooses its wire from the retained game recipe", () => {
 });
 
 test("display gamma is shared, neutral by default, and range checked", () => {
-  const defaults = parseApplicationCommand([]), configured = parseApplicationCommand(["--renderer", "cpu", "--gamma", "1.5"]);
+  const defaults = parseApplicationCommand([]),
+    configured = parseApplicationCommand(["--renderer", "cpu", "--gamma", "1.5"]);
   if (defaults.kind !== "menu" || configured.kind !== "menu") throw new Error("Expected startup menus");
-  expect(defaults.options.gamma).toBe(1); expect(configured.options.gamma).toBe(1.5);
-  for (const value of ["NaN", "Infinity", "0", "0.49", "3.01"]) expect(() => parseApplicationCommand(["--gamma", value])).toThrow("Display gamma must be between 0.5 and 3");
+  expect(defaults.options.gamma).toBe(1);
+  expect(configured.options.gamma).toBe(1.5);
+  for (const value of ["NaN", "Infinity", "0", "0.49", "3.01"])
+    expect(() => parseApplicationCommand(["--gamma", value])).toThrow("Display gamma must be between 0.5 and 3");
 });
-
 
 test("startup menu precedes implicit defaults while explicit launches remain direct", () => {
   for (const argv of [[], ["--renderer", "cpu", "--gamma", "1.3"], ["--content-root", "/tmp/games", "--hidden"]])
@@ -67,7 +70,6 @@ test("startup menu precedes implicit defaults while explicit launches remain dir
   expect(() => parseApplicationCommand(["--menu", "--connect-q2", "localhost"])).toThrow("local, non-dedicated");
 });
 
-
 test("movement CLI preserves exact products and later family or preset choices win", () => {
   const selected = parseApplicationCommand(["--movement", "qw"]);
   if (selected.kind !== "run") throw new Error("Expected launch");
@@ -77,7 +79,10 @@ test("movement CLI preserves exact products and later family or preset choices w
     if (command.kind !== "run") throw new Error("Expected launch");
     expect(command.options.movementProduct).toBe(id);
   }
-  for (const args of [["--movement", "qw", "--movement", "q2"], ["--movement", "qw", "--preset", "q1-q2"]]) {
+  for (const args of [
+    ["--movement", "qw", "--movement", "q2"],
+    ["--movement", "qw", "--preset", "q1-q2"],
+  ]) {
     const command = parseApplicationCommand(args);
     if (command.kind !== "run") throw new Error("Expected launch");
     expect(command.options.movement).toBe("q2");

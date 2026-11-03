@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SeatId } from "../contracts/identity.ts";
 import { LocalizationCatalog, LocalizationTable } from "./localization.ts";
 import type { LibLog } from "./localization.ts";
@@ -17,10 +18,21 @@ async function loadResources<T extends LocalizationTable>(catalog: T, language: 
   }
   return catalog;
 }
-export function loadLocalizationResources(seat: SeatId, language: string, read: LocalizationReader, profile: LocalizationProfile = "q1-rerelease", log?: LibLog): Promise<LocalizationCatalog> {
+export function loadLocalizationResources(
+  seat: SeatId,
+  language: string,
+  read: LocalizationReader,
+  profile: LocalizationProfile = "q1-rerelease",
+  log?: LibLog,
+): Promise<LocalizationCatalog> {
   return loadResources(new LocalizationCatalog(seat, profile), language, read, log);
 }
 /** Server-authored strings use the same grammar and overlays without a fabricated player seat. */
-export function loadServerLocalizationResources(language: string, read: LocalizationReader, profile: LocalizationProfile = "q1-rerelease", log?: LibLog): Promise<LocalizationTable> {
+export function loadServerLocalizationResources(
+  language: string,
+  read: LocalizationReader,
+  profile: LocalizationProfile = "q1-rerelease",
+  log?: LibLog,
+): Promise<LocalizationTable> {
   return loadResources(new LocalizationTable(profile), language, read, log);
 }

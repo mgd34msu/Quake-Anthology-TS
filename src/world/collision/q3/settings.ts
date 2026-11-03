@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarFlag, type CvarRegistry } from "../../../core/cvars/index.ts";
 
 export const collisionMapCvarDefinitions = [
@@ -14,9 +15,15 @@ export class CollisionMapSettings {
     for (const definition of collisionMapCvarDefinitions) this.cvars.register(definition.name, definition.value, definition.flags);
   }
 
-  get noAreas(): boolean { return this.enabled("cm_noAreas"); }
-  get noCurves(): boolean { return this.enabled("cm_noCurves"); }
-  get playerCurveClip(): boolean { return this.enabled("cm_playerCurveClip"); }
+  get noAreas(): boolean {
+    return this.enabled("cm_noAreas");
+  }
+  get noCurves(): boolean {
+    return this.enabled("cm_noCurves");
+  }
+  get playerCurveClip(): boolean {
+    return this.enabled("cm_playerCurveClip");
+  }
 
   private enabled(name: string): boolean {
     const value = this.cvars.get(name);

@@ -3,7 +3,10 @@
 import type { NativeAbi } from "../../contracts/execution.ts";
 
 export class ElfError extends Error {
-  constructor(message: string) { super(`ELF: ${message}`); this.name = "ElfError"; }
+  constructor(message: string) {
+    super(`ELF: ${message}`);
+    this.name = "ElfError";
+  }
 }
 
 export interface ElfSegment {
@@ -77,17 +80,34 @@ export function dynamicValue(dynamic: ElfInspection["dynamic"], tag: number): bi
 
 class Reader {
   readonly view: DataView;
-  constructor(readonly bytes: Uint8Array) { this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
+  constructor(readonly bytes: Uint8Array) {
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
   range(offset: number, size: number): void {
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size < 0 || offset > this.bytes.length - size) {
       throw new ElfError(`file range ${offset}+${size} exceeds ${this.bytes.length} bytes`);
     }
   }
-  u8(offset: number): number { this.range(offset, 1); return this.view.getUint8(offset); }
-  u16(offset: number): number { this.range(offset, 2); return this.view.getUint16(offset, true); }
-  u32(offset: number): number { this.range(offset, 4); return this.view.getUint32(offset, true); }
-  word(offset: number, wide: boolean): bigint { this.range(offset, wide ? 8 : 4); return wide ? this.view.getBigUint64(offset, true) : BigInt(this.view.getUint32(offset, true)); }
-  signed(offset: number, wide: boolean): bigint { this.range(offset, wide ? 8 : 4); return wide ? this.view.getBigInt64(offset, true) : BigInt(this.view.getInt32(offset, true)); }
+  u8(offset: number): number {
+    this.range(offset, 1);
+    return this.view.getUint8(offset);
+  }
+  u16(offset: number): number {
+    this.range(offset, 2);
+    return this.view.getUint16(offset, true);
+  }
+  u32(offset: number): number {
+    this.range(offset, 4);
+    return this.view.getUint32(offset, true);
+  }
+  word(offset: number, wide: boolean): bigint {
+    this.range(offset, wide ? 8 : 4);
+    return wide ? this.view.getBigUint64(offset, true) : BigInt(this.view.getUint32(offset, true));
+  }
+  signed(offset: number, wide: boolean): bigint {
+    this.range(offset, wide ? 8 : 4);
+    return wide ? this.view.getBigInt64(offset, true) : BigInt(this.view.getInt32(offset, true));
+  }
   string(offset: number, maximum: number): string {
     this.range(offset, maximum);
     let end = offset;
@@ -142,7 +162,8 @@ export function inspectElf(bytes: Uint8Array): ElfInspection {
   for (let i = 0; i < phnum; i++) {
     const p = phoff + i * phsize;
     const segment: ElfSegment = {
-      type: r.u32(p), flags: r.u32(p + (wide ? 4 : 24)),
+      type: r.u32(p),
+      flags: r.u32(p + (wide ? 4 : 24)),
       offset: checkedNumber(r.word(p + (wide ? 8 : 4), wide), "segment offset"),
       address: r.word(p + (wide ? 16 : 8), wide),
       fileSize: checkedNumber(r.word(p + (wide ? 32 : 16), wide), "segment file size"),
@@ -156,7 +177,7 @@ export function inspectElf(bytes: Uint8Array): ElfInspection {
       if (alignment > 1n && ((alignment & (alignment - 1n)) !== 0n || (segment.address - BigInt(segment.offset)) % alignment !== 0n)) {
         throw new ElfError("invalid segment alignment or file/address congruence");
       }
-      if (segment.address + BigInt(segment.memorySize) > (1n << BigInt(wide ? 64 : 32))) throw new ElfError("segment exceeds ELF address width");
+      if (segment.address + BigInt(segment.memorySize) > 1n << BigInt(wide ? 64 : 32)) throw new ElfError("segment exceeds ELF address width");
     }
     segments.push(segment);
   }
@@ -165,10 +186,16 @@ export function inspectElf(bytes: Uint8Array): ElfInspection {
   for (let i = 0; i < shnum; i++) {
     const p = shoff + i * shsize;
     const section = {
-      name: "", nameOffset: r.u32(p), type: r.u32(p + 4), flags: r.word(p + 8, wide),
-      address: r.word(p + (wide ? 16 : 12), wide), offset: checkedNumber(r.word(p + (wide ? 24 : 16), wide), "section offset"),
-      size: checkedNumber(r.word(p + (wide ? 32 : 20), wide), "section size"), link: r.u32(p + (wide ? 40 : 24)),
-      info: r.u32(p + (wide ? 44 : 28)), entrySize: checkedNumber(r.word(p + (wide ? 56 : 36), wide), "section entry size"),
+      name: "",
+      nameOffset: r.u32(p),
+      type: r.u32(p + 4),
+      flags: r.word(p + 8, wide),
+      address: r.word(p + (wide ? 16 : 12), wide),
+      offset: checkedNumber(r.word(p + (wide ? 24 : 16), wide), "section offset"),
+      size: checkedNumber(r.word(p + (wide ? 32 : 20), wide), "section size"),
+      link: r.u32(p + (wide ? 40 : 24)),
+      info: r.u32(p + (wide ? 44 : 28)),
+      entrySize: checkedNumber(r.word(p + (wide ? 56 : 36), wide), "section entry size"),
     };
     if (section.type !== 8 && section.type !== 0) r.range(section.offset, section.size);
     rawSections.push(section);
@@ -191,17 +218,31 @@ export function inspectElf(bytes: Uint8Array): ElfInspection {
   const relocations = readRelocations(r, segments, dynamic, wide);
   const versions = readVersions(r, segments, dynamic, stringAt);
   const symbols = readSymbols(r, segments, sections, dynamic, wide, versions, stringAt);
-  for (const relocation of relocations) if (relocation.symbolIndex >= symbols.length && relocation.symbolIndex !== 0) throw new ElfError("relocation symbol index exceeds symbol table");
+  for (const relocation of relocations)
+    if (relocation.symbolIndex >= symbols.length && relocation.symbolIndex !== 0) throw new ElfError("relocation symbol index exceeds symbol table");
   const interpreterSegments = segments.filter(segment => segment.type === 3);
   if (interpreterSegments.length > 1 || segments.filter(segment => segment.type === 7).length > 1) throw new ElfError("multiple interpreter or TLS segments");
   const interpreter = interpreterSegments[0];
-  const optionalString = (tag: number): string | null => { const value = dynamicValue(dynamic, tag); return value === null ? null : stringAt(value); };
+  const optionalString = (tag: number): string | null => {
+    const value = dynamicValue(dynamic, tag);
+    return value === null ? null : stringAt(value);
+  };
   return {
-    abi: wide ? { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" }
+    abi: wide
+      ? { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" }
       : { kind: "linux-i386", image: "elf32", pointerBytes: 4, call: "system-v-i386" },
-    type: type === 3 ? "shared" : "executable", entryPoint: r.word(24, wide), segments, sections, dynamic,
-    neededLibraries: (dynamic.get(1) ?? []).map(stringAt), soname: optionalString(14), runpath: optionalString(29), rpath: optionalString(15),
-    interpreter: interpreter === undefined ? null : r.string(interpreter.offset, interpreter.fileSize), symbols, relocations,
+    type: type === 3 ? "shared" : "executable",
+    entryPoint: r.word(24, wide),
+    segments,
+    sections,
+    dynamic,
+    neededLibraries: (dynamic.get(1) ?? []).map(stringAt),
+    soname: optionalString(14),
+    runpath: optionalString(29),
+    rpath: optionalString(15),
+    interpreter: interpreter === undefined ? null : r.string(interpreter.offset, interpreter.fileSize),
+    symbols,
+    relocations,
   };
 }
 
@@ -215,7 +256,10 @@ function readDynamic(r: Reader, segments: readonly ElfSegment[], wide: boolean):
     for (let offset = 0; offset + stride <= segment.fileSize; offset += stride) {
       const p = segment.offset + offset;
       const tag = checkedNumber(r.word(p, wide), "dynamic tag");
-      if (tag === 0) { terminated = true; break; }
+      if (tag === 0) {
+        terminated = true;
+        break;
+      }
       const values = entries.get(tag) ?? [];
       if (values.length !== 0 && tag !== 1) throw new ElfError(`duplicate dynamic tag 0x${tag.toString(16)}`);
       values.push(r.word(p + (wide ? 8 : 4), wide));
@@ -240,8 +284,13 @@ function readRelocations(r: Reader, segments: readonly ElfSegment[], dynamic: El
     for (let offset = 0; offset < length; offset += stride) {
       const p = start + offset;
       const info = r.word(p + (wide ? 8 : 4), wide);
-      relocations.push({ address: r.word(p, wide), type: Number(info & (wide ? 0xffffffffn : 0xffn)),
-        symbolIndex: Number(info >> BigInt(wide ? 32 : 8)), addend: rela ? r.signed(p + (wide ? 16 : 8), wide) : null, table });
+      relocations.push({
+        address: r.word(p, wide),
+        type: Number(info & (wide ? 0xffffffffn : 0xffn)),
+        symbolIndex: Number(info >> BigInt(wide ? 32 : 8)),
+        addend: rela ? r.signed(p + (wide ? 16 : 8), wide) : null,
+        table,
+      });
     }
   };
   for (const rela of [false, true]) {
@@ -274,9 +323,10 @@ function readRelocations(r: Reader, segments: readonly ElfSegment[], dynamic: El
         cursor = entry + BigInt(width);
       } else {
         if (cursor === null) throw new ElfError("RELR bitmap precedes address");
-        for (let bit = 1; bit < width * 8; bit++) if ((entry & (1n << BigInt(bit))) !== 0n) {
-          relocations.push({ address: cursor + BigInt((bit - 1) * width), type: 8, symbolIndex: 0, addend: null, table: "relr" });
-        }
+        for (let bit = 1; bit < width * 8; bit++)
+          if ((entry & (1n << BigInt(bit))) !== 0n) {
+            relocations.push({ address: cursor + BigInt((bit - 1) * width), type: 8, symbolIndex: 0, addend: null, table: "relr" });
+          }
         cursor += BigInt((width * 8 - 1) * width);
       }
     }
@@ -284,12 +334,20 @@ function readRelocations(r: Reader, segments: readonly ElfSegment[], dynamic: El
   return relocations;
 }
 
-function readVersions(r: Reader, segments: readonly ElfSegment[], dynamic: ElfInspection["dynamic"], stringAt: (index: bigint) => string): Map<number, Omit<ElfVersion, "hidden">> {
+function readVersions(
+  r: Reader,
+  segments: readonly ElfSegment[],
+  dynamic: ElfInspection["dynamic"],
+  stringAt: (index: bigint) => string,
+): Map<number, Omit<ElfVersion, "hidden">> {
   const versions = new Map<number, Omit<ElfVersion, "hidden">>();
   for (const needed of [true, false]) {
     const address = dynamicValue(dynamic, needed ? 0x6ffffffe : 0x6ffffffc);
     const count = checkedNumber(dynamicValue(dynamic, needed ? 0x6fffffff : 0x6ffffffd) ?? 0n, "version count");
-    if (address === null) { if (count !== 0) throw new ElfError("missing version table"); continue; }
+    if (address === null) {
+      if (count !== 0) throw new ElfError("missing version table");
+      continue;
+    }
     if (count === 0) throw new ElfError("version table has no count");
     let current = address;
     for (let i = 0; i < count; i++) {
@@ -303,7 +361,11 @@ function readVersions(r: Reader, segments: readonly ElfSegment[], dynamic: ElfIn
         if (needed || j === 0) {
           const index = needed ? r.u16(a + 6) & 0x7fff : r.u16(p + 4) & 0x7fff;
           const flags = needed ? r.u16(a + 4) : r.u16(p + 2);
-          const version = { name: stringAt(BigInt(r.u32(a + (needed ? 8 : 0)))), library: needed ? stringAt(BigInt(r.u32(p + 4))) : "", weak: (flags & 2) !== 0 };
+          const version = {
+            name: stringAt(BigInt(r.u32(a + (needed ? 8 : 0)))),
+            library: needed ? stringAt(BigInt(r.u32(p + 4))) : "",
+            weak: (flags & 2) !== 0,
+          };
           if (versions.has(index)) throw new ElfError(`duplicate version index ${index}`);
           versions.set(index, version);
         }
@@ -319,10 +381,18 @@ function readVersions(r: Reader, segments: readonly ElfSegment[], dynamic: ElfIn
   return versions;
 }
 
-function readSymbols(r: Reader, segments: readonly ElfSegment[], sections: readonly ElfSection[], dynamic: ElfInspection["dynamic"], wide: boolean,
-  versions: ReadonlyMap<number, Omit<ElfVersion, "hidden">>, dynamicString: (index: bigint) => string): ElfSymbol[] {
+function readSymbols(
+  r: Reader,
+  segments: readonly ElfSegment[],
+  sections: readonly ElfSection[],
+  dynamic: ElfInspection["dynamic"],
+  wide: boolean,
+  versions: ReadonlyMap<number, Omit<ElfVersion, "hidden">>,
+  dynamicString: (index: bigint) => string,
+): ElfSymbol[] {
   const symtab = dynamicValue(dynamic, 6);
-  const symbolSection = symtab === null ? sections.find(section => section.type === 2) : sections.find(section => section.type === 11 && section.address === symtab);
+  const symbolSection =
+    symtab === null ? sections.find(section => section.type === 2) : sections.find(section => section.type === 11 && section.address === symtab);
   const stride = wide ? 24 : 16;
   let count: number;
   let offset: number;
@@ -331,7 +401,11 @@ function readSymbols(r: Reader, segments: readonly ElfSegment[], sections: reado
     if (symbolSection === undefined) return [];
     const strings = sections[symbolSection.link];
     if (strings === undefined || strings.type !== 3) throw new ElfError("symbol table lacks string section");
-    stringAt = index => { const i = checkedNumber(index, "symbol name"); if (i >= strings.size) throw new ElfError("symbol name exceeds string table"); return r.string(strings.offset + i, strings.size - i); };
+    stringAt = index => {
+      const i = checkedNumber(index, "symbol name");
+      if (i >= strings.size) throw new ElfError("symbol name exceeds string table");
+      return r.string(strings.offset + i, strings.size - i);
+    };
     count = symbolSection.size / stride;
     offset = symbolSection.offset;
   } else {
@@ -344,7 +418,8 @@ function readSymbols(r: Reader, segments: readonly ElfSegment[], sections: reado
     else throw new ElfError("cannot bound dynamic symbols without hash or section metadata");
     offset = elfFileOffset(segments, symtab, count * stride);
   }
-  if (!Number.isSafeInteger(count) || (symbolSection !== undefined && (symbolSection.entrySize !== stride || symbolSection.size / stride !== count))) throw new ElfError("symbol count or entry size disagrees with section metadata");
+  if (!Number.isSafeInteger(count) || (symbolSection !== undefined && (symbolSection.entrySize !== stride || symbolSection.size / stride !== count)))
+    throw new ElfError("symbol count or entry size disagrees with section metadata");
   r.range(offset, count * stride);
   const versym = dynamicValue(dynamic, 0x6ffffff0);
   const versionOffset = versym === null ? null : elfFileOffset(segments, versym, count * 2);
@@ -358,10 +433,17 @@ function readSymbols(r: Reader, segments: readonly ElfSegment[], sections: reado
     if (versionIndex > 1 && version === undefined) throw new ElfError(`undefined version index ${versionIndex}`);
     const section = r.u16(p + (wide ? 6 : 14));
     if (section === 0xffff) throw new ElfError("extended symbol section indices are unsupported");
-    symbols.push({ index, name: stringAt(BigInt(r.u32(p))), value: r.word(p + (wide ? 8 : 4), wide),
-      size: checkedNumber(r.word(p + (wide ? 16 : 8), wide), "symbol size"), binding: versionIndex === 0 && section !== 0 ? 0 : info >> 4, type: info & 15,
-      visibility: r.u8(p + (wide ? 5 : 13)) & 3, section,
-      version: version === undefined ? null : { ...version, hidden: (versionWord & 0x8000) !== 0 } });
+    symbols.push({
+      index,
+      name: stringAt(BigInt(r.u32(p))),
+      value: r.word(p + (wide ? 8 : 4), wide),
+      size: checkedNumber(r.word(p + (wide ? 16 : 8), wide), "symbol size"),
+      binding: versionIndex === 0 && section !== 0 ? 0 : info >> 4,
+      type: info & 15,
+      visibility: r.u8(p + (wide ? 5 : 13)) & 3,
+      section,
+      version: version === undefined ? null : { ...version, hidden: (versionWord & 0x8000) !== 0 },
+    });
   }
   return symbols;
 }

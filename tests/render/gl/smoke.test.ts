@@ -15,8 +15,15 @@ import { DepthAtlasTarget } from "../../../src/render/gl/depth-atlas.ts";
 import type { DepthAtlasDraw, DepthAtlasPass } from "../../../src/contracts/render.ts";
 
 const white = { x: 1, y: 1, z: 1, w: 1 };
-const state: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal",
-  depthWrite: true, alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null };
+const state: RenderState = {
+  blend: { source: "one", destination: "zero" },
+  depthTest: "less-equal",
+  depthWrite: true,
+  alphaTest: "none",
+  cull: "none",
+  depthRange: [0, 1],
+  polygonOffset: null,
+};
 const vertices: readonly RenderVertex[] = [
   { position: { x: -1, y: -1, z: 0, w: 1 }, texCoord: { x: 0.5, y: 0.5 }, color: white },
   { position: { x: 1, y: -1, z: 0, w: 1 }, texCoord: { x: 0.5, y: 0.5 }, color: white },
@@ -25,17 +32,28 @@ const vertices: readonly RenderVertex[] = [
 ];
 
 test("GL packing preserves float32 bytes, paired coordinates and world lighting arrays", () => {
-  const paired = vertices.map((vertex, index) => ({ ...vertex,
+  const paired = vertices.map((vertex, index) => ({
+    ...vertex,
     position: { ...vertex.position, z: index / 3, w: index === 0 ? -0 : 1 },
-    texCoord2: { x: index / 7, y: -index / 9 } }));
+    texCoord2: { x: index / 7, y: -index / 9 },
+  }));
   const worldPositions = paired.map(vertex => ({ x: vertex.position.x, y: vertex.position.y, z: vertex.position.z }));
   const normals = paired.map(() => ({ x: 0, y: -0, z: 1 }));
-  const batch: DrawBatch = { texturing: "pair", primitive: "triangles", vertices: paired, indices: [0, 1, 2, 0, 2, 3],
-    texture: { kind: "retain-current-texture" }, secondTexture: { binding: { kind: "retain-current-texture" }, environment: "modulate" }, state,
-    lighting: { kind: "q2-world", worldPositions, normals, pass: "lightmap", lights: [], atlas: null } };
+  const batch: DrawBatch = {
+    texturing: "pair",
+    primitive: "triangles",
+    vertices: paired,
+    indices: [0, 1, 2, 0, 2, 3],
+    texture: { kind: "retain-current-texture" },
+    secondTexture: { binding: { kind: "retain-current-texture" }, environment: "modulate" },
+    state,
+    lighting: { kind: "q2-world", worldPositions, normals, pass: "lightmap", lights: [], atlas: null },
+  };
   const arrays = packGeometry(batch);
   const bytes = (values: Float32Array | Uint32Array): Uint8Array => new Uint8Array(values.buffer, values.byteOffset, values.byteLength);
-  expect(bytes(arrays.positions)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.position.x, vertex.position.y, vertex.position.z, vertex.position.w]))));
+  expect(bytes(arrays.positions)).toEqual(
+    bytes(new Float32Array(paired.flatMap(vertex => [vertex.position.x, vertex.position.y, vertex.position.z, vertex.position.w]))),
+  );
   expect(bytes(arrays.colors)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.color.x, vertex.color.y, vertex.color.z, vertex.color.w]))));
   expect(bytes(arrays.coordinates)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.texCoord.x, vertex.texCoord.y]))));
   expect(bytes(arrays.coordinates2)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.texCoord2.x, vertex.texCoord2.y]))));
@@ -44,12 +62,19 @@ test("GL packing preserves float32 bytes, paired coordinates and world lighting 
   expect(bytes(arrays.indices)).toEqual(bytes(new Uint32Array(batch.indices)));
   const single = packGeometry({ ...batch, texturing: "single", lighting: { kind: "vertex" } });
   expect(single.coordinates2).toEqual(new Float32Array(paired.length * 2));
-  expect(single.worldPositions.length).toBe(0); expect(single.normals.length).toBe(0);
+  expect(single.worldPositions.length).toBe(0);
+  expect(single.normals.length).toBe(0);
   expect(() => packGeometry({ ...batch, indices: [0, 1, 4] })).toThrow("index is outside");
   expect(() => packGeometry({ ...batch, indices: [0, 1] })).toThrow("index count");
-  expect(() => packGeometry({ ...batch, vertices: paired.map(vertex => ({ ...vertex, position: { ...vertex.position, x: 1e40 } })) })).toThrow("finite float32");
-  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions: [], normals, pass: "lightmap", lights: [], atlas: null } })).toThrow("world positions");
-  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions, normals: [], pass: "lightmap", lights: [], atlas: null } })).toThrow("normals");
+  expect(() => packGeometry({ ...batch, vertices: paired.map(vertex => ({ ...vertex, position: { ...vertex.position, x: 1e40 } })) })).toThrow(
+    "finite float32",
+  );
+  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions: [], normals, pass: "lightmap", lights: [], atlas: null } })).toThrow(
+    "world positions",
+  );
+  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions, normals: [], pass: "lightmap", lights: [], atlas: null } })).toThrow(
+    "normals",
+  );
 });
 
 function draw(renderer: GlRenderer, batch: DrawBatch): void {
@@ -60,98 +85,172 @@ function draw(renderer: GlRenderer, batch: DrawBatch): void {
     if (batch.texturing === "pair") prepared.applyTexture(1, batch.secondTexture.binding);
     Bun.gc(true);
     prepared.draw();
-  } finally { prepared.cleanup(); }
+  } finally {
+    prepared.cleanup();
+  }
 }
 
 test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("indexed depth atlas retains client state, ordered runs and oversized triangles", () => {
   using window = SdlWindow.open({ title: "Depth atlas arrays", width: 16, height: 16, backend: "gl", hidden: true, resizable: false, stencilBits: 8 });
-  const native = loadGl(window), gl = native.symbols, program = new StageProgram(window), target = new DepthAtlasTarget(window, gl, program);
-  const textures = new Uint32Array(1), buffers = new Uint32Array(2);
+  const native = loadGl(window),
+    gl = native.symbols,
+    program = new StageProgram(window),
+    target = new DepthAtlasTarget(window, gl, program);
+  const textures = new Uint32Array(1),
+    buffers = new Uint32Array(2);
   const integer = (name: number): number => {
-    const values = new Int32Array(1); gl.glGetIntegerv(name, values);
-    const value = values[0]; if (value === undefined) throw new Error("Missing GL integer"); return value;
+    const values = new Int32Array(1);
+    gl.glGetIntegerv(name, values);
+    const value = values[0];
+    if (value === undefined) throw new Error("Missing GL integer");
+    return value;
   };
   // Supported native targets have 64-bit pointers; these values are never dereferenced in JS.
   const pointer = (name: number): bigint => {
-    const values = new BigUint64Array(1); gl.glGetPointerv(name, values);
-    const value = values[0]; if (value === undefined) throw new Error("Missing GL pointer"); return value;
+    const values = new BigUint64Array(1);
+    gl.glGetPointerv(name, values);
+    const value = values[0];
+    if (value === undefined) throw new Error("Missing GL pointer");
+    return value;
   };
   const version = /^(\d+)\.(\d+)/.exec(String(gl.glGetString(0x1f02)));
-  const major = Number(version?.[1] ?? 0), minor = Number(version?.[2] ?? 0), restart = major > 3 || major === 3 && minor >= 1;
-  const clientPositions = new Float32Array([1, 2, 3, 4]), clientColors = new Float32Array([0.2, 0.4, 0.6, 0.8]);
+  const major = Number(version?.[1] ?? 0),
+    minor = Number(version?.[2] ?? 0),
+    restart = major > 3 || (major === 3 && minor >= 1);
+  const clientPositions = new Float32Array([1, 2, 3, 4]),
+    clientColors = new Float32Array([0.2, 0.4, 0.6, 0.8]);
   const clientCoordinates = new Float32Array([0.25, 0.75, 0, 0]);
   const snapshot = () => {
-    const clientTexture = integer(0x84e1), coordinates: { enabled: number; pointer: bigint; buffer: number }[] = [];
+    const clientTexture = integer(0x84e1),
+      coordinates: { enabled: number; pointer: bigint; buffer: number }[] = [];
     for (const unit of [1, 3]) {
       gl.glClientActiveTexture(0x84c0 + unit);
       coordinates.push({ enabled: gl.glIsEnabled(0x8078), pointer: pointer(0x8092), buffer: integer(0x889a) });
     }
     gl.glClientActiveTexture(clientTexture);
-    const color = new Float32Array(4); gl.glGetFloatv(0xb00, color);
-    return { clientTexture, coordinates, color, vertexPointer: pointer(0x808e), colorPointer: pointer(0x8090),
-      vertexSize: integer(0x807a), vertexStride: integer(0x807c), vertexEnabled: gl.glIsEnabled(0x8074), colorEnabled: gl.glIsEnabled(0x8076),
-      arrayBuffer: integer(0x8894), elementBuffer: integer(0x8895), vertexBuffer: integer(0x8896), colorBuffer: integer(0x8898),
-      stackDepth: integer(0xbb1), restart: restart && gl.glIsEnabled(0x8f9d) !== 0 };
+    const color = new Float32Array(4);
+    gl.glGetFloatv(0xb00, color);
+    return {
+      clientTexture,
+      coordinates,
+      color,
+      vertexPointer: pointer(0x808e),
+      colorPointer: pointer(0x8090),
+      vertexSize: integer(0x807a),
+      vertexStride: integer(0x807c),
+      vertexEnabled: gl.glIsEnabled(0x8074),
+      colorEnabled: gl.glIsEnabled(0x8076),
+      arrayBuffer: integer(0x8894),
+      elementBuffer: integer(0x8895),
+      vertexBuffer: integer(0x8896),
+      colorBuffer: integer(0x8898),
+      stackDepth: integer(0xbb1),
+      restart: restart && gl.glIsEnabled(0x8f9d) !== 0,
+    };
   };
-  let calls = 0, rejectDraw = false;
+  let calls = 0,
+    rejectDraw = false;
   const drawElements = gl.glDrawElements;
   gl.glDrawElements = Object.assign((...args: Parameters<typeof drawElements>) => {
     calls++;
-    if (rejectDraw) { rejectDraw = false; throw new Error("depth submission rejected"); }
+    if (rejectDraw) {
+      rejectDraw = false;
+      throw new Error("depth submission rejected");
+    }
     return drawElements(...args);
   }, drawElements);
   try {
-    gl.glGenTextures(1, textures); gl.glGenBuffers(2, buffers);
-    const texture = textures[0], arrayBuffer = buffers[0], elementBuffer = buffers[1];
+    gl.glGenTextures(1, textures);
+    gl.glGenBuffers(2, buffers);
+    const texture = textures[0],
+      arrayBuffer = buffers[0],
+      elementBuffer = buffers[1];
     if (texture === undefined || arrayBuffer === undefined || elementBuffer === undefined) throw new Error("Missing GL names");
     gl.glBindTexture(0xde1, texture);
     gl.glTexImage2D(0xde1, 0, 0x8cac, 16, 16, 0, 0x1902, 0x1406, new Float32Array(256).fill(1));
-    gl.glTexParameteri(0xde1, 0x2801, 0x2600); gl.glTexParameteri(0xde1, 0x2800, 0x2600);
-    gl.glVertexPointer(3, 0x1406, 16, clientPositions); gl.glEnableClientState(0x8074);
-    gl.glColorPointer(4, 0x1406, 0, clientColors); gl.glEnableClientState(0x8076); gl.glColor4f(0.2, 0.4, 0.6, 0.8);
+    gl.glTexParameteri(0xde1, 0x2801, 0x2600);
+    gl.glTexParameteri(0xde1, 0x2800, 0x2600);
+    gl.glVertexPointer(3, 0x1406, 16, clientPositions);
+    gl.glEnableClientState(0x8074);
+    gl.glColorPointer(4, 0x1406, 0, clientColors);
+    gl.glEnableClientState(0x8076);
+    gl.glColor4f(0.2, 0.4, 0.6, 0.8);
     for (const unit of [3, 1]) {
-      gl.glClientActiveTexture(0x84c0 + unit); gl.glTexCoordPointer(2, 0x1406, 0, clientCoordinates); gl.glEnableClientState(0x8078);
+      gl.glClientActiveTexture(0x84c0 + unit);
+      gl.glTexCoordPointer(2, 0x1406, 0, clientCoordinates);
+      gl.glEnableClientState(0x8078);
     }
-    gl.glBindBuffer(0x8892, arrayBuffer); gl.glBindBuffer(0x8893, elementBuffer);
+    gl.glBindBuffer(0x8892, arrayBuffer);
+    gl.glBindBuffer(0x8893, elementBuffer);
     if (restart) gl.glEnable(0x8f9d);
     const before = snapshot();
-    const depth = (): Float32Array => { const pixels = new Float32Array(256); gl.glGetTexImage(0xde1, 0, 0x1902, 0x1406, pixels); return pixels; };
+    const depth = (): Float32Array => {
+      const pixels = new Float32Array(256);
+      gl.glGetTexImage(0xde1, 0, 0x1902, 0x1406, pixels);
+      return pixels;
+    };
     const quadPositions = new Float64Array(vertices.length * 4);
-    vertices.forEach((vertex, index) => { quadPositions.set([vertex.position.x, vertex.position.y, -0.5, vertex.position.w], index * 4); });
-    const quad: DepthAtlasDraw = { positions: quadPositions,
-      indices: [0, 1, 2, 0, 2, 3], cull: "none", polygonOffset: null };
+    vertices.forEach((vertex, index) => {
+      quadPositions.set([vertex.position.x, vertex.position.y, -0.5, vertex.position.w], index * 4);
+    });
+    const quad: DepthAtlasDraw = { positions: quadPositions, indices: [0, 1, 2, 0, 2, 3], cull: "none", polygonOffset: null };
     const pass: DepthAtlasPass = { viewport: { x: 0, y: 0, width: 16, height: 16 }, clearDepth: 1, draws: [quad] };
-    target.draw(texture, 16, 16, [{ ...pass, draws: [quad, quad, { ...quad, cull: "back" }, { ...quad, polygonOffset: { factor: 1, units: 2 } }] },
-      { viewport: { x: 0, y: 0, width: 8, height: 8 }, clearDepth: 0.5, draws: [] }]);
-    expect(calls).toBe(3); expect(snapshot()).toEqual(before);
+    target.draw(texture, 16, 16, [
+      { ...pass, draws: [quad, quad, { ...quad, cull: "back" }, { ...quad, polygonOffset: { factor: 1, units: 2 } }] },
+      { viewport: { x: 0, y: 0, width: 8, height: 8 }, clearDepth: 0.5, draws: [] },
+    ]);
+    expect(calls).toBe(3);
+    expect(snapshot()).toEqual(before);
     const first = depth();
-    expect(first[0]).toBe(0.5); expect(first[255]).toBe(0.25);
+    expect(first[0]).toBe(0.5);
+    expect(first[255]).toBe(0.25);
     expect(() => target.draw(texture, 16, 16, [pass, { ...pass, draws: [{ ...quad, indices: [0, 1, 99] }] }])).toThrow("vertex index is invalid");
-    expect(depth()).toEqual(first); expect(snapshot()).toEqual(before);
+    expect(depth()).toEqual(first);
+    expect(snapshot()).toEqual(before);
     rejectDraw = true;
     expect(() => target.draw(texture, 16, 16, [pass])).toThrow("depth submission rejected");
     expect(snapshot()).toEqual(before);
     const largePositions = new Float64Array(65536 * 4);
-    for (let index = 0; index < 65536; index++) largePositions.set(quad.positions.subarray(index % 4 * 4, index % 4 * 4 + 4), index * 4);
+    for (let index = 0; index < 65536; index++) largePositions.set(quad.positions.subarray((index % 4) * 4, (index % 4) * 4 + 4), index * 4);
     calls = 0;
-    target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: largePositions }, { ...quad, positions: largePositions }] }]);
-    expect(calls).toBe(2); expect(depth().every(value => value === 0.25)).toBe(true);
+    target.draw(texture, 16, 16, [
+      {
+        ...pass,
+        draws: [
+          { ...quad, positions: largePositions },
+          { ...quad, positions: largePositions },
+        ],
+      },
+    ]);
+    expect(calls).toBe(2);
+    expect(depth().every(value => value === 0.25)).toBe(true);
     calls = 0;
     const plusOne = new Float64Array(largePositions.length + 4);
-    plusOne.set(largePositions); plusOne.set([0, 0, 0, 1], largePositions.length);
+    plusOne.set(largePositions);
+    plusOne.set([0, 0, 0, 1], largePositions.length);
     target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: plusOne }] }]);
-    expect(calls).toBe(1); expect(depth().every(value => value === 0.25)).toBe(true);
-    const oversized: DepthAtlasDraw = { ...quad, positions: new Float64Array([
-      -2, -2, 0, 1, -2, -2, 0, 1, -2, -2, 0, 1,
-      -1, -1, -0.5, 1, 3, -1, -0.5, 1, -1, 3, -0.5, 1]),
-      indices: Array.from({ length: 196611 }, (_, index) => index < 196608 ? index % 3 : index % 3 + 3) };
-    calls = 0; target.draw(texture, 16, 16, [{ ...pass, draws: [oversized] }]);
-    expect(calls).toBe(4); expect(depth().every(value => value === 0.25)).toBe(true);
-    expect(snapshot()).toEqual(before); expect(gl.glGetError()).toBe(0);
+    expect(calls).toBe(1);
+    expect(depth().every(value => value === 0.25)).toBe(true);
+    const oversized: DepthAtlasDraw = {
+      ...quad,
+      positions: new Float64Array([-2, -2, 0, 1, -2, -2, 0, 1, -2, -2, 0, 1, -1, -1, -0.5, 1, 3, -1, -0.5, 1, -1, 3, -0.5, 1]),
+      indices: Array.from({ length: 196611 }, (_, index) => (index < 196608 ? index % 3 : (index % 3) + 3)),
+    };
+    calls = 0;
+    target.draw(texture, 16, 16, [{ ...pass, draws: [oversized] }]);
+    expect(calls).toBe(4);
+    expect(depth().every(value => value === 0.25)).toBe(true);
+    expect(snapshot()).toEqual(before);
+    expect(gl.glGetError()).toBe(0);
   } finally {
     gl.glDrawElements = drawElements;
-    gl.glBindBuffer(0x8892, 0); gl.glBindBuffer(0x8893, 0); gl.glDeleteBuffers(2, buffers); gl.glDeleteTextures(1, textures);
-    target.close(); program.close(); native.close();
+    gl.glBindBuffer(0x8892, 0);
+    gl.glBindBuffer(0x8893, 0);
+    gl.glDeleteBuffers(2, buffers);
+    gl.glDeleteTextures(1, textures);
+    target.close();
+    program.close();
+    native.close();
   }
 });
 
@@ -167,28 +266,41 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   expect(() => new GlRenderer(window, owner)).toThrow("active");
   const image: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "green" }, width: 1, height: 1 };
   const secondary: RendererImage = { owner, ordinal: 1, source: { kind: "generated", name: "blue" }, width: 1, height: 1 };
-  for (const [resource, pixels] of [[image, new Uint8Array([0, 255, 0, 255])], [secondary, new Uint8Array([0, 0, 255, 255])]] satisfies readonly (readonly [RendererImage, Uint8Array])[]) {
-    renderer.applyImageResource({ kind: "create-image", image: resource,
+  for (const [resource, pixels] of [
+    [image, new Uint8Array([0, 255, 0, 255])],
+    [secondary, new Uint8Array([0, 0, 255, 255])],
+  ] satisfies readonly (readonly [RendererImage, Uint8Array])[]) {
+    renderer.applyImageResource({
+      kind: "create-image",
+      image: resource,
       content: { kind: "rgba8", levels: [{ width: 1, height: 1, pixels }], borderColor: white },
-      sampling: { wrap: "repeat", filter: "nearest" } });
+      sampling: { wrap: "repeat", filter: "nearest" },
+    });
   }
-  const batch: DrawBatch = { texturing: "single", primitive: "triangles", vertices, indices: [0, 1, 2, 0, 2, 3],
-    texture: { kind: "bind-image", image }, state, lighting: { kind: "vertex" } };
+  const batch: DrawBatch = {
+    texturing: "single",
+    primitive: "triangles",
+    vertices,
+    indices: [0, 1, 2, 0, 2, 3],
+    texture: { kind: "bind-image", image },
+    state,
+    lighting: { kind: "vertex" },
+  };
   const clear = { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: true };
   renderer.selectDrawBuffer("back", false);
   renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: null });
   expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([0, 0, 0, 255]));
   draw(renderer, batch);
-  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0)));
   expect(renderer.readDepthPixel(8, 8)).toBeCloseTo(0.5, 5);
   renderer.drawShowImage(image, { x: 16, y: 16, width: 1, height: 1 }, false);
   renderer.clearColorBuffer();
   draw(renderer, batch);
-  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0)));
   renderer.drawImmediate({ kind: "shadow-volume", positions: [], indices: [], mirror: false, whiteImage: image });
   renderer.clearColorBuffer();
   draw(renderer, batch);
-  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0)));
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) } });
   renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: { x: 1, y: 0, z: 0, w: 0 } });
   draw(renderer, batch);
@@ -196,8 +308,12 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   expect(pixels.slice((8 * 16 + 4) * 4, (8 * 16 + 4) * 4 + 4)).toEqual(new Uint8Array([0, 0, 0, 255]));
   expect(pixels.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4)).toEqual(new Uint8Array([255, 0, 0, 255]));
   renderer.drawImmediate({ kind: "disable-portal-clip" });
-  const paired: DrawBatch = { ...batch, texturing: "pair", vertices: vertices.map(vertex => ({ ...vertex, texCoord2: vertex.texCoord })),
-    secondTexture: { binding: { kind: "bind-image", image: secondary }, environment: "add" } };
+  const paired: DrawBatch = {
+    ...batch,
+    texturing: "pair",
+    vertices: vertices.map(vertex => ({ ...vertex, texCoord2: vertex.texCoord })),
+    secondTexture: { binding: { kind: "bind-image", image: secondary }, environment: "add" },
+  };
   draw(renderer, paired);
   expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([255, 0, 255, 255]));
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([0, 255, 0, 0]) } });
@@ -206,7 +322,8 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) } });
   renderer.setOverdrawMeasurement(true);
   renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: null });
-  draw(renderer, batch); draw(renderer, batch);
+  draw(renderer, batch);
+  draw(renderer, batch);
   const stencil = new Uint8Array(16 * 16);
   renderer.readStencilOverdraw(stencil);
   expect(stencil.every(value => value === 2)).toBe(true);
@@ -214,39 +331,97 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([0, 0, 0, 255]) } });
   const worldPositions = vertices.map(vertex => ({ x: vertex.position.x * 128, y: vertex.position.y * 128, z: 0 }));
   const normals = vertices.map(() => ({ x: 0, y: 0, z: 1 }));
-  const light = { origin: { x: 0, y: 0, z: 32 }, radius: 256, color: { x: 0, y: 1, z: 0 }, scale: 1,
-    cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 }, shadow: { kind: "none" } } satisfies import("../../../src/contracts/render.ts").Q2FragmentLight;
+  const light = {
+    origin: { x: 0, y: 0, z: 32 },
+    radius: 256,
+    color: { x: 0, y: 1, z: 0 },
+    scale: 1,
+    cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 },
+    shadow: { kind: "none" },
+  } satisfies import("../../../src/contracts/render.ts").Q2FragmentLight;
   const lit: DrawBatch = { ...batch, lighting: { kind: "q2-world", worldPositions, normals, pass: "lightmap", lights: [light], atlas: null } };
   draw(renderer, lit);
   pixels = renderer.readPixels();
-  const centerGreen = pixels[(8 * 16 + 8) * 4 + 1], cornerGreen = pixels[1];
+  const centerGreen = pixels[(8 * 16 + 8) * 4 + 1],
+    cornerGreen = pixels[1];
   if (centerGreen === undefined || cornerGreen === undefined) throw new Error("Missing GL lighting pixels");
   expect(centerGreen).toBeGreaterThan(100);
   expect(cornerGreen).toBeLessThan(centerGreen);
   const atlas: RendererImage = { owner, ordinal: 2, source: { kind: "generated", name: "shadow atlas" }, width: 96, height: 96 };
-  renderer.applyImageResource({ kind: "create-image", image: atlas,
+  renderer.applyImageResource({
+    kind: "create-image",
+    image: atlas,
     content: { kind: "depth32f", levels: [{ width: 96, height: 96, pixels: new Float32Array(96 * 96).fill(1) }] },
-    sampling: { wrap: "clamp", filter: "nearest" } });
-  renderer.drawImmediate({ kind: "depth-atlas", image: atlas, passes: [{ viewport: { x: 0, y: 0, width: 96, height: 96 }, clearDepth: 1,
-    draws: [{ positions: new Float64Array(vertices.flatMap(vertex => [vertex.position.x, vertex.position.y, -0.5, vertex.position.w])), indices: batch.indices, cull: "none", polygonOffset: null }] }] });
+    sampling: { wrap: "clamp", filter: "nearest" },
+  });
+  renderer.drawImmediate({
+    kind: "depth-atlas",
+    image: atlas,
+    passes: [
+      {
+        viewport: { x: 0, y: 0, width: 96, height: 96 },
+        clearDepth: 1,
+        draws: [
+          {
+            positions: new Float64Array(vertices.flatMap(vertex => [vertex.position.x, vertex.position.y, -0.5, vertex.position.w])),
+            indices: batch.indices,
+            cull: "none",
+            polygonOffset: null,
+          },
+        ],
+      },
+    ],
+  });
   expect(renderer.readDepthImage(atlas).pixels.every(depth => Math.abs(depth - 0.25) < 0.00001)).toBe(true);
   expect(renderer.readPixels()).toEqual(pixels);
   const matrix: Mat4 = [1 / 256, 0, 0, 0, 0, 1 / 256, 0, 0, 0, 0, 0, 0, 0.5, 0.5, 0.75, 1];
-  draw(renderer, { ...lit, lighting: { kind: "q2-world", worldPositions, normals, pass: "lightmap",
-    lights: [{ ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }],
-    atlas: { image: atlas, texelSize: 1 / 96, nearPlane: 4 } } });
+  draw(renderer, {
+    ...lit,
+    lighting: {
+      kind: "q2-world",
+      worldPositions,
+      normals,
+      pass: "lightmap",
+      lights: [{ ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }],
+      atlas: { image: atlas, texelSize: 1 / 96, nearPlane: 4 },
+    },
+  });
   expect(renderer.readPixels().slice((8 * 16 + 8) * 4, (8 * 16 + 8) * 4 + 4)).toEqual(new Uint8Array([0, 0, 0, 255]));
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]) } });
-  draw(renderer, { ...batch, lighting: { kind: "q2-model-shadow", worldPositions: vertices.map(() => ({ x: 0, y: 0, z: 0 })),
-    lights: [{ origin: light.origin, radius: 256, fraction: { x: 1, y: 0, z: 0 }, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } }],
-    shadeScale: 1, atlas: { image: atlas, texelSize: 1 / 96, nearPlane: 4 } } });
+  draw(renderer, {
+    ...batch,
+    lighting: {
+      kind: "q2-model-shadow",
+      worldPositions: vertices.map(() => ({ x: 0, y: 0, z: 0 })),
+      lights: [{ origin: light.origin, radius: 256, fraction: { x: 1, y: 0, z: 0 }, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } }],
+      shadeScale: 1,
+      atlas: { image: atlas, texelSize: 1 / 96, nearPlane: 4 },
+    },
+  });
   expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([0, 255, 255, 255]));
-  const fogPass: Q2FogOperation = { kind: "q2-fog", camera: {
-    origin: { x: 0, y: 0, z: 10 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }],
-    projection: perspectiveMat4(90, 1, 4, 1024), viewport: { x: 0, y: 0, width: 16, height: 16 }, clip: { kind: "none" } },
-    fog: { kind: "q2", color: { x: 0, y: 0, z: 1 }, density: 16, skyFactor: 0.5,
-      height: { start: { color: { x: 1, y: 0, z: 0 }, distance: 0 }, end: { color: { x: 0, y: 0, z: 1 }, distance: 100 },
-        density: 0, falloff: 0 } }, farDepth: 1 - 1e-6, skyDrawn: false };
+  const fogPass: Q2FogOperation = {
+    kind: "q2-fog",
+    camera: {
+      origin: { x: 0, y: 0, z: 10 },
+      axis: [
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      projection: perspectiveMat4(90, 1, 4, 1024),
+      viewport: { x: 0, y: 0, width: 16, height: 16 },
+      clip: { kind: "none" },
+    },
+    fog: {
+      kind: "q2",
+      color: { x: 0, y: 0, z: 1 },
+      density: 16,
+      skyFactor: 0.5,
+      height: { start: { color: { x: 1, y: 0, z: 0 }, distance: 0 }, end: { color: { x: 0, y: 0, z: 1 }, distance: 100 }, density: 0, falloff: 0 },
+    },
+    farDepth: 1 - 1e-6,
+    skyDrawn: false,
+  };
   renderer.beginView({ viewport: fogPass.camera.viewport, clear: { ...clear, depth: 0.5 }, clipPlane: null });
   renderer.drawImmediate(fogPass);
   pixels = renderer.readPixels();
@@ -254,12 +429,13 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   expect(pixels[2]).toBeCloseTo(160, -1);
   expect(renderer.readDepthPixel(8, 8)).toBeCloseTo(0.5, 5);
   renderer.beginView({ viewport: fogPass.camera.viewport, clear: { ...clear, depth: 0.5 }, clipPlane: null });
-  renderer.drawImmediate({ ...fogPass, fog: { ...fogPass.fog, density: 0,
-    height: { ...fogPass.fog.height, density: 0.3, falloff: 0.1 } } });
+  renderer.drawImmediate({ ...fogPass, fog: { ...fogPass.fog, density: 0, height: { ...fogPass.fog.height, density: 0.3, falloff: 0.1 } } });
   pixels = renderer.readPixels();
-  const heightRed = pixels[(8 * 16 + 8) * 4], heightBlue = pixels[(8 * 16 + 8) * 4 + 2];
+  const heightRed = pixels[(8 * 16 + 8) * 4],
+    heightBlue = pixels[(8 * 16 + 8) * 4 + 2];
   if (heightRed === undefined || heightBlue === undefined) throw new Error("Missing GL height fog pixels");
-  expect(heightRed).toBeGreaterThan(100); expect(heightBlue).toBeLessThan(heightRed);
+  expect(heightRed).toBeGreaterThan(100);
+  expect(heightBlue).toBeLessThan(heightRed);
   renderer.beginView({ viewport: fogPass.camera.viewport, clear, clipPlane: null });
   renderer.drawImmediate(fogPass);
   expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([0, 0, 0, 255]));
@@ -268,8 +444,16 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   if (skyBlue === undefined) throw new Error("Missing GL sky fog pixel");
   expect([127, 128]).toContain(skyBlue);
   renderer.beginView({ viewport: fogPass.camera.viewport, clear, clipPlane: null });
-  renderer.withObjectOpacity(0.5, () => { draw(renderer, batch); return undefined; });
-  expect(renderer.readPixels().slice(0, 3).every(value => value === 127 || value === 128)).toBe(true);
+  renderer.withObjectOpacity(0.5, () => {
+    draw(renderer, batch);
+    return undefined;
+  });
+  expect(
+    renderer
+      .readPixels()
+      .slice(0, 3)
+      .every(value => value === 127 || value === 128),
+  ).toBe(true);
   draw(renderer, batch);
   expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([255, 255, 255, 255]));
   expect(renderer.readDepthPixel(8, 8)).toBeCloseTo(0.5, 5);
@@ -279,8 +463,10 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   renderer.close();
   using restarted = new GlRenderer(window, { ...owner, identity: Symbol("GL restart"), generation: 1 });
   expect(() => restarted.applyImageResource({ kind: "release-image", image })).toThrow("another renderer");
-  window.setSize(12, 8); window.pollEvents();
-  expect(restarted.width).toBe(12); expect(restarted.height).toBe(8);
+  window.setSize(12, 8);
+  window.pollEvents();
+  expect(restarted.width).toBe(12);
+  expect(restarted.height).toBe(8);
   restarted.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear, clipPlane: null });
   pixels = restarted.readPixels();
   expect(pixels.length).toBe(12 * 8 * 4);
@@ -293,33 +479,52 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL output gamma follows blen
   const owner: RendererResourceOwner = { identity: Symbol("GL gamma"), session: createIdentityOwner("GL gamma").session, generation: 0 };
   using renderer = new GlRenderer(window, owner);
   const image: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "gamma sample" }, width: 1, height: 1 };
-  renderer.applyImageResource({ kind: "create-image", image,
+  renderer.applyImageResource({
+    kind: "create-image",
+    image,
     content: { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([64, 128, 192, 128]) }], borderColor: white },
-    sampling: { wrap: "repeat", filter: "nearest" } });
-  const batch: DrawBatch = { texturing: "single", primitive: "triangles", vertices, indices: [0, 1, 2, 0, 2, 3],
-    texture: { kind: "bind-image", image }, state: { ...state, blend: { source: "src-alpha", destination: "one-minus-src-alpha" } }, lighting: { kind: "vertex" } };
+    sampling: { wrap: "repeat", filter: "nearest" },
+  });
+  const batch: DrawBatch = {
+    texturing: "single",
+    primitive: "triangles",
+    vertices,
+    indices: [0, 1, 2, 0, 2, 3],
+    texture: { kind: "bind-image", image },
+    state: { ...state, blend: { source: "src-alpha", destination: "one-minus-src-alpha" } },
+    lighting: { kind: "vertex" },
+  };
   const clear = { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: true };
   renderer.selectDrawBuffer("back", false);
   renderer.setOverdrawMeasurement(true);
   renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: null });
   draw(renderer, batch);
-  const raw = renderer.readPixels(), stencil = new Uint8Array(16 * 16);
+  const raw = renderer.readPixels(),
+    stencil = new Uint8Array(16 * 16);
   renderer.readStencilOverdraw(stencil);
   expect(stencil.every(value => value === 1)).toBe(true);
-  renderer.setOutputGamma(1); renderer.finish();
+  renderer.setOutputGamma(1);
+  renderer.finish();
   expect(renderer.readPixels()).toEqual(raw);
   expect(() => renderer.setOutputGamma(0)).toThrow("0.5 and 3");
-  renderer.setOutputGamma(2); renderer.finish();
+  renderer.setOutputGamma(2);
+  renderer.finish();
   expect(renderer.getError()).toBe(0);
-  const table = outputGammaTable(2); if (table === null) throw new Error("Gamma table missing");
-  const corrected = raw.map((component, index) => index % 4 === 3 ? component : table[component] ?? 0);
+  const table = outputGammaTable(2);
+  if (table === null) throw new Error("Gamma table missing");
+  const corrected = raw.map((component, index) => (index % 4 === 3 ? component : (table[component] ?? 0)));
   expect(renderer.readPixels()).toEqual(corrected);
-  renderer.finish(); renderer.finish();
+  renderer.finish();
+  renderer.finish();
   expect(renderer.readPixels()).toEqual(corrected);
   expect(renderer.readDepthPixel(12, 8)).toBeCloseTo(0.5, 5);
   renderer.readStencilOverdraw(stencil);
   expect(stencil.every(value => value === 1)).toBe(true);
-  renderer.beginView({ viewport: { x: 0, y: 0, width: 8, height: 16 }, clear: { depth: 0.75, color: { x: 0.25, y: 0, z: 0, w: 1 }, stencil: true }, clipPlane: null });
+  renderer.beginView({
+    viewport: { x: 0, y: 0, width: 8, height: 16 },
+    clear: { depth: 0.75, color: { x: 0.25, y: 0, z: 0, w: 1 }, stencil: true },
+    clipPlane: null,
+  });
   renderer.finish();
   const partial = renderer.readPixels();
   expect(partial.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4)).toEqual(corrected.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4));
@@ -332,21 +537,25 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL output gamma follows blen
   expect(restored.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4)).toEqual(raw.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4));
   expect(renderer.readDepthPixel(4, 8)).toBeCloseTo(0.75, 5);
   renderer.setOutputGamma(2);
-  window.setSize(12, 8); window.pollEvents();
+  window.setSize(12, 8);
+  window.pollEvents();
   renderer.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear: { ...clear, color: { x: 0.25, y: 0.5, z: 0.75, w: 1 } }, clipPlane: null });
   renderer.finish();
   const resized = renderer.readPixels();
   renderer.setOutputGamma(1);
   const resizedRaw = renderer.readPixels();
-  expect(resized).toEqual(resizedRaw.map((component, index) => index % 4 === 3 ? component : table[component] ?? 0));
+  expect(resized).toEqual(resizedRaw.map((component, index) => (index % 4 === 3 ? component : (table[component] ?? 0))));
   expect(resized.length).toBe(12 * 8 * 4);
-  renderer.setOutputGamma(2); renderer.finish();
+  renderer.setOutputGamma(2);
+  renderer.finish();
   expect(renderer.getError()).toBe(0);
-  renderer.present(); renderer.close();
+  renderer.present();
+  renderer.close();
   using restarted = new GlRenderer(window, { ...owner, identity: Symbol("gamma restart"), generation: 1 });
   restarted.setOutputGamma(2);
   restarted.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear, clipPlane: null });
-  restarted.finish(); expect(restarted.getError()).toBe(0);
+  restarted.finish();
+  expect(restarted.getError()).toBe(0);
 });
 
 test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserve native state across changes, rejected inputs and restart", () => {
@@ -355,60 +564,141 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
   const atlasImage: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "atlas" }, width: 16, height: 16 };
   const atlas = { image: atlasImage, texelSize: 1 / 16, nearPlane: 4 };
   const matrix: [...Mat4] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-  let light: import("../../../src/contracts/render.ts").Q2FragmentLight = { origin: { x: 0, y: 1, z: 2 }, radius: 64, color: { x: 1, y: 0.5, z: 0.25 }, scale: 1,
-    cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 }, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } };
-  const lighting = () => ({ kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [light], atlas } satisfies import("../../../src/contracts/render.ts").BatchLighting);
-  const reference = new StageProgram(window), cached = new StageProgram(window);
-  const referenceTrace = traceUniforms(reference["library"].symbols, reference["uniforms"]), trace = traceUniforms(cached["library"].symbols, cached["uniforms"]);
+  let light: import("../../../src/contracts/render.ts").Q2FragmentLight = {
+    origin: { x: 0, y: 1, z: 2 },
+    radius: 64,
+    color: { x: 1, y: 0.5, z: 0.25 },
+    scale: 1,
+    cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 },
+    shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } },
+  };
+  const lighting = () =>
+    ({
+      kind: "q2-world",
+      worldPositions: [],
+      normals: [],
+      pass: "lightmap",
+      lights: [light],
+      atlas,
+    }) satisfies import("../../../src/contracts/render.ts").BatchLighting;
+  const reference = new StageProgram(window),
+    cached = new StageProgram(window);
+  const referenceTrace = traceUniforms(reference["library"].symbols, reference["uniforms"]),
+    trace = traceUniforms(cached["library"].symbols, cached["uniforms"]);
   const lookup = cached["uniforms"].get;
   let locationLookups = 0;
-  cached["uniforms"].get = function (...args) { locationLookups++; return lookup.apply(this, args); };
+  cached["uniforms"].get = function (...args) {
+    locationLookups++;
+    return lookup.apply(this, args);
+  };
   function freshReference(): void {
-    reference["integers"].clear(); reference["scalars"].clear(); reference["vectors3"].clear(); reference["vectors4"].clear(); reference["matrices"].clear();
+    reference["integers"].clear();
+    reference["scalars"].clear();
+    reference["vectors3"].clear();
+    reference["vectors4"].clear();
+    reference["matrices"].clear();
   }
   function use(...args: Parameters<StageProgram["use"]>): void {
-    freshReference(); reference.use(...args); cached.use(...args);
+    freshReference();
+    reference.use(...args);
+    cached.use(...args);
     expect(trace.state).toEqual(referenceTrace.state);
   }
   try {
     use(null, "none", lighting());
     const initial = trace.calls;
     const initialLookups = locationLookups;
-    use(null, "none", lighting()); expect(trace.calls).toBe(initial);
+    use(null, "none", lighting());
+    expect(trace.calls).toBe(initial);
     expect(locationLookups).toBe(initialLookups);
-    cached.useDepth(); cached.restore(0); use(null, "none", lighting()); expect(trace.calls).toBe(initial);
-    const changed = (change: () => void): void => { const before = trace.calls; change(); use(null, "none", lighting()); expect(trace.calls).toBe(before + 1); };
-    changed(() => { light = { ...light, radius: 65 }; });
-    changed(() => { light = { ...light, scale: 0.75 }; });
-    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) {
-      changed(() => { light = { ...light, origin: { ...light.origin, [component]: light.origin[component] + 1 } }; });
-      changed(() => { light = { ...light, color: { ...light.color, [component]: light.color[component] + 0.1 } }; });
-      changed(() => { const cone = light.cone; if (cone === null) throw new Error("Missing cone"); light = { ...light, cone: { ...cone, direction: { ...cone.direction, [component]: cone.direction[component] + 0.1 } } }; });
-    }
-    changed(() => { const cone = light.cone; if (cone === null) throw new Error("Missing cone"); light = { ...light, cone: { ...cone, cosHalfAngle: 0.6 } }; });
-    for (const component of ["x", "y", "z", "w"] satisfies readonly ("x" | "y" | "z" | "w")[]) changed(() => {
-      const shadow = light.shadow; if (shadow.kind !== "cone") throw new Error("Missing shadow");
-      light = { ...light, shadow: { ...shadow, atlasRect: { ...shadow.atlasRect, [component]: shadow.atlasRect[component] + 0.01 } } };
+    cached.useDepth();
+    cached.restore(0);
+    use(null, "none", lighting());
+    expect(trace.calls).toBe(initial);
+    const changed = (change: () => void): void => {
+      const before = trace.calls;
+      change();
+      use(null, "none", lighting());
+      expect(trace.calls).toBe(before + 1);
+    };
+    changed(() => {
+      light = { ...light, radius: 65 };
     });
-    for (let index = 0; index < matrix.length; index++) changed(() => { matrix[index] = (matrix[index] ?? 0) + 0.01; });
-    changed(() => { atlas.texelSize = 1 / 32; }); changed(() => { atlas.nearPlane = 2; });
-    changed(() => { light = { ...light, origin: { ...light.origin, x: 0 } }; });
-    changed(() => { light = { ...light, origin: { ...light.origin, x: -0 } }; });
+    changed(() => {
+      light = { ...light, scale: 0.75 };
+    });
+    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) {
+      changed(() => {
+        light = { ...light, origin: { ...light.origin, [component]: light.origin[component] + 1 } };
+      });
+      changed(() => {
+        light = { ...light, color: { ...light.color, [component]: light.color[component] + 0.1 } };
+      });
+      changed(() => {
+        const cone = light.cone;
+        if (cone === null) throw new Error("Missing cone");
+        light = { ...light, cone: { ...cone, direction: { ...cone.direction, [component]: cone.direction[component] + 0.1 } } };
+      });
+    }
+    changed(() => {
+      const cone = light.cone;
+      if (cone === null) throw new Error("Missing cone");
+      light = { ...light, cone: { ...cone, cosHalfAngle: 0.6 } };
+    });
+    for (const component of ["x", "y", "z", "w"] satisfies readonly ("x" | "y" | "z" | "w")[])
+      changed(() => {
+        const shadow = light.shadow;
+        if (shadow.kind !== "cone") throw new Error("Missing shadow");
+        light = { ...light, shadow: { ...shadow, atlasRect: { ...shadow.atlasRect, [component]: shadow.atlasRect[component] + 0.01 } } };
+      });
+    for (let index = 0; index < matrix.length; index++)
+      changed(() => {
+        matrix[index] = (matrix[index] ?? 0) + 0.01;
+      });
+    changed(() => {
+      atlas.texelSize = 1 / 32;
+    });
+    changed(() => {
+      atlas.nearPlane = 2;
+    });
+    changed(() => {
+      light = { ...light, origin: { ...light.origin, x: 0 } };
+    });
+    changed(() => {
+      light = { ...light, origin: { ...light.origin, x: -0 } };
+    });
     for (const environment of ["modulate", "add", "replace", null] satisfies readonly Parameters<StageProgram["use"]>[0][]) {
       for (const alpha of ["none", "gt0", "lt128", "ge128"] satisfies readonly RenderState["alphaTest"][]) use(environment, alpha, lighting(), true);
     }
     use(null, "none", lighting(), false);
     use(null, "none", { kind: "vertex" });
-    const world = lighting(); if (world.kind !== "q2-world") throw new Error("Missing world lighting");
+    const world = lighting();
+    if (world.kind !== "q2-world") throw new Error("Missing world lighting");
     use(null, "none", { ...world, lights: [light, { ...light, radius: 80 }] });
-    use(null, "none", { ...world, lights: [] }); use(null, "none", { ...world, lights: [light, { ...light, radius: 90 }] });
-    for (const pass of ["texture", "material-lightmap", "lightmap"] satisfies readonly Exclude<Extract<import("../../../src/contracts/render.ts").BatchLighting, { readonly kind: "q2-world" }>["pass"], "model">[]) use(null, "none", { ...world, pass });
-    light = { ...light, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } }; use(null, "none", lighting());
-    light = { ...light, shadow: { kind: "none" } }; use(null, "none", lighting());
-    light = { ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }; use(null, "none", lighting());
-    const model = { kind: "q2-model-shadow", worldPositions: [], shadeScale: 1, lights: [{ origin: light.origin, radius: light.radius, fraction: { x: 1, y: 0.5, z: 0.25 }, shadow: light.shadow }], atlas } satisfies import("../../../src/contracts/render.ts").BatchLighting;
-    use(null, "none", model); use(null, "none", { ...model, shadeScale: 0.5 });
-    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) use(null, "none", { ...model, lights: model.lights.map(item => ({ ...item, fraction: { ...item.fraction, [component]: 0.75 } })) });
+    use(null, "none", { ...world, lights: [] });
+    use(null, "none", { ...world, lights: [light, { ...light, radius: 90 }] });
+    for (const pass of ["texture", "material-lightmap", "lightmap"] satisfies readonly Exclude<
+      Extract<import("../../../src/contracts/render.ts").BatchLighting, { readonly kind: "q2-world" }>["pass"],
+      "model"
+    >[])
+      use(null, "none", { ...world, pass });
+    light = { ...light, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } };
+    use(null, "none", lighting());
+    light = { ...light, shadow: { kind: "none" } };
+    use(null, "none", lighting());
+    light = { ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } };
+    use(null, "none", lighting());
+    const model = {
+      kind: "q2-model-shadow",
+      worldPositions: [],
+      shadeScale: 1,
+      lights: [{ origin: light.origin, radius: light.radius, fraction: { x: 1, y: 0.5, z: 0.25 }, shadow: light.shadow }],
+      atlas,
+    } satisfies import("../../../src/contracts/render.ts").BatchLighting;
+    use(null, "none", model);
+    use(null, "none", { ...model, shadeScale: 0.5 });
+    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[])
+      use(null, "none", { ...model, lights: model.lights.map(item => ({ ...item, fraction: { ...item.fraction, [component]: 0.75 } })) });
     const invalid = [
       { ...world, lights: Array.from({ length: 9 }, () => light) },
       { ...world, atlas: { ...atlas, nearPlane: 0 } },
@@ -416,54 +706,111 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
       { ...world, lights: [{ ...light, origin: { ...light.origin, x: NaN } }] },
       { ...world, atlas: null, lights: [light] },
     ] satisfies readonly import("../../../src/contracts/render.ts").BatchLighting[];
-    const rejections = ["Q2 fragment lighting accepts at most eight selected lights per draw", "Q2 shadow atlas texel size and near plane must be positive",
-      "Q2 fragment light radius must be positive", "OpenGL lighting uniforms must be finite float32 values", "Q2 shadow receiver is missing its atlas"];
+    const rejections = [
+      "Q2 fragment lighting accepts at most eight selected lights per draw",
+      "Q2 shadow atlas texel size and near plane must be positive",
+      "Q2 fragment light radius must be positive",
+      "OpenGL lighting uniforms must be finite float32 values",
+      "Q2 shadow receiver is missing its atlas",
+    ];
     for (const [index, malformed] of invalid.entries()) {
       const message = rejections[index] ?? "";
       for (let repeat = 0; repeat < 2; repeat++) {
-        freshReference(); expect(() => reference.use(null, "none", malformed)).toThrow(message); expect(() => cached.use(null, "none", malformed)).toThrow(message);
+        freshReference();
+        expect(() => reference.use(null, "none", malformed)).toThrow(message);
+        expect(() => cached.use(null, "none", malformed)).toThrow(message);
         expect(trace.state).toEqual(referenceTrace.state);
       }
       use(null, "none", lighting());
     }
-    trace.rejectScalar(); referenceTrace.rejectScalar(); light = { ...light, radius: light.radius + 1 };
-    freshReference(); expect(() => reference.use(null, "none", lighting())).toThrow("native upload rejected"); expect(() => cached.use(null, "none", lighting())).toThrow("native upload rejected");
+    trace.rejectScalar();
+    referenceTrace.rejectScalar();
+    light = { ...light, radius: light.radius + 1 };
+    freshReference();
+    expect(() => reference.use(null, "none", lighting())).toThrow("native upload rejected");
+    expect(() => cached.use(null, "none", lighting())).toThrow("native upload rejected");
     use(null, "none", lighting());
     expect(trace.calls).toBeLessThan(referenceTrace.calls);
-  } finally { cached.close(); reference.close(); }
+  } finally {
+    cached.close();
+    reference.close();
+  }
   expect(() => cached.use(null, "none")).toThrow("closed");
-  const restarted = new StageProgram(window), restartTrace = traceUniforms(restarted["library"].symbols, restarted["uniforms"]);
+  const restarted = new StageProgram(window),
+    restartTrace = traceUniforms(restarted["library"].symbols, restarted["uniforms"]);
   const resolveLocation = restarted["library"].symbols.glGetUniformLocation;
-  let missing = true, resolutionCalls = 0;
+  let missing = true,
+    resolutionCalls = 0;
   restarted["library"].symbols.glGetUniformLocation = Object.assign((...args: Parameters<typeof resolveLocation>) => {
-    resolutionCalls++; return missing ? -1 : resolveLocation(...args);
+    resolutionCalls++;
+    return missing ? -1 : resolveLocation(...args);
   }, resolveLocation);
   try {
     expect(() => restarted.use(null, "none", lighting())).toThrow("OpenGL stage uniform is missing: u_fog_mode");
     expect(() => restarted.use(null, "none", lighting())).toThrow("OpenGL stage uniform is missing: u_fog_mode");
     expect(resolutionCalls).toBe(2);
     missing = false;
-    restarted.use(null, "none", lighting()); expect(restartTrace.calls).toBeGreaterThan(5);
+    restarted.use(null, "none", lighting());
+    expect(restartTrace.calls).toBeGreaterThan(5);
+  } finally {
+    restarted.close();
   }
-  finally { restarted.close(); }
 });
 
 function traceUniforms(gl: ReturnType<typeof loadGlPrograms>["symbols"], locations: ReadonlyMap<string, number>) {
-  const state = new Map<string, readonly number[]>(); let calls = 0, rejectScalar = false;
+  const state = new Map<string, readonly number[]>();
+  let calls = 0,
+    rejectScalar = false;
   const record = (location: number, values: readonly number[]): void => {
-    for (const [name, id] of locations) if (id === location) { state.set(name, [...values]); calls++; return; }
+    for (const [name, id] of locations)
+      if (id === location) {
+        state.set(name, [...values]);
+        calls++;
+        return;
+      }
     throw new Error("Unknown uniform location");
   };
-  const integer = gl.glUniform1i, scalar = gl.glUniform1f, vector3 = gl.glUniform3f, vector4 = gl.glUniform4f, matrix = gl.glUniformMatrix4fv;
-  gl.glUniform1i = Object.assign((location: number, value: number) => { const result = integer(location, value); record(location, [value]); return result; }, integer);
+  const integer = gl.glUniform1i,
+    scalar = gl.glUniform1f,
+    vector3 = gl.glUniform3f,
+    vector4 = gl.glUniform4f,
+    matrix = gl.glUniformMatrix4fv;
+  gl.glUniform1i = Object.assign((location: number, value: number) => {
+    const result = integer(location, value);
+    record(location, [value]);
+    return result;
+  }, integer);
   gl.glUniform1f = Object.assign((location: number, value: number) => {
-    if (rejectScalar) { rejectScalar = false; throw new Error("native upload rejected"); }
-    const result = scalar(location, value); record(location, [Math.fround(value)]); return result;
+    if (rejectScalar) {
+      rejectScalar = false;
+      throw new Error("native upload rejected");
+    }
+    const result = scalar(location, value);
+    record(location, [Math.fround(value)]);
+    return result;
   }, scalar);
-  gl.glUniform3f = Object.assign((location: number, x: number, y: number, z: number) => { const result = vector3(location, x, y, z); record(location, [Math.fround(x), Math.fround(y), Math.fround(z)]); return result; }, vector3);
-  gl.glUniform4f = Object.assign((location: number, x: number, y: number, z: number, w: number) => { const result = vector4(location, x, y, z, w); record(location, [Math.fround(x), Math.fround(y), Math.fround(z), Math.fround(w)]); return result; }, vector4);
+  gl.glUniform3f = Object.assign((location: number, x: number, y: number, z: number) => {
+    const result = vector3(location, x, y, z);
+    record(location, [Math.fround(x), Math.fround(y), Math.fround(z)]);
+    return result;
+  }, vector3);
+  gl.glUniform4f = Object.assign((location: number, x: number, y: number, z: number, w: number) => {
+    const result = vector4(location, x, y, z, w);
+    record(location, [Math.fround(x), Math.fround(y), Math.fround(z), Math.fround(w)]);
+    return result;
+  }, vector4);
   gl.glUniformMatrix4fv = Object.assign((location: number, count: number, transpose: number, value: Float32Array) => {
-    const result = matrix(location, count, transpose, value); record(location, [...value]); return result;
+    const result = matrix(location, count, transpose, value);
+    record(location, [...value]);
+    return result;
   }, matrix);
-  return { state, get calls() { return calls; }, rejectScalar() { rejectScalar = true; } };
+  return {
+    state,
+    get calls() {
+      return calls;
+    },
+    rejectScalar() {
+      rejectScalar = true;
+    },
+  };
 }

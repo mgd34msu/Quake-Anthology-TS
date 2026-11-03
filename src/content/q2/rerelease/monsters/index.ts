@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q2GameServices, Q2SpawnModule } from "../../foundation/host.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
@@ -52,7 +53,11 @@ function ordinaryDefinitions(monsters: Q2Monsters) {
 
 export function registerQ2RereleaseOrdinaryMonsters(monsters: Q2Monsters, weapons: Q2MissionPackMonsterWeapons): undefined {
   for (const definition of Object.values(ordinaryDefinitions(monsters))) monsters.register(definition, "rerelease");
-  for (const definition of [...createRereleaseChickDefinitions(weapons), ...createRereleaseTankDefinitions(weapons), ...createRereleaseGladiatorDefinitions(weapons)]) {
+  for (const definition of [
+    ...createRereleaseChickDefinitions(weapons),
+    ...createRereleaseTankDefinitions(weapons),
+    ...createRereleaseGladiatorDefinitions(weapons),
+  ]) {
     if (definition.classname === "monster_chick_heat" || definition.classname === "monster_gladb") continue;
     monsters.register(definition, "rerelease");
   }
@@ -86,9 +91,24 @@ export function registerQ2RereleaseMonsters(monsters: Q2Monsters, options: Q2Rer
   for (const definition of createRereleaseGladiatorDefinitions(options.weapons)) monsters.register(definition, "rerelease");
   for (const definition of createRereleaseSupertankDefinitions(options.weapons, options.isN64)) monsters.register(definition, "rerelease");
   return {
-    callbacks: { ...monsters.callbacks, think: { ...monsters.callbacks.think, ...rereleaseTankStandModule.callbacks?.think }, use: { ...monsters.callbacks.use, ...rereleaseTankStandModule.callbacks?.use }, touch: { ...monsters.callbacks.touch, ...actor.targets.callbacks?.touch } },
-    spawn(entity, game) { return rereleaseTankStandModule.spawn(entity, game) || actor.targets.spawn(entity, game) || monsters.spawn(entity, game); },
+    callbacks: {
+      ...monsters.callbacks,
+      think: { ...monsters.callbacks.think, ...rereleaseTankStandModule.callbacks?.think },
+      use: { ...monsters.callbacks.use, ...rereleaseTankStandModule.callbacks?.use },
+      touch: { ...monsters.callbacks.touch, ...actor.targets.callbacks?.touch },
+    },
+    spawn(entity, game) {
+      return rereleaseTankStandModule.spawn(entity, game) || actor.targets.spawn(entity, game) || monsters.spawn(entity, game);
+    },
   };
 }
 
-export { arachnidDefinition, createRereleaseBerserkDefinition, createGuardianDefinition, shamblerDefinition, createGunCommanderDefinition, createRereleaseTankDefinitions, rereleaseTankStandModule };
+export {
+  arachnidDefinition,
+  createRereleaseBerserkDefinition,
+  createGuardianDefinition,
+  shamblerDefinition,
+  createGunCommanderDefinition,
+  createRereleaseTankDefinitions,
+  rereleaseTankStandModule,
+};

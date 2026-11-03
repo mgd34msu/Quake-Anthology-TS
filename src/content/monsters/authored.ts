@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 
@@ -24,9 +25,14 @@ export interface AuthoredMonster extends AuthoredTarget {
   combatTarget: string;
   combatGoal: ActorId | null;
   standGround: boolean;
-  placement: { readonly kind: "ready" } | { readonly kind: "teleport"; readonly origin: Vec3 }
+  placement:
+    | { readonly kind: "ready" }
+    | { readonly kind: "teleport"; readonly origin: Vec3 }
     | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: ActorId; readonly origin: Vec3 }[]; activator: ActorId | null };
-  activation: { readonly kind: "active" } | { readonly kind: "dormant" } | { readonly kind: "scheduled"; readonly at: number; readonly activator: ActorId | null };
+  activation:
+    | { readonly kind: "active" }
+    | { readonly kind: "dormant" }
+    | { readonly kind: "scheduled"; readonly at: number; readonly activator: ActorId | null };
 }
 
 export interface MonsterMission {

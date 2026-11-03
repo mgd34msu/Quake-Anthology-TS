@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
 import type { ActiveModPresentation } from "../../world/session/mod-presentations.ts";
 import type { ApplicationAudio, ApplicationAudioSeatEvents } from "./audio.ts";
@@ -6,15 +7,23 @@ import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ApplicationAssets } from "./assets.ts";
 
 export function presentationAudioControl(source: SimulationPresentationEvent): boolean {
-  return source.kind === "presentation-owner" || source.kind === "music"
-    || source.kind === "q2" && source.event.kind === "music"
-    || source.kind === "q1-level" && source.event.kind === "finale";
+  return (
+    source.kind === "presentation-owner" ||
+    source.kind === "music" ||
+    (source.kind === "q2" && source.event.kind === "music") ||
+    (source.kind === "q1-level" && source.event.kind === "finale")
+  );
 }
 
 /** Apply retained local requests in the same chronology as incoming source controls. */
-export async function preparePresentationAudio(events: PresentationState, audio: Pick<ApplicationAudio, "playComponentMedia" | "receive">,
-  source: readonly SimulationPresentationEvent[] = [], seats: readonly ApplicationAudioSeatEvents[] = []): Promise<void> {
-  const pending = events.pendingLocalMedia().filter(request => request.kind !== "local-media" || request.event.kind !== "shader-remap"), local = new Set(pending);
+export async function preparePresentationAudio(
+  events: PresentationState,
+  audio: Pick<ApplicationAudio, "playComponentMedia" | "receive">,
+  source: readonly SimulationPresentationEvent[] = [],
+  seats: readonly ApplicationAudioSeatEvents[] = [],
+): Promise<void> {
+  const pending = events.pendingLocalMedia().filter(request => request.kind !== "local-media" || request.event.kind !== "shader-remap"),
+    local = new Set(pending);
   const ordered = [...source.filter(presentationAudioControl), ...pending].sort((a, b) => a.sequence - b.sequence);
   for (const request of ordered) {
     if (request.kind !== "presentation-owner" && request.sequence < events.appliedMediaSequence) {
@@ -26,8 +35,7 @@ export async function preparePresentationAudio(events: PresentationState, audio:
       if (request.kind === "local-media") {
         if (request.event.kind === "shader-remap") continue;
         await audio.playComponentMedia({ ...request, event: request.event }, () => events.localMediaCurrent(request));
-      }
-      else await audio.receive([request]);
+      } else await audio.receive([request]);
       events.acknowledgeLocalMedia(request);
     } else if (request.kind !== "local-media") await audio.receive([request]);
     if (request.kind !== "presentation-owner") events.appliedMedia(request.sequence);
@@ -38,11 +46,18 @@ export async function preparePresentationAudio(events: PresentationState, audio:
 const shaderDeliveries = new WeakMap<PresentationState, Promise<void>>();
 
 export async function preparePresentationShaders(events: PresentationState, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
-  for (;;) { const pending = shaderDeliveries.get(events); if (pending === undefined) break; await pending; }
+  for (;;) {
+    const pending = shaderDeliveries.get(events);
+    if (pending === undefined) break;
+    await pending;
+  }
   const delivery = drainPresentationShaders(events, assets);
   shaderDeliveries.set(events, delivery);
-  try { await delivery; }
-  finally { if (shaderDeliveries.get(events) === delivery) shaderDeliveries.delete(events); }
+  try {
+    await delivery;
+  } finally {
+    if (shaderDeliveries.get(events) === delivery) shaderDeliveries.delete(events);
+  }
 }
 
 async function drainPresentationShaders(events: PresentationState, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
@@ -54,9 +69,15 @@ async function drainPresentationShaders(events: PresentationState, assets: Pick<
     if (request === null) continue;
     if (request.event.kind !== "shader-remap") throw new Error("Shader delivery requires a material cue");
     const current = (): boolean => events.localMediaCurrent(request);
-    if (!current()) { events.acknowledgeLocalMedia(request, false); continue; }
+    if (!current()) {
+      events.acknowledgeLocalMedia(request, false);
+      continue;
+    }
     const shaders = request.event.original === request.event.replacement ? assets.world.shaders : (await assets.provider(request.content)).shaders;
-    if (!current()) { events.acknowledgeLocalMedia(request, false); continue; }
+    if (!current()) {
+      events.acknowledgeLocalMedia(request, false);
+      continue;
+    }
     const result = await assets.world.remapShader(request.event.original, request.event.replacement, request.event.timeOffset, { source: shaders, current });
     if (result === "stale" && current()) throw new Error("Shader destination changed before local media delivery");
     events.acknowledgeLocalMedia(request, result === "committed");
@@ -71,8 +92,15 @@ export function primaryShaderControl(events: PresentationState, assets: Applicat
     // A consumer retired mid-dispatch (fast restart) drops the remap; its
     // replacement rebuilds shader state from the full configstrings at init.
     if (!current()) return;
-    const parsed = Number.parseFloat(offset), timeOffset = Number.isNaN(parsed) ? 0 : parsed;
-    events.publishLocalMedia(undefined, assets.content.recipe.engineBehavior.content, { kind: "shader-remap", original, replacement, timeOffset }, initializing, current);
+    const parsed = Number.parseFloat(offset),
+      timeOffset = Number.isNaN(parsed) ? 0 : parsed;
+    events.publishLocalMedia(
+      undefined,
+      assets.content.recipe.engineBehavior.content,
+      { kind: "shader-remap", original, replacement, timeOffset },
+      initializing,
+      current,
+    );
     await preparePresentationShaders(events, assets);
   };
 }

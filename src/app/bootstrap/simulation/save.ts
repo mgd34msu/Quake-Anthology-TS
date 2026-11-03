@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
 import { readModule } from "../../../persistence/execution.ts";
 import { decodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
@@ -19,7 +20,8 @@ export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderC
   const matches = image.providers.filter(value => value.schema === schema);
   const value = matches[0];
   const expected = saveProviderContract(schema, image.recipe.map.entities.provider);
-  if (value === undefined || matches.length !== 1 || value.provider !== expected.provider || value.version !== expected.version) throw new Error(`Missing or unsupported saved provider ${schema}`);
+  if (value === undefined || matches.length !== 1 || value.provider !== expected.provider || value.version !== expected.version)
+    throw new Error(`Missing or unsupported saved provider ${schema}`);
   return value;
 }
 
@@ -33,9 +35,12 @@ export function savedSourceCvars(image: SaveImage): unknown {
 export function savedBotCheckpoint(image: SaveImage): DecodedApplicationBotsCheckpoint | null {
   if (!image.providers.some(record => record.schema === "world:bots")) return null;
   const bots = decodeApplicationBotsCheckpoint(decodeCheckpointValue(simulationProviderCheckpoint(image, "world:bots").bytes));
-  const players = simulationSaveReader(image).field("players").list(value => ({
-    slot: value.field("clientSlot").integer(0), actor: readSavedActor(value.field("actor")),
-  }));
+  const players = simulationSaveReader(image)
+    .field("players")
+    .list(value => ({
+      slot: value.field("clientSlot").integer(0),
+      actor: readSavedActor(value.field("actor")),
+    }));
   const slots = new Set<number>();
   for (const connection of bots.transport.connections) {
     if (slots.has(connection.client.slot)) throw new Error("Duplicate saved bot client slot");
@@ -56,24 +61,47 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
     if (image.guests.length !== 0) throw new Error("Selected source cannot restore guest memory providers");
     return null;
   }
-  const checkpoint = image.guests[0], name = execution.kind === "quakec" ? "QuakeC" : q3Native ? "Native Q3" : "QVM";
+  const checkpoint = image.guests[0],
+    name = execution.kind === "quakec" ? "QuakeC" : q3Native ? "Native Q3" : "QVM";
   const kind = q3Native ? "native-guest" : execution.kind;
-  if (image.guests.length !== 1 || checkpoint === undefined || checkpoint.kind !== kind || checkpoint.kind !== "quakec" && checkpoint.kind !== "qvm" && checkpoint.kind !== "native-guest")
+  if (
+    image.guests.length !== 1 ||
+    checkpoint === undefined ||
+    checkpoint.kind !== kind ||
+    (checkpoint.kind !== "quakec" && checkpoint.kind !== "qvm" && checkpoint.kind !== "native-guest")
+  )
     throw new Error(`${name} save requires exactly one complete guest checkpoint`);
-  if (execution.kind === "qvm" && (execution.api.kind !== "q3-qagame" || checkpoint.kind !== "qvm"
-    || execution.api.version !== ((checkpoint.abiProfile ?? "q3-modern") === "q3-modern" ? 8 : 7)))
+  if (
+    execution.kind === "qvm" &&
+    (execution.api.kind !== "q3-qagame" ||
+      checkpoint.kind !== "qvm" ||
+      execution.api.version !== ((checkpoint.abiProfile ?? "q3-modern") === "q3-modern" ? 8 : 7))
+  )
     throw new Error("QVM save requires matching selected qagame API and ABI profile");
   const mount = execution.artifact.provenance.mount.identity;
-  const expected = { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath,
-    digest: execution.artifact.digest, revision: execution.kind === "quakec" ? execution.artifact.digest : `${mount.id}:${mount.generation}` };
+  const expected = {
+    id: execution.owner.provider,
+    artifactPath: execution.artifact.requestedPath,
+    digest: execution.artifact.digest,
+    revision: execution.kind === "quakec" ? execution.artifact.digest : `${mount.id}:${mount.generation}`,
+  };
   if (checkpoint.kind === "native-guest") {
-    if (execution.kind !== "native" || execution.owner.provider !== image.recipe.map.entities.provider || !isDeepStrictEqual(checkpoint.module, expected)
-      || !isDeepStrictEqual(checkpoint.runtimeState.module, expected) || !isDeepStrictEqual(checkpoint.abi, execution.profile))
+    if (
+      execution.kind !== "native" ||
+      execution.owner.provider !== image.recipe.map.entities.provider ||
+      !isDeepStrictEqual(checkpoint.module, expected) ||
+      !isDeepStrictEqual(checkpoint.runtimeState.module, expected) ||
+      !isDeepStrictEqual(checkpoint.abi, execution.profile)
+    )
       throw new Error("Native Q3 checkpoint differs from the selected artifact and profile");
     return checkpoint;
   }
-  if (execution.owner.provider !== image.recipe.map.entities.provider || !isDeepStrictEqual(checkpoint.module, expected)
-    || !isDeepStrictEqual(checkpoint.hostState.module, expected) || !isDeepStrictEqual(checkpoint.api, execution.api))
+  if (
+    execution.owner.provider !== image.recipe.map.entities.provider ||
+    !isDeepStrictEqual(checkpoint.module, expected) ||
+    !isDeepStrictEqual(checkpoint.hostState.module, expected) ||
+    !isDeepStrictEqual(checkpoint.api, execution.api)
+  )
     throw new Error(`${name} checkpoint differs from the selected artifact and API`);
   return checkpoint;
 }
@@ -113,9 +141,13 @@ export function nativeQ2RereleaseSave(image: SaveImage, expected?: ModuleIdentit
 
 export function nativeQ2SavedClients(image: SaveImage) {
   if (nativeQ2OriginalSave(image) === null && nativeQ2RereleaseSave(image) === null) return [];
-  const clients = simulationSaveReader(image).field("nativeClients").list(value => ({
-    clientSlot: value.field("clientSlot").integer(0), phase: value.field("phase").choice("connected", "active"), userinfo: value.field("userinfo").string(),
-  }));
+  const clients = simulationSaveReader(image)
+    .field("nativeClients")
+    .list(value => ({
+      clientSlot: value.field("clientSlot").integer(0),
+      phase: value.field("phase").choice("connected", "active"),
+      userinfo: value.field("userinfo").string(),
+    }));
   if (new Set(clients.map(client => client.clientSlot)).size !== clients.length) throw new Error("Duplicate native saved client slot");
   return clients;
 }
@@ -142,24 +174,48 @@ export function validateSimulationSave(image: SaveImage): void {
   simulationProviderCheckpoint(image, "world:source-slots");
   const guest = simulationGuestCheckpoint(image);
   const native = nativeQ2OriginalSave(image) ?? nativeQ2RereleaseSave(image);
-  if (native !== null && simulationSaveReader(image).field("players").list(value => value.value).length !== 0) throw new Error("Native Q2 players must remain source-owned");
-  if ((guest?.kind === "qvm" || guest?.kind === "native-guest") && simulationSaveReader(image).field("players").list(value => value.value).length !== 0)
+  if (
+    native !== null &&
+    simulationSaveReader(image)
+      .field("players")
+      .list(value => value.value).length !== 0
+  )
+    throw new Error("Native Q2 players must remain source-owned");
+  if (
+    (guest?.kind === "qvm" || guest?.kind === "native-guest") &&
+    simulationSaveReader(image)
+      .field("players")
+      .list(value => value.value).length !== 0
+  )
     throw new Error("Q3 guest players must remain owned by the saved guest client records");
   const execution = image.recipe.execution.find(module => module.role === "server-game");
   const bots = savedBotCheckpoint(image);
   if (bots !== null && execution?.kind !== "typescript") throw new Error("Saved bot services have no supported source owner");
-  if (bots !== null && execution?.kind === "typescript" && execution.api.kind !== "q3-qagame")
-    simulationProviderCheckpoint(image, "world:source-cvars");
+  if (bots !== null && execution?.kind === "typescript" && execution.api.kind !== "q3-qagame") simulationProviderCheckpoint(image, "world:source-cvars");
   if (image.providers.some(record => record.schema === "world:source-cvars")) {
-    if (execution?.kind !== "typescript" || execution.api.kind !== "q1-netquake" && execution.api.kind !== "q1-quakeworld"
-      && execution.api.kind !== "q2-classic-game" && execution.api.kind !== "q2-rerelease-game")
+    if (
+      execution?.kind !== "typescript" ||
+      (execution.api.kind !== "q1-netquake" &&
+        execution.api.kind !== "q1-quakeworld" &&
+        execution.api.kind !== "q2-classic-game" &&
+        execution.api.kind !== "q2-rerelease-game")
+    )
       throw new Error("Saved common cvars have no matching source owner");
     simulationProviderCheckpoint(image, "world:source-cvars");
   }
   if (guest === null && execution?.kind === "typescript") {
     if (execution.api.kind === "q1-netquake" || execution.api.kind === "q1-quakeworld") simulationProviderCheckpoint(image, "q1:foundation");
     else if (execution.api.kind === "q2-classic-game" || execution.api.kind === "q2-rerelease-game") {
-      for (const schema of ["q2:composition", "q2:foundation", "q2:items", "q2:movers", "q2:monsters", "q2:weapons", "q2:players", "q2:base-entities"] satisfies readonly ProviderCheckpoint["schema"][])
+      for (const schema of [
+        "q2:composition",
+        "q2:foundation",
+        "q2:items",
+        "q2:movers",
+        "q2:monsters",
+        "q2:weapons",
+        "q2:players",
+        "q2:base-entities",
+      ] satisfies readonly ProviderCheckpoint["schema"][])
         simulationProviderCheckpoint(image, schema);
     } else if (execution.api.kind === "q3-qagame") {
       simulationProviderCheckpoint(image, "q3:native");
@@ -185,42 +241,77 @@ export function nativeQ3RuntimeReader(image: SaveImage) {
   return {
     arsenals: reader.field("arsenals").list(entry => {
       const state = entry.field("state");
-      const arsenal: Q3ArsenalRuntimeState = { product: state.field("product").choice("baseq3", "missionpack"), maxHealth: state.field("maxHealth").number(),
-        spectator: state.field("spectator").boolean(), persistentPowerupTag: state.field("persistentPowerupTag").integer(), holdableItem: state.field("holdableItem").integer(),
-        holdableTag: state.field("holdableTag").integer(), respawned: state.field("respawned").boolean(), useItemHeld: state.field("useItemHeld").boolean(),
-        eventSequence: state.field("eventSequence").integer(), fractionalMilliseconds: state.field("fractionalMilliseconds").finite(),
+      const arsenal: Q3ArsenalRuntimeState = {
+        product: state.field("product").choice("baseq3", "missionpack"),
+        maxHealth: state.field("maxHealth").number(),
+        spectator: state.field("spectator").boolean(),
+        persistentPowerupTag: state.field("persistentPowerupTag").integer(),
+        holdableItem: state.field("holdableItem").integer(),
+        holdableTag: state.field("holdableTag").integer(),
+        respawned: state.field("respawned").boolean(),
+        useItemHeld: state.field("useItemHeld").boolean(),
+        eventSequence: state.field("eventSequence").integer(),
+        fractionalMilliseconds: state.field("fractionalMilliseconds").finite(),
         externalSlot: state.field("externalSlot").choice("active", "holster-requested", "dropping", "holstered", "resume-requested"),
-        requestedWeapon: state.field("requestedWeapon").nullable(value => value.integer()) };
+        requestedWeapon: state.field("requestedWeapon").nullable(value => value.integer()),
+      };
       return { actor: readSavedActor(entry.field("actor")), state: arsenal };
     }),
-    movement: reader.field("movement").list(entry => ({ actor: readSavedActor(entry.field("actor")), state: entry.field("state").nullable((state): ClientMovementOptions => ({
-      traceMask: state.field("traceMask").integer(), fixedMsec: state.field("fixedMsec").nullable(value => value.integer()),
-      noFootsteps: state.field("noFootsteps").boolean(), gauntletHit: state.field("gauntletHit").boolean(), debugLevel: state.field("debugLevel").integer() })) })),
-    lastAttacks: reader.field("lastAttacks").list(entry => ({ actor: readSavedActor(entry.field("actor")), attack: readQ2AttackCheckpoint(entry.field("attack")) })),
+    movement: reader.field("movement").list(entry => ({
+      actor: readSavedActor(entry.field("actor")),
+      state: entry.field("state").nullable(
+        (state): ClientMovementOptions => ({
+          traceMask: state.field("traceMask").integer(),
+          fixedMsec: state.field("fixedMsec").nullable(value => value.integer()),
+          noFootsteps: state.field("noFootsteps").boolean(),
+          gauntletHit: state.field("gauntletHit").boolean(),
+          debugLevel: state.field("debugLevel").integer(),
+        }),
+      ),
+    })),
+    lastAttacks: reader
+      .field("lastAttacks")
+      .list(entry => ({ actor: readSavedActor(entry.field("actor")), attack: readQ2AttackCheckpoint(entry.field("attack")) })),
   };
 }
 export function simulationSaveReader(image: SaveImage): SaveReader {
   return new SaveReader(decodeCheckpointValue(simulationProviderCheckpoint(image, "world:simulation").bytes), "world:simulation");
 }
 export function savedSimulationSettings(image: SaveImage) {
-  const reader = simulationSaveReader(image), settings = reader.field("settings");
+  const reader = simulationSaveReader(image),
+    settings = reader.field("settings");
   const guest = simulationQ3GuestCheckpoint(image);
-  return { skill: settings.field("skill").choice(0, 1, 2, 3), mode: settings.field("mode").choice("singleplayer", "coop", "deathmatch"),
-    maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
+  return {
+    skill: settings.field("skill").choice(0, 1, 2, 3),
+    mode: settings.field("mode").choice("singleplayer", "coop", "deathmatch"),
+    maxClients: settings.field("maxClients").integer(1),
+    seed: settings.field("seed").integer(0),
     initialSpawnPoint: settings.field("initialSpawnPoint").value === undefined ? "" : settings.field("initialSpawnPoint").string(),
     startItems: settings.field("startItems").value === undefined ? "" : settings.field("startItems").string(),
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
-    clientSlots: nativeQ2OriginalSave(image) !== null || nativeQ2RereleaseSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
-      : savedQ3GuestClients(guest).map(player => player.client.slot) };
+    clientSlots:
+      nativeQ2OriginalSave(image) !== null || nativeQ2RereleaseSave(image) !== null
+        ? nativeQ2SavedClients(image).map(client => client.clientSlot)
+        : guest === null
+          ? reader.field("players").list(value => value.field("clientSlot").integer(0))
+          : savedQ3GuestClients(guest).map(player => player.client.slot),
+  };
 }
 
 function savedNativeModule(image: SaveImage, schema: "q2:classic-native-original" | "q2:rerelease-native-original"): ModuleIdentity {
   const execution = image.recipe.execution.find(module => module.role === "server-game");
   if (execution?.kind !== "native") throw new Error("Native saved identity has no source execution");
-  const record = simulationProviderCheckpoint(image, schema), reader = new SaveReader(decodeCheckpointValue(record.bytes), schema);
-  const module = readModule(reader.field("module")), prefix = `${execution.artifact.digest}/native-compatibility.json/`;
+  const record = simulationProviderCheckpoint(image, schema),
+    reader = new SaveReader(decodeCheckpointValue(record.bytes), schema);
+  const module = readModule(reader.field("module")),
+    prefix = `${execution.artifact.digest}/native-compatibility.json/`;
   const declared = module.revision.startsWith(prefix) && /^sha256:[0-9a-f]{64}$/.test(module.revision.slice(prefix.length));
-  if (module.id !== execution.owner.provider || module.artifactPath !== execution.artifact.requestedPath || module.digest !== execution.artifact.digest
-    || module.revision !== execution.artifact.digest && !declared) throw new Error("Native saved identity differs from the selected artifact");
+  if (
+    module.id !== execution.owner.provider ||
+    module.artifactPath !== execution.artifact.requestedPath ||
+    module.digest !== execution.artifact.digest ||
+    (module.revision !== execution.artifact.digest && !declared)
+  )
+    throw new Error("Native saved identity differs from the selected artifact");
   return module;
 }

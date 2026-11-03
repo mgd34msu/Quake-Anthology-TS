@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Memory traps from server/sv_game.c, client/cl_cgame.c and client/cl_ui.c.
  * Copyright (C) 1999-2005 Id Software, Inc.

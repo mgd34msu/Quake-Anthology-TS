@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SelectedPickupWeapon } from "../../../../world/gameplay/pickups.ts";
 import { q1WeaponStatus, q1WeaponDisplayName } from "./weapon-status.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
@@ -42,21 +43,30 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     this.weapons = [...new Set<Q1Weapon>([...WEAPONS, ...options.game.registeredWeapons.keys()])];
   }
 
-  get game(): Q1EntityServices { return this.options.game; }
+  get game(): Q1EntityServices {
+    return this.options.game;
+  }
 
-  has(actor: ActorId): boolean { return this.options.game.player(actor) !== null; }
+  has(actor: ActorId): boolean {
+    return this.options.game.player(actor) !== null;
+  }
 
   admit(actor: OwnedActor, maxHealth: number): ArsenalState {
     const game = this.options.game;
     if (game.player(actor.id) !== null) throw new Error("Selected Q1 arsenal already admitted");
-    for (const entry of game.host.inventory.entries(actor.id)) if (this.options.replacedItems?.includes(entry.item)) game.host.inventory.configure(actor, { ...entry, count: 0 });
+    for (const entry of game.host.inventory.entries(actor.id))
+      if (this.options.replacedItems?.includes(entry.item)) game.host.inventory.configure(actor, { ...entry, count: 0 });
     const native = this.options.nativePlayer?.(actor.id);
     if (native === undefined) game.initializeWeaponInventory(actor);
     for (const weapon of game.registeredWeapons.keys()) {
       const item = game.weaponItem(weapon);
       game.host.inventory.configure(actor, { item, count: game.host.inventory.count(actor.id, item), capacity: 1 });
     }
-    const player = game.attachPlayer(actor, { initializeInventory: false, maxHealth: native?.maxHealth ?? maxHealth, ...(native === undefined ? {} : { weapon: native.weapon }) });
+    const player = game.attachPlayer(actor, {
+      initializeInventory: false,
+      maxHealth: native?.maxHealth ?? maxHealth,
+      ...(native === undefined ? {} : { weapon: native.weapon }),
+    });
     if (native?.autoSwitch !== undefined) player.autoSwitch = native.autoSwitch;
     return this.read(actor.id);
   }
@@ -83,49 +93,76 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     const extensions = (travel.extensions ?? []).map(extension => {
       const restore = game.playerExtensions.get(extension.id)?.restoreTravel;
       if (restore === undefined || restored.has(extension.id)) throw new Error(`Invalid selected Q1 travel extension: ${extension.id}`);
-      restored.add(extension.id); return { restore, bytes: extension.bytes };
+      restored.add(extension.id);
+      return { restore, bytes: extension.bytes };
     });
     const player = game.attachPlayer(actor, { initializeInventory: false, maxHealth, weapon: travel.weapon });
-    for (const entry of travel.inventory) game.host.inventory.configure(actor, { ...entry, capacity: game.inventoryCapacity(actor.id, entry.item) ?? entry.capacity });
+    for (const entry of travel.inventory)
+      game.host.inventory.configure(actor, { ...entry, capacity: game.inventoryCapacity(actor.id, entry.item) ?? entry.capacity });
     for (const extension of extensions) extension.restore(game, player, extension.bytes);
     return this.read(actor.id);
   }
 
   read(actor: ActorId): ArsenalState {
-    const player = this.require(actor), game = this.options.game;
+    const player = this.require(actor),
+      game = this.options.game;
     if (!this.weapons.includes(player.weapon)) throw new Error("Selected Q1 player has a weapon from another product");
-    return { provider: this.provider, activeWeapon: game.weaponItem(player.weapon),
-      ammo: game.host.inventory.entries(actor).filter(entry => this.weapons.some(weapon => game.weaponItem(weapon) === entry.item || game.weaponAmmo(weapon) === entry.item)),
-      state: { kind: "q1", frame: player.weaponFrame, attackFinishedSeconds: player.attackFinished, sourceWeapon: isQ1BaseWeapon(player.weapon) ? q1WeaponBit(player.weapon) : 0 } };
+    return {
+      provider: this.provider,
+      activeWeapon: game.weaponItem(player.weapon),
+      ammo: game.host.inventory
+        .entries(actor)
+        .filter(entry => this.weapons.some(weapon => game.weaponItem(weapon) === entry.item || game.weaponAmmo(weapon) === entry.item)),
+      state: {
+        kind: "q1",
+        frame: player.weaponFrame,
+        attackFinishedSeconds: player.attackFinished,
+        sourceWeapon: isQ1BaseWeapon(player.weapon) ? q1WeaponBit(player.weapon) : 0,
+      },
+    };
   }
 
   select(actor: ActorId, item: ItemId): boolean {
-    const player = this.require(actor), game = this.options.game;
+    const player = this.require(actor),
+      game = this.options.game;
     const weapon = this.weapons.find(weapon => game.weaponItem(weapon) === item);
     return weapon !== undefined && game.selectWeapon(player.actor, weapon);
   }
 
-  pendingWeapon(actor: ActorId): null { this.require(actor); return null; }
+  pendingWeapon(actor: ActorId): null {
+    this.require(actor);
+    return null;
+  }
   impulse(actor: ActorId, value: number): boolean {
     const player = this.require(actor);
     if (value === 0 || this.game.time < player.attackFinished) return false;
     return this.options.impulse?.(player, value) ?? q1WeaponImpulse(this.game, player, value);
   }
-  handoff(actor: ActorId) { return this.options.game.primaryWeaponHandoff(this.require(actor).actor); }
+  handoff(actor: ActorId) {
+    return this.options.game.primaryWeaponHandoff(this.require(actor).actor);
+  }
 
   pickupAmmo(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined {
-    const game = this.options.game, player = this.require(actor.id);
+    const game = this.options.game,
+      player = this.require(actor.id);
     this.options.preparePickup?.(player);
     const before = game.chooseBest(actor, item => grants.find(grant => grant.item === item)?.before ?? game.host.inventory.count(actor.id, item));
     return q1AmmoPickupSelection(game, player, before, autoSwitch && (this.options.nativePlayer?.(actor.id).autoSwitch ?? player.autoSwitch) !== "never");
   }
 
   pickupWeapons(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined {
-    const game = this.options.game, player = this.require(actor.id);
+    const game = this.options.game,
+      player = this.require(actor.id);
     this.options.preparePickup?.(player);
     for (const item of weapons) {
       const weapon = this.weapons.find(weapon => game.weaponItem(weapon) === item);
-      if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, (this.options.nativePlayer?.(actor.id).autoSwitch ?? player.autoSwitch) === "never" ? "never" : selection);
+      if (weapon !== undefined)
+        q1WeaponPickupSelection(
+          game,
+          player,
+          weapon,
+          (this.options.nativePlayer?.(actor.id).autoSwitch ?? player.autoSwitch) === "never" ? "never" : selection,
+        );
     }
     return undefined;
   }
@@ -133,15 +170,20 @@ export class Q1SelectedArsenal implements SelectedArsenal {
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to a different provider");
     // Peers choose this string; a weapon outside the product is no request.
-    if (intent?.weapon != null && this.weapons.some(weapon => this.options.game.weaponItem(weapon) === intent.weapon) && this.options.game.weaponItem(this.require(input.actor.id).weapon) !== intent.weapon)
+    if (
+      intent?.weapon != null &&
+      this.weapons.some(weapon => this.options.game.weaponItem(weapon) === intent.weapon) &&
+      this.options.game.weaponItem(this.require(input.actor.id).weapon) !== intent.weapon
+    )
       this.select(input.actor.id, intent.weapon);
-    const before = this.read(input.actor.id), observation = this.options.observe(input.actor.id);
+    const before = this.read(input.actor.id),
+      observation = this.options.observe(input.actor.id);
     const seconds = input.frame.time.kind === "seconds" ? input.frame.time.value : input.frame.time.value / 1000;
     const pressed = (input.command.buttons & 1) !== 0 && (input.command.kind !== "q3" || (input.command.buttons & CommandButtons.TALK) === 0);
     const weapon = this.require(input.actor.id).weapon;
     const fired = this.options.game.weaponInput(input.actor, pressed, observation.viewAngles, seconds, observation.waterLevel);
     const live = this.options.game.host.actors.isLive(input.actor.id);
-    const animation = fired && live ? this.options.fired?.(input.actor.id, weapon, input.animation) ?? input.animation : input.animation;
+    const animation = fired && live ? (this.options.fired?.(input.actor.id, weapon, input.animation) ?? input.animation) : input.animation;
     return { arsenal: live ? this.read(input.actor.id) : before, animation, effects: [] };
   }
 
@@ -157,13 +199,30 @@ export class Q1SelectedArsenal implements SelectedArsenal {
   }
 
   ui(actor: ActorId, source: ProviderReference): Pick<PlayerUi, "activeWeapon" | "ammo" | "items" | "weaponStatus" | "arsenalWarning"> {
-    const player = this.require(actor), game = this.options.game, ammo = game.weaponAmmo(player.weapon);
-    return { weaponStatus: q1WeaponStatus(game, player, source), arsenalWarning: "none", activeWeapon: game.weaponItem(player.weapon), ammo: ammo === null ? null : { item: ammo, count: game.host.inventory.count(actor, ammo) },
+    const player = this.require(actor),
+      game = this.options.game,
+      ammo = game.weaponAmmo(player.weapon);
+    return {
+      weaponStatus: q1WeaponStatus(game, player, source),
+      arsenalWarning: "none",
+      activeWeapon: game.weaponItem(player.weapon),
+      ammo: ammo === null ? null : { item: ammo, count: game.host.inventory.count(actor, ammo) },
       items: this.weapons.map((weapon, index) => {
-        const item = game.weaponItem(weapon), ammo = game.weaponAmmo(weapon), count = ammo === null ? null : game.host.inventory.count(actor, ammo);
-        return { id: item, label: q1WeaponDisplayName(weapon), kind: "weapon", sourceOrdinal: index + 1, owned: game.host.inventory.count(actor, item) > 0,
-          hasAmmo: game.weaponAvailable(player, weapon), count, warningCount: 0 };
-      }) };
+        const item = game.weaponItem(weapon),
+          ammo = game.weaponAmmo(weapon),
+          count = ammo === null ? null : game.host.inventory.count(actor, ammo);
+        return {
+          id: item,
+          label: q1WeaponDisplayName(weapon),
+          kind: "weapon",
+          sourceOrdinal: index + 1,
+          owned: game.host.inventory.count(actor, item) > 0,
+          hasAmmo: game.weaponAvailable(player, weapon),
+          count,
+          warningCount: 0,
+        };
+      }),
+    };
   }
 
   view(actor: ActorId): { readonly path: string; readonly frame: number } {
@@ -172,7 +231,11 @@ export class Q1SelectedArsenal implements SelectedArsenal {
   }
 
   catalog(): readonly SelectedPickupWeapon[] {
-    return this.weapons.map(weapon => ({ item: this.game.weaponItem(weapon), ammo: this.game.weaponAmmo(weapon), drop: weapon === "rogue:grapple" || weapon === "ctf:grapple" ? "none" : "supply" }));
+    return this.weapons.map(weapon => ({
+      item: this.game.weaponItem(weapon),
+      ammo: this.game.weaponAmmo(weapon),
+      drop: weapon === "rogue:grapple" || weapon === "ctf:grapple" ? "none" : "supply",
+    }));
   }
 
   private require(actor: ActorId): Q1PlayerState {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_active.c: ClientEvents.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ServerWorld } from "../base/world.ts";
@@ -23,11 +24,11 @@ interface ClientEventServices {
 }
 
 /** Time, gameType, drop timing and dmflags may be live getters during dispatch. */
-export type ClientEventsContext = ClientEventServices & (
-  | { readonly product: "baseq3"; readonly combat: Extract<CombatContext, { product: "baseq3" }> }
-  | { readonly product: "missionpack"; readonly combat: Extract<CombatContext, { product: "missionpack" }>;
-    readonly personalPortal: PersonalPortalRuntime }
-);
+export type ClientEventsContext = ClientEventServices &
+  (
+    | { readonly product: "baseq3"; readonly combat: Extract<CombatContext, { product: "baseq3" }> }
+    | { readonly product: "missionpack"; readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly personalPortal: PersonalPortalRuntime }
+  );
 
 /** Executes server effects from the two-slot predictable-event ring, without consuming it. */
 export function clientEvents(context: ClientEventsContext, entity: GameEntity, oldEventSequence: number): void {
@@ -42,15 +43,18 @@ export function clientEvents(context: ClientEventsContext, entity: GameEntity, o
     switch (event) {
       case EntityEvent.EV_FALL_MEDIUM:
       case EntityEvent.EV_FALL_FAR:
-        if (entity.s.eType !== EntityType.ET_PLAYER || (context.dmflags & 8)) break;
+        if (entity.s.eType !== EntityType.ET_PLAYER || context.dmflags & 8) break;
         entity.painDebounceTime = (context.combat.time + 200) | 0;
         damage(context.combat, entity, null, null, null, null, event === EntityEvent.EV_FALL_FAR ? 10 : 5, 0, 19);
         break;
       case EntityEvent.EV_FIRE_WEAPON:
         if (context.primaryAttackAllowed?.(entity.actor.id) !== false) context.weapons.fire(entity);
         break;
-      case EntityEvent.EV_USE_ITEM1: case EntityEvent.EV_USE_ITEM2: case EntityEvent.EV_USE_ITEM3:
-      case EntityEvent.EV_USE_ITEM4: case EntityEvent.EV_USE_ITEM5:
+      case EntityEvent.EV_USE_ITEM1:
+      case EntityEvent.EV_USE_ITEM2:
+      case EntityEvent.EV_USE_ITEM3:
+      case EntityEvent.EV_USE_ITEM4:
+      case EntityEvent.EV_USE_ITEM5:
         useQ3Holdable({ ...context, teleport: target => useTeleporter(context, target) }, entity, event);
         break;
       default:
@@ -74,12 +78,17 @@ export function useQ3Holdable(context: Q3HoldableContext, entity: GameEntity, ev
   switch (event) {
     case EntityEvent.EV_USE_ITEM1:
       context.combat.entities.rankings.useHoldable(entity.slot, 1);
-      context.teleport(entity); break;
+      context.teleport(entity);
+      break;
     case EntityEvent.EV_USE_ITEM2:
       context.combat.entities.rankings.useHoldable(entity.slot, 2);
-      entity.health = (client.ps.stats.get(statSchema(context.product).maxHealth) + 25) | 0; break;
+      entity.health = (client.ps.stats.get(statSchema(context.product).maxHealth) + 25) | 0;
+      break;
     case EntityEvent.EV_USE_ITEM3:
-      if (context.product === "missionpack") { client.invulnerabilityTime = 0; context.weapons.startKamikaze(entity); }
+      if (context.product === "missionpack") {
+        client.invulnerabilityTime = 0;
+        context.weapons.startKamikaze(entity);
+      }
       break;
     case EntityEvent.EV_USE_ITEM4:
       if (context.product === "missionpack") {
@@ -96,9 +105,13 @@ export function useQ3Holdable(context: Q3HoldableContext, entity: GameEntity, ev
 export function dropQ3TeleportObjectives(context: Pick<ClientEventsContext, "drops" | "product" | "combat">, entity: GameEntity): void {
   const client = entity.client;
   if (client === null) throw new Error("Teleporter requires a client entity");
-  const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG) ? Powerup.PW_REDFLAG :
-    client.ps.powerups.get(Powerup.PW_BLUEFLAG) ? Powerup.PW_BLUEFLAG :
-      client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) ? Powerup.PW_NEUTRALFLAG : Powerup.PW_NONE;
+  const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG)
+    ? Powerup.PW_REDFLAG
+    : client.ps.powerups.get(Powerup.PW_BLUEFLAG)
+      ? Powerup.PW_BLUEFLAG
+      : client.ps.powerups.get(Powerup.PW_NEUTRALFLAG)
+        ? Powerup.PW_NEUTRALFLAG
+        : Powerup.PW_NONE;
   const flag = powerup === Powerup.PW_NONE ? null : findItemForPowerup(context.product, powerup);
   if (flag !== null) {
     const dropped = dropItem(context.drops, entity, flag, 0);

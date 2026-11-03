@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, ProviderId } from "./identity.ts";
 
 export type ClockProfile =
@@ -5,18 +6,26 @@ export type ClockProfile =
   | { readonly kind: "q1-quakeworld"; readonly maximumCommandMilliseconds: number }
   | { readonly kind: "q2-classic"; readonly frameMilliseconds: 100 }
   | { readonly kind: "q2-rerelease"; readonly frameMilliseconds: number; readonly preparation: "before-frame" }
-  | { readonly kind: "q3"; readonly serverFrameMilliseconds: number; readonly fixedMovementMilliseconds: number | null; readonly maximumCommandMilliseconds: 200 };
+  | {
+      readonly kind: "q3";
+      readonly serverFrameMilliseconds: number;
+      readonly fixedMovementMilliseconds: number | null;
+      readonly maximumCommandMilliseconds: 200;
+    };
 
 /** Source clocks retain their units; conversion is explicit at a provider boundary. */
-export type SourceTime =
-  | { readonly kind: "seconds"; readonly value: number }
-  | { readonly kind: "milliseconds"; readonly value: number };
+export type SourceTime = { readonly kind: "seconds"; readonly value: number } | { readonly kind: "milliseconds"; readonly value: number };
 
 export type FramePhase = "frame-entry" | "client-command" | "entity-prethink" | "entity-physics" | "entity-think" | "client-end-frame" | "frame-exit";
 
 export type FrameOrdering =
   | { readonly kind: "native"; readonly traversal: "source-slot-order"; readonly clock: ClockProfile }
-  | { readonly kind: "mixed"; readonly providers: readonly ProviderId[]; readonly entityOrder: "source-slot-order"; readonly ties: "provider-entity-invocation" };
+  | {
+      readonly kind: "mixed";
+      readonly providers: readonly ProviderId[];
+      readonly entityOrder: "source-slot-order";
+      readonly ties: "provider-entity-invocation";
+    };
 
 export interface FrameContext {
   readonly frame: number;

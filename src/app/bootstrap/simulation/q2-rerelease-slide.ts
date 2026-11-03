@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II rerelease g_phys.cpp SV_FlyMove. GPL-2.0-or-later.
  * Movement clipping is shared with the existing p_move.cpp implementation. */
 import { sameActor } from "../../../contracts/identity.ts";
@@ -30,19 +31,26 @@ const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** Creates the source movement routines once per physics owner. Impacts occur
  * after all bumps, in first-contact order, with the final body already visible. */
-export function createQ2RereleaseFlyMove(numeric: NumericOperations, context: Q2RereleaseMovementContext): (actor: OwnedActor, elapsed: number, host: Q2RereleaseFlyMoveServices) => undefined {
+export function createQ2RereleaseFlyMove(
+  numeric: NumericOperations,
+  context: Q2RereleaseMovementContext,
+): (actor: OwnedActor, elapsed: number, host: Q2RereleaseFlyMoveServices) => undefined {
   const movement = createRereleaseMovement(numeric, context);
   return (actor, elapsed, host) => {
     const body = host.bodies.read(actor.id);
     if (body === null || !host.actors.isLive(actor.id)) return undefined;
     host.bodies.write(actor, { ...body, ground: null });
-    const origin = sourceVector(body.origin), velocity = sourceVector(body.velocity);
+    const origin = sourceVector(body.origin),
+      velocity = sourceVector(body.velocity);
     const touch: KexTouchListT = { num: 0, traces: [] };
     const entities: MovementEntity[] = [];
     const canonical = (hit: TraceResult["hit"]): MovementEntity | null => {
       if (hit.kind === "none") return null;
-      const existing = entities.find(candidate => candidate.kind === "world" && hit.kind === "world" ? candidate.model === hit.model
-        : candidate.kind === "actor" && hit.kind === "actor" && sameActor(candidate.actor, hit.actor));
+      const existing = entities.find(candidate =>
+        candidate.kind === "world" && hit.kind === "world"
+          ? candidate.model === hit.model
+          : candidate.kind === "actor" && hit.kind === "actor" && sameActor(candidate.actor, hit.actor),
+      );
       if (existing !== undefined) return existing;
       entities.push(hit);
       return hit;
@@ -54,13 +62,30 @@ export function createQ2RereleaseFlyMove(numeric: NumericOperations, context: Q2
       if (current !== null) host.bodies.write(actor, { ...current, origin: vector(origin), velocity: vector(velocity) });
       const result = host.trace(vector(start), vector(end), { min: vector(mins), max: vector(maxs) });
       if (result.kind !== "q2") throw new Error("Rerelease sliding requires Q2 trace fields");
-      return { allsolid: result.allSolid, startsolid: result.startSolid, fraction: result.fraction, endpos: sourceVector(result.end),
-        plane: sourcePlane(result.sourcePlane), surface: result.surface === null ? null : { ...result.surface },
+      return {
+        allsolid: result.allSolid,
+        startsolid: result.startSolid,
+        fraction: result.fraction,
+        endpos: sourceVector(result.end),
+        plane: sourcePlane(result.sourcePlane),
+        surface: result.surface === null ? null : { ...result.surface },
         plane2: result.secondary === null ? plane() : sourcePlane(result.secondary.plane),
         surface2: result.secondary?.surface === null || result.secondary === null ? null : { ...result.secondary.surface },
-        contents: result.contents, ent: canonical(result.hit), source: result };
+        contents: result.contents,
+        ent: canonical(result.hit),
+        source: result,
+      };
     };
-    movement.PM_StepSlideMove_Generic(origin, velocity, numeric.store(elapsed), sourceVector(body.bounds.min), sourceVector(body.bounds.max), touch, false, trace);
+    movement.PM_StepSlideMove_Generic(
+      origin,
+      velocity,
+      numeric.store(elapsed),
+      sourceVector(body.bounds.min),
+      sourceVector(body.bounds.max),
+      touch,
+      false,
+      trace,
+    );
     const moved = host.bodies.read(actor.id);
     if (moved === null || !host.actors.isLive(actor.id)) return undefined;
     host.bodies.write(actor, { ...moved, origin: vector(origin), velocity: vector(velocity) });
@@ -69,8 +94,12 @@ export function createQ2RereleaseFlyMove(numeric: NumericOperations, context: Q2
       const original = contact.source;
       if (original.kind !== "q2") throw new Error("Rerelease contact lost its source trace");
       const selectedPlane = scenePlane(contact.plane);
-      const result: TraceResult = { ...original, sourcePlane: selectedPlane, surface: contact.surface,
-        contact: original.contact.kind === "none" ? original.contact : { kind: "plane", plane: selectedPlane } };
+      const result: TraceResult = {
+        ...original,
+        sourcePlane: selectedPlane,
+        surface: contact.surface,
+        contact: original.contact.kind === "none" ? original.contact : { kind: "plane", plane: selectedPlane },
+      };
       const other = host.hitActor(result);
       if (other === null || !host.actors.isLive(other)) continue;
       const current = host.bodies.read(actor.id);

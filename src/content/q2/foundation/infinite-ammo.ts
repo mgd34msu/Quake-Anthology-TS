@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q2GameServices } from "./host.ts";
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Interned string identities, following the shared C foundation
  * (include/qa/strings.h, src/core/strings.c): text is admitted once and every
@@ -36,12 +37,30 @@ export function quakeNameFlags(text: string): number {
   if (text.startsWith("q1:ammo/")) flags |= NAME_Q1_AMMO;
   if (text.length > 2 && text.startsWith("*") && (text.endsWith("p") || text.endsWith("P"))) flags |= NAME_BRUSH_PATH;
   switch (text) {
-    case "red": case "team:red": flags |= NAME_TEAM_RED_ALIAS | NAME_TEAM_RED_EXACT; break;
-    case "blue": case "team:blue": flags |= NAME_TEAM_BLUE_ALIAS | NAME_TEAM_BLUE_EXACT; break;
-    case "5": case "q2:1": case "q3:1": flags |= NAME_TEAM_RED_ALIAS; break;
-    case "14": case "q2:2": case "q3:2": flags |= NAME_TEAM_BLUE_ALIAS; break;
-    case "q2": case "q3": flags |= NAME_TEAM_COLOR_NAMESPACE; break;
-    default: break;
+    case "red":
+    case "team:red":
+      flags |= NAME_TEAM_RED_ALIAS | NAME_TEAM_RED_EXACT;
+      break;
+    case "blue":
+    case "team:blue":
+      flags |= NAME_TEAM_BLUE_ALIAS | NAME_TEAM_BLUE_EXACT;
+      break;
+    case "5":
+    case "q2:1":
+    case "q3:1":
+      flags |= NAME_TEAM_RED_ALIAS;
+      break;
+    case "14":
+    case "q2:2":
+    case "q3:2":
+      flags |= NAME_TEAM_BLUE_ALIAS;
+      break;
+    case "q2":
+    case "q3":
+      flags |= NAME_TEAM_COLOR_NAMESPACE;
+      break;
+    default:
+      break;
   }
   return flags;
 }
@@ -58,7 +77,9 @@ export class StringTable {
 
   constructor(private readonly classify: (text: string) => number = quakeNameFlags) {}
 
-  get count(): number { return this.texts.length - 1; }
+  get count(): number {
+    return this.texts.length - 1;
+  }
 
   intern(text: string): number {
     const existing = this.ids.get(text);
@@ -83,7 +104,7 @@ export class StringTable {
 
   /** Binds a static name list once; the returned IDs stay valid for the table lifetime. */
   bindNames(names: readonly string[]): readonly number[] {
-    return names.map((name) => this.intern(name));
+    return names.map(name => this.intern(name));
   }
 
   text(id: number): string {

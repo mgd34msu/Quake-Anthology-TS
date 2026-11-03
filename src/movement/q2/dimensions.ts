@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Bounds } from "../../contracts/math.ts";
 import type { NumericOperations } from "../../contracts/numeric.ts";
 

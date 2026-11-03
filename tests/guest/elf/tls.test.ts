@@ -8,7 +8,11 @@ import { loadElf } from "../../../src/guest/elf/index.ts";
 import { elfTlsFixture as fixture } from "../../support/elf-fixtures.ts";
 
 const module: ModuleIdentity = { id: "test:elf-tls", artifactPath: "authored-elf-tls", revision: "1", digest: createContentDigest("32".repeat(32)) };
-const resolver: GuestImportResolver = { resolve(import_) { return { kind: "unresolved", import: import_, detail: "authored image has no external imports" }; } };
+const resolver: GuestImportResolver = {
+  resolve(import_) {
+    return { kind: "unresolved", import: import_, detail: "authored image has no external imports" };
+  },
+};
 
 function at(memory: SparseGuestMemory, value: bigint): GuestAddress {
   const address = memory.pointer(value);
@@ -25,7 +29,12 @@ for (const width of [4, 8]) {
     const options = { bytes, module, memory, loadBias, resolver, dependencies: new Set<string>() };
     expect(() => loadElf(options)).toThrow("requires a guest thread/module allocation");
     expect(memory.mappings()).toHaveLength(0);
-    const tls = { current: { moduleId: 7n, threadPointerOffset: -64n }, resolve() { return null; } };
+    const tls = {
+      current: { moduleId: 7n, threadPointerOffset: -64n },
+      resolve() {
+        return null;
+      },
+    };
     expect(() => loadElf({ ...options, tls })).toThrow("requires explicit guest resolver execution");
     expect(memory.mappings()).toHaveLength(0);
     const unsupported = bytes.slice();
@@ -35,7 +44,9 @@ for (const width of [4, 8]) {
     expect(() => loadElf({ ...options, bytes: unsupported, tls })).toThrow("unsupported");
     expect(memory.mappings()).toHaveLength(0);
     let indirectCalls = 0;
-    const image = loadElf({ ...options, tls,
+    const image = loadElf({
+      ...options,
+      tls,
       resolveIndirect(address) {
         expect(address.byteOffset).toBe(loadBias + 0x840n);
         expect(memory.readPointer(at(memory, loadBias + 0x700n))?.byteOffset).toBe(loadBias + 0x800n);
@@ -43,7 +54,8 @@ for (const width of [4, 8]) {
         return at(memory, loadBias + 0x850n);
       },
     });
-    const read = (offset: bigint): bigint => width === 8 ? memory.readUint64(at(memory, loadBias + offset)) : BigInt(memory.readUint32(at(memory, loadBias + offset)));
+    const read = (offset: bigint): bigint =>
+      width === 8 ? memory.readUint64(at(memory, loadBias + offset)) : BigInt(memory.readUint32(at(memory, loadBias + offset)));
     expect(read(0x900n)).toBe(7n);
     expect(read(0x910n)).toBe(width === 8 ? 11n : 4n);
     expect(BigInt.asIntN(width * 8, read(0x920n))).toBe(-57n);
@@ -56,7 +68,10 @@ for (const width of [4, 8]) {
     expect(image.tls.zeroFillBytes).toBe(16);
     expect(image.tls.alignment).toBe(16n);
     expect(image.tlsExports).toEqual([{ symbol: { kind: "name", name: "tls", version: null }, offset: 4n, byteLength: 4 }]);
-    expect(image.exports.map(item => item.symbol)).toEqual([{ kind: "name", name: "entry", version: "ELF_TEST_1" }, { kind: "name", name: "entry", version: null }]);
+    expect(image.exports.map(item => item.symbol)).toEqual([
+      { kind: "name", name: "entry", version: "ELF_TEST_1" },
+      { kind: "name", name: "entry", version: null },
+    ]);
     expect(image.initializers.map(address => address.byteOffset)).toEqual([0x800n, 0x800n, 0x810n].map(value => loadBias + value));
     expect(image.finalizers.map(address => address.byteOffset)).toEqual([0x830n, 0x820n, 0x810n].map(value => loadBias + value));
   });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,19 +33,49 @@ test("map-only add-ons retain package identity and scripts while inheriting thei
     }
     const catalog = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: true });
     for (const base of products) {
-      const child = catalog.require(`${base.family}-${base.edition}-map-only`), parent = catalog.require(`${base.family}-${base.edition}-custom-code`);
-      const inherited = new InstalledCatalog(root, catalog.products.map(product => product.id === child.id
-        ? { ...product, expectation: { ...product.expectation, baseProduct: parent.expectation.id } } : product), catalog.rootArchives, catalog.generation);
-      const inheritedCommand = parseApplicationCommand(["--game", child.expectation.id, "--map", "start", "--movement", base.family, "--character", base.family, "--mode", "deathmatch"]);
+      const child = catalog.require(`${base.family}-${base.edition}-map-only`),
+        parent = catalog.require(`${base.family}-${base.edition}-custom-code`);
+      const inherited = new InstalledCatalog(
+        root,
+        catalog.products.map(product =>
+          product.id === child.id ? { ...product, expectation: { ...product.expectation, baseProduct: parent.expectation.id } } : product,
+        ),
+        catalog.rootArchives,
+        catalog.generation,
+      );
+      const inheritedCommand = parseApplicationCommand([
+        "--game",
+        child.expectation.id,
+        "--map",
+        "start",
+        "--movement",
+        base.family,
+        "--character",
+        base.family,
+        "--mode",
+        "deathmatch",
+      ]);
       if (inheritedCommand.kind !== "run") throw new Error("Missing inherited launch");
       const inheritedPreset = applicationPreset(inherited, inheritedCommand.options);
       expect(inheritedPreset.map.entities.content).toBe(child.id);
       expect(inheritedPreset.execution[0]?.kind).toBe(base.family === "q1" ? "quakec" : base.family === "q2" ? "native" : "qvm");
       for (const name of ["map-only", "custom-code"]) {
         const id = `${base.family}-${base.edition}-${name}`;
-        const command = parseApplicationCommand(["--game", id, "--map", "start", "--movement", base.family, "--character", base.family, "--mode", "deathmatch"]);
+        const command = parseApplicationCommand([
+          "--game",
+          id,
+          "--map",
+          "start",
+          "--movement",
+          base.family,
+          "--character",
+          base.family,
+          "--mode",
+          "deathmatch",
+        ]);
         if (command.kind !== "run") throw new Error("Missing application options");
-        const product = catalog.require(id), preset = applicationPreset(catalog, command.options);
+        const product = catalog.require(id),
+          preset = applicationPreset(catalog, command.options);
         expect(preset.map.entities.content).toBe(product.id);
         expect(preset.map.geometry.content).toBe(product.id);
         expect(preset.presentation.assets).toBe(product.id);
@@ -58,7 +89,9 @@ test("map-only add-ons retain package identity and scripts while inheriting thei
             try {
               expect(configuration.selection.source.content).toBe(product.id);
               expect(new TextDecoder().decode((await configuration.mounts.open("config.cfg"))?.bytes)).toBe("echo map-only\n");
-            } finally { await configuration.close(); }
+            } finally {
+              await configuration.close();
+            }
           }
         } else {
           expect(sourceProgramProduct(catalog, product.id).id).toBe(product.id);
@@ -66,34 +99,77 @@ test("map-only add-ons retain package identity and scripts while inheriting thei
         }
       }
     }
-    const arena = catalog.require("q3-baseq3"), child = catalog.require("q3-classic-map-only");
+    const arena = catalog.require("q3-baseq3"),
+      child = catalog.require("q3-classic-map-only");
     const teamExpectation = expectedProducts.find(product => product.id === "q3-missionpack");
     if (teamExpectation === undefined) throw new Error("Missing Team Arena product");
     const team = { ...arena, id: "q3:classic:missionpack:installed", expectation: teamExpectation } satisfies typeof arena;
-    const teamCatalog = new InstalledCatalog(root, [...catalog.products.map(product => product.id === child.id
-      ? { ...product, expectation: { ...product.expectation, baseProduct: teamExpectation.id } } : product), team], catalog.rootArchives, catalog.generation);
-    const teamCommand = parseApplicationCommand(["--game", child.expectation.id, "--map", "start", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"]);
+    const teamCatalog = new InstalledCatalog(
+      root,
+      [
+        ...catalog.products.map(product =>
+          product.id === child.id ? { ...product, expectation: { ...product.expectation, baseProduct: teamExpectation.id } } : product,
+        ),
+        team,
+      ],
+      catalog.rootArchives,
+      catalog.generation,
+    );
+    const teamCommand = parseApplicationCommand([
+      "--game",
+      child.expectation.id,
+      "--map",
+      "start",
+      "--movement",
+      "q3",
+      "--character",
+      "q3",
+      "--mode",
+      "deathmatch",
+    ]);
     if (teamCommand.kind !== "run") throw new Error("Missing Team Arena launch");
     expect(selectedSourceProgram(applicationPreset(teamCatalog, teamCommand.options))).toBe("missionpack");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("inherited program rules and equipment retain the selected package owner", () => {
   const products = expectedProducts.map<CatalogProduct>(expectation => ({
-    id: `${expectation.family}:${expectation.edition}:${expectation.campaign}:installed`, expectation,
-    availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [],
+    id: `${expectation.family}:${expectation.edition}:${expectation.campaign}:installed`,
+    expectation,
+    availability: { kind: "installed" },
+    archives: [],
+    looseRoot: null,
+    userContent: null,
+    maps: [],
+    diagnostics: [],
   }));
   const cases: readonly { readonly base: string; readonly rules: "tag" | "deathball" | "horde" | "standard" }[] = [
-    { base: "q2-classic-rogue", rules: "tag" }, { base: "q2-classic-rogue", rules: "deathball" },
-    { base: "q1-rerelease-mg1", rules: "horde" }, { base: "q1-rerelease-ctf", rules: "standard" },
+    { base: "q2-classic-rogue", rules: "tag" },
+    { base: "q2-classic-rogue", rules: "deathball" },
+    { base: "q1-rerelease-mg1", rules: "horde" },
+    { base: "q1-rerelease-ctf", rules: "standard" },
   ];
   for (const scenario of cases) {
     const base = products.find(product => product.expectation.id === scenario.base);
     if (base === undefined) throw new Error("Missing source program fixture");
-    const child = { ...base, id: `${base.expectation.family}:${base.expectation.edition}:map-only:installed`,
-      expectation: { ...base.expectation, id: "custom-map-only", campaign: "map-only", baseProduct: scenario.base, requiredPrograms: [] } } satisfies typeof base;
+    const child = {
+      ...base,
+      id: `${base.expectation.family}:${base.expectation.edition}:map-only:installed`,
+      expectation: { ...base.expectation, id: "custom-map-only", campaign: "map-only", baseProduct: scenario.base, requiredPrograms: [] },
+    } satisfies typeof base;
     const catalog = new InstalledCatalog("/fixture", [...products, child], [], 1);
-    const command = parseApplicationCommand(["--game", child.expectation.id, "--map", "start", "--movement", base.expectation.family, "--character", base.expectation.family]);
+    const command = parseApplicationCommand([
+      "--game",
+      child.expectation.id,
+      "--map",
+      "start",
+      "--movement",
+      base.expectation.family,
+      "--character",
+      base.expectation.family,
+    ]);
     if (command.kind !== "run") throw new Error("Missing source rule options");
     const preset = applicationPreset(catalog, { ...command.options, rules: scenario.rules });
     expect(preset.map.entities.content).toBe(child.id);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 /*
  * BSP entity observations from Quake III Arena botlib/be_aas_bspq3.c.
@@ -8,9 +9,7 @@ import { nativeAtof, nativeAtoi } from "../../../core/numeric.ts";
 import { LexerFlag, ScriptLanguageError, ScriptLexer, type ScriptToken } from "../../../content/legacy-script/lexer.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 
-export type AasBspNumberResult =
-  | { readonly found: false; readonly value: 0 }
-  | { readonly found: true; readonly value: number };
+export type AasBspNumberResult = { readonly found: false; readonly value: 0 } | { readonly found: true; readonly value: number };
 
 export type AasBspVectorResult =
   | { readonly found: false; readonly value: { readonly x: 0; readonly y: 0; readonly z: 0 } }
@@ -60,8 +59,7 @@ function digit(character: string | undefined): boolean {
 }
 
 function hexDigit(character: string | undefined): boolean {
-  return digit(character) || (character !== undefined
-    && ((character >= "a" && character <= "f") || (character >= "A" && character <= "F")));
+  return digit(character) || (character !== undefined && ((character >= "a" && character <= "f") || (character >= "A" && character <= "F")));
 }
 
 interface ScannedFloat {
@@ -95,10 +93,16 @@ function scanFloat(text: string, start: number): ScannedFloat | null {
     if (hexadecimal) cursor += 2;
     const isDigit = hexadecimal ? hexDigit : digit;
     let digits = 0;
-    while (isDigit(text[cursor])) { cursor++; digits++; }
+    while (isDigit(text[cursor])) {
+      cursor++;
+      digits++;
+    }
     if (text[cursor] === ".") {
       cursor++;
-      while (isDigit(text[cursor])) { cursor++; digits++; }
+      while (isDigit(text[cursor])) {
+        cursor++;
+        digits++;
+      }
     }
     if (digits === 0) return null;
     const exponent = text.charAt(cursor).toLowerCase();
@@ -124,24 +128,52 @@ export class AasBspEntities {
   private entityText: BotMemoryAllocation | null = null;
   private isLoaded = false;
 
-  constructor(private readonly print: AasBspPrint, private readonly memory = new BotMemory()) {}
+  constructor(
+    private readonly print: AasBspPrint,
+    private readonly memory = new BotMemory(),
+  ) {}
 
-  get loaded(): boolean { return this.isLoaded; }
+  get loaded(): boolean {
+    return this.isLoaded;
+  }
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { count: this.entityCount, loaded: this.isLoaded, nextAllocation: this.nextAllocation,
-      entityText: this.entityText === null ? null : memory.reference(this.entityText), entities: this.entities.map(entity => entity.pairs),
-      allocations: [...this.allocations].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })) };
+    return {
+      count: this.entityCount,
+      loaded: this.isLoaded,
+      nextAllocation: this.nextAllocation,
+      entityText: this.entityText === null ? null : memory.reference(this.entityText),
+      entities: this.entities.map(entity => entity.pairs),
+      allocations: [...this.allocations].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })),
+    };
   }
   restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
-    const reader = new SaveReader(value, "bot.bsp"), image = { count: reader.field("count").integer(0), loaded: reader.field("loaded").boolean(),
-      nextAllocation: reader.field("nextAllocation").integer(1), entityText: reader.field("entityText").nullable(entry => entry.integer(0)),
-      entities: reader.field("entities").list(entry => entry.integer(0)), allocations: reader.field("allocations").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })) };
-    if (this.isLoaded || this.allocations.size !== 0 || !Number.isInteger(image.count) || image.count < 0 || image.count > MAX_ENTITIES
-      || image.entities.length !== MAX_ENTITIES || !Number.isSafeInteger(image.nextAllocation) || image.nextAllocation < 1
-      || image.nextAllocation > 0x100000000) throw new Error("Invalid bot BSP entity restoration");
+    const reader = new SaveReader(value, "bot.bsp"),
+      image = {
+        count: reader.field("count").integer(0),
+        loaded: reader.field("loaded").boolean(),
+        nextAllocation: reader.field("nextAllocation").integer(1),
+        entityText: reader.field("entityText").nullable(entry => entry.integer(0)),
+        entities: reader.field("entities").list(entry => entry.integer(0)),
+        allocations: reader
+          .field("allocations")
+          .list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
+      };
+    if (
+      this.isLoaded ||
+      this.allocations.size !== 0 ||
+      !Number.isInteger(image.count) ||
+      image.count < 0 ||
+      image.count > MAX_ENTITIES ||
+      image.entities.length !== MAX_ENTITIES ||
+      !Number.isSafeInteger(image.nextAllocation) ||
+      image.nextAllocation < 1 ||
+      image.nextAllocation > 0x100000000
+    )
+      throw new Error("Invalid bot BSP entity restoration");
     for (const entry of image.allocations) {
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextAllocation || this.allocations.has(entry.pointer)) throw new Error("Invalid saved BSP allocation pointer");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextAllocation || this.allocations.has(entry.pointer))
+        throw new Error("Invalid saved BSP allocation pointer");
       this.allocations.set(entry.pointer, memory.allocation(entry.allocation));
     }
     for (const [index, pair] of image.entities.entries()) {
@@ -159,7 +191,9 @@ export class AasBspEntities {
       entity.pairs = pair;
     }
     this.entityText = image.entityText === null ? null : memory.allocation(image.entityText);
-    this.entityCount = image.count; this.nextAllocation = image.nextAllocation; this.isLoaded = image.loaded;
+    this.entityCount = image.count;
+    this.nextAllocation = image.nextAllocation;
+    this.isLoaded = image.loaded;
   }
 
   load(entityText: string): 0 {
@@ -192,8 +226,7 @@ export class AasBspEntities {
     return next < 1 || next >= this.entityCount ? 0 : next;
   }
 
-  value(entity: number, key: AasBspKey, output: Uint8Array, size = output.length,
-    writes?: { readonly view: DataView; clear(length: number): void }): boolean {
+  value(entity: number, key: AasBspKey, output: Uint8Array, size = output.length, writes?: { readonly view: DataView; clear(length: number): void }): boolean {
     int32(entity);
     if (output.length === 0) throw new RangeError("AAS_ValueForBSPEpairKey requires its first output byte");
     if (writes === undefined) output[0] = 0;
@@ -305,7 +338,7 @@ export class AasBspEntities {
     for (let index = 1; index < this.entityCount; index++) {
       const entity = this.entities[index];
       if (entity === undefined) throw new Error("BSP entity allocation is absent");
-      for (let pair = entity.pairs; pair !== 0;) {
+      for (let pair = entity.pairs; pair !== 0; ) {
         const next = this.pointer(pair, 8);
         const key = this.pointer(pair, 0);
         if (key !== 0) this.memory.free(this.allocation(key));
@@ -319,12 +352,12 @@ export class AasBspEntities {
   }
 
   private read(lexer: ScriptLexer): ScriptToken | undefined {
-    try { return lexer.next(); }
-    catch (error) {
+    try {
+      return lexer.next();
+    } catch (error) {
       if (!(error instanceof ScriptLanguageError)) throw error;
       for (const issue of error.diagnostics) {
-        this.print(issue.severity === "error" ? 3 : 2,
-          `file ${issue.location.path}, line ${issue.location.line}: ${issue.message}\n`);
+        this.print(issue.severity === "error" ? 3 : 2, `file ${issue.location.path}, line ${issue.location.line}: ${issue.message}\n`);
       }
       return undefined;
     }

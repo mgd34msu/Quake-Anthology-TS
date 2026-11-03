@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { BinaryReader, BinaryWriter } from "../../../src/core/binary/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
@@ -7,24 +8,49 @@ import { classifyBsp } from "../../../src/formats/bsp-kind.ts";
 
 test("Quake64 keeps shifted texture dimensions and decodes packed lighting offsets", () => {
   const texture = new BinaryWriter(56);
-  texture.i32(1); texture.i32(8);
-  texture.bytes(new TextEncoder().encode("stone")); texture.bytes(new Uint8Array(11));
-  texture.u32(2); texture.u32(2); texture.u32(2);
-  texture.u32(44); texture.u32(0); texture.u32(0); texture.u32(0);
+  texture.i32(1);
+  texture.i32(8);
+  texture.bytes(new TextEncoder().encode("stone"));
+  texture.bytes(new Uint8Array(11));
+  texture.u32(2);
+  texture.u32(2);
+  texture.u32(2);
+  texture.u32(44);
+  texture.u32(0);
+  texture.u32(0);
+  texture.u32(0);
   texture.bytes(new Uint8Array([1, 2, 3, 4]));
-  const plane = new BinaryWriter(20); plane.f32(0); plane.f32(0); plane.f32(1); plane.f32(0); plane.i32(2);
+  const plane = new BinaryWriter(20);
+  plane.f32(0);
+  plane.f32(0);
+  plane.f32(1);
+  plane.f32(0);
+  plane.i32(2);
   const face = new BinaryWriter(20);
-  face.u16(0); face.u16(0); face.i32(0); face.u16(0); face.u16(0);
-  face.bytes(new Uint8Array([0, 255, 255, 255])); face.i32(2);
+  face.u16(0);
+  face.u16(0);
+  face.i32(0);
+  face.u16(0);
+  face.u16(0);
+  face.bytes(new Uint8Array([0, 255, 255, 255]));
+  face.i32(2);
   const lumps: Uint8Array[] = Array.from({ length: 15 }, () => new Uint8Array());
-  lumps[1] = plane.finish(); lumps[2] = texture.finish(); lumps[6] = new Uint8Array(40); lumps[7] = face.finish();
+  lumps[1] = plane.finish();
+  lumps[2] = texture.finish();
+  lumps[6] = new Uint8Array(40);
+  lumps[7] = face.finish();
   lumps[8] = new Uint8Array([255, 255, 8, 64]);
   const writer = new BinaryWriter(124 + lumps.reduce((sum, lump) => sum + lump.length, 0));
   writer.u32(0x51363420);
   let offset = 124;
-  for (const lump of lumps) { writer.i32(offset); writer.i32(lump.length); offset += lump.length; }
+  for (const lump of lumps) {
+    writer.i32(offset);
+    writer.i32(lump.length);
+    offset += lump.length;
+  }
   for (const lump of lumps) writer.bytes(lump);
-  const bytes = writer.finish(), map = readQ1Bsp(bytes);
+  const bytes = writer.finish(),
+    map = readQ1Bsp(bytes);
   expect(classifyBsp(bytes)).toBe("q1");
   expect(map.format).toBe("quake64");
   expect(map.textures[0]).toMatchObject({ width: 2, height: 2, quake64Shift: 2 });
@@ -64,7 +90,10 @@ test("retains unknown and empty BSPX entries", () => {
   for (let i = 0; i < 30; i++) writer.u32(0);
   writer.bytes(new TextEncoder().encode("BSPX"));
   writer.u32(2);
-  for (const entry of [{ name: "FUTURE_LUMP", offset: 196, length: 3 }, { name: "EMPTY_LUMP", offset: 199, length: 0 }]) {
+  for (const entry of [
+    { name: "FUTURE_LUMP", offset: 196, length: 3 },
+    { name: "EMPTY_LUMP", offset: 199, length: 0 },
+  ]) {
     const name = new Uint8Array(24);
     name.set(new TextEncoder().encode(entry.name));
     writer.bytes(name);
@@ -73,7 +102,7 @@ test("retains unknown and empty BSPX entries", () => {
   }
   writer.bytes(new Uint8Array([1, 2, 3]));
   const map = readQ1Bsp(writer.finish());
-  expect(map.bspx.map((entry) => entry.name)).toEqual(["FUTURE_LUMP", "EMPTY_LUMP"]);
+  expect(map.bspx.map(entry => entry.name)).toEqual(["FUTURE_LUMP", "EMPTY_LUMP"]);
   expect(map.extensions[0]?.bytes).toEqual(new Uint8Array([1, 2, 3]));
   expect(map.extensions[1]?.bytes.length).toBe(0);
 });
@@ -96,8 +125,14 @@ test("reads authored brush planes and decoupled lightmap projection", () => {
   light.u32(24);
   for (const axis of [0.25, 0, 0, 4, 0, -0.125, 0, 8]) light.f32(axis);
   expect(readDecoupledLightmaps(light.finish(), 1)?.[0]).toEqual({
-    width: 8, height: 16, lightingOffset: 24,
-    axes: [{ x: 0.25, y: 0, z: 0 }, { x: 0, y: -0.125, z: 0 }], offset: { x: 4, y: 8 },
+    width: 8,
+    height: 16,
+    lightingOffset: 24,
+    axes: [
+      { x: 0.25, y: 0, z: 0 },
+      { x: 0, y: -0.125, z: 0 },
+    ],
+    offset: { x: 4, y: 8 },
   });
 });
 
@@ -107,12 +142,18 @@ test("an external .lit describing a different map is ignored, not fatal", () => 
   const writer = new BinaryWriter(124 + lumps.reduce((sum, lump) => sum + lump.length, 0));
   writer.i32(29);
   let offset = 124;
-  for (const lump of lumps) { writer.i32(offset); writer.i32(lump.length); offset += lump.length; }
+  for (const lump of lumps) {
+    writer.i32(offset);
+    writer.i32(lump.length);
+    offset += lump.length;
+  }
   for (const lump of lumps) writer.bytes(lump);
   const bytes = writer.finish();
   const lit = (samples: number): Uint8Array => {
     const out = new BinaryWriter(8 + samples * 3);
-    out.bytes(new TextEncoder().encode("QLIT")); out.u32(1); out.bytes(new Uint8Array(samples * 3).fill(7));
+    out.bytes(new TextEncoder().encode("QLIT"));
+    out.u32(1);
+    out.bytes(new Uint8Array(samples * 3).fill(7));
     return out.finish();
   };
   // One RGB sample cannot describe four BSP lighting samples (e.g. another

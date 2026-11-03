@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export function normalizeResourcePath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
-  if (!normalized || normalized.includes("\0") || /^[a-z]:/i.test(normalized)
-    || normalized.split("/").some(part => !part || part === "." || part === "..")) {
+  if (!normalized || normalized.includes("\0") || /^[a-z]:/i.test(normalized) || normalized.split("/").some(part => !part || part === "." || part === "..")) {
     throw new RangeError(`Invalid relative resource path: ${path}`);
   }
   return normalized;
@@ -24,8 +24,12 @@ export function isMissingFile(error: unknown): boolean {
 }
 
 /** Resolve spelling on case-sensitive hosts, rejecting ambiguous case collisions. */
-export async function findContentPath(root: string, path: string, comparison: "exact" | "case-insensitive" = "case-insensitive",
-  list: (directory: string) => Promise<readonly string[]> = directory => readdir(directory)): Promise<string | null> {
+export async function findContentPath(
+  root: string,
+  path: string,
+  comparison: "exact" | "case-insensitive" = "case-insensitive",
+  list: (directory: string) => Promise<readonly string[]> = directory => readdir(directory),
+): Promise<string | null> {
   const parts = normalizeResourcePath(path).split("/");
   let current = resolve(root);
   try {

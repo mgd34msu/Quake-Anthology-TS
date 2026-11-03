@@ -1,8 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ExecutableRecipe } from "../../../../contracts/content.ts";
 import type { ArsenalIntent } from "../../../../contracts/gameplay.ts";
 import type { OwnedActor, SeatId } from "../../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
-import type { ActorAnimationState, ArsenalState, MovementEnvironment, MovementProfile, MovementState, OrderedMovementEffect } from "../../../../contracts/movement.ts";
+import type {
+  ActorAnimationState,
+  ArsenalState,
+  MovementEnvironment,
+  MovementProfile,
+  MovementState,
+  OrderedMovementEffect,
+} from "../../../../contracts/movement.ts";
 import type { UserCommand } from "../../../../contracts/protocol.ts";
 import type { SceneQueries, TraceHit } from "../../../../contracts/scene.ts";
 import type { Q3ArsenalRuntimeState } from "../../../../content/q3/foundation/arsenal.ts";

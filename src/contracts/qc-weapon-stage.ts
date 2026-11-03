@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModSourceCall } from "./mod-callbacks.ts";
 
 export interface QcWeaponStageDeclaration {
@@ -15,6 +16,9 @@ export interface QcPrimaryWeaponStageDeclaration extends QcWeaponStageDeclaratio
   readonly client: {
     readonly spawn: string | ModSourceCall;
     readonly selectSpawn: string | ModSourceCall;
-    readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly function: string } | { readonly kind: "call"; readonly call: ModSourceCall };
+    readonly objectives:
+      | { readonly kind: "none" }
+      | { readonly kind: "call"; readonly function: string }
+      | { readonly kind: "call"; readonly call: ModSourceCall };
   };
 }

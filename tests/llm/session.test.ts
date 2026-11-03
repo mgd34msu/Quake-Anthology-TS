@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { LlmRequestInput } from "../../src/llm/request.ts";
 import { LlmSession } from "../../src/llm/session.ts";
@@ -5,13 +6,22 @@ import { LlmSession } from "../../src/llm/session.ts";
 function fixture() {
   const calls: LlmRequestInput[] = [];
   let config = "provider:model-a";
-  const session = new LlmSession(async input => {
-    calls.push(input);
-    if (input.prompt.includes("READY only")) return "READY";
-    if (input.prompt.endsWith("bad")) throw new Error("transport failed");
-    return `answer:${input.prompt}`;
-  }, () => config);
-  return { calls, session, setConfig: (value: string) => { config = value; } };
+  const session = new LlmSession(
+    async input => {
+      calls.push(input);
+      if (input.prompt.includes("READY only")) return "READY";
+      if (input.prompt.endsWith("bad")) throw new Error("transport failed");
+      return `answer:${input.prompt}`;
+    },
+    () => config,
+  );
+  return {
+    calls,
+    session,
+    setConfig: (value: string) => {
+      config = value;
+    },
+  };
 }
 
 test("one session primes once, keeps its ID and transcript across games, and updates its primer in place", async () => {
@@ -83,7 +93,10 @@ test("close rejects later session work", async () => {
 
 test("PLATFORM-013 a request cancelled during warm-up aborts the warm-up transport call", async () => {
   const signals: (AbortSignal | undefined)[] = [];
-  const session = new LlmSession(async input => { signals.push(input.signal); return "READY"; });
+  const session = new LlmSession(async input => {
+    signals.push(input.signal);
+    return "READY";
+  });
   const controller = new AbortController();
   await session.request({ prompt: "hi", instructions: "turn", sessionInstructions: "CATALOG", signal: controller.signal });
   expect(signals[0]).toBe(controller.signal);

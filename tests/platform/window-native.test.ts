@@ -11,7 +11,7 @@ function cpu(): SdlWindow {
 }
 
 function frame(width: number, height: number): Uint8Array {
-  return Uint8Array.from({ length: width * height * 4 }, (_, index) => index % 4 === 3 ? 255 : (index * 31) % 256);
+  return Uint8Array.from({ length: width * height * 4 }, (_, index) => (index % 4 === 3 ? 255 : (index * 31) % 256));
 }
 
 describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL window ownership", () => {
@@ -42,7 +42,10 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       const resized = frame(7, 5);
       window.present(resized);
       expect(window.readPixels()).toEqual(resized);
-    } finally { window.close(); window.close(); }
+    } finally {
+      window.close();
+      window.close();
+    }
   });
 
   test("real pushed events retain key, mouse, window and quit fields", () => {
@@ -61,22 +64,30 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       for (const event of expected) window.pushEvent(event);
       expect(window.pollEvents()).toEqual(expected);
       expect(window.pollEvents()).toEqual([]);
-    } finally { window.close(); }
+    } finally {
+      window.close();
+    }
   });
 
   test("events stay with their window and closing one preserves the other", () => {
-    const first = cpu(), second = cpu();
+    const first = cpu(),
+      second = cpu();
     try {
-      first.pollEvents(); second.pollEvents();
+      first.pollEvents();
+      second.pollEvents();
       second.pushEvent({ kind: "key", timestamp: 123, down: true, repeat: false, scancode: 4, keycode: 97, modifiers: 0 });
       first.pushEvent({ kind: "quit", timestamp: 124 });
       expect(first.pollEvents().map(event => event.kind)).toEqual(["quit"]);
       expect(second.pollEvents().map(event => event.kind)).toEqual(["key", "quit"]);
-      first.close(); first.close();
+      first.close();
+      first.close();
       const pixels = frame(3, 2);
       second.present(pixels);
       expect(second.readPixels()).toEqual(pixels);
-    } finally { first.close(); second.close(); }
+    } finally {
+      first.close();
+      second.close();
+    }
   });
 
   test("invalid startup and closed handles fail at the boundary", () => {
@@ -89,7 +100,9 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       expect(() => window.present(new Uint8Array(23))).toThrow("size");
       expect(() => window.swap()).toThrow("GL window");
       expect(() => window.pushEvent({ kind: "quit", timestamp: -1 })).toThrow("uint32");
-    } finally { window.close(); }
+    } finally {
+      window.close();
+    }
     expect(() => window.pollEvents()).toThrow("closed");
     expect(() => window.setSize(4, 4)).toThrow("closed");
     expect(() => window.drawableSize).toThrow("closed");
@@ -101,7 +114,10 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       try {
         window.present(frame(3, 2));
         expect(window.readPixels()).toEqual(frame(3, 2));
-      } finally { window.close(); window.close(); }
+      } finally {
+        window.close();
+        window.close();
+      }
       expect(window.closed).toBe(true);
     }
   });
@@ -113,7 +129,8 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
     const window = cpu();
     try {
       controllers.setAssignments([{ kind: "automatic" }]);
-      controllers.pollEvents(); window.pollEvents();
+      controllers.pollEvents();
+      window.pollEvents();
       virtual.setAxis(0, 12000);
       virtual.setButton(0, true);
       window.pushEvent({ kind: "key", timestamp: 56, down: true, repeat: false, scancode: 4, keycode: 97, modifiers: 0 });
@@ -134,18 +151,25 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       audio.close();
       reopened.present(frame(3, 2));
       expect(reopened.readPixels()).toEqual(frame(3, 2));
-    } finally { window.close(); controllers.close(); virtual.close(); }
+    } finally {
+      window.close();
+      controllers.close();
+      virtual.close();
+    }
   });
 
   test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("partial GL startup failure leaves a CPU window usable", () => {
     const retained = cpu();
     try {
       for (let iteration = 0; iteration < 3; iteration++)
-        expect(() => SdlWindow.open({ title: "unsupported GL", width: 2, height: 2, backend: "gl", hidden: true }))
-          .toThrow("SDL could not create any source GL visual candidate");
+        expect(() => SdlWindow.open({ title: "unsupported GL", width: 2, height: 2, backend: "gl", hidden: true })).toThrow(
+          "SDL could not create any source GL visual candidate",
+        );
       retained.present(frame(3, 2));
       expect(retained.readPixels()).toEqual(frame(3, 2));
-    } finally { retained.close(); }
+    } finally {
+      retained.close();
+    }
   });
 
   test.skipIf(process.env["SDL_VIDEODRIVER"] !== "x11")("real GL procedures clear, read back, swap and retain context lifetime", () => {
@@ -162,24 +186,34 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
           const pixels = new Uint8Array(16 * 16 * 4);
           native.symbols.glReadPixels(0, 0, 16, 16, 0x1908, 0x1401, pixels);
           expect(native.symbols.glGetError()).toBe(0);
-          expect(pixels).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+          expect(pixels).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0)));
           expect(window.getGlProcAddress("glBegin")).toBeGreaterThan(0);
           window.swap();
-        } finally { native.close(); native.close(); }
+        } finally {
+          native.close();
+          native.close();
+        }
         const transfer = window.detachRenderContext();
         expect(transfer.windowId).toBe(window.id);
         expect(() => window.makeCurrent()).toThrow("reserved");
         window.restoreRenderContext();
         window.makeCurrent();
       }
-      first.close(); second.swap();
-    } finally { first.close(); second.close(); }
+      first.close();
+      second.swap();
+    } finally {
+      first.close();
+      second.close();
+    }
   });
 
   test.skipIf(process.env["SDL_VIDEODRIVER"] !== "x11")("GLSL 120 compiles, links and draws through native client arrays", () => {
     using window = SdlWindow.open({ title: "GLSL platform smoke", width: 8, height: 8, backend: "gl", hidden: true });
-    const fixed = loadGl(window), programs = loadGlPrograms(window);
-    const api = programs.symbols, gl = fixed.symbols, shaders: number[] = [];
+    const fixed = loadGl(window),
+      programs = loadGlPrograms(window);
+    const api = programs.symbols,
+      gl = fixed.symbols,
+      shaders: number[] = [];
     let program = 0;
     const compile = (type: number, source: string): number => {
       const shader = api.glCreateShader(type);
@@ -188,7 +222,9 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       programs.shaderSource(shader, source);
       Bun.gc(true);
       api.glCompileShader(shader);
-      const status = new Int32Array(1), length = new Int32Array(1), log = new Uint8Array(1024);
+      const status = new Int32Array(1),
+        length = new Int32Array(1),
+        log = new Uint8Array(1024);
       api.glGetShaderiv(shader, 0x8b81, status);
       api.glGetShaderInfoLog(shader, log.length, length, log);
       if (status[0] !== 1) throw new Error(`GLSL compilation failed: ${new TextDecoder().decode(log)}`);
@@ -196,47 +232,66 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
     };
     try {
       const vertex = compile(0x8b31, "#version 120\n// café shader source owns UTF-8 bytes\nvoid main() { gl_Position = gl_Vertex; }\n");
-      const fragment = compile(0x8b30, "#version 120\nuniform int mode; uniform float intensity;\nvoid main() { gl_FragColor = mode == 1 ? vec4(0.0, intensity, 0.0, 1.0) : vec4(1.0); }\n");
+      const fragment = compile(
+        0x8b30,
+        "#version 120\nuniform int mode; uniform float intensity;\nvoid main() { gl_FragColor = mode == 1 ? vec4(0.0, intensity, 0.0, 1.0) : vec4(1.0); }\n",
+      );
       program = api.glCreateProgram();
       expect(program).toBeGreaterThan(0);
-      api.glAttachShader(program, vertex); api.glAttachShader(program, fragment); api.glLinkProgram(program);
-      const status = new Int32Array(1), length = new Int32Array(1), log = new Uint8Array(1024);
+      api.glAttachShader(program, vertex);
+      api.glAttachShader(program, fragment);
+      api.glLinkProgram(program);
+      const status = new Int32Array(1),
+        length = new Int32Array(1),
+        log = new Uint8Array(1024);
       api.glGetProgramiv(program, 0x8b82, status);
       api.glGetProgramInfoLog(program, log.length, length, log);
       if (status[0] !== 1) throw new Error(`GLSL link failed: ${new TextDecoder().decode(log)}`);
       api.glUseProgram(program);
       const mode = api.glGetUniformLocation(program, Buffer.from("mode\0"));
       const intensity = api.glGetUniformLocation(program, Buffer.from("intensity\0"));
-      expect(mode).toBeGreaterThanOrEqual(0); expect(intensity).toBeGreaterThanOrEqual(0);
-      api.glUniform1i(mode, 1); api.glUniform1f(intensity, 1);
+      expect(mode).toBeGreaterThanOrEqual(0);
+      expect(intensity).toBeGreaterThanOrEqual(0);
+      api.glUniform1i(mode, 1);
+      api.glUniform1f(intensity, 1);
       gl.glViewport(0, 0, 8, 8);
       const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
-      gl.glEnableClientState(0x8074); gl.glVertexPointer(2, 0x1406, 0, vertices);
+      gl.glEnableClientState(0x8074);
+      gl.glVertexPointer(2, 0x1406, 0, vertices);
       gl.glDrawElements(0x0004, 3, 0x1403, new Uint16Array([0, 1, 2]));
       gl.glDisableClientState(0x8074);
       const pixels = new Uint8Array(8 * 8 * 4);
       gl.glReadPixels(0, 0, 8, 8, 0x1908, 0x1401, pixels);
       expect(gl.glGetError()).toBe(0);
-      expect(pixels).toEqual(Uint8Array.from({ length: pixels.length }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+      expect(pixels).toEqual(Uint8Array.from({ length: pixels.length }, (_, index) => (index % 4 === 1 || index % 4 === 3 ? 255 : 0)));
       window.swap();
       expect(() => window.close()).toThrow("procedure tables");
     } finally {
       api.glUseProgram(0);
       if (program !== 0) api.glDeleteProgram(program);
       for (const shader of shaders) api.glDeleteShader(shader);
-      programs.close(); programs.close(); fixed.close();
+      programs.close();
+      programs.close();
+      fixed.close();
     }
   });
 });
 
 test("text and precise wheel bytes decode independently of synthetic SDL compatibility limits", () => {
-  const text = new Uint8Array(56), textView = new DataView(text.buffer);
-  textView.setUint32(0, 0x303, true); textView.setUint32(4, 77, true);
+  const text = new Uint8Array(56),
+    textView = new DataView(text.buffer);
+  textView.setUint32(0, 0x303, true);
+  textView.setUint32(4, 77, true);
   text.set(new TextEncoder().encode("café"), 12);
   expect(decodeSdlEvent(text)).toEqual({ kind: "text", timestamp: 77, text: "café" });
-  const wheel = new Uint8Array(56), wheelView = new DataView(wheel.buffer);
-  wheelView.setUint32(0, 0x403, true); wheelView.setUint32(4, 78, true);
-  wheelView.setInt32(16, -1, true); wheelView.setInt32(20, 2, true); wheelView.setUint32(24, 1, true);
-  wheelView.setFloat32(28, -1.5, true); wheelView.setFloat32(32, 2.25, true);
+  const wheel = new Uint8Array(56),
+    wheelView = new DataView(wheel.buffer);
+  wheelView.setUint32(0, 0x403, true);
+  wheelView.setUint32(4, 78, true);
+  wheelView.setInt32(16, -1, true);
+  wheelView.setInt32(20, 2, true);
+  wheelView.setUint32(24, 1, true);
+  wheelView.setFloat32(28, -1.5, true);
+  wheelView.setFloat32(32, 2.25, true);
   expect(decodeSdlEvent(wheel)).toEqual({ kind: "mouse-wheel", timestamp: 78, x: -1, y: 2, preciseX: -1.5, preciseY: 2.25, flipped: true });
 });

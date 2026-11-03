@@ -1,4 +1,16 @@
-export const applicationAudioCommands: readonly string[] = ["snd_restart", "cd", "music", "soundinfo", "soundlist", "play", "stopsound", "s_info", "s_list", "s_stop"];
+// SPDX-License-Identifier: GPL-2.0-or-later
+export const applicationAudioCommands: readonly string[] = [
+  "snd_restart",
+  "cd",
+  "music",
+  "soundinfo",
+  "soundlist",
+  "play",
+  "stopsound",
+  "s_info",
+  "s_list",
+  "s_stop",
+];
 export const cdCommandDocumentation = {
   summary: "Control the selected soundtrack: play or loop a numbered track, stop, pause, resume, enable, reset, remap or inspect it.",
   usage: "cd <play|loop> <track> | cd <stop|pause|resume|on|off|reset|info> | cd remap [tracks...]",
@@ -8,5 +20,6 @@ export const cdCommandDocumentation = {
 
 export const musicCommandDocumentation = {
   summary: "Play a named soundtrack once, or an intro followed by a looping track, using the current content and music gain.",
-  usage: "music <intro> [loop]", examples: ["music music/win", "music music/intro music/loop"],
+  usage: "music <intro> [loop]",
+  examples: ["music music/win", "music music/intro music/loop"],
 };

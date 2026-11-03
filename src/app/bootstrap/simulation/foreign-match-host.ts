@@ -58,8 +58,7 @@ export interface ForeignMatchStrategy {
 
 /** Whether the recipe's match provider names a foreign-world mode: deathmatch on any family other than the rule's native Q2. */
 export function foreignMatchMode(host: ForeignMatchHost, provider: string): boolean {
-  return host.recipe.match.provider === provider && host.mode === "deathmatch"
-    && providerFamily(host.recipe.map.entities.provider) !== "q2";
+  return host.recipe.match.provider === provider && host.mode === "deathmatch" && providerFamily(host.recipe.map.entities.provider) !== "q2";
 }
 
 export function mapFamily(host: ForeignMatchHost): ReturnType<typeof providerFamily> {
@@ -70,14 +69,18 @@ export function mapFamily(host: ForeignMatchHost): ReturnType<typeof providerFam
 export function entityOrigin(entity: { get(key: string): string | undefined }): Vec3 | null {
   const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
   const [x, y, z] = parts;
-  if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z))
+    return null;
   return { x, y, z };
 }
 
 /** Auto-balance: the next player joins red unless blue is short. */
 export function balancedTeam(teams: ReadonlyMap<ActorId, 1 | 2>): 1 | 2 {
-  let red = 0, blue = 0;
-  for (const team of teams.values()) if (team === 1) red++; else blue++;
+  let red = 0,
+    blue = 0;
+  for (const team of teams.values())
+    if (team === 1) red++;
+    else blue++;
   return blue < red ? 2 : 1;
 }
 
@@ -89,7 +92,8 @@ export class ForeignMatchSpawns {
 
   origins(): readonly Vec3[] {
     if (this.#origins !== null) return this.#origins;
-    const origins: Vec3[] = [], fallback: Vec3[] = [];
+    const origins: Vec3[] = [],
+      fallback: Vec3[] = [];
     for (const entity of parseEntities(this.host.entityLump)) {
       const classname = entity.get("classname");
       if (classname !== "info_player_deathmatch" && classname !== "info_player_start") continue;
@@ -102,12 +106,19 @@ export class ForeignMatchSpawns {
 
   /** The spawn farthest from every player, lifted to stand clear of the floor. */
   farthest(): Vec3 | null {
-    const playerBodies = this.host.players().flatMap(actor => { const body = this.host.physics.bodies.read(actor); return body === null ? [] : [body.origin]; });
-    let best: Vec3 | null = null, bestDistance = -1;
+    const playerBodies = this.host.players().flatMap(actor => {
+      const body = this.host.physics.bodies.read(actor);
+      return body === null ? [] : [body.origin];
+    });
+    let best: Vec3 | null = null,
+      bestDistance = -1;
     for (const spot of this.origins()) {
       let nearest = Infinity;
       for (const origin of playerBodies) nearest = Math.min(nearest, Math.hypot(spot.x - origin.x, spot.y - origin.y, spot.z - origin.z));
-      if (nearest > bestDistance) { bestDistance = nearest; best = spot; }
+      if (nearest > bestDistance) {
+        bestDistance = nearest;
+        best = spot;
+      }
     }
     return best === null ? null : { x: best.x, y: best.y, z: best.z + 24 };
   }

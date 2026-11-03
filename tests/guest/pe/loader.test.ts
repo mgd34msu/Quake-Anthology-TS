@@ -52,17 +52,31 @@ for (const width of [4, 8]) {
     const memory = new SparseGuestMemory({ module, pointerBytes: width });
     const image = mapPeImage({ bytes: peFixture(width), memory });
     const target = memory.map({ base: 0x50000000n, byteLength: 16, permissions: "read-execute", bytes: new Uint8Array([0xc3]) });
-    expect(image.imports.map(entry => entry.symbol)).toEqual([{ kind: "name", name: "Target", version: null }, { kind: "ordinal", ordinal: 7 }]);
+    expect(image.imports.map(entry => entry.symbol)).toEqual([
+      { kind: "name", name: "Target", version: null },
+      { kind: "ordinal", ordinal: 7 },
+    ]);
     const iat = memory.offset(image.base, 0x2160n);
     const original = memory.copy(iat, width * 2);
     const mappings = memory.mappings();
-    expect(() => bindPeImports(image, memory, { resolve(import_) {
-      return import_.symbol.kind === "name" ? { kind: "guest", address: target, module }
-        : { kind: "unresolved", import: import_, detail: "ordinal unavailable" };
-    } })).toThrow("ordinal unavailable");
+    expect(() =>
+      bindPeImports(image, memory, {
+        resolve(import_) {
+          return import_.symbol.kind === "name"
+            ? { kind: "guest", address: target, module }
+            : { kind: "unresolved", import: import_, detail: "ordinal unavailable" };
+        },
+      }),
+    ).toThrow("ordinal unavailable");
     expect(memory.copy(iat, width * 2)).toEqual(original);
     expect(memory.mappings()).toEqual(mappings);
-    expect(bindPeImports(image, memory, { resolve() { return { kind: "guest", address: target, module }; } }).length).toBe(2);
+    expect(
+      bindPeImports(image, memory, {
+        resolve() {
+          return { kind: "guest", address: target, module };
+        },
+      }).length,
+    ).toBe(2);
     expect(memory.readPointer(iat)?.byteOffset).toBe(target.byteOffset);
     expect(memory.readPointer(memory.offset(iat, BigInt(width)))?.byteOffset).toBe(target.byteOffset);
     expect(memory.mappings()).toEqual(mappings);
@@ -75,7 +89,7 @@ test("named exports and ordinal forwarders resolve within the guest graph and re
   const image = mapPeImage({ bytes: peFixture(4), memory });
   const other = mapPeImage({ bytes: peFixture(4), memory, base: 0x20000000n });
   const requested = { kind: "name", name: "Forward", version: null } satisfies Parameters<typeof resolvePeExport>[1];
-  expect(resolvePeExport(image, requested, library => library === "other" ? other : null).address.byteOffset).toBe(0x20001010n);
+  expect(resolvePeExport(image, requested, library => (library === "other" ? other : null)).address.byteOffset).toBe(0x20001010n);
   expect(resolvePeExport(image, { kind: "name", name: "GetGameAPI", version: null }, () => null).address.byteOffset).toBe(0x10001010n);
   expect(() => resolvePeExport(image, requested, () => null)).toThrow("unresolved forwarded library");
   const cyclic = peFixture(4);
@@ -90,8 +104,12 @@ test("x64 unwind chains and language handler locations remain available to the g
   const bytes = peFixture(8);
   const view = new DataView(bytes.buffer);
   bytes.set([0x21, 0, 0, 0], 0x9a0);
-  view.setUint32(0x9a4, 0x1000, true); view.setUint32(0x9a8, 0x1040, true); view.setUint32(0x9ac, 0x23b0, true);
-  bytes.set([9, 0, 0, 0], 0x9b0); view.setUint32(0x9b4, 0x1050, true); view.setUint32(0x9b8, 0x12345678, true);
+  view.setUint32(0x9a4, 0x1000, true);
+  view.setUint32(0x9a8, 0x1040, true);
+  view.setUint32(0x9ac, 0x23b0, true);
+  bytes.set([9, 0, 0, 0], 0x9b0);
+  view.setUint32(0x9b4, 0x1050, true);
+  view.setUint32(0x9b8, 0x12345678, true);
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const image = mapPeImage({ bytes, memory });
   expect(image.unwindRecords[0]?.chained?.handlerRva).toBe(0x1050);
@@ -104,12 +122,52 @@ test("x64 unwind chains and language handler locations remain available to the g
 test("truncated, overlapping and unsupported input fails before mapping guest memory", () => {
   const cases: { readonly label: string; readonly mutate: (bytes: Uint8Array) => Uint8Array }[] = [
     { label: "truncated", mutate: bytes => bytes.subarray(0, 96) },
-    { label: "section overlap", mutate(bytes) { new DataView(bytes.buffer).setUint32(0x1ac, 0x1000, true); return bytes; } },
-    { label: "unsupported relocation", mutate(bytes) { new DataView(bytes.buffer).setUint16(0x1008, 0x7200, true); return bytes; } },
-    { label: "missing relocation", mutate(bytes) { const view = new DataView(bytes.buffer); view.setUint32(0x120, 0, true); view.setUint32(0x124, 0, true); return bytes; } },
-    { label: "delay imports", mutate(bytes) { const view = new DataView(bytes.buffer); view.setUint32(0x160, 0x2100, true); view.setUint32(0x164, 40, true); return bytes; } },
-    { label: "bad TLS callback", mutate(bytes) { new DataView(bytes.buffer).setUint32(0x840, 0x10003000, true); return bytes; } },
-    { label: "unterminated import descriptors", mutate(bytes) { new DataView(bytes.buffer).setUint32(0x104, 20, true); return bytes; } },
+    {
+      label: "section overlap",
+      mutate(bytes) {
+        new DataView(bytes.buffer).setUint32(0x1ac, 0x1000, true);
+        return bytes;
+      },
+    },
+    {
+      label: "unsupported relocation",
+      mutate(bytes) {
+        new DataView(bytes.buffer).setUint16(0x1008, 0x7200, true);
+        return bytes;
+      },
+    },
+    {
+      label: "missing relocation",
+      mutate(bytes) {
+        const view = new DataView(bytes.buffer);
+        view.setUint32(0x120, 0, true);
+        view.setUint32(0x124, 0, true);
+        return bytes;
+      },
+    },
+    {
+      label: "delay imports",
+      mutate(bytes) {
+        const view = new DataView(bytes.buffer);
+        view.setUint32(0x160, 0x2100, true);
+        view.setUint32(0x164, 40, true);
+        return bytes;
+      },
+    },
+    {
+      label: "bad TLS callback",
+      mutate(bytes) {
+        new DataView(bytes.buffer).setUint32(0x840, 0x10003000, true);
+        return bytes;
+      },
+    },
+    {
+      label: "unterminated import descriptors",
+      mutate(bytes) {
+        new DataView(bytes.buffer).setUint32(0x104, 20, true);
+        return bytes;
+      },
+    },
   ];
   for (const entry of cases) {
     const memory = new SparseGuestMemory({ module, pointerBytes: 4 });

@@ -1,8 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Command replay and correction from id Software code/cgame/cg_predict.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
-import type { ActorAnimationState, ArsenalState, MovementProvider, MovementServices,
-  OrderedMovementEffect, Q3MovementInput, Q3MovementState } from "../../contracts/movement.ts";
+import type {
+  ActorAnimationState,
+  ArsenalState,
+  MovementProvider,
+  MovementServices,
+  OrderedMovementEffect,
+  Q3MovementInput,
+  Q3MovementState,
+} from "../../contracts/movement.ts";
 import type { Q3UserCommand } from "../../contracts/protocol.ts";
 import type { TraceHit } from "../../contracts/scene.ts";
 import { add3, length3, scale3, sub3, vec3, lerpAngleRule } from "../../core/math.ts";
@@ -12,8 +20,7 @@ import { MoveFlags, MoveType } from "./constants.ts";
 const f32 = Math.fround;
 
 function emptyCommand(): Q3UserCommand {
-  return { kind: "q3", serverTimeMilliseconds: 0, angleWords: [0, 0, 0], buttons: 0,
-    weapon: 0, forwardMove: 0, rightMove: 0, upMove: 0 };
+  return { kind: "q3", serverTimeMilliseconds: 0, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 0, rightMove: 0, upMove: 0 };
 }
 function copyCommand(command: Q3UserCommand): Q3UserCommand {
   return { ...command, angleWords: [command.angleWords[0], command.angleWords[1], command.angleWords[2]] };
@@ -28,7 +35,9 @@ export interface Q3CommandSource {
 export class Q3CommandHistory implements Q3CommandSource {
   private readonly commands = Array.from({ length: 64 }, emptyCommand);
   private number = 0;
-  get currentNumber(): number { return this.number; }
+  get currentNumber(): number {
+    return this.number;
+  }
   append(command: Q3UserCommand): number {
     this.number = (this.number + 1) | 0;
     this.commands[this.number & 63] = copyCommand(command);
@@ -85,8 +94,7 @@ export interface Q3PredictionHost {
   setMovementMilliseconds(value: number): void;
   /** Restore selected providers' holdables, game words and other prediction-owned state. */
   restoreSnapshot(snapshot: Q3PredictionSnapshot): void;
-  movementInput(actor: Q3PredictedActor, command: Q3UserCommand, commandNumber: number,
-    physicsTimeMilliseconds: number): Q3MovementInput;
+  movementInput(actor: Q3PredictedActor, command: Q3UserCommand, commandNumber: number, physicsTimeMilliseconds: number): Q3MovementInput;
   movementServices(physicsTimeMilliseconds: number): MovementServices;
   /** Source item admission, teleport and jump-pad prediction occur after Pmove. */
   touchTriggers(actor: Q3PredictedActor, bounds: Bounds, physicsTimeMilliseconds: number): Q3PredictionTriggers;
@@ -96,21 +104,32 @@ export interface Q3PredictionHost {
 }
 
 function interpolateVector(a: Vec3, b: Vec3, fraction: number): Vec3 {
-  return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))),
-    f32(a.z + f32(fraction * f32(b.z - a.z))));
+  return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))), f32(a.z + f32(fraction * f32(b.z - a.z))));
 }
 
 export function updateQ3PredictionView(state: Q3MovementState, health: number, command: Q3UserCommand): Q3MovementState {
-  if (state.movementType === MoveType.PM_INTERMISSION || state.movementType === MoveType.PM_SPINTERMISSION ||
-      (state.movementType !== MoveType.PM_SPECTATOR && health <= 0)) return state;
+  if (
+    state.movementType === MoveType.PM_INTERMISSION ||
+    state.movementType === MoveType.PM_SPINTERMISSION ||
+    (state.movementType !== MoveType.PM_SPECTATOR && health <= 0)
+  )
+    return state;
   let deltaPitch = state.deltaAngleWords[0];
   let pitch = ((command.angleWords[0] + deltaPitch) << 16) >> 16;
-  if (pitch > 16000) { deltaPitch = (16000 - command.angleWords[0]) | 0; pitch = 16000; }
-  else if (pitch < -16000) { deltaPitch = (-16000 - command.angleWords[0]) | 0; pitch = -16000; }
+  if (pitch > 16000) {
+    deltaPitch = (16000 - command.angleWords[0]) | 0;
+    pitch = 16000;
+  } else if (pitch < -16000) {
+    deltaPitch = (-16000 - command.angleWords[0]) | 0;
+    pitch = -16000;
+  }
   const yaw = ((command.angleWords[1] + state.deltaAngleWords[1]) << 16) >> 16;
   const roll = ((command.angleWords[2] + state.deltaAngleWords[2]) << 16) >> 16;
-  return { ...state, deltaAngleWords: [deltaPitch, state.deltaAngleWords[1], state.deltaAngleWords[2]],
-    viewAngles: vec3(pitch * (360 / 65536), yaw * (360 / 65536), roll * (360 / 65536)) };
+  return {
+    ...state,
+    deltaAngleWords: [deltaPitch, state.deltaAngleWords[1], state.deltaAngleWords[2]],
+    viewAngles: vec3(pitch * (360 / 65536), yaw * (360 / 65536), roll * (360 / 65536)),
+  };
 }
 
 export class Q3PredictionRuntime {
@@ -120,9 +139,15 @@ export class Q3PredictionRuntime {
   private errorTime = 0;
   constructor(readonly host: Q3PredictionHost) {}
 
-  get actor(): Q3PredictedActor | null { return this.predicted; }
-  get predictedError(): Vec3 { return this.error; }
-  get predictedErrorTime(): number { return this.errorTime; }
+  get actor(): Q3PredictedActor | null {
+    return this.predicted;
+  }
+  get predictedError(): Vec3 {
+    return this.error;
+  }
+  get predictedErrorTime(): number {
+    return this.errorTime;
+  }
 
   private requiredCommand(number: number): Q3UserCommand {
     const command = this.host.commands.read(number);
@@ -138,23 +163,35 @@ export class Q3PredictionRuntime {
     if (frame.nextFrameTeleport || next === null || next.serverTimeMilliseconds <= previous.serverTimeMilliseconds) {
       return { ...previous.actor, movement };
     }
-    const fraction = f32(f32((frame.timeMilliseconds - previous.serverTimeMilliseconds) | 0) /
-      f32((next.serverTimeMilliseconds - previous.serverTimeMilliseconds) | 0));
-    const a = previous.actor.movement, b = next.actor.movement;
+    const fraction = f32(
+      f32((frame.timeMilliseconds - previous.serverTimeMilliseconds) | 0) / f32((next.serverTimeMilliseconds - previous.serverTimeMilliseconds) | 0),
+    );
+    const a = previous.actor.movement,
+      b = next.actor.movement;
     const cycle = b.bobCycle < a.bobCycle ? (b.bobCycle + 256) | 0 : b.bobCycle;
-    return { ...previous.actor, movement: { ...movement,
-      bobCycle: qvmFloatToInt(f32(f32(a.bobCycle) + f32(fraction * f32((cycle - a.bobCycle) | 0)))),
-      origin: interpolateVector(a.origin, b.origin, fraction), velocity: interpolateVector(a.velocity, b.velocity, fraction),
-      viewAngles: grabAngles ? movement.viewAngles : vec3(lerpAngleRule(a.viewAngles.x, b.viewAngles.x, fraction, "float"),
-        lerpAngleRule(a.viewAngles.y, b.viewAngles.y, fraction, "float"), lerpAngleRule(a.viewAngles.z, b.viewAngles.z, fraction, "float")) } };
+    return {
+      ...previous.actor,
+      movement: {
+        ...movement,
+        bobCycle: qvmFloatToInt(f32(f32(a.bobCycle) + f32(fraction * f32((cycle - a.bobCycle) | 0)))),
+        origin: interpolateVector(a.origin, b.origin, fraction),
+        velocity: interpolateVector(a.velocity, b.velocity, fraction),
+        viewAngles: grabAngles
+          ? movement.viewAngles
+          : vec3(
+              lerpAngleRule(a.viewAngles.x, b.viewAngles.x, fraction, "float"),
+              lerpAngleRule(a.viewAngles.y, b.viewAngles.y, fraction, "float"),
+              lerpAngleRule(a.viewAngles.z, b.viewAngles.z, fraction, "float"),
+            ),
+      },
+    };
   }
 
   async predict(frame: Q3PredictionFrame): Promise<Q3PredictionOutput> {
     const settings = this.host.settings();
     const snapshot = frame.snapshot;
     if (this.predicted === null) this.predicted = snapshot.actor;
-    if (settings.demoPlayback || (snapshot.actor.movement.movementFlags & MoveFlags.FOLLOW) !== 0 ||
-        settings.noPredict || settings.synchronousClients) {
+    if (settings.demoPlayback || (snapshot.actor.movement.movementFlags & MoveFlags.FOLLOW) !== 0 || settings.noPredict || settings.synchronousClients) {
       const grabAngles = !settings.demoPlayback && (snapshot.actor.movement.movementFlags & MoveFlags.FOLLOW) === 0;
       this.predicted = this.interpolate(frame, grabAngles);
       return { status: "interpolated", actor: this.predicted, hyperspace: false, effects: [], consumedTeleport: false };
@@ -180,17 +217,18 @@ export class Q3PredictionRuntime {
     for (let number = (current - 63) | 0; number <= current; number++) {
       const command = this.host.commands.read(number);
       if (command !== null) this.command = copyCommand(command);
-      if (settings.fixed) this.predicted = { ...this.predicted,
-        movement: updateQ3PredictionView(this.predicted.movement, frame.health, this.command) };
+      if (settings.fixed) this.predicted = { ...this.predicted, movement: updateQ3PredictionView(this.predicted.movement, frame.health, this.command) };
       const ps = this.predicted.movement;
       if (this.command.serverTimeMilliseconds <= ps.commandTimeMilliseconds || this.command.serverTimeMilliseconds > latest.serverTimeMilliseconds) continue;
       if (ps.commandTimeMilliseconds === old.movement.commandTimeMilliseconds) {
         if (frame.thisFrameTeleport && !consumedTeleport) {
-          this.error = vec3(0, 0, 0); consumedTeleport = true;
+          this.error = vec3(0, 0, 0);
+          consumedTeleport = true;
           if (settings.showMiss !== 0) this.host.warn("PredictionTeleport\n");
         } else {
           const adjusted = this.host.adjustForMover(ps.origin, ps.ground, physicsTime, frame.previousTimeMilliseconds);
-          const delta = sub3(old.movement.origin, adjusted), length = f32(length3(delta));
+          const delta = sub3(old.movement.origin, adjusted),
+            length = f32(length3(delta));
           if (length > f32(0.1)) {
             if (settings.showMiss !== 0) this.host.warn(`Prediction miss: ${length.toFixed(6)}\n`);
             if (settings.errorDecayInteger !== 0) {
@@ -199,17 +237,33 @@ export class Q3PredictionRuntime {
               if (fraction < 0) fraction = 0;
               this.error = scale3(this.error, fraction);
             } else this.error = vec3(0, 0, 0);
-            this.error = add3(delta, this.error); this.errorTime = frame.previousTimeMilliseconds;
+            this.error = add3(delta, this.error);
+            this.errorTime = frame.previousTimeMilliseconds;
           }
         }
       }
-      if (settings.fixed) this.command = { ...this.command, serverTimeMilliseconds: Math.imul(
-        Math.trunc(((this.command.serverTimeMilliseconds + settings.movementMilliseconds - 1) | 0) /
-          settings.movementMilliseconds), settings.movementMilliseconds) };
+      if (settings.fixed)
+        this.command = {
+          ...this.command,
+          serverTimeMilliseconds: Math.imul(
+            Math.trunc(((this.command.serverTimeMilliseconds + settings.movementMilliseconds - 1) | 0) / settings.movementMilliseconds),
+            settings.movementMilliseconds,
+          ),
+        };
       const input = this.host.movementInput(this.predicted, this.command, number, physicsTime);
-      const result = this.host.movement.move({ ...input, state: this.predicted.movement, arsenal: this.predicted.arsenal,
-        animation: this.predicted.animation, command: this.command, commandSequence: number, execution: "prediction",
-        profile: { ...input.profile, fixedMilliseconds: settings.fixed ? settings.movementMilliseconds : null } }, this.host.movementServices(physicsTime));
+      const result = this.host.movement.move(
+        {
+          ...input,
+          state: this.predicted.movement,
+          arsenal: this.predicted.arsenal,
+          animation: this.predicted.animation,
+          command: this.command,
+          commandSequence: number,
+          execution: "prediction",
+          profile: { ...input.profile, fixedMilliseconds: settings.fixed ? settings.movementMilliseconds : null },
+        },
+        this.host.movementServices(physicsTime),
+      );
       effects.push(...result.effects);
       if (result.status === "actor-removed") {
         return { status: "actor-removed", effects, consumedTeleport };
@@ -217,11 +271,18 @@ export class Q3PredictionRuntime {
       this.predicted = { movement: result.state, arsenal: result.arsenal, animation: result.animation };
       moved = true;
       const triggers = this.host.touchTriggers(this.predicted, result.bounds, physicsTime);
-      this.predicted = triggers.actor; hyperspace ||= triggers.hyperspace; effects.push(...triggers.effects);
+      this.predicted = triggers.actor;
+      hyperspace ||= triggers.hyperspace;
+      effects.push(...triggers.effects);
     }
     if (!moved) return { status: "unchanged", actor: this.predicted, hyperspace, effects, consumedTeleport };
-    this.predicted = { ...this.predicted, movement: { ...this.predicted.movement,
-      origin: this.host.adjustForMover(this.predicted.movement.origin, this.predicted.movement.ground, physicsTime, frame.timeMilliseconds) } };
+    this.predicted = {
+      ...this.predicted,
+      movement: {
+        ...this.predicted.movement,
+        origin: this.host.adjustForMover(this.predicted.movement.origin, this.predicted.movement.ground, physicsTime, frame.timeMilliseconds),
+      },
+    };
     if (settings.showMiss !== 0 && this.predicted.movement.predictableEventSequence > ((old.movement.predictableEventSequence + 2) | 0)) {
       this.host.warn("WARNING: dropped event\n");
     }
@@ -230,10 +291,12 @@ export class Q3PredictionRuntime {
   }
 }
 
-export type Q3PredictionOutput = {
-  readonly status: "predicted" | "interpolated" | "unchanged" | "command-backup-exceeded";
-  readonly actor: Q3PredictedActor;
-  readonly hyperspace: boolean;
-  readonly effects: readonly OrderedMovementEffect[];
-  readonly consumedTeleport: boolean;
-} | { readonly status: "actor-removed"; readonly effects: readonly OrderedMovementEffect[]; readonly consumedTeleport: boolean };
+export type Q3PredictionOutput =
+  | {
+      readonly status: "predicted" | "interpolated" | "unchanged" | "command-backup-exceeded";
+      readonly actor: Q3PredictedActor;
+      readonly hyperspace: boolean;
+      readonly effects: readonly OrderedMovementEffect[];
+      readonly consumedTeleport: boolean;
+    }
+  | { readonly status: "actor-removed"; readonly effects: readonly OrderedMovementEffect[]; readonly consumedTeleport: boolean };

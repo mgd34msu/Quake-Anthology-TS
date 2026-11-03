@@ -18,22 +18,32 @@ export class HordeRules implements ForeignMatchStrategy {
 
   constructor(private readonly host: ForeignMatchHost) {}
 
-  get wave(): number { return this.#wave; }
-  get pendingWave(): number { return this.#pendingWave; }
-  get fraggedCount(): number { return this.#fragged.size; }
+  get wave(): number {
+    return this.#wave;
+  }
+  get pendingWave(): number {
+    return this.#pendingWave;
+  }
+  get fraggedCount(): number {
+    return this.#fragged.size;
+  }
 
-  active(): boolean { return this.host.recipe.match.provider === "q3:horde" && this.host.sourceKind === "q3"; }
+  active(): boolean {
+    return this.host.recipe.match.provider === "q3:horde" && this.host.sourceKind === "q3";
+  }
   /** Horde keeps no state a restart or save could not rebuild from the bot roster. */
-  blocksCheckpoint(): boolean { return false; }
+  blocksCheckpoint(): boolean {
+    return false;
+  }
   release(): void {}
 
   tick(): void {
     if (!this.active()) return;
-    const host = this.host, now = host.timeSeconds;
+    const host = this.host,
+      now = host.timeSeconds;
     const players = host.players();
     const bots = players.filter(actor => host.botServices.isBot(actor));
-    const humansAlive = players.some(actor => !host.botServices.isBot(actor)
-      && (host.q3Native(actor)?.health ?? host.combat.read(actor)?.health ?? 0) > 0);
+    const humansAlive = players.some(actor => !host.botServices.isBot(actor) && (host.q3Native(actor)?.health ?? host.combat.read(actor)?.health ?? 0) > 0);
     if (!humansAlive) return;
     if (this.#wave === 0) {
       if (now >= this.#nextWaveAt) {
@@ -54,7 +64,10 @@ export class HordeRules implements ForeignMatchStrategy {
     const admitted = [...this.#fragged.keys()].filter(actor => host.actors.isLive(actor));
     const humans = players.length - bots.length;
     const target = Math.min(1 + this.#wave, 8, Math.max(1, host.maxClients - humans));
-    if (admitted.length < target) { this.#requestBot(players.length); return; }
+    if (admitted.length < target) {
+      this.#requestBot(players.length);
+      return;
+    }
     if (!admitted.every(actor => this.#fragged.get(actor)?.fragged === true)) return;
     // Wave cleared: retire survivors through the bot transport (which frees
     // their session client slots for the next wave) and schedule it.

@@ -1,10 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* MDL v6 adapted from the reference port and Quake's
  * WinQuake/modelgen.h, model.c. Copyright (C) 1996-1997 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ModelVertex, PackedAliasVertex, Q1AliasFrame, Q1AliasFrameSet, Q1AliasModel, TimedFrames } from "../../contracts/scene.ts";
 import { BinaryReader } from "../../core/binary/index.ts";
-import { boundsFromPoints, count, fail, groupType, index, intervals, packedPosition, packedVertex, readTimed, syncType, unionBounds, vector, version } from "./common.ts";
+import {
+  boundsFromPoints,
+  count,
+  fail,
+  groupType,
+  index,
+  intervals,
+  packedPosition,
+  packedVertex,
+  readTimed,
+  syncType,
+  unionBounds,
+  vector,
+  version,
+} from "./common.ts";
 import { decodeAliasNormal } from "./normals.ts";
 
 function frame(reader: BinaryReader, vertexCount: number, scale: Vec3, translate: Vec3): Q1AliasFrame {
@@ -20,7 +35,10 @@ function frame(reader: BinaryReader, vertexCount: number, scale: Vec3, translate
     vertices.push({ position: packedPosition(packed, scale, translate), normal: decodeAliasNormal(packed.normalIndex) });
   }
   return {
-    name, compressedBounds, compressedVertices, vertices,
+    name,
+    compressedBounds,
+    compressedVertices,
+    vertices,
     bounds: boundsFromPoints(compressedBounds.map(value => packedPosition(value, scale, translate))),
     origin: { x: 0, y: 0, z: 0 },
   };
@@ -33,7 +51,8 @@ function frameSet(reader: BinaryReader, vertexCount: number, scale: Vec3, transl
   const endpoints = intervals(reader, frameCount);
   reader.dataView(reader.offset, frameCount * (24 + vertexCount * 4));
   return {
-    kind: "group", compressedBounds,
+    kind: "group",
+    compressedBounds,
     bounds: boundsFromPoints(compressedBounds.map(value => packedPosition(value, scale, translate))),
     frames: endpoints.map(intervalSeconds => ({ intervalSeconds, frame: frame(reader, vertexCount, scale, translate) })),
   };
@@ -69,18 +88,33 @@ export function parseMdl(data: Uint8Array, source = "<mdl>"): Q1AliasModel {
   const triangles: Q1AliasModel["triangles"][number][] = [];
   for (let i = 0; i < triangleCount; i++) {
     const front = reader.i32() !== 0;
-    triangles.push({ front, vertices: [
-      index(reader, reader.i32(), vertexCount, "vertex"),
-      index(reader, reader.i32(), vertexCount, "vertex"),
-      index(reader, reader.i32(), vertexCount, "vertex"),
-    ] });
+    triangles.push({
+      front,
+      vertices: [
+        index(reader, reader.i32(), vertexCount, "vertex"),
+        index(reader, reader.i32(), vertexCount, "vertex"),
+        index(reader, reader.i32(), vertexCount, "vertex"),
+      ],
+    });
   }
   reader.dataView(reader.offset, frameCount * (4 + 24 + vertexCount * 4));
   const frames: Q1AliasFrameSet[] = [];
   for (let i = 0; i < frameCount; i++) frames.push(frameSet(reader, vertexCount, scale, scaleOrigin));
   return {
-    kind: "q1-mdl", scale, scaleOrigin, boundingRadius, eyePosition, size,
-    skinWidth, skinHeight, sync, flags, skins, textureCoordinates, triangles, frames,
-    bounds: unionBounds(frames.map(value => value.kind === "single" ? value.frame.bounds : value.bounds)),
+    kind: "q1-mdl",
+    scale,
+    scaleOrigin,
+    boundingRadius,
+    eyePosition,
+    size,
+    skinWidth,
+    skinHeight,
+    sync,
+    flags,
+    skins,
+    textureCoordinates,
+    triangles,
+    frames,
+    bounds: unionBounds(frames.map(value => (value.kind === "single" ? value.frame.bounds : value.bounds))),
   };
 }

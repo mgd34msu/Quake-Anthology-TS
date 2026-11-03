@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { GameEntity } from "./state.ts";
 import type { UseParticipant } from "./state.ts";

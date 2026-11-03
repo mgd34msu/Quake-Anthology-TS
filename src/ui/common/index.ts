@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export * from "./controller.ts";
 export * from "./draw.ts";
 export * from "./layout.ts";

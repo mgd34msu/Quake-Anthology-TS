@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { CPU_OFFSET_DEPTH_BITS, CPU_OPAQUE_STATE, SoftwareRenderer } from "./rasterizer.ts";
 export { CpuRenderTarget } from "./commands.ts";
 export type { CpuPresenter } from "./commands.ts";

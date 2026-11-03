@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 function isStub<T extends object>(value: unknown): value is T {
   return typeof value === "object" && value !== null;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q2 rerelease knowledge comes from mounted bots/*.txt, including dangers.txt.
 // The donor incorrectly claimed Q2 shipped none and synthesized Q1-shaped files.
 // Only its explicit inventory-bit adapter remains: these bits are not Q2 item IDs
@@ -65,10 +66,10 @@ export interface BotObjectiveBindingT {
   readonly team: number;
 }
 
-
 /** Standard CTF objective classnames; selected mod data can expose further objectives. */
 export const BOT_OBJECTIVE_BINDINGS: readonly BotObjectiveBindingT[] = [
-  { classname: "item_flag_team1", team: 1 }, { classname: "item_flag_team2", team: 2 },
+  { classname: "item_flag_team1", team: 1 },
+  { classname: "item_flag_team2", team: 2 },
 ];
 
 export function Bot_BuildKnowledge(files: BotDataFilesT): BotKnowledge {
@@ -83,9 +84,19 @@ export function Bot_GameMode(knowledge: BotKnowledge, cvarValue: (name: string) 
 /** Source mount precedence is resolved before this synchronous typed boundary. */
 export function Bot_LoadKnowledge(files: Pick<BotSourceFiles, "read">, platform: "PC" | "Consoles" | "Nintendo" = "PC"): BotKnowledge {
   const read = (name: string): string | null => readBotSourceText(files, `bots/${name}.txt`);
-  const weapons = read("weapons"), settings = read(`settings_${platform}`);
+  const weapons = read("weapons"),
+    settings = read(`settings_${platform}`);
   if (weapons === null || settings === null) throw new Error(`Q2 rerelease bot source data unavailable: weapons.txt and settings_${platform}.txt are required`);
-  return Bot_BuildKnowledge({ weapons, settings, characters: read("characters") ?? "", items: read("items") ?? "",
-    monsters: read("monsters") ?? "", interactables: read("interactables") ?? "", gameRules: read("game_rules") ?? "",
-    teams: read("teams") ?? "", chats: read("chats") ?? "", dangers: read("dangers") ?? "" });
+  return Bot_BuildKnowledge({
+    weapons,
+    settings,
+    characters: read("characters") ?? "",
+    items: read("items") ?? "",
+    monsters: read("monsters") ?? "",
+    interactables: read("interactables") ?? "",
+    gameRules: read("game_rules") ?? "",
+    teams: read("teams") ?? "",
+    chats: read("chats") ?? "",
+    dangers: read("dangers") ?? "",
+  });
 }

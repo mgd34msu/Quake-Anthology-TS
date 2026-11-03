@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Q_atoi and IN_Impulse from Quake I/II cl_input.c; MSG_WriteByte emits the low byte.
 // Copyright (C) id Software. GPL-2.0-or-later.
 import type { CommandDialect } from "../contracts/common.ts";
@@ -31,9 +32,12 @@ function quakeInteger(text: string): number {
 export function parseImpulse(text: string, dialect: CommandDialect): number {
   switch (dialect) {
     case "q1-netquake":
-    case "q1-quakeworld": return quakeInteger(text) & 255;
-    case "q2-classic": return Number.parseInt(text, 10) & 255;
+    case "q1-quakeworld":
+      return quakeInteger(text) & 255;
+    case "q2-classic":
+      return Number.parseInt(text, 10) & 255;
     case "q2-rerelease":
-    case "q3": return Number(text);
+    case "q3":
+      return Number(text);
   }
 }

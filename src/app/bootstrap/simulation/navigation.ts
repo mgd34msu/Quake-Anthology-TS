@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { applicationTrainConnections } from "./bot-mover-connections.ts";
 import { SaveReader } from "../../../persistence/value.ts";
 import type { NavigationRuntimeCheckpoint } from "../../../bots/navigation/runtime.ts";
@@ -15,7 +16,15 @@ import type { MovementPredictionPlayer } from "./player-movement.ts";
 import { guestMovementProjection } from "./q3/guest-movement.ts";
 import type { ClientId } from "../../../contracts/identity.ts";
 import type { SharedSimulation } from "./runtime.ts";
-import { capturePlayerLocomotion, playerLocomotionMatches, createPlayerMovementPrediction, locomotionTemplate, playerCrouchedBounds, playerTracePolicy, selectedMovementProfile } from "./player-movement.ts";
+import {
+  capturePlayerLocomotion,
+  playerLocomotionMatches,
+  createPlayerMovementPrediction,
+  locomotionTemplate,
+  playerCrouchedBounds,
+  playerTracePolicy,
+  selectedMovementProfile,
+} from "./player-movement.ts";
 import type { LocomotionPlayer } from "./player-movement.ts";
 import { MoverState } from "../../../content/q3/base/game/state.ts";
 
@@ -23,14 +32,24 @@ const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export function botNavigationProfile(player: LocomotionPlayer): NavigationProfile {
   const movement = selectedMovementProfile(player);
   const crouches = movement.kind === "q2-classic" || movement.kind === "q2-rerelease" || movement.kind === "q3";
-  return { movement, shape: { kind: "box", bounds: player.standingBounds },
-    ...(crouches ? { crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape"> : {}),
+  return {
+    movement,
+    shape: { kind: "box", bounds: player.standingBounds },
+    ...(crouches ? ({ crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape">) : {}),
     policy: playerTracePolicy(player),
-    capabilities: new Set<TravelMode>([...(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const
-      : ["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const),
-    // TFL_DEFAULT includes TFL_TELEPORT and TFL_JUMPPAD; routing leaves selection to the travel flags.
-    ...(movement.kind === "q3" ? ["teleport", "jump-pad"] as const : [])]),
-    maximumStep: 18, minimumFloorNormal: 0.7, maximumDrop: 128, team: null, monster: false };
+    capabilities: new Set<TravelMode>([
+      ...(crouches
+        ? (["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const)
+        : (["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const)),
+      // TFL_DEFAULT includes TFL_TELEPORT and TFL_JUMPPAD; routing leaves selection to the travel flags.
+      ...(movement.kind === "q3" ? (["teleport", "jump-pad"] as const) : []),
+    ]),
+    maximumStep: 18,
+    minimumFloorNormal: 0.7,
+    maximumDrop: 128,
+    team: null,
+    monster: false,
+  };
 }
 
 export interface ApplicationBotNavigationCheckpoint {
@@ -43,18 +62,28 @@ export interface ApplicationBotNavigation extends SelectedBotNavigation {
   checkpoint(): ApplicationBotNavigationCheckpoint;
   restoreCheckpoint(value: unknown, remapClient?: (saved: number) => number): void;
 }
-export interface ApplicationBotNavigationOptions { readonly content: LoadedApplicationContent; readonly simulation: SharedSimulation; }
+export interface ApplicationBotNavigationOptions {
+  readonly content: LoadedApplicationContent;
+  readonly simulation: SharedSimulation;
+}
 export async function createApplicationBotNavigation({ content, simulation }: ApplicationBotNavigationOptions): Promise<ApplicationBotNavigation> {
   if (content.recipe !== simulation.recipe) throw new Error("Navigation and simulation must use the same loaded recipe");
   const guestPlayers = new Map<ClientId, MovementPredictionPlayer>();
   const players = (): readonly MovementPredictionPlayer[] => {
     const guest = simulation.q3Guest();
-    if (guest === null) return simulation.players().flatMap(actor => { const player = simulation.movementPlayer(actor); return player === null ? [] : [player]; });
+    if (guest === null)
+      return simulation.players().flatMap(actor => {
+        const player = simulation.movementPlayer(actor);
+        return player === null ? [] : [player];
+      });
     const current = guest.players();
     for (const client of guestPlayers.keys()) if (!current.some(player => player.client.equals(client))) guestPlayers.delete(client);
     return current.map(player => {
       let projection = guestPlayers.get(player.client);
-      if (projection === undefined) { projection = guestMovementProjection(guest, player, content.recipe); guestPlayers.set(player.client, projection); }
+      if (projection === undefined) {
+        projection = guestMovementProjection(guest, player, content.recipe);
+        guestPlayers.set(player.client, projection);
+      }
       return projection;
     });
   };
@@ -67,20 +96,36 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
   };
   const worldFor = (selectedPlayer: MovementPredictionPlayer | null): NavigationWorld => {
     const boundModels = new Map<NavigationEntityBinding, number>();
-    const driver: NavigationPredictionDriver = { begin: (request, selected) => {
-      const player = selectedPlayer ?? firstPlayer();
-      if (player === null) return null;
-      const projection = createPlayerMovementPrediction(simulation, player, request.from, zero, 16, false, selected.movement);
-      return { ...projection, input(previous, index, action) {
-        const at = previous?.status === "active" ? movementOrigin(previous.state) : request.from;
-        const x = action.to.x - at.x, y = action.to.y - at.y, distance = Math.hypot(x, y);
-        const scale = distance === 0 ? 0 : Math.min(400, distance * 20) / distance;
-        return projection.input(previous, index, { x: x * scale, y: y * scale,
-          z: action.mode === "jump" || action.mode === "water-jump" || action.mode === "ladder" ? 400 : action.mode === "crouch" ? -400 : 0 });
-      } };
-    } };
-    return { scene: simulation.scene, passActor: selectedPlayer?.actor.id ?? null, get revision() { return simulation.timeSeconds * 1000; },
-      admit: createMovementAdmission(driver), beginRoute: selected => createMovementRouteAdmission(driver, selected),
+    const driver: NavigationPredictionDriver = {
+      begin: (request, selected) => {
+        const player = selectedPlayer ?? firstPlayer();
+        if (player === null) return null;
+        const projection = createPlayerMovementPrediction(simulation, player, request.from, zero, 16, false, selected.movement);
+        return {
+          ...projection,
+          input(previous, index, action) {
+            const at = previous?.status === "active" ? movementOrigin(previous.state) : request.from;
+            const x = action.to.x - at.x,
+              y = action.to.y - at.y,
+              distance = Math.hypot(x, y);
+            const scale = distance === 0 ? 0 : Math.min(400, distance * 20) / distance;
+            return projection.input(previous, index, {
+              x: x * scale,
+              y: y * scale,
+              z: action.mode === "jump" || action.mode === "water-jump" || action.mode === "ladder" ? 400 : action.mode === "crouch" ? -400 : 0,
+            });
+          },
+        };
+      },
+    };
+    return {
+      scene: simulation.scene,
+      passActor: selectedPlayer?.actor.id ?? null,
+      get revision() {
+        return simulation.timeSeconds * 1000;
+      },
+      admit: createMovementAdmission(driver),
+      beginRoute: selected => createMovementRouteAdmission(driver, selected),
       entity: binding => {
         const linked = simulation.scene.queryActors(simulation.scene.modelBounds(0));
         let model = binding.model ?? boundModels.get(binding) ?? null;
@@ -89,7 +134,12 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
             if (collision.shape.kind !== "model") continue;
             const entity = simulation.q1Source()?.game.entity(body.actor);
             if (entity === undefined || entity === null) continue;
-            if (![body.state.origin, entity.pos1, entity.pos2].some(endpoint => sourceMoverBoundsMatch(binding.bounds, body.absoluteBounds, body.state.origin, endpoint))) continue;
+            if (
+              ![body.state.origin, entity.pos1, entity.pos2].some(endpoint =>
+                sourceMoverBoundsMatch(binding.bounds, body.absoluteBounds, body.state.origin, endpoint),
+              )
+            )
+              continue;
             if (model !== null) return null;
             model = collision.shape.model;
           }
@@ -105,22 +155,48 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
             const key = (master.spawnflags & 8) !== 0 ? "q1:key/gold" : (master.spawnflags & 16) !== 0 ? "q1:key/silver" : null;
             const player = selectedPlayer ?? firstPlayer();
             const needsKey = key !== null && master.touch !== null && (player === null || simulation.inventory.count(player.actor.id, key) === 0);
-            return { ...common, enabled: q1.solid === "bsp", destination: q1.move?.destination ?? null,
+            return {
+              ...common,
+              enabled: q1.solid === "bsp",
+              destination: q1.move?.destination ?? null,
               ...(q1.classname === "func_plat" ? { elevator: { origin: body.state.origin, bottom: q1.pos2, top: q1.pos1, phase: q1.state } } : {}),
-              locked: q1.classname === "func_plat" ? !q1.activated : q1.classname === "func_door"
-                && (master.state === "bottom" || master.state === "down")
-                && (master.targetname !== "" || master.maxHealth > 0 || (master.spawnflags & 4) !== 0 || needsKey) };
+              locked:
+                q1.classname === "func_plat"
+                  ? !q1.activated
+                  : q1.classname === "func_door" &&
+                    (master.state === "bottom" || master.state === "down") &&
+                    (master.targetname !== "" || master.maxHealth > 0 || (master.spawnflags & 4) !== 0 || needsKey),
+            };
           }
-          const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
+          const q2 = simulation.q2Source(),
+            entity = q2?.game.entity(body.actor);
           if (q2 !== null && entity !== undefined && entity !== null) {
-            const platform = q2.baseEntities.platformState(entity) ?? q2.product.expansions
-              .map(expansion => expansion.entities.movers?.platformState(entity) ?? null).find(state => state !== null) ?? null;
+            const platform =
+              q2.baseEntities.platformState(entity) ??
+              q2.product.expansions.map(expansion => expansion.entities.movers?.platformState(entity) ?? null).find(state => state !== null) ??
+              null;
             const train = q2.movers.trainRoute(entity, q2.game);
-            return { ...common, enabled: entity.solid === "brush", ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)),
-              ...(train === null ? {} : { train: { origin: body.state.origin, running: train.running,
-                stops: train.stops.map(stop => ({ id: stop.actor.slot, origin: stop.origin, next: stop.next?.slot ?? null,
-                  wait: stop.wait, teleport: stop.teleport })) } }),
-              ...(platform === null ? {} : { elevator: { ...platform, origin: body.state.origin } }) };
+            return {
+              ...common,
+              enabled: entity.solid === "brush",
+              ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)),
+              ...(train === null
+                ? {}
+                : {
+                    train: {
+                      origin: body.state.origin,
+                      running: train.running,
+                      stops: train.stops.map(stop => ({
+                        id: stop.actor.slot,
+                        origin: stop.origin,
+                        next: stop.next?.slot ?? null,
+                        wait: stop.wait,
+                        teleport: stop.teleport,
+                      })),
+                    },
+                  }),
+              ...(platform === null ? {} : { elevator: { ...platform, origin: body.state.origin } }),
+            };
           }
           const q3 = simulation.q3Source()?.records.nativeByActor(body.actor);
           if (q3 !== undefined && q3 !== null) {
@@ -130,55 +206,96 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
               const entity = source?.records.nativeByActor(trigger.actor);
               return entity?.classname === "door_trigger" && entity.parent === master && entity.r.linked && entity.touch !== null;
             });
-            return { ...common, enabled: q3.r.linked,
-              locked: master.moverState === MoverState.POS1 && (q3.classname === "func_door" && !automatic
-                || q3.classname === "func_plat" && master.targetname !== null),
-              destination: q3.moverState === MoverState.ONE_TO_TWO ? q3.pos2 : q3.moverState === MoverState.TWO_TO_ONE ? q3.pos1 : null };
+            return {
+              ...common,
+              enabled: q3.r.linked,
+              locked:
+                master.moverState === MoverState.POS1 &&
+                ((q3.classname === "func_door" && !automatic) || (q3.classname === "func_plat" && master.targetname !== null)),
+              destination: q3.moverState === MoverState.ONE_TO_TWO ? q3.pos2 : q3.moverState === MoverState.TWO_TO_ONE ? q3.pos1 : null,
+            };
           }
           return null;
         }
         return null;
-      }, hazard: bounds => {
+      },
+      hazard: bounds => {
         for (const { body } of simulation.scene.queryActors(bounds)) {
           const q1 = simulation.q1Source()?.game.entity(body.actor);
           if (q1?.classname === "trigger_hurt" && q1.solid === "trigger" && q1.damage > 0 && q1.touch !== null) return true;
-          const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
-          if (entity?.classname === "trigger_hurt" && entity.solid === "trigger" && entity.damage > 0 && entity.touch !== null
-            && q2 !== null && entity.timestamp <= q2.game.host.now()) return true;
-          const q3 = simulation.q3Source(), native = q3?.records.nativeByActor(body.actor);
-          if (native?.classname === "trigger_hurt" && native.r.linked && native.damage > 0 && native.touch !== null
-            && q3 !== null && native.timestamp <= q3.level.time) return true;
+          const q2 = simulation.q2Source(),
+            entity = q2?.game.entity(body.actor);
+          if (
+            entity?.classname === "trigger_hurt" &&
+            entity.solid === "trigger" &&
+            entity.damage > 0 &&
+            entity.touch !== null &&
+            q2 !== null &&
+            entity.timestamp <= q2.game.host.now()
+          )
+            return true;
+          const q3 = simulation.q3Source(),
+            native = q3?.records.nativeByActor(body.actor);
+          if (
+            native?.classname === "trigger_hurt" &&
+            native.r.linked &&
+            native.damage > 0 &&
+            native.touch !== null &&
+            q3 !== null &&
+            native.timestamp <= q3.level.time
+          )
+            return true;
         }
         return false;
-      } };
+      },
+    };
   };
-  const profile = botNavigationProfile(first), world = worldFor(firstPlayer());
-  const loaded = await loadNavigation({ geometry: simulation.options.world, map: { name: content.recipe.map.geometry.requestedPath,
-    format: simulation.options.world.kind, digest: content.recipe.map.geometry.digest }, profile, world, connections: applicationTrainConnections(simulation, profile),
+  const profile = botNavigationProfile(first),
+    world = worldFor(firstPlayer());
+  const loaded = await loadNavigation({
+    geometry: simulation.options.world,
+    map: { name: content.recipe.map.geometry.requestedPath, format: simulation.options.world.kind, digest: content.recipe.map.geometry.digest },
+    profile,
+    world,
+    connections: applicationTrainConnections(simulation, profile),
     resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content),
     navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
-    mapBytes: await content.mounts.read(content.recipe.map.geometry) });
+    mapBytes: await content.mounts.read(content.recipe.map.geometry),
+  });
   let baseRuntime = loaded.runtime;
   type CachedNavigation = { readonly player: MovementPredictionPlayer | null; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer };
   const clients = new Map<number, CachedNavigation>();
   const forClient = (client: number): NavigationRuntime => {
-    const player = playerFor(client), cached = clients.get(client);
+    const player = playerFor(client),
+      cached = clients.get(client);
     if (cached?.player === player && playerLocomotionMatches(player, cached.locomotion)) return cached.runtime;
     const runtime = new NavigationRuntime({ ...loaded.runtime.graph, profile: botNavigationProfile(player) }, worldFor(player));
-    clients.set(client, { player, runtime, locomotion: capturePlayerLocomotion(player) }); return runtime;
+    clients.set(client, { player, runtime, locomotion: capturePlayerLocomotion(player) });
+    return runtime;
   };
-  return { get runtime() { return baseRuntime; }, forClient,
+  return {
+    get runtime() {
+      return baseRuntime;
+    },
+    forClient,
     restartRound() {
       const selected = firstPlayer() ?? locomotionTemplate(content.recipe);
       baseRuntime = new NavigationRuntime({ ...loaded.runtime.graph, profile: botNavigationProfile(selected) }, worldFor(null));
       clients.clear();
     },
     checkpoint() {
-      return { version: 1, base: baseRuntime.checkpoint(), clients: Array.from(clients, ([client, cached]) => {
-        const current = players().find(player => player.client.slot === client);
-        return { client, reusable: current !== undefined && current !== null && current === cached.player
-          && playerLocomotionMatches(current, cached.locomotion), runtime: cached.runtime.checkpoint() };
-      }) };
+      return {
+        version: 1,
+        base: baseRuntime.checkpoint(),
+        clients: Array.from(clients, ([client, cached]) => {
+          const current = players().find(player => player.client.slot === client);
+          return {
+            client,
+            reusable: current !== undefined && current !== null && current === cached.player && playerLocomotionMatches(current, cached.locomotion),
+            runtime: cached.runtime.checkpoint(),
+          };
+        }),
+      };
     },
     restoreCheckpoint(value, remapClient = client => client) {
       const reader = new SaveReader(value, "applicationNavigation");
@@ -188,8 +305,10 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
       const restored = new Map<number, CachedNavigation>();
       const savedClients = new Set<number>();
       reader.field("clients").list(entry => {
-        const saved = entry.field("client").integer(0), client = remapClient(saved);
-        if (!Number.isSafeInteger(client) || client < 0 || savedClients.has(saved) || restored.has(client)) entry.fail("invalid or duplicate navigation client mapping");
+        const saved = entry.field("client").integer(0),
+          client = remapClient(saved);
+        if (!Number.isSafeInteger(client) || client < 0 || savedClients.has(saved) || restored.has(client))
+          entry.fail("invalid or duplicate navigation client mapping");
         savedClients.add(saved);
         const reusable = entry.field("reusable").boolean();
         const player = reusable ? playerFor(client) : null;
@@ -199,14 +318,34 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
         restored.set(client, { player, locomotion, runtime });
       });
       baseRuntime.restoreCheckpoint(base.checkpoint());
-      clients.clear(); for (const [client, cached] of restored) clients.set(client, cached);
-    }, crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
+      clients.clear();
+      for (const [client, cached] of restored) clients.set(client, cached);
+    },
+    crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
     travelWeapon: () => null,
     predictClientMovement(query: BotMovementPrediction) {
       // Entity -1 is a probe with no owner (the jump-pad item test): any admitted player's movement provides the physics.
       const anyone = query.entityNum < 0 ? firstPlayer() : null;
-      if (query.entityNum < 0 && anyone === null) return { end: query.origin, velocity: query.velocity, frames: 0, stopEvent: 0, endArea: null,
-        trajectory: [query.origin], seconds: 0, grounded: false, waterLevel: 0, trace: null, bounds: null };
-      return predictApplicationBotMovement(simulation, anyone ?? playerFor(query.entityNum), query, anyone === null ? forClient(query.entityNum) : forClient(anyone.client.slot));
-    } };
+      if (query.entityNum < 0 && anyone === null)
+        return {
+          end: query.origin,
+          velocity: query.velocity,
+          frames: 0,
+          stopEvent: 0,
+          endArea: null,
+          trajectory: [query.origin],
+          seconds: 0,
+          grounded: false,
+          waterLevel: 0,
+          trace: null,
+          bounds: null,
+        };
+      return predictApplicationBotMovement(
+        simulation,
+        anyone ?? playerFor(query.entityNum),
+        query,
+        anyone === null ? forClient(query.entityNum) : forClient(anyone.client.slot),
+      );
+    },
+  };
 }

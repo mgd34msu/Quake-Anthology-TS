@@ -1,19 +1,59 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestStorage, NativeCallAbi, NativeHeapBlock, WindowsHeapTables } from "../../../contracts/execution.ts";
+import type {
+  GuestAddress,
+  GuestCallContext,
+  GuestCallResult,
+  GuestCallValue,
+  GuestStorage,
+  NativeCallAbi,
+  NativeHeapBlock,
+  WindowsHeapTables,
+} from "../../../contracts/execution.ts";
 import { GuestCallRunner } from "../../abi/index.ts";
-import type { GuestCallSignature, GuestImage, GuestImport, GuestImportResolution, GuestImportResolver, GuestHostCallback, MappedGuestMemory } from "../../core/index.ts";
+import type {
+  GuestCallSignature,
+  GuestImage,
+  GuestImport,
+  GuestImportResolution,
+  GuestImportResolver,
+  GuestHostCallback,
+  MappedGuestMemory,
+} from "../../core/index.ts";
 import { bindPeImports, resolvePeExport } from "../../pe/index.ts";
 import type { PeImage } from "../../pe/index.ts";
 import { allocateNativeMemory, nativeAllocationBytes, readUnsigned, writePointer, writeUnsigned } from "../common/memory.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
-import type { WindowsCapabilities, WindowsImportCoverage, WindowsImportImplementation, WindowsInitializeOptions, WindowsRuntimeOptions, WindowsServiceHost } from "./contracts.ts";
+import type {
+  WindowsCapabilities,
+  WindowsImportCoverage,
+  WindowsImportImplementation,
+  WindowsInitializeOptions,
+  WindowsRuntimeOptions,
+  WindowsServiceHost,
+} from "./contracts.ts";
 import { installKernel } from "./kernel.ts";
 import { installCrt } from "./crt.ts";
 import { installMsvcStreams } from "./msvc/streams.ts";
 
-function canonical(library: string): string { const base = library.replaceAll("\\", "/").split("/").at(-1) ?? library; return base.toLowerCase().endsWith(".dll") ? base.toLowerCase() : `${base.toLowerCase()}.dll`; }
-interface ImportEntry { readonly library: string; readonly name: string; readonly callback: GuestHostCallback; readonly address: GuestAddress; readonly supported: boolean; reached: number; failed: number; lastFailure: string | null; }
-interface HeapAllocation { readonly address: GuestAddress; readonly size: number; readonly heap: bigint; }
+function canonical(library: string): string {
+  const base = library.replaceAll("\\", "/").split("/").at(-1) ?? library;
+  return base.toLowerCase().endsWith(".dll") ? base.toLowerCase() : `${base.toLowerCase()}.dll`;
+}
+interface ImportEntry {
+  readonly library: string;
+  readonly name: string;
+  readonly callback: GuestHostCallback;
+  readonly address: GuestAddress;
+  readonly supported: boolean;
+  reached: number;
+  failed: number;
+  lastFailure: string | null;
+}
+interface HeapAllocation {
+  readonly address: GuestAddress;
+  readonly size: number;
+  readonly heap: bigint;
+}
 
 /** One emulated Windows thread, sharing the caller's CPU, memory and callback table. */
 export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceHost {
@@ -51,7 +91,8 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     if (options.callbacks.memory !== this.memory) throw new TypeError("Windows callbacks require the same guest memory");
     this.capabilities = options.capabilities ?? {};
     this.pointerStorage = this.memory.pointerBytes === 4 ? "uint32" : "uint64";
-    this.processId = options.processId ?? 1; this.threadId = options.threadId ?? 1;
+    this.processId = options.processId ?? 1;
+    this.threadId = options.threadId ?? 1;
     this.teb = this.memory.allocate({ byteLength: 0x2000, alignment: 4096n, label: "Windows TEB" });
     this.peb = this.memory.allocate({ byteLength: 0x1000, alignment: 4096n, label: "Windows PEB" });
     this.staticTls = this.memory.allocate({ byteLength: this.memory.pointerBytes * 1024, alignment: 16n, label: "Windows static TLS vector" });
@@ -62,115 +103,226 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     writeUnsigned(this.memory, this.teb, width, (1n << BigInt(width * 8)) - 1n);
     writeUnsigned(this.memory, this.memory.offset(this.teb, width === 4 ? 0x20n : 0x40n), width, BigInt(this.processId));
     writeUnsigned(this.memory, this.memory.offset(this.teb, width === 4 ? 0x24n : 0x48n), width, BigInt(this.threadId));
-    installKernel(this); installCrt(this); installMsvcStreams(this);
+    installKernel(this);
+    installCrt(this);
+    installMsvcStreams(this);
     // Microsoft STL xlocale: locale::id contains size_t _Id; its shared counter is int.
     this.registerData("msvcp140.dll", "?_Id_cnt@id@locale@std@@0HA", new Uint8Array(4));
     this.registerData("msvcp140.dll", "?id@?$numpunct@D@std@@2V0locale@2@A", new Uint8Array(width));
   }
-  chargeBytes(byteLength: number): void { this.#runner?.chargeBytes(byteLength); }
-  get runner(): GuestCallRunner { if (this.#runner === null) throw new Error("Attach the shared GuestCallRunner before Windows execution"); return this.#runner; }
-  get images(): readonly PeImage[] { return this.#images; }
-  get lastError(): number { return Number(readUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4)); }
-  set lastError(value: number) { writeUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4, BigInt(value)); }
-  get coverage(): readonly WindowsImportCoverage[] { return this.#importOrder.filter(entry => this.#requested.get(entry.library)?.has(entry.name) === true || entry.reached > 0)
-    .map(({ library, name, supported, reached, failed, lastFailure }) => ({ library, name, supported, reached, failed, lastFailure })); }
-  #importEntry(library: string, name: string): ImportEntry | undefined { return this.#imports.get(library)?.get(name); }
-  #dataAddress(library: string, name: string): GuestAddress | undefined { return this.#data.get(library)?.get(name); }
+  chargeBytes(byteLength: number): void {
+    this.#runner?.chargeBytes(byteLength);
+  }
+  get runner(): GuestCallRunner {
+    if (this.#runner === null) throw new Error("Attach the shared GuestCallRunner before Windows execution");
+    return this.#runner;
+  }
+  get images(): readonly PeImage[] {
+    return this.#images;
+  }
+  get lastError(): number {
+    return Number(readUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4));
+  }
+  set lastError(value: number) {
+    writeUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4, BigInt(value));
+  }
+  get coverage(): readonly WindowsImportCoverage[] {
+    return this.#importOrder
+      .filter(entry => this.#requested.get(entry.library)?.has(entry.name) === true || entry.reached > 0)
+      .map(({ library, name, supported, reached, failed, lastFailure }) => ({ library, name, supported, reached, failed, lastFailure }));
+  }
+  #importEntry(library: string, name: string): ImportEntry | undefined {
+    return this.#imports.get(library)?.get(name);
+  }
+  #dataAddress(library: string, name: string): GuestAddress | undefined {
+    return this.#data.get(library)?.get(name);
+  }
   attachRunner(runner: GuestCallRunner): void {
-    if (runner.options.cpu.memory !== this.memory || runner.options.callbacks !== this.options.callbacks) throw new TypeError("Windows runner belongs to different guest state");
+    if (runner.options.cpu.memory !== this.memory || runner.options.callbacks !== this.options.callbacks)
+      throw new TypeError("Windows runner belongs to different guest state");
     this.#runner = runner;
     const state = runner.options.cpu.state;
     const stack = state.registers.read("rsp", this.memory.pointerBytes === 4 ? 32 : 64);
     const mapping = this.memory.mappings().find(entry => stack > entry.base && stack <= entry.base + BigInt(entry.byteLength));
     if (mapping === undefined) throw new Error("Windows thread stack must already be mapped");
-    writeUnsigned(this.memory, this.memory.offset(this.teb, BigInt(this.memory.pointerBytes)), this.memory.pointerBytes, mapping.base + BigInt(mapping.byteLength));
+    writeUnsigned(
+      this.memory,
+      this.memory.offset(this.teb, BigInt(this.memory.pointerBytes)),
+      this.memory.pointerBytes,
+      mapping.base + BigInt(mapping.byteLength),
+    );
     writeUnsigned(this.memory, this.memory.offset(this.teb, BigInt(this.memory.pointerBytes * 2)), this.memory.pointerBytes, mapping.base);
-    if (this.memory.pointerBytes === 4) state.segments.fs.base = this.teb.byteOffset; else state.segments.gs.base = this.teb.byteOffset;
+    if (this.memory.pointerBytes === 4) state.segments.fs.base = this.teb.byteOffset;
+    else state.segments.gs.base = this.teb.byteOffset;
   }
   signature(library: string, parameters: readonly GuestStorage[], result: GuestStorage | "void"): GuestCallSignature {
-    const abi: NativeCallAbi = this.memory.pointerBytes === 8 ? { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }
-      : { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: canonical(library) === "kernel32.dll" ? "stdcall" : "cdecl" };
-    return { abi, parameters: parameters.map(storage => ({ kind: "scalar", storage })), result: result === "void" ? "void" : { kind: "scalar", storage: result }, variadic: false };
+    const abi: NativeCallAbi =
+      this.memory.pointerBytes === 8
+        ? { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }
+        : { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: canonical(library) === "kernel32.dll" ? "stdcall" : "cdecl" };
+    return {
+      abi,
+      parameters: parameters.map(storage => ({ kind: "scalar", storage })),
+      result: result === "void" ? "void" : { kind: "scalar", storage: result },
+      variadic: false,
+    };
   }
   service(library: string, name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: WindowsImportImplementation): void {
     this.register(library, name, this.signature(library, parameters, result), invoke);
   }
-  register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void { this.#register(library, name, signature, invoke, true); }
+  register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void {
+    this.#register(library, name, signature, invoke, true);
+  }
   registerData(library: string, name: string, bytes: Uint8Array): GuestAddress {
-    const normalized = canonical(library), key = `${normalized}!${name}`;
-    if (this.#dataAddress(normalized, name) !== undefined || this.#importEntry(normalized, name) !== undefined) throw new Error(`Duplicate Windows data export ${key}`);
-    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key }); this.memory.write(address, bytes);
-    let exports = this.#data.get(normalized); if (exports === undefined) { exports = new Map<string, GuestAddress>(); this.#data.set(normalized, exports); }
+    const normalized = canonical(library),
+      key = `${normalized}!${name}`;
+    if (this.#dataAddress(normalized, name) !== undefined || this.#importEntry(normalized, name) !== undefined)
+      throw new Error(`Duplicate Windows data export ${key}`);
+    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key });
+    this.memory.write(address, bytes);
+    let exports = this.#data.get(normalized);
+    if (exports === undefined) {
+      exports = new Map<string, GuestAddress>();
+      this.#data.set(normalized, exports);
+    }
     exports.set(name, address);
-    if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
+    if (!this.#libraries.has(normalized))
+      this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
     return address;
   }
   #register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation, supported: boolean): ImportEntry {
-    const normalized = canonical(library), key = `${normalized}!${name}`;
+    const normalized = canonical(library),
+      key = `${normalized}!${name}`;
     if (this.#importEntry(normalized, name) !== undefined) throw new Error(`Windows import already registered: ${key}`);
     let reached = 0;
-    const callback: GuestHostCallback = { id: `windows:${key}`, signature, invoke: (context, args) => {
-      reached++; const entry = this.#importEntry(normalized, name); if (entry !== undefined) entry.reached = reached;
-      try { return invoke(context, args); } catch (error) { if (entry !== undefined) { entry.failed++; entry.lastFailure = error instanceof Error ? error.message : String(error); } throw error; }
-    } };
+    const callback: GuestHostCallback = {
+      id: `windows:${key}`,
+      signature,
+      invoke: (context, args) => {
+        reached++;
+        const entry = this.#importEntry(normalized, name);
+        if (entry !== undefined) entry.reached = reached;
+        try {
+          return invoke(context, args);
+        } catch (error) {
+          if (entry !== undefined) {
+            entry.failed++;
+            entry.lastFailure = error instanceof Error ? error.message : String(error);
+          }
+          throw error;
+        }
+      },
+    };
     const address = this.options.callbacks.bind(callback);
     const entry: ImportEntry = { library: normalized, name, callback, address, supported, reached, failed: 0, lastFailure: null };
-    let imports = this.#imports.get(normalized); if (imports === undefined) { imports = new Map<string, ImportEntry>(); this.#imports.set(normalized, imports); }
+    let imports = this.#imports.get(normalized);
+    if (imports === undefined) {
+      imports = new Map<string, ImportEntry>();
+      this.#imports.set(normalized, imports);
+    }
     imports.set(name, entry);
     this.#importOrder.push(entry);
-    if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
+    if (!this.#libraries.has(normalized))
+      this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
     return entry;
   }
   resolve(import_: GuestImport, requesting: GuestImage): GuestImportResolution {
     const name = import_.symbol.kind === "name" ? import_.symbol.name : `#${import_.symbol.ordinal}`;
     const library = canonical(import_.library);
-    let requested = this.#requested.get(library); if (requested === undefined) { requested = new Set<string>(); this.#requested.set(library, requested); }
+    let requested = this.#requested.get(library);
+    if (requested === undefined) {
+      requested = new Set<string>();
+      this.#requested.set(library, requested);
+    }
     requested.add(name);
-    const data = this.#dataAddress(library, name); if (data !== undefined) return { kind: "guest", address: data, module: this.memory.module };
+    const data = this.#dataAddress(library, name);
+    if (data !== undefined) return { kind: "guest", address: data, module: this.memory.module };
     const guest = this.#images.find(image => canonical(image.module.artifactPath) === library);
     if (guest !== undefined && guest !== requesting) {
-      const target = resolvePeExport(guest, import_.symbol, forwarded => this.#images.find(image => canonical(image.module.artifactPath) === canonical(forwarded)) ?? null);
+      const target = resolvePeExport(
+        guest,
+        import_.symbol,
+        forwarded => this.#images.find(image => canonical(image.module.artifactPath) === canonical(forwarded)) ?? null,
+      );
       return { kind: "guest", address: target.address, module: target.image.module };
     }
     let entry = this.#importEntry(library, name);
-    if (entry === undefined) entry = this.#register(library, name, this.signature(library, [], "void"), context => { throw new UnsupportedWindowsImport(library, name, context); }, false);
+    if (entry === undefined)
+      entry = this.#register(
+        library,
+        name,
+        this.signature(library, [], "void"),
+        context => {
+          throw new UnsupportedWindowsImport(library, name, context);
+        },
+        false,
+      );
     return { kind: "host", address: entry.address, callback: entry.callback };
   }
   resolveAddress(library: string, name: string): GuestAddress | null {
     const seen = new Map<string, Set<string>>();
     for (let depth = 0; depth < 128; depth++) {
       const normalized = canonical(library);
-      let names = seen.get(normalized); if (names === undefined) { names = new Set<string>(); seen.set(normalized, names); }
-      if (names.has(name)) return null; names.add(name);
+      let names = seen.get(normalized);
+      if (names === undefined) {
+        names = new Set<string>();
+        seen.set(normalized, names);
+      }
+      if (names.has(name)) return null;
+      names.add(name);
       const image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
-      if (image === undefined) { const entry = this.#importEntry(normalized, name); return entry?.supported === true ? entry.address : this.#dataAddress(normalized, name) ?? null; }
-      const exported = image.exports.find(value => value.symbol.kind === "name" ? value.symbol.name === name : `#${value.symbol.ordinal}` === name);
+      if (image === undefined) {
+        const entry = this.#importEntry(normalized, name);
+        return entry?.supported === true ? entry.address : (this.#dataAddress(normalized, name) ?? null);
+      }
+      const exported = image.exports.find(value => (value.symbol.kind === "name" ? value.symbol.name === name : `#${value.symbol.ordinal}` === name));
       if (exported === undefined) return null;
       if (exported.target.kind === "address") return exported.target.address;
-      library = exported.target.library; name = exported.target.symbol.kind === "name" ? exported.target.symbol.name : `#${exported.target.symbol.ordinal}`;
+      library = exported.target.library;
+      name = exported.target.symbol.kind === "name" ? exported.target.symbol.name : `#${exported.target.symbol.ordinal}`;
     }
     return null;
   }
   libraryHandle(library: string): GuestAddress | null {
-    const normalized = canonical(library), image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
+    const normalized = canonical(library),
+      image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
     if (image !== undefined) return image.base;
-    return ([...this.#imports.get(normalized)?.values() ?? []].some(value => value.supported) || (this.#data.get(normalized)?.size ?? 0) > 0) ? this.#libraries.get(normalized) ?? null : null;
+    return [...(this.#imports.get(normalized)?.values() ?? [])].some(value => value.supported) || (this.#data.get(normalized)?.size ?? 0) > 0
+      ? (this.#libraries.get(normalized) ?? null)
+      : null;
   }
   loadLibrary(library: string): GuestAddress | null {
     const handle = this.libraryHandle(library);
-    if (handle === null) { this.lastError = 126; return null; }
-    this.#libraryReferences.set(handle.byteOffset, (this.#libraryReferences.get(handle.byteOffset) ?? 0) + 1); return handle;
+    if (handle === null) {
+      this.lastError = 126;
+      return null;
+    }
+    this.#libraryReferences.set(handle.byteOffset, (this.#libraryReferences.get(handle.byteOffset) ?? 0) + 1);
+    return handle;
   }
   freeLibrary(handle: GuestAddress): boolean {
     const count = this.#libraryReferences.get(handle.byteOffset) ?? 0;
-    if (count === 0) { this.lastError = 6; return false; }
-    if (count === 1) this.#libraryReferences.delete(handle.byteOffset); else this.#libraryReferences.set(handle.byteOffset, count - 1);
+    if (count === 0) {
+      this.lastError = 6;
+      return false;
+    }
+    if (count === 1) this.#libraryReferences.delete(handle.byteOffset);
+    else this.#libraryReferences.set(handle.byteOffset, count - 1);
     // Prepared images and built-in services retain their owner's initial reference.
     return true;
   }
-  libraryName(handle: GuestAddress): string | null { return [...this.#libraries].find(([, address]) => address.byteOffset === handle.byteOffset)?.[0] ?? this.#images.find(image => image.base.byteOffset === handle.byteOffset)?.module.artifactPath ?? null; }
+  libraryName(handle: GuestAddress): string | null {
+    return (
+      [...this.#libraries].find(([, address]) => address.byteOffset === handle.byteOffset)?.[0] ??
+      this.#images.find(image => image.base.byteOffset === handle.byteOffset)?.module.artifactPath ??
+      null
+    );
+  }
   allocate(size: number, heap = 0n): GuestAddress | null {
-    if (!Number.isSafeInteger(size) || size < 0 || size > 0x10000000) { this.lastError = 8; return null; }
+    if (!Number.isSafeInteger(size) || size < 0 || size > 0x10000000) {
+      this.lastError = 8;
+      return null;
+    }
     const address = allocateNativeMemory(this.memory, size, "Windows guest heap");
     this.#allocations.set(address.byteOffset, { address, size: Math.max(size, 1), heap });
     return address;
@@ -178,15 +330,30 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   free(address: GuestAddress | null, heap = 0n): boolean {
     if (address === null) return true;
     const allocation = this.#allocations.get(address.byteOffset);
-    if (allocation === undefined || allocation.heap !== heap) { this.lastError = 87; return false; }
-    this.memory.unmap(allocation.address, nativeAllocationBytes(allocation.size)); this.#allocations.delete(address.byteOffset); return true;
+    if (allocation === undefined || allocation.heap !== heap) {
+      this.lastError = 87;
+      return false;
+    }
+    this.memory.unmap(allocation.address, nativeAllocationBytes(allocation.size));
+    this.#allocations.delete(address.byteOffset);
+    return true;
   }
-  allocationSize(address: GuestAddress, heap = 0n): number | null { const entry = this.#allocations.get(address.byteOffset); return entry?.heap === heap ? entry.size : null; }
+  allocationSize(address: GuestAddress, heap = 0n): number | null {
+    const entry = this.#allocations.get(address.byteOffset);
+    return entry?.heap === heap ? entry.size : null;
+  }
   /** The runtime's heap table and kernel tables, for a process image: the memory they describe is saved with the mappings. */
   heapState(): { readonly blocks: readonly NativeHeapBlock[]; readonly tables: WindowsHeapTables } {
-    return { blocks: [...this.#allocations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size, heap: entry.heap })),
-      tables: { heaps: [...this.heaps], reservations: [...this.reservations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size })),
-        tls: [...this.tlsIndices], fls: [...this.fiberSlots].map(([index, slot]) => ({ index, callback: slot.callback?.byteOffset ?? null, value: slot.value?.byteOffset ?? null })), lastError: this.lastError } };
+    return {
+      blocks: [...this.#allocations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size, heap: entry.heap })),
+      tables: {
+        heaps: [...this.heaps],
+        reservations: [...this.reservations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size })),
+        tls: [...this.tlsIndices],
+        fls: [...this.fiberSlots].map(([index, slot]) => ({ index, callback: slot.callback?.byteOffset ?? null, value: slot.value?.byteOffset ?? null })),
+        lastError: this.lastError,
+      },
+    };
   }
   /** Rebinds the saved tables to this process's addresses; every block must lie in a mapping already restored. */
   restoreHeapState(blocks: readonly NativeHeapBlock[], tables: WindowsHeapTables): void {
@@ -196,15 +363,28 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
       return address;
     };
     this.#allocations.clear();
-    for (const block of blocks) { const address = pointer(block.base); this.memory.check(address, 1, "read"); this.#allocations.set(block.base, { address, size: block.size, heap: block.heap }); }
-    this.heaps.clear(); for (const heap of tables.heaps) this.heaps.add(heap);
-    this.reservations.clear(); for (const entry of tables.reservations) this.reservations.set(entry.base, { address: pointer(entry.base), size: entry.size });
+    for (const block of blocks) {
+      const address = pointer(block.base);
+      this.memory.check(address, 1, "read");
+      this.#allocations.set(block.base, { address, size: block.size, heap: block.heap });
+    }
+    this.heaps.clear();
+    for (const heap of tables.heaps) this.heaps.add(heap);
+    this.reservations.clear();
+    for (const entry of tables.reservations) this.reservations.set(entry.base, { address: pointer(entry.base), size: entry.size });
     this.fiberSlots.clear();
-    for (const slot of tables.fls) this.fiberSlots.set(slot.index, { callback: slot.callback === null ? null : pointer(slot.callback), value: slot.value === null ? null : pointer(slot.value) });
-    this.tlsIndices.clear(); for (const index of tables.tls) this.tlsIndices.add(index);
+    for (const slot of tables.fls)
+      this.fiberSlots.set(slot.index, {
+        callback: slot.callback === null ? null : pointer(slot.callback),
+        value: slot.value === null ? null : pointer(slot.value),
+      });
+    this.tlsIndices.clear();
+    for (const index of tables.tls) this.tlsIndices.add(index);
     this.lastError = tables.lastError;
   }
-  destroyHeap(heap: bigint): void { for (const entry of this.#allocations.values()) if (entry.heap === heap) this.free(entry.address, heap); }
+  destroyHeap(heap: bigint): void {
+    for (const entry of this.#allocations.values()) if (entry.heap === heap) this.free(entry.address, heap);
+  }
   prepareImage(image: PeImage): void {
     if (this.#prepared.has(image)) return;
     if (image.base.addressSpace !== this.memory.addressSpace) throw new Error("Windows image belongs to another memory");
@@ -213,7 +393,11 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     if (image.tls !== null) {
       if (image.tlsIndexAddress === null || this.#tlsBlocks.size >= 1024) throw new Error("Invalid Windows static TLS index");
       const index = this.#tlsBlocks.size;
-      const block = this.memory.allocate({ byteLength: Math.max(1, image.tls.initialized.length + image.tls.zeroFillBytes), alignment: image.tls.alignment < 16n ? 16n : image.tls.alignment, label: `${image.module.id}: TLS` });
+      const block = this.memory.allocate({
+        byteLength: Math.max(1, image.tls.initialized.length + image.tls.zeroFillBytes),
+        alignment: image.tls.alignment < 16n ? 16n : image.tls.alignment,
+        label: `${image.module.id}: TLS`,
+      });
       this.memory.write(block, image.tls.initialized);
       writeUnsigned(this.memory, image.tlsIndexAddress, 4, BigInt(index));
       writePointer(this.memory, this.memory.offset(this.staticTls, BigInt(index * this.memory.pointerBytes)), block);
@@ -226,68 +410,144 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   #prepareCfg(image: PeImage): void {
     const config = image.loadConfiguration;
     if (config === null || (image.pe.dllCharacteristics & 0x4000) === 0 || (config.guardFlags & 0x100) === 0) return;
-    const width = this.memory.pointerBytes, tableOffset = width === 4 ? 80 : 128;
+    const width = this.memory.pointerBytes,
+      tableOffset = width === 4 ? 80 : 128;
     if (config.bytes.length < tableOffset + width * 2) throw new Error("Truncated CFG load configuration");
     const table = readUnsigned(this.memory, this.memory.offset(config.address, BigInt(tableOffset)), width);
     const count = readUnsigned(this.memory, this.memory.offset(config.address, BigInt(tableOffset + width)), width);
-    const extra = config.guardFlags >>> 28, stride = extra + 4;
+    const extra = config.guardFlags >>> 28,
+      stride = extra + 4;
     if (count > image.byteLength / BigInt(stride)) throw new Error("Invalid CFG target count");
-    const base = this.memory.pointer(table); if (count !== 0n && base === null) throw new Error("Null CFG target table");
+    const base = this.memory.pointer(table);
+    if (count !== 0n && base === null) throw new Error("Null CFG target table");
     if (base !== null) {
-      const entries = this.memory.copy(base, Number(count) * stride), view = new DataView(entries.buffer);
+      const entries = this.memory.copy(base, Number(count) * stride),
+        view = new DataView(entries.buffer);
       let previous = -1;
       for (let index = 0; index < Number(count); index++) {
-        const rva = view.getUint32(index * stride, true), flags = extra === 0 ? 0 : view.getUint8(index * stride + 4);
-        if (rva <= previous || BigInt(rva) >= image.byteLength || (flags & ~3) !== 0 || entries.subarray(index * stride + 5, (index + 1) * stride).some(byte => byte !== 0)) throw new Error("Invalid/unsupported CFG function metadata");
+        const rva = view.getUint32(index * stride, true),
+          flags = extra === 0 ? 0 : view.getUint8(index * stride + 4);
+        if (
+          rva <= previous ||
+          BigInt(rva) >= image.byteLength ||
+          (flags & ~3) !== 0 ||
+          entries.subarray(index * stride + 5, (index + 1) * stride).some(byte => byte !== 0)
+        )
+          throw new Error("Invalid/unsupported CFG function metadata");
         previous = rva;
-        if ((flags & 1) !== 0 || (flags & 2) !== 0 && (config.guardFlags & 0x8000) !== 0) continue;
-        const address = this.memory.offset(image.base, BigInt(rva)); this.memory.check(address, 1, "execute"); this.#cfgTargets.add(address.byteOffset);
+        if ((flags & 1) !== 0 || ((flags & 2) !== 0 && (config.guardFlags & 0x8000) !== 0)) continue;
+        const address = this.memory.offset(image.base, BigInt(rva));
+        this.memory.check(address, 1, "execute");
+        this.#cfgTargets.add(address.byteOffset);
       }
     }
     if (this.#cfgCheck === null) {
       this.service("quake-runtime.dll", "guard-check", [], "void", context => {
         const target = this.runner.options.cpu.state.registers.read(width === 4 ? "rcx" : "rax", width === 4 ? 32 : 64);
-        this.#validateCfg(target, context); return { kind: "void" };
+        this.#validateCfg(target, context);
+        return { kind: "void" };
       });
       this.#cfgCheck = this.resolveAddress("quake-runtime.dll", "guard-check");
       if (width === 8) {
         this.service("quake-runtime.dll", "guard-dispatch-check", ["pointer"], "void", (context, args) => {
-          const arg = args[0]; if (arg?.kind !== "pointer") throw new TypeError("CFG dispatch target missing");
-          this.#validateCfg(arg.value?.byteOffset ?? 0n, context); return { kind: "void" };
+          const arg = args[0];
+          if (arg?.kind !== "pointer") throw new TypeError("CFG dispatch target missing");
+          this.#validateCfg(arg.value?.byteOffset ?? 0n, context);
+          return { kind: "void" };
         });
-        const check = this.resolveAddress("quake-runtime.dll", "guard-dispatch-check"); if (check === null) throw new Error("CFG checker binding missing");
-        const immediate = Array.from({ length: 8 }, (_, index) => Number(check.byteOffset >> BigInt(index * 8) & 255n));
+        const check = this.resolveAddress("quake-runtime.dll", "guard-dispatch-check");
+        if (check === null) throw new Error("CFG checker binding missing");
+        const immediate = Array.from({ length: 8 }, (_, index) => Number((check.byteOffset >> BigInt(index * 8)) & 255n));
         // Preserve the target and Windows register arguments around the checked host trap, then tail-jump.
-        const code = new Uint8Array([0x50, 0x51, 0x52, 0x41, 0x50, 0x41, 0x51, 0x48, 0x83, 0xec, 0x20,
-          0x48, 0x89, 0xc1, 0x48, 0xb8, ...immediate, 0xff, 0xd0, 0x48, 0x83, 0xc4, 0x20, 0x41, 0x59, 0x41, 0x58, 0x5a, 0x59, 0x58, 0xff, 0xe0]);
-        const address = this.memory.allocate({ byteLength: code.length, alignment: 16n, label: "Guest CFG dispatch instructions" }); this.memory.write(address, code); this.memory.protect(address, code.length, "read-execute"); this.#cfgDispatch = address;
+        const code = new Uint8Array([
+          0x50,
+          0x51,
+          0x52,
+          0x41,
+          0x50,
+          0x41,
+          0x51,
+          0x48,
+          0x83,
+          0xec,
+          0x20,
+          0x48,
+          0x89,
+          0xc1,
+          0x48,
+          0xb8,
+          ...immediate,
+          0xff,
+          0xd0,
+          0x48,
+          0x83,
+          0xc4,
+          0x20,
+          0x41,
+          0x59,
+          0x41,
+          0x58,
+          0x5a,
+          0x59,
+          0x58,
+          0xff,
+          0xe0,
+        ]);
+        const address = this.memory.allocate({ byteLength: code.length, alignment: 16n, label: "Guest CFG dispatch instructions" });
+        this.memory.write(address, code);
+        this.memory.protect(address, code.length, "read-execute");
+        this.#cfgDispatch = address;
       } else {
-        this.service("quake-runtime.dll", "guard-dispatch-check", [], "void", context => { throw new UnsupportedWindowsImport("quake-runtime.dll", "guard-dispatch-check", context, "i386 CFG dispatch convention is not implemented"); });
+        this.service("quake-runtime.dll", "guard-dispatch-check", [], "void", context => {
+          throw new UnsupportedWindowsImport("quake-runtime.dll", "guard-dispatch-check", context, "i386 CFG dispatch convention is not implemented");
+        });
         this.#cfgDispatch = this.resolveAddress("quake-runtime.dll", "guard-dispatch-check");
       }
     }
     const patch = (slot: GuestAddress | null, value: GuestAddress | null): void => {
       if (slot === null || value === null) return;
-      const region = this.memory.mappings().find(mapping => slot.byteOffset >= mapping.base && slot.byteOffset + BigInt(width) <= mapping.base + BigInt(mapping.byteLength));
+      const region = this.memory
+        .mappings()
+        .find(mapping => slot.byteOffset >= mapping.base && slot.byteOffset + BigInt(width) <= mapping.base + BigInt(mapping.byteLength));
       if (region === undefined) throw new Error("Unmapped CFG pointer slot");
-      this.memory.protect(slot, width, "read-write"); try { writePointer(this.memory, slot, value); } finally { this.memory.protect(slot, width, region.permissions); }
+      this.memory.protect(slot, width, "read-write");
+      try {
+        writePointer(this.memory, slot, value);
+      } finally {
+        this.memory.protect(slot, width, region.permissions);
+      }
     };
-    patch(config.guardCheckSlot, this.#cfgCheck); patch(config.guardDispatchSlot, this.#cfgDispatch);
+    patch(config.guardCheckSlot, this.#cfgCheck);
+    patch(config.guardDispatchSlot, this.#cfgDispatch);
   }
   #validateCfg(target: bigint, context: GuestCallContext): void {
     const valid = this.#cfgTargets.has(target) || this.options.callbacks.hasBoundTrap(target);
     const address = this.memory.pointer(target);
-    if (!valid || address === null) throw new UnsupportedWindowsImport("quake-runtime.dll", "control-flow-guard", context, `invalid indirect target 0x${target.toString(16)}`);
+    if (!valid || address === null)
+      throw new UnsupportedWindowsImport("quake-runtime.dll", "control-flow-guard", context, `invalid indirect target 0x${target.toString(16)}`);
     this.memory.check(address, 1, "execute");
   }
-  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[], convention?: "system"): GuestCallResult {
+  invoke(
+    context: GuestCallContext,
+    target: GuestAddress,
+    parameters: readonly GuestStorage[],
+    result: GuestStorage | "void",
+    args: readonly GuestCallValue[],
+    convention?: "system",
+  ): GuestCallResult {
     const library = convention === "system" ? "kernel32.dll" : "ucrtbase.dll";
-    return this.runner.invoke({ target, signature: this.signature(library, parameters, result), arguments: args,
-      context: { ...context, callback: { kind: "native-guest", module: context.module, address: target, abi: this.signature(library, [], "void").abi } }, instructionBudget: this.#budget });
+    return this.runner.invoke({
+      target,
+      signature: this.signature(library, parameters, result),
+      arguments: args,
+      context: { ...context, callback: { kind: "native-guest", module: context.module, address: target, abi: this.signature(library, [], "void").abi } },
+      instructionBudget: this.#budget,
+    });
   }
   initialize(image: PeImage, options: WindowsInitializeOptions): void {
     if (this.#initialized.has(image)) return;
-    this.prepareImage(image); this.#budget = options.instructionBudget;
+    this.prepareImage(image);
+    this.#budget = options.instructionBudget;
     for (const callback of image.tls?.callbacks ?? []) this.#notification(image, callback, 1, options, "void");
     if (image.entryPoint !== null) {
       const result = this.#notification(image, image.entryPoint, 1, options, "int32");
@@ -304,7 +564,16 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   }
   #notification(image: PeImage, target: GuestAddress, reason: number, options: WindowsInitializeOptions, result: "void" | "int32"): GuestCallResult {
     const signature = this.signature("kernel32.dll", ["pointer", "uint32", "pointer"], result);
-    return this.runner.invoke({ target, signature, arguments: [{ kind: "pointer", value: image.base }, { kind: "uint32", value: reason }, { kind: "pointer", value: null }],
-      context: { ...options.context, callback: { kind: "native-guest", module: options.context.module, address: target, abi: signature.abi } }, instructionBudget: options.instructionBudget });
+    return this.runner.invoke({
+      target,
+      signature,
+      arguments: [
+        { kind: "pointer", value: image.base },
+        { kind: "uint32", value: reason },
+        { kind: "pointer", value: null },
+      ],
+      context: { ...options.context, callback: { kind: "native-guest", module: options.context.module, address: target, abi: signature.abi } },
+      instructionBudget: options.instructionBudget,
+    });
   }
 }

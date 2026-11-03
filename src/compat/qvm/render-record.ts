@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // QVM layouts from id Software code/cgame/tr_types.h and game/q_shared.h.
 // Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later
 import { BinaryError } from "../../core/binary/index.ts";
@@ -11,8 +12,7 @@ export const QVM_POLY_VERTEX_BYTES = 24;
 export const QVM_ORIENTATION_BYTES = 48;
 
 function requireBytes(view: DataView, bytes: number, source: string): void {
-  if (view.byteLength < bytes) throw new BinaryError(source, 0,
-    `record requires ${bytes} bytes, received ${view.byteLength}`);
+  if (view.byteLength < bytes) throw new BinaryError(source, 0, `record requires ${bytes} bytes, received ${view.byteLength}`);
 }
 
 function readVector(view: DataView, offset: number): Vec3 {
@@ -33,24 +33,45 @@ export function readQvmRefEntity(view: DataView): SourceRefEntityRecord {
   const type = view.getInt32(0, true);
   if (type < 0 || type > 7) throw new BinaryError("QVM refEntity_t", 0, `unsupported entity type ${type}`);
   const record = {
-    renderFlags: view.getInt32(4, true), model: view.getInt32(8, true), lightingOrigin: readVector(view, 12),
-    shadowPlane: view.getFloat32(24, true), axis: readAxis(view, 28), nonNormalizedAxes: view.getInt32(64, true) !== 0,
-    origin: readVector(view, 68), frame: view.getInt32(80, true), oldOrigin: readVector(view, 84), oldFrame: view.getInt32(96, true),
-    backLerp: view.getFloat32(100, true), skinNum: view.getInt32(104, true), customSkin: view.getInt32(108, true),
-    customShader: view.getInt32(112, true), shaderRGBA: readColor(view, 116),
-    shaderTexCoord: { x: view.getFloat32(120, true), y: view.getFloat32(124, true) }, shaderTime: view.getFloat32(128, true),
-    radius: view.getFloat32(132, true), rotation: view.getFloat32(136, true),
+    renderFlags: view.getInt32(4, true),
+    model: view.getInt32(8, true),
+    lightingOrigin: readVector(view, 12),
+    shadowPlane: view.getFloat32(24, true),
+    axis: readAxis(view, 28),
+    nonNormalizedAxes: view.getInt32(64, true) !== 0,
+    origin: readVector(view, 68),
+    frame: view.getInt32(80, true),
+    oldOrigin: readVector(view, 84),
+    oldFrame: view.getInt32(96, true),
+    backLerp: view.getFloat32(100, true),
+    skinNum: view.getInt32(104, true),
+    customSkin: view.getInt32(108, true),
+    customShader: view.getInt32(112, true),
+    shaderRGBA: readColor(view, 116),
+    shaderTexCoord: { x: view.getFloat32(120, true), y: view.getFloat32(124, true) },
+    shaderTime: view.getFloat32(128, true),
+    radius: view.getFloat32(132, true),
+    rotation: view.getFloat32(136, true),
   };
   switch (type) {
-    case 0: return { ...record, kind: "model" };
-    case 1: return { ...record, kind: "poly" };
-    case 2: return { ...record, kind: "sprite" };
-    case 3: return { ...record, kind: "beam" };
-    case 4: return { ...record, kind: "rail-core" };
-    case 5: return { ...record, kind: "rail-rings" };
-    case 6: return { ...record, kind: "lightning" };
-    case 7: return { ...record, kind: "portal-surface" };
-    default: throw new BinaryError("QVM refEntity_t", 0, `unsupported entity type ${type}`);
+    case 0:
+      return { ...record, kind: "model" };
+    case 1:
+      return { ...record, kind: "poly" };
+    case 2:
+      return { ...record, kind: "sprite" };
+    case 3:
+      return { ...record, kind: "beam" };
+    case 4:
+      return { ...record, kind: "rail-core" };
+    case 5:
+      return { ...record, kind: "rail-rings" };
+    case 6:
+      return { ...record, kind: "lightning" };
+    case 7:
+      return { ...record, kind: "portal-surface" };
+    default:
+      throw new BinaryError("QVM refEntity_t", 0, `unsupported entity type ${type}`);
   }
 }
 
@@ -64,12 +85,27 @@ function readTextRow(view: DataView, offset: number): string {
 export function readQvmRefdef(view: DataView): Refdef {
   requireBytes(view, QVM_REFDEF_BYTES, "QVM refdef_t");
   return {
-    x: view.getInt32(0, true), y: view.getInt32(4, true), width: view.getInt32(8, true), height: view.getInt32(12, true),
-    fovX: view.getFloat32(16, true), fovY: view.getFloat32(20, true), viewOrigin: readVector(view, 24), viewAxis: readAxis(view, 36),
-    time: view.getInt32(72, true), renderFlags: view.getInt32(76, true),
+    x: view.getInt32(0, true),
+    y: view.getInt32(4, true),
+    width: view.getInt32(8, true),
+    height: view.getInt32(12, true),
+    fovX: view.getFloat32(16, true),
+    fovY: view.getFloat32(20, true),
+    viewOrigin: readVector(view, 24),
+    viewAxis: readAxis(view, 36),
+    time: view.getInt32(72, true),
+    renderFlags: view.getInt32(76, true),
     areaMask: new Uint8Array(new Uint8Array(view.buffer, view.byteOffset + 80, 32)),
-    text: [readTextRow(view, 112), readTextRow(view, 144), readTextRow(view, 176), readTextRow(view, 208),
-      readTextRow(view, 240), readTextRow(view, 272), readTextRow(view, 304), readTextRow(view, 336)],
+    text: [
+      readTextRow(view, 112),
+      readTextRow(view, 144),
+      readTextRow(view, 176),
+      readTextRow(view, 208),
+      readTextRow(view, 240),
+      readTextRow(view, 272),
+      readTextRow(view, 304),
+      readTextRow(view, 336),
+    ],
   };
 }
 
@@ -80,8 +116,11 @@ export function readQvmPolyVertices(view: DataView, count: number): readonly Ref
   }
   return Array.from({ length: count }, (_, index) => {
     const offset = index * QVM_POLY_VERTEX_BYTES;
-    return { position: readVector(view, offset),
-      texCoord: { x: view.getFloat32(offset + 12, true), y: view.getFloat32(offset + 16, true) }, color: readColor(view, offset + 20) };
+    return {
+      position: readVector(view, offset),
+      texCoord: { x: view.getFloat32(offset + 12, true), y: view.getFloat32(offset + 16, true) },
+      color: readColor(view, offset + 20),
+    };
   });
 }
 

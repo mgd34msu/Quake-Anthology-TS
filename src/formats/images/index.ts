@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export * from "./palette.ts";
 export * from "./indexed.ts";
 export * from "./png.ts";

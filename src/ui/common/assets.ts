@@ -22,32 +22,73 @@ export interface NativeUiArtSelection {
   /** The startup menu's backdrop. */
   readonly mainBackground?: boolean;
 }
-export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<ImageLevel>,
-  selection: NativeUiArtSelection = {}): Promise<NativeUiArt> {
+export async function loadNativeUiArt(
+  font: ResourceId,
+  images: SceneImageRegistry,
+  read: (path: string) => Promise<ImageLevel>,
+  selection: NativeUiArtSelection = {},
+): Promise<NativeUiArt> {
   const { frames = true, mainBackground = true } = selection;
   const assets: readonly { readonly resource: ResourceId; readonly file: MenuArtFile }[] = [
     ...(frames ? [{ resource: "resource:engine-menu:background" as const, file: menuBackground }] : []),
     ...(mainBackground ? [{ resource: "resource:engine-menu:main-background" as const, file: mainMenuBackground }] : []),
-    ...(frames ? [{ resource: "resource:engine-menu:panel" as const, file: menuPanel }, { resource: "resource:engine-menu:focus" as const, file: menuFocus }] : []),
+    ...(frames
+      ? [
+          { resource: "resource:engine-menu:panel" as const, file: menuPanel },
+          { resource: "resource:engine-menu:focus" as const, file: menuFocus },
+        ]
+      : []),
   ];
   const decoded = await Promise.all(assets.map(async asset => ({ ...asset, image: await read(asset.file.file) })));
-  const pictures = new Map<ResourceId, ImagePicture>(), owned: RendererImage[] = [];
+  const pictures = new Map<ResourceId, ImagePicture>(),
+    owned: RendererImage[] = [];
   try {
     for (const asset of decoded) {
-      if (asset.image.width !== asset.file.width || asset.image.height !== asset.file.height) throw new Error(`Menu image dimensions differ from the manifest: ${asset.file.file}`);
-      const image = images.register(asset.file.file, rgbaImage(asset.image), { wrap: "clamp", filter: "linear" }); owned.push(image);
+      if (asset.image.width !== asset.file.width || asset.image.height !== asset.file.height)
+        throw new Error(`Menu image dimensions differ from the manifest: ${asset.file.file}`);
+      const image = images.register(asset.file.file, rgbaImage(asset.image), { wrap: "clamp", filter: "linear" });
+      owned.push(image);
       pictures.set(asset.resource, { kind: "image", name: asset.file.file, image });
     }
-    const whiteImage = images.register("menu-white", rgbaImage({ width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]) }), { wrap: "clamp", filter: "nearest" });
+    const whiteImage = images.register("menu-white", rgbaImage({ width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]) }), {
+      wrap: "clamp",
+      filter: "nearest",
+    });
     owned.push(whiteImage);
-    const slice = (resource: ResourceId, frame: MenuArtFrame): UiImageSlice => ({ resource, width: frame.region.width, height: frame.region.height,
-      uv: frame.region.uv, border: frame.border, borderScale: frame.borderScale });
+    const slice = (resource: ResourceId, frame: MenuArtFrame): UiImageSlice => ({
+      resource,
+      width: frame.region.width,
+      height: frame.region.height,
+      uv: frame.region.uv,
+      border: frame.border,
+      borderScale: frame.borderScale,
+    });
     let closed = false;
-    const skin = frames ? { ...defaultUiSkin(font), background: "resource:engine-menu:background" as const, panel: slice("resource:engine-menu:panel", menuPanel),
-      focus: slice("resource:engine-menu:focus", menuFocus) } : { ...defaultUiSkin(font), background: null, panel: null, focus: null };
-    return { skin, white: { kind: "image", name: "menu-white", image: whiteImage },
-      picture(resource) { const picture = pictures.get(resource); if (picture === undefined || closed) throw new Error(`Unregistered native UI image: ${resource}`); return picture; },
-      close() { if (closed) return; closed = true; for (const image of owned) images.release(image); pictures.clear(); },
+    const skin = frames
+      ? {
+          ...defaultUiSkin(font),
+          background: "resource:engine-menu:background" as const,
+          panel: slice("resource:engine-menu:panel", menuPanel),
+          focus: slice("resource:engine-menu:focus", menuFocus),
+        }
+      : { ...defaultUiSkin(font), background: null, panel: null, focus: null };
+    return {
+      skin,
+      white: { kind: "image", name: "menu-white", image: whiteImage },
+      picture(resource) {
+        const picture = pictures.get(resource);
+        if (picture === undefined || closed) throw new Error(`Unregistered native UI image: ${resource}`);
+        return picture;
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        for (const image of owned) images.release(image);
+        pictures.clear();
+      },
     };
-  } catch (error) { for (const image of owned) images.release(image); throw error; }
+  } catch (error) {
+    for (const image of owned) images.release(image);
+    throw error;
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
 import { q3RendererSettings } from "./render-settings.ts";
 import { RemoteComponentView } from "./remote-components.ts";
@@ -60,76 +61,166 @@ export class RemoteSeatView {
   private closed = false;
   private readonly components: RemoteComponentView | null;
   private readonly reportedEffects = new Set<string>();
-  private constructor(readonly presentation: WorldSeatPresentation, readonly effects: ApplicationEffects,
-    private readonly options: RemoteSeatViewOptions, readonly assets: ApplicationAssets, private readonly ownsAssets: boolean) {
+  private constructor(
+    readonly presentation: WorldSeatPresentation,
+    readonly effects: ApplicationEffects,
+    private readonly options: RemoteSeatViewOptions,
+    readonly assets: ApplicationAssets,
+    private readonly ownsAssets: boolean,
+  ) {
     const remote = options.source.remote;
-    this.components = remote instanceof UnifiedRemotePresentation ? new RemoteComponentView(remote, {
-      assets, audio: options.audio, input: options.controls, queries: remote.scene, renderer: options.renderer, systemCinematics: options.systemCinematics,
-      print: options.print, nextFrame: () => new Promise<void>(resolve => { setImmediate(() => { resolve(); }); }),
-      clock: { now: options.now, frameNumber: () => remote.output?.snapshot.frame.frame ?? 0 },
-    }) : null;
+    this.components =
+      remote instanceof UnifiedRemotePresentation
+        ? new RemoteComponentView(remote, {
+            assets,
+            audio: options.audio,
+            input: options.controls,
+            queries: remote.scene,
+            renderer: options.renderer,
+            systemCinematics: options.systemCinematics,
+            print: options.print,
+            nextFrame: () =>
+              new Promise<void>(resolve => {
+                setImmediate(() => {
+                  resolve();
+                });
+              }),
+            clock: { now: options.now, frameNumber: () => remote.output?.snapshot.frame.frame ?? 0 },
+          })
+        : null;
   }
 
   static async prepare(options: RemoteSeatViewOptions): Promise<RemoteSeatView> {
     const { local, controls, source, audio, renderer } = options;
     const ownsAssets = options.content !== options.assets.content;
-    const assets = ownsAssets ? createWorldAssets(options.content,renderer,options.print,options.images) : options.assets;
-    const remote = source.remote, seat = local.player.seat;
+    const assets = ownsAssets ? createWorldAssets(options.content, renderer, options.print, options.images) : options.assets;
+    const remote = source.remote,
+      seat = local.player.seat;
     const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
     const effects = new ApplicationEffects(assets, remote.scene, actor => remote.isPlayer(actor), options.options.seed);
-    let ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
+    let ui: ApplicationSeatUi | null = null,
+      q3: ApplicationQ3Client | null = null;
     try {
       options.assertCurrent();
-      if(ownsAssets)await assets.loadWorld();
-      const font=ownsAssets ? await assets.loadConsoleFont() : options.font;
-      const typography = await assets.loadMenuTypography(); options.assertCurrent();
-      for (const failure of await effects.preloadTransientResources()) options.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
+      if (ownsAssets) await assets.loadWorld();
+      const font = ownsAssets ? await assets.loadConsoleFont() : options.font;
+      const typography = await assets.loadMenuTypography();
       options.assertCurrent();
-      ui = createSeatUi({ local, art: options.art, input: controls, mutateWindow: operation => renderer.mutateWindow(operation), simulation: remote, font, audio,
-        quit: options.quit, command: options.execute, typography, view: options.view.binding() });
+      for (const failure of await effects.preloadTransientResources())
+        options.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
+      options.assertCurrent();
+      ui = createSeatUi({
+        local,
+        art: options.art,
+        input: controls,
+        mutateWindow: operation => renderer.mutateWindow(operation),
+        simulation: remote,
+        font,
+        audio,
+        quit: options.quit,
+        command: options.execute,
+        typography,
+        view: options.view.binding(),
+      });
       if (remote instanceof Q3RemotePresentation) {
         const guest = options.q3;
         if (guest === null) throw new Error("Q3 remote seat requires its admitted guest owners");
         const command = guest.connection.commands.read(guest.connection.commands.currentNumber);
-        local.builder.setViewAngles(command === null ? { x: 0, y: 0, z: 0 } : {
-          x: (command.angles[0] << 16 >> 16) * (360 / 65536),
-          y: (command.angles[1] << 16 >> 16) * (360 / 65536),
-          z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
+        local.builder.setViewAngles(
+          command === null
+            ? { x: 0, y: 0, z: 0 }
+            : {
+                x: ((command.angles[0] << 16) >> 16) * (360 / 65536),
+                y: ((command.angles[1] << 16) >> 16) * (360 / 65536),
+                z: ((command.angles[2] << 16) >> 16) * (360 / 65536),
+              },
+        );
         q3 = await ApplicationQ3Client.create({
-          kind: "qvm", source: remote.cgameSource, connection: guest.connection,
-          keys: guest.keys, cvars: options.cvars, timeCvars: options.cvars,
-          get splitScreen() { return options.count() > 1; },
-          saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, renderSettings: () => q3RendererSettings(controls.sharedCvars),
-          assertCurrent: options.assertCurrent, commandBuffer: controls.guestCommands,
-          guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id),
+          kind: "qvm",
+          source: remote.cgameSource,
+          connection: guest.connection,
+          keys: guest.keys,
+          cvars: options.cvars,
+          timeCvars: options.cvars,
+          get splitScreen() {
+            return options.count() > 1;
+          },
+          saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0,
+          renderSettings: () => q3RendererSettings(controls.sharedCvars),
+          assertCurrent: options.assertCurrent,
+          commandBuffer: controls.guestCommands,
+          guestCvars: controls.guestCvars(seat.id),
+          guestInput: controls.guestInput(seat.id),
           commandRegistration: controls.clientCommandRegistration(seat.id),
-          renderer, browser: guest.browser, assets, queries: remote.scene, local, audio,
-          viewport: options.viewport, now: options.now,
-          clientState: () => ({ phase: source.network.phase === "active" ? 8 : source.network.phase === "loading" ? 6 : 5,
+          renderer,
+          browser: guest.browser,
+          assets,
+          queries: remote.scene,
+          local,
+          audio,
+          viewport: options.viewport,
+          now: options.now,
+          clientState: () => ({
+            phase: source.network.phase === "active" ? 8 : source.network.phase === "loading" ? 6 : 5,
             connectPacketCount: source.network instanceof Q3ClientNetwork ? source.network.connectPacketCount : 0,
             clientNumber: guest.connection.clientNumber,
-            serverName: options.options.network.kind === "q3-client" ? options.options.network.remote : "", message: "" }),
+            serverName: options.options.network.kind === "q3-client" ? options.options.network.remote : "",
+            message: "",
+          }),
           commands: {
             reliable: text => controls.enqueueClientReliable(text, context, command => source.network.command(command)),
-            console: text => controls.enqueueClientCommand(text, {session:context.session, origin:{kind:"script",name:"q3-cgame",caller:context.origin}}),
+            console: text =>
+              controls.enqueueClientCommand(text, { session: context.session, origin: { kind: "script", name: "q3-cgame", caller: context.origin } }),
             print: text => controls.print(text, context),
           },
         });
         options.assertCurrent();
       }
-      const characters=remote instanceof UnifiedRemotePresentation && options.options.character==="q3"
-        ? await loadQ3Character(await options.content.forContent(options.content.recipe.character.appearance.content),
-          {model:options.options.characterModel,skin:"default",headModel:"",headSkin:"default",team:null,teamName:""}) : null;
+      const characters =
+        remote instanceof UnifiedRemotePresentation && options.options.character === "q3"
+          ? await loadQ3Character(await options.content.forContent(options.content.recipe.character.appearance.content), {
+              model: options.options.characterModel,
+              skin: "default",
+              headModel: "",
+              headSkin: "default",
+              team: null,
+              teamName: "",
+            })
+          : null;
       options.assertCurrent();
-      const presentation = createSeatPresentation({ local, assets, renderer, simulation: remote, seatCount: options.count(), font,
-        characters, ui, effects, q3Client: q3, worldTextCullFactor: () => options.images.cvars.variableValue("gl_debug_distfrac"),
-        fieldOfView: () => options.view.fieldOfView, consoleScale: () => options.images.cvars.variableValue("con_scale") });
-      presentation.publishLayout(options.index(),options.count());
+      const presentation = createSeatPresentation({
+        local,
+        assets,
+        renderer,
+        simulation: remote,
+        seatCount: options.count(),
+        font,
+        characters,
+        ui,
+        effects,
+        q3Client: q3,
+        worldTextCullFactor: () => options.images.cvars.variableValue("gl_debug_distfrac"),
+        fieldOfView: () => options.view.fieldOfView,
+        consoleScale: () => options.images.cvars.variableValue("con_scale"),
+      });
+      presentation.publishLayout(options.index(), options.count());
       seat.validatePresentation(presentation);
-      return new RemoteSeatView(presentation, effects, options,assets,ownsAssets);
+      return new RemoteSeatView(presentation, effects, options, assets, ownsAssets);
     } catch (error) {
       const failures: unknown[] = [error];
-      for (const close of [() => q3?.close(), () => ui?.close(), () => effects.close(), () => {if(ownsAssets)assets.close();}]) try { close(); } catch (cleanup) { failures.push(cleanup); }
+      for (const close of [
+        () => q3?.close(),
+        () => ui?.close(),
+        () => effects.close(),
+        () => {
+          if (ownsAssets) assets.close();
+        },
+      ])
+        try {
+          close();
+        } catch (cleanup) {
+          failures.push(cleanup);
+        }
       if (failures.length !== 1) throw new AggregateError(failures, "Remote seat view preparation failed");
       throw error;
     }
@@ -144,31 +235,72 @@ export class RemoteSeatView {
 
   async prepareFrame(output: SimulationOutput, music = false): Promise<ApplicationAudioSeatEvents> {
     if (this.closed) throw new Error("Remote seat view is closed");
-    const remote = this.options.source.remote, events = remote.drainPresentationEvents();
-    if(remote instanceof UnifiedRemotePresentation)this.options.local.player.seat.receive(remote.drainSimulationEvents());
-    const models = remote.presentations(), characters = remote.characterViews();
+    const remote = this.options.source.remote,
+      events = remote.drainPresentationEvents();
+    if (remote instanceof UnifiedRemotePresentation) this.options.local.player.seat.receive(remote.drainSimulationEvents());
+    const models = remote.presentations(),
+      characters = remote.characterViews();
     this.effects.receive(events);
     if (!(remote instanceof Q3RemotePresentation)) await this.effects.prepare(output.snapshot, models, characters);
-    for(const effect of this.effects.drainUnhandled()){const key=`${effect.source.content}:${effect.reason}`;if(!this.reportedEffects.has(key)){this.reportedEffects.add(key);this.options.print(`Player ${this.presentation.local.player.seat.id.index+1}: unresolved ${effect.source.kind} effect: ${effect.reason}\n`);}}
+    for (const effect of this.effects.drainUnhandled()) {
+      const key = `${effect.source.content}:${effect.reason}`;
+      if (!this.reportedEffects.has(key)) {
+        this.reportedEffects.add(key);
+        this.options.print(`Player ${this.presentation.local.player.seat.id.index + 1}: unresolved ${effect.source.kind} effect: ${effect.reason}\n`);
+      }
+    }
     await this.components?.prepareMedia(events, music);
     this.presentation.sourceEvents(events);
     await this.presentation.prepare(output.snapshot, models, characters);
     await this.components?.prepare(this.presentation, events, output.snapshot.frame.frame);
-    return { seat: this.presentation.local.player.seat.id, snapshot: output.snapshot, events, scene: remote.scene, music: false,
-      effectSounds: [...this.effects.drainSounds(), ...this.effects.drainRecipientSounds()
-        .filter(batch => batch.recipient.equals(this.presentation.local.player.actor)).flatMap(batch => batch.sounds)] };
+    return {
+      seat: this.presentation.local.player.seat.id,
+      snapshot: output.snapshot,
+      events,
+      scene: remote.scene,
+      music: false,
+      effectSounds: [
+        ...this.effects.drainSounds(),
+        ...this.effects
+          .drainRecipientSounds()
+          .filter(batch => batch.recipient.equals(this.presentation.local.player.actor))
+          .flatMap(batch => batch.sounds),
+      ],
+    };
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     const errors: unknown[] = [];
-    try { this.components?.close(); } catch (error) { errors.push(error); }
-    try { await this.presentation.q3Client?.shutdown(); } catch (error) { errors.push(error); }
+    try {
+      this.components?.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await this.presentation.q3Client?.shutdown();
+    } catch (error) {
+      errors.push(error);
+    }
     const seat = this.presentation.local.player.seat;
-    try { if (seat.presentation === this.presentation) seat.clearPresentation(); else this.presentation.close(); } catch (error) { errors.push(error); }
-    try { this.effects.close(); } catch (error) { errors.push(error); }
-    if(this.ownsAssets)try{this.assets.close();}catch(error){errors.push(error);}
+    try {
+      if (seat.presentation === this.presentation) seat.clearPresentation();
+      else this.presentation.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.effects.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (this.ownsAssets)
+      try {
+        this.assets.close();
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote seat view retirement failed");
   }
 }

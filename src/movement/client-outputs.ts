@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModClientMovementMode, ModClientMovementOutputs } from "../contracts/mod-client-outputs.ts";
 import type { MovementState } from "../contracts/movement.ts";
 import type { UserCommand } from "../contracts/protocol.ts";
@@ -6,10 +7,19 @@ import type { UserCommand } from "../contracts/protocol.ts";
 export function clientStanceCommand(command: UserCommand, crouched: boolean | undefined): UserCommand {
   if (crouched === undefined) return command;
   switch (command.kind) {
-    case "q2-rerelease": return { ...command, buttons: crouched ? command.buttons | 16 : command.buttons & ~16 };
-    case "q1-quakeworld": return { ...command, upMove: crouched ? -Math.max(1, Math.abs(command.upMove)) : Math.max(0, command.upMove), buttons: crouched ? command.buttons & ~2 : command.buttons };
-    case "q2-classic": case "q3": return { ...command, upMove: crouched ? -Math.max(1, Math.abs(command.upMove)) : Math.max(0, command.upMove) };
-    case "q1-netquake": throw new Error("NetQuake has no source crouch command; authored bounds require their own qualified movement boundary");
+    case "q2-rerelease":
+      return { ...command, buttons: crouched ? command.buttons | 16 : command.buttons & ~16 };
+    case "q1-quakeworld":
+      return {
+        ...command,
+        upMove: crouched ? -Math.max(1, Math.abs(command.upMove)) : Math.max(0, command.upMove),
+        buttons: crouched ? command.buttons & ~2 : command.buttons,
+      };
+    case "q2-classic":
+    case "q3":
+      return { ...command, upMove: crouched ? -Math.max(1, Math.abs(command.upMove)) : Math.max(0, command.upMove) };
+    case "q1-netquake":
+      throw new Error("NetQuake has no source crouch command; authored bounds require their own qualified movement boundary");
   }
 }
 /** Original enumerations differ between Classic API3 and rerelease API2023. */

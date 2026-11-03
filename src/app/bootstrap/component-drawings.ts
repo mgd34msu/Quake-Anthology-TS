@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -24,7 +25,12 @@ export class ComponentDrawings {
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) {
       const lifecycle = source.kind === "presentation-owner";
-      if (!lifecycle && source.kind !== "debug-graph" && (source.kind !== "q2-rerelease" || source.event.kind !== "world-text" && source.event.kind !== "debug-shapes")) continue;
+      if (
+        !lifecycle &&
+        source.kind !== "debug-graph" &&
+        (source.kind !== "q2-rerelease" || (source.event.kind !== "world-text" && source.event.kind !== "debug-shapes"))
+      )
+        continue;
       const owner = source.kind === "presentation-owner" ? source.event.owner : source.owner;
       if (owner === undefined) continue;
       let state = this.owners.get(owner.provider);
@@ -36,7 +42,9 @@ export class ComponentDrawings {
       if (source.sequence <= state.sequence) continue;
       state.sequence = source.sequence;
       if (source.kind === "presentation-owner") {
-        state.lines.clear(); state.text.clear(); state.graph = null;
+        state.lines.clear();
+        state.text.clear();
+        state.graph = null;
         if (source.event.kind === "retired") state.retired = true;
         continue;
       }
@@ -60,10 +68,16 @@ export class ComponentDrawings {
     }
   }
   drawGraphs(draw: Draw2D, view: Rect, settings: DebugGraphSettings, white: PictureAsset): number {
-    if (settings.debuggraph === 0 && settings.timegraph === 0 && settings.netgraph === 0 || !Number.isFinite(settings.height) || Math.trunc(settings.height) <= 0) return 0;
+    if (
+      (settings.debuggraph === 0 && settings.timegraph === 0 && settings.netgraph === 0) ||
+      !Number.isFinite(settings.height) ||
+      Math.trunc(settings.height) <= 0
+    )
+      return 0;
     let bottom = view.y + view.height;
     for (const state of this.owners.values()) {
-      const graph = state.graph, palette = graph?.palette;
+      const graph = state.graph,
+        palette = graph?.palette;
       if (state.retired || graph === null || palette == null) continue;
       graph.samples.draw(draw, { ...view, height: bottom - view.y }, settings, index => debugGraphColor(palette, index), white);
       bottom -= settings.height;
@@ -72,11 +86,16 @@ export class ComponentDrawings {
     return Math.min(view.height, view.y + view.height - bottom);
   }
   snapshot(seconds: number, frame: number): { readonly text: readonly WorldText[]; readonly lines: readonly DebugLine[] } {
-    const text: WorldText[] = [], lines: DebugLine[] = [];
-    for (const state of this.owners.values()) if (!state.retired) {
-      text.push(...state.text.snapshot(seconds, frame)); lines.push(...state.lines.snapshot(seconds * 1000, frame));
-    }
+    const text: WorldText[] = [],
+      lines: DebugLine[] = [];
+    for (const state of this.owners.values())
+      if (!state.retired) {
+        text.push(...state.text.snapshot(seconds, frame));
+        lines.push(...state.lines.snapshot(seconds * 1000, frame));
+      }
     return { text, lines };
   }
-  clear(): void { this.owners.clear(); }
+  clear(): void {
+    this.owners.clear();
+  }
 }

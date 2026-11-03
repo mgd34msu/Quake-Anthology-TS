@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";

@@ -1,93 +1,205 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { recipeFixture } from "../../support/save-fixtures.ts";
-import { expect, test } from 'bun:test';
-import type { ExecutableRecipe } from '../../../src/contracts/content.ts';
+import { expect, test } from "bun:test";
+import type { ExecutableRecipe } from "../../../src/contracts/content.ts";
 
-import { createIdentityOwner } from '../../../src/contracts/identity.ts';
-import { LoopbackHub } from '../../support/loopback.ts';
-import { UnifiedChannel } from '../../../src/network/unified/channel.ts';
-import { decodeUnifiedPacket } from '../../../src/network/unified/packet.ts';
-import { createUnifiedComposition } from '../../../src/app/bootstrap/network/unified-content.ts';
-import { UnifiedServerNetwork } from '../../../src/app/bootstrap/network/unified-server.ts';
-import { encodeUnifiedHandshake, decodeUnifiedHandshake, encodeUnifiedControl, encodeUnifiedInputs } from '../../../src/app/bootstrap/network/unified-control.ts';
-import type { UnifiedApplicationServerHost } from '../../../src/app/bootstrap/simulation/network-unified.ts';
+import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+import { LoopbackHub } from "../../support/loopback.ts";
+import { UnifiedChannel } from "../../../src/network/unified/channel.ts";
+import { decodeUnifiedPacket } from "../../../src/network/unified/packet.ts";
+import { createUnifiedComposition } from "../../../src/app/bootstrap/network/unified-content.ts";
+import { UnifiedServerNetwork } from "../../../src/app/bootstrap/network/unified-server.ts";
+import {
+  encodeUnifiedHandshake,
+  decodeUnifiedHandshake,
+  encodeUnifiedControl,
+  encodeUnifiedInputs,
+} from "../../../src/app/bootstrap/network/unified-control.ts";
+import type { UnifiedApplicationServerHost } from "../../../src/app/bootstrap/simulation/network-unified.ts";
 const recipe = (): ExecutableRecipe => recipeFixture();
 
 async function fixture(command: () => void = () => {}, componentCommand?: NonNullable<UnifiedApplicationServerHost["componentCommand"]>) {
-  const hub = new LoopbackHub(), transport = hub.bind('server'), socket = hub.bind('client');
-  const identity = createIdentityOwner('unified-server'), player = { client: identity.client(0, 0), actor: identity.actor(1, 0), sourceEntity: 1 };
-  const selected = recipe(), composition = createUnifiedComposition(selected);
+  const hub = new LoopbackHub(),
+    transport = hub.bind("server"),
+    socket = hub.bind("client");
+  const identity = createIdentityOwner("unified-server"),
+    player = { client: identity.client(0, 0), actor: identity.actor(1, 0), sourceEntity: 1 };
+  const selected = recipe(),
+    composition = createUnifiedComposition(selected);
   let disconnected = 0;
-  const host: UnifiedApplicationServerHost = { recipe: selected, maxClients: 2, mode: 'deathmatch',
-    admit: () => ({ kind: 'accepted', player }), carriedPlayer: () => player, disconnect: () => { disconnected++; }, userinfo: () => {}, command,
+  const host: UnifiedApplicationServerHost = {
+    recipe: selected,
+    maxClients: 2,
+    mode: "deathmatch",
+    admit: () => ({ kind: "accepted", player }),
+    carriedPlayer: () => player,
+    disconnect: () => {
+      disconnected++;
+    },
+    userinfo: () => {},
+    command,
     ...(componentCommand === undefined ? {} : { componentCommand }),
-    input: (_player, sequence, command, arsenal) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command, ...(arsenal === undefined ? {} : { arsenal }) }),
-    frame: () => { throw new Error('No frame requested in input boundary test'); }, resources: () => [], presentationEvents: (_player, events) => events, initialPresentation: () => [] };
+    input: (_player, sequence, command, arsenal) => ({
+      actor: player.actor,
+      source: { kind: "remote-client", client: player.client },
+      sequence,
+      command,
+      ...(arsenal === undefined ? {} : { arsenal }),
+    }),
+    frame: () => {
+      throw new Error("No frame requested in input boundary test");
+    },
+    resources: () => [],
+    presentationEvents: (_player, events) => events,
+    initialPresentation: () => [],
+  };
   const server = new UnifiedServerNetwork({ transport, host, composition, print: () => {} });
-  socket.send(transport.address, encodeUnifiedHandshake({ kind: 'hello', nonce: '1'.repeat(32) })); await server.poll(0);
-  const response = socket.poll(); if (response?.kind !== 'packet') throw new Error('Missing challenge');
-  const challenge = decodeUnifiedHandshake(response.payload); if (challenge?.kind !== 'challenge') throw new Error('Wrong challenge');
-  socket.send(transport.address, encodeUnifiedHandshake({ kind: 'connect', nonce: challenge.nonce, token: challenge.token })); await server.poll(1);
+  socket.send(transport.address, encodeUnifiedHandshake({ kind: "hello", nonce: "1".repeat(32) }));
+  await server.poll(0);
+  const response = socket.poll();
+  if (response?.kind !== "packet") throw new Error("Missing challenge");
+  const challenge = decodeUnifiedHandshake(response.payload);
+  if (challenge?.kind !== "challenge") throw new Error("Wrong challenge");
+  socket.send(transport.address, encodeUnifiedHandshake({ kind: "connect", nonce: challenge.nonce, token: challenge.token }));
+  await server.poll(1);
   const channel = new UnifiedChannel(challenge.token);
-  const receive = (now: number): void => { for (;;) { const packet = socket.poll(); if (packet === null) break; if (packet.kind === 'packet') channel.receive(packet.payload, now); } };
-  receive(1); channel.queueReliable(encodeUnifiedControl({ kind: 'ready', epoch: 1, composition: composition.digest, userinfo: '\\name\\Fixture' }));
-  for (let now = 2; now < 6; now++) { for (const bytes of channel.flush(now)) socket.send(transport.address, bytes); await server.poll(now); receive(now); }
+  const receive = (now: number): void => {
+    for (;;) {
+      const packet = socket.poll();
+      if (packet === null) break;
+      if (packet.kind === "packet") channel.receive(packet.payload, now);
+    }
+  };
+  receive(1);
+  channel.queueReliable(encodeUnifiedControl({ kind: "ready", epoch: 1, composition: composition.digest, userinfo: "\\name\\Fixture" }));
+  for (let now = 2; now < 6; now++) {
+    for (const bytes of channel.flush(now)) socket.send(transport.address, bytes);
+    await server.poll(now);
+    receive(now);
+  }
   expect(server.clients.length).toBe(1);
   return { hub, socket, transport, server, channel, disconnected: () => disconnected };
 }
 
-test('later same-poll disconnect removes inputs already queued for the authoritative actor', async () => {
+test("later same-poll disconnect removes inputs already queued for the authoritative actor", async () => {
   const f = await fixture();
   try {
-    f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [{ sequence: 7, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: 0, viewAngles: { x: 0, y: 0, z: 0 }, forwardMove: 200, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 } }] }), 1);
-    f.channel.queueReliable(encodeUnifiedControl({ kind: 'disconnect', reason: 'fixture done' }));
+    f.channel.queueFrame(
+      encodeUnifiedInputs({
+        epoch: 1,
+        commands: [
+          {
+            sequence: 7,
+            command: {
+              kind: "q1-netquake",
+              acknowledgedServerTimeSeconds: 0,
+              viewAngles: { x: 0, y: 0, z: 0 },
+              forwardMove: 200,
+              sideMove: 0,
+              upMove: 0,
+              buttons: 0,
+              impulse: 0,
+            },
+          },
+        ],
+      }),
+      1,
+    );
+    f.channel.queueReliable(encodeUnifiedControl({ kind: "disconnect", reason: "fixture done" }));
     const packets = f.channel.flush(10);
-    for (const bytes of packets.filter(bytes => decodeUnifiedPacket(bytes)?.kind === 'frame')) f.socket.send(f.transport.address, bytes);
-    for (const bytes of packets.filter(bytes => decodeUnifiedPacket(bytes)?.kind !== 'frame')) f.socket.send(f.transport.address, bytes);
+    for (const bytes of packets.filter(bytes => decodeUnifiedPacket(bytes)?.kind === "frame")) f.socket.send(f.transport.address, bytes);
+    for (const bytes of packets.filter(bytes => decodeUnifiedPacket(bytes)?.kind !== "frame")) f.socket.send(f.transport.address, bytes);
     expect(await f.server.poll(10)).toEqual([]);
-    expect(f.disconnected()).toBe(1); expect(f.server.clients).toEqual([]); expect(f.server.phase).toBe('active');
-  } finally { f.server.close(); f.hub.close(); }
+    expect(f.disconnected()).toBe(1);
+    expect(f.server.clients).toEqual([]);
+    expect(f.server.phase).toBe("active");
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });
 
-test('a command failure costs only that peer its connection and leaves the authority running', async () => {
-  const failure = new Error('source command failed'), f = await fixture(() => { throw failure; });
+test("a command failure costs only that peer its connection and leaves the authority running", async () => {
+  const failure = new Error("source command failed"),
+    f = await fixture(() => {
+      throw failure;
+    });
   try {
-    f.channel.queueReliable(encodeUnifiedControl({ kind: 'command', epoch: 1, name: 'source_command', args: [] }));
+    f.channel.queueReliable(encodeUnifiedControl({ kind: "command", epoch: 1, name: "source_command", args: [] }));
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
     expect(await f.server.poll(10)).toEqual([]);
-    expect(f.disconnected()).toBe(1); expect(f.server.clients).toEqual([]); expect(f.server.phase).toBe('active');
-  } finally { f.server.close(); f.hub.close(); }
+    expect(f.disconnected()).toBe(1);
+    expect(f.server.clients).toEqual([]);
+    expect(f.server.phase).toBe("active");
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });
 
-test('malformed authenticated input drops only that peer and leaves the authority running', async () => {
+test("malformed authenticated input drops only that peer and leaves the authority running", async () => {
   const f = await fixture();
   try {
     f.channel.queueFrame(Uint8Array.of(255, 0, 17), 1);
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
     expect(await f.server.poll(10)).toEqual([]);
-    expect(f.disconnected()).toBe(1); expect(f.server.phase).toBe('active');
-  } finally { f.server.close(); f.hub.close(); }
+    expect(f.disconnected()).toBe(1);
+    expect(f.server.phase).toBe("active");
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });
 
-test('NetQuake input bursts apply only the newest command for one server frame', async () => {
+test("NetQuake input bursts apply only the newest command for one server frame", async () => {
   const f = await fixture();
   try {
-    f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [7, 8, 9].map(sequence => ({ sequence,
-      command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: 0, viewAngles: { x: 0, y: sequence, z: 0 }, forwardMove: 200, sideMove: 0, upMove: 0, buttons: 0, impulse: sequence === 7 ? 9 : 0 } })) }), 1);
+    f.channel.queueFrame(
+      encodeUnifiedInputs({
+        epoch: 1,
+        commands: [7, 8, 9].map(sequence => ({
+          sequence,
+          command: {
+            kind: "q1-netquake",
+            acknowledgedServerTimeSeconds: 0,
+            viewAngles: { x: 0, y: sequence, z: 0 },
+            forwardMove: 200,
+            sideMove: 0,
+            upMove: 0,
+            buttons: 0,
+            impulse: sequence === 7 ? 9 : 0,
+          },
+        })),
+      }),
+      1,
+    );
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
     const commands = await f.server.poll(10);
     expect(commands.map(command => command.sequence)).toEqual([9]);
     const command = commands[0]?.command;
-    if (command?.kind !== 'q1-netquake') throw new Error('Expected NetQuake command');
-    expect(command.impulse).toBe(9); expect(command.viewAngles.y).toBe(9);
-  } finally { f.server.close(); f.hub.close(); }
+    if (command?.kind !== "q1-netquake") throw new Error("Expected NetQuake command");
+    expect(command.impulse).toBe(9);
+    expect(command.viewAngles.y).toBe(9);
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });
 
-
-test('movement values outside provider bounds drop the peer instead of reaching simulation', async () => {
-  const invalid: readonly { readonly sequence: number; readonly command: Parameters<typeof encodeUnifiedInputs>[0]['commands'][number]['command'] }[] = [
-    { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 128, rightMove: 0, upMove: 0 } },
-    { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 0, rightMove: -129, upMove: 0 } },
-    { sequence: 7, command: { kind: 'q2-rerelease', milliseconds: 256, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: 0 } },
+test("movement values outside provider bounds drop the peer instead of reaching simulation", async () => {
+  const invalid: readonly { readonly sequence: number; readonly command: Parameters<typeof encodeUnifiedInputs>[0]["commands"][number]["command"] }[] = [
+    {
+      sequence: 7,
+      command: { kind: "q3", serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 128, rightMove: 0, upMove: 0 },
+    },
+    {
+      sequence: 7,
+      command: { kind: "q3", serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 0, rightMove: -129, upMove: 0 },
+    },
+    {
+      sequence: 7,
+      command: { kind: "q2-rerelease", milliseconds: 256, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: 0 },
+    },
   ];
   for (const input of invalid) {
     const f = await fixture();
@@ -95,29 +207,51 @@ test('movement values outside provider bounds drop the peer instead of reaching 
       f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [input] }), 1);
       for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
       expect(await f.server.poll(10)).toEqual([]);
-      expect(f.disconnected()).toBe(1); expect(f.server.phase).toBe('active');
-    } finally { f.server.close(); f.hub.close(); }
+      expect(f.disconnected()).toBe(1);
+      expect(f.server.phase).toBe("active");
+    } finally {
+      f.server.close();
+      f.hub.close();
+    }
   }
 });
 
-test('movement values at provider bounds are admitted', async () => {
+test("movement values at provider bounds are admitted", async () => {
   const f = await fixture();
   try {
-    f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [
-      { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 127, rightMove: -128, upMove: 0 } },
-    ] }), 1);
+    f.channel.queueFrame(
+      encodeUnifiedInputs({
+        epoch: 1,
+        commands: [
+          {
+            sequence: 7,
+            command: { kind: "q3", serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 127, rightMove: -128, upMove: 0 },
+          },
+        ],
+      }),
+      1,
+    );
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
     expect((await f.server.poll(10)).map(command => command.sequence)).toEqual([7]);
     expect(f.disconnected()).toBe(0);
-  } finally { f.server.close(); f.hub.close(); }
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });
 
-test('retired component command admission rejects its peer without stopping the authoritative host', async () => {
+test("retired component command admission rejects its peer without stopping the authoritative host", async () => {
   const f = await fixture(undefined, () => false);
   try {
-    f.channel.queueReliable(encodeUnifiedControl({ kind: 'component-command', epoch: 1, owner: { provider: 'mod:retired', generation: 1 }, generation: 0, args: ['score'] }));
+    f.channel.queueReliable(
+      encodeUnifiedControl({ kind: "component-command", epoch: 1, owner: { provider: "mod:retired", generation: 1 }, generation: 0, args: ["score"] }),
+    );
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
     expect(await f.server.poll(10)).toEqual([]);
-    expect(f.disconnected()).toBe(1); expect(f.server.phase).toBe('active');
-  } finally { f.server.close(); f.hub.close(); }
+    expect(f.disconnected()).toBe(1);
+    expect(f.server.phase).toBe("active");
+  } finally {
+    f.server.close();
+    f.hub.close();
+  }
 });

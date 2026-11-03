@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../../support/corpus.ts";
 
@@ -12,10 +13,21 @@ test("model images resolve contained parent references without weakening mount p
   expect(modelImagePath("models/monsters/tank/../ctank/skin.png")).toBe("models/monsters/ctank/skin.png");
   expect(modelImagePath("models\\monsters\\tank\\..\\ctank\\skin.pcx")).toBe("models/monsters/ctank/skin.pcx");
   expect(modelImagePath("./models/monsters/tank/skin.pcx")).toBe("models/monsters/tank/skin.pcx");
-  for (const name of ["../skin.pcx", "models/../../skin.pcx", "/models/skin.pcx", "C:\\skin.pcx", "models/skin\0.pcx", "models//skin.pcx", "models/..", "./C:/skin.pcx"]) {
+  for (const name of [
+    "../skin.pcx",
+    "models/../../skin.pcx",
+    "/models/skin.pcx",
+    "C:\\skin.pcx",
+    "models/skin\0.pcx",
+    "models//skin.pcx",
+    "models/..",
+    "./C:/skin.pcx",
+  ]) {
     expect(() => modelImagePath(name)).toThrow(/Model image escapes content root|Invalid (?:model image|relative resource) path/);
   }
-  expect(() => normalizeResourcePath("models/monsters/tank/../ctank/skin.pcx")).toThrow("Invalid relative resource path: models/monsters/tank/../ctank/skin.pcx");
+  expect(() => normalizeResourcePath("models/monsters/tank/../ctank/skin.pcx")).toThrow(
+    "Invalid relative resource path: models/monsters/tank/../ctank/skin.pcx",
+  );
 });
 
 test("retail Q2 tank embedded sibling skins resolve to actual archive images", async () => {
@@ -35,5 +47,7 @@ test("retail Q2 tank embedded sibling skins resolve to actual archive images", a
       expect(image.width).toBe(model.skinWidth);
       expect(image.height).toBe(model.skinHeight);
     }
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });

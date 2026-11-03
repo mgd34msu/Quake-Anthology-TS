@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RawAudioStream } from "../audio/streams.ts";
 import type { AudioStreamTarget, StreamPcm } from "../audio/types.ts";
 import type { CinematicOptions } from "./types.ts";
@@ -16,7 +17,11 @@ export function cinematicAudio(mixer: CinematicMixer, id: string, gain = 1): Pic
     onAudio(audio, target) {
       mixer.queueStream({ id, gain, audience: target.kind === "seat" ? target : { kind: "world" } }, audio);
     },
-    onAudioReset() { mixer.stopStream(id); },
-    onAudioPause(paused) { mixer.pauseStream(id, paused); },
+    onAudioReset() {
+      mixer.stopStream(id);
+    },
+    onAudioPause(paused) {
+      mixer.pauseStream(id, paused);
+    },
   };
 }

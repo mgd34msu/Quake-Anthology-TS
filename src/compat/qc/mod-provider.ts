@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { validateQcMod } from "./mod-validation.ts";
 import { SourceModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import { resolveQcObjectiveStorage } from "./mod-objectives.ts";
@@ -58,12 +59,19 @@ import type { QcProgram } from "./program.ts";
 
 export type QcModValue = ModRuntimeValue;
 export type QcModInputs = ReadonlyMap<ModCallbackInput, QcModValue>;
-export interface QcModRandom extends RandomSource { checkpoint(): RandomState; restore(state: RandomState): undefined; }
+export interface QcModRandom extends RandomSource {
+  checkpoint(): RandomState;
+  restore(state: RandomState): undefined;
+}
 export interface QcModMedia {
   readonly content: ContentId;
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
 }
-interface FieldBinding { readonly declaration: ModActorField; readonly offset: number; readonly words: 1 | 3; }
+interface FieldBinding {
+  readonly declaration: ModActorField;
+  readonly offset: number;
+  readonly words: 1 | 3;
+}
 const FOREIGN_SLOT_QUARANTINE = 64;
 
 /** Isolated source words project existing actors; every declared shared store keeps its canonical owner. */
@@ -103,21 +111,52 @@ export class QcModProvider {
   private presentationGeneration = 0;
   private clientSource: ModClientPresentationSource | null = null;
   private commands: ModCommandPort | null = null;
-  constructor(readonly program: QcProgram, readonly module: ModuleIdentity, readonly declaration: ModCallbackDeclaration,
-    readonly services: ModHostServices, readonly random: QcModRandom, readonly media?: QcModMedia) {
+  constructor(
+    readonly program: QcProgram,
+    readonly module: ModuleIdentity,
+    readonly declaration: ModCallbackDeclaration,
+    readonly services: ModHostServices,
+    readonly random: QcModRandom,
+    readonly media?: QcModMedia,
+  ) {
     validateQcMod(program, declaration);
     this.objectives = new ModSourceObjectives(module.id, declaration.objectives ?? [], services.match, {
-      location: declaration => [declaration.state.storage, declaration.carrier, declaration.target].map(storage => {
-        if (storage === null) return "none";
-        const { offset, reference } = this.objectiveStorage(storage);
-        if (reference === null) return `global:${offset}`;
-        const actor = this.actor(reference); return `entity:${actor.slot}:${actor.generation}:${reference}:${offset}`;
-      }).join("|"),
-      current: () => !this.closed, readScalar: storage => { const { words, offset } = this.objectiveStorage(storage); return words.float(offset); },
-      writeScalar: (storage, value) => { const { words, offset } = this.objectiveStorage(storage); words.setFloat(offset, value); },
-      readActor: storage => { const { words, offset } = this.objectiveStorage(storage), reference = words.int(offset); return reference === 0 ? null : this.actor(reference); },
-      writeActor: (storage, value) => { const reference = this.reference(value), { words, offset } = this.objectiveStorage(storage); words.setInt(offset, reference); },
-      invoke: (call, inputs) => { this.invoke(call, inputs); }, seconds: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
+      location: declaration =>
+        [declaration.state.storage, declaration.carrier, declaration.target]
+          .map(storage => {
+            if (storage === null) return "none";
+            const { offset, reference } = this.objectiveStorage(storage);
+            if (reference === null) return `global:${offset}`;
+            const actor = this.actor(reference);
+            return `entity:${actor.slot}:${actor.generation}:${reference}:${offset}`;
+          })
+          .join("|"),
+      current: () => !this.closed,
+      readScalar: storage => {
+        const { words, offset } = this.objectiveStorage(storage);
+        return words.float(offset);
+      },
+      writeScalar: (storage, value) => {
+        const { words, offset } = this.objectiveStorage(storage);
+        words.setFloat(offset, value);
+      },
+      readActor: storage => {
+        const { words, offset } = this.objectiveStorage(storage),
+          reference = words.int(offset);
+        return reference === 0 ? null : this.actor(reference);
+      },
+      writeActor: (storage, value) => {
+        const reference = this.reference(value),
+          { words, offset } = this.objectiveStorage(storage);
+        words.setInt(offset, reference);
+      },
+      invoke: (call, inputs) => {
+        this.invoke(call, inputs);
+      },
+      seconds: () => {
+        const time = services.time();
+        return time.kind === "seconds" ? time.value : time.value / 1000;
+      },
     });
     this.fields = declaration.actorFields.map(entry => {
       const field = program.fieldsByName.get(entry.field);
@@ -130,113 +169,224 @@ export class QcModProvider {
     this.environment = new QcModEnvironment(services, program, declaration, actor => this.reference(actor));
     const host = new Map<QcHostBuiltinName, QcBuiltin>();
     const movement = new Map<QcHostBuiltinName, QcBuiltin>();
-    if (services.engine?.physics !== undefined) for (const name of ["walkmove", "movetogoal", "changeyaw", "checkbottom"] satisfies readonly QcHostBuiltinName[]) host.set(name, vm => {
-      const builtin = movement.get(name); if (builtin === undefined) return vm.fail(`Source movement service ${name} was not initialized`); return builtin(vm);
-    });
+    if (services.engine?.physics !== undefined)
+      for (const name of ["walkmove", "movetogoal", "changeyaw", "checkbottom"] satisfies readonly QcHostBuiltinName[])
+        host.set(name, vm => {
+          const builtin = movement.get(name);
+          if (builtin === undefined) return vm.fail(`Source movement service ${name} was not initialized`);
+          return builtin(vm);
+        });
     host.set("spawn", vm => this.ownedActors.spawn(vm));
     host.set("remove", vm => this.ownedActors.remove(vm));
-    if (services.engine !== undefined) for (const [name, builtin] of createQcSpatialBindings({
-      options: { program, entities, scene: services.engine.scene, numeric: Q1_DONOR_PROFILE, model: name => {
-        if (name === "") return { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } };
-        if (media === undefined) return null;
-        const resource = media.resources.get(name);
-        const precached = this.lookup("model", name);
-        return resource?.modelBounds == null || precached === null ? null : { index: precached.index, bounds: resource.modelBounds };
-      } },
-      prepareEntities: () => this.prepareEntities(), actor: slot => {
-        const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
-        if (actor === null) throw new Error("Spatial builtin references a released mod actor"); return actor;
-      }, reference: actor => this.reference(actor), isFreeEntity: slot => {
-        const actor = this.actorsBySlot.get(slot); return actor === undefined || !services.actors.isLive(actor);
-      }, link: slot => {
-        const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
-        if (actor === null) throw new Error("Cannot link a released mod actor");
-        services.bodies.link(actor);
-      },
-    })) host.set(name, builtin);
-    if (services.engine !== undefined) host.set("aim", createQcAimBinding({
-      options: { program, entities, bodies: services.bodies, scene: services.engine.scene, numeric: Q1_DONOR_PROFILE },
-      actor: slot => {
-        const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
-        if (actor === null) throw new Error("Aim references a released component actor"); return actor;
-      },
-    }, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay"),
-      noAim: actor => {
-        const client = services.clients?.forActor(actor);
-        return program.api.kind === "q1-quakeworld" && client != null && services.clients !== undefined
-          && nativeAtoi(quakeWorldInfo(services.clients.userinfo(client)).get("noaim") ?? "0") > 0;
-      }, targets: () => {
-        this.prepareEntities();
-        const targets: { actor: ActorId; reference: number }[] = [];
-        for (let slot = 1; slot < entities.count; slot++) {
+    if (services.engine !== undefined)
+      for (const [name, builtin] of createQcSpatialBindings({
+        options: {
+          program,
+          entities,
+          scene: services.engine.scene,
+          numeric: Q1_DONOR_PROFILE,
+          model: name => {
+            if (name === "") return { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } };
+            if (media === undefined) return null;
+            const resource = media.resources.get(name);
+            const precached = this.lookup("model", name);
+            return resource?.modelBounds == null || precached === null ? null : { index: precached.index, bounds: resource.modelBounds };
+          },
+        },
+        prepareEntities: () => this.prepareEntities(),
+        actor: slot => {
+          const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+          if (actor === null) throw new Error("Spatial builtin references a released mod actor");
+          return actor;
+        },
+        reference: actor => this.reference(actor),
+        isFreeEntity: slot => {
           const actor = this.actorsBySlot.get(slot);
-          if (actor !== undefined && services.actors.isLive(actor)) targets.push({ actor, reference: entities.reference(slot) });
-        }
-        return targets;
-      } }));
+          return actor === undefined || !services.actors.isLive(actor);
+        },
+        link: slot => {
+          const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+          if (actor === null) throw new Error("Cannot link a released mod actor");
+          services.bodies.link(actor);
+        },
+      }))
+        host.set(name, builtin);
+    if (services.engine !== undefined)
+      host.set(
+        "aim",
+        createQcAimBinding(
+          {
+            options: { program, entities, bodies: services.bodies, scene: services.engine.scene, numeric: Q1_DONOR_PROFILE },
+            actor: slot => {
+              const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+              if (actor === null) throw new Error("Aim references a released component actor");
+              return actor;
+            },
+          },
+          {
+            aimThreshold: () => this.cvars.variableValue("sv_aim"),
+            teamplay: () => this.cvars.variableValue("teamplay"),
+            noAim: actor => {
+              const client = services.clients?.forActor(actor);
+              return (
+                program.api.kind === "q1-quakeworld" &&
+                client != null &&
+                services.clients !== undefined &&
+                nativeAtoi(quakeWorldInfo(services.clients.userinfo(client)).get("noaim") ?? "0") > 0
+              );
+            },
+            targets: () => {
+              this.prepareEntities();
+              const targets: { actor: ActorId; reference: number }[] = [];
+              for (let slot = 1; slot < entities.count; slot++) {
+                const actor = this.actorsBySlot.get(slot);
+                if (actor !== undefined && services.actors.isLive(actor)) targets.push({ actor, reference: entities.reference(slot) });
+              }
+              return targets;
+            },
+          },
+        ),
+      );
     this.messages = null;
     if (services.engine !== undefined && media !== undefined) {
       const lookup = (kind: "model" | "sound", name: string) => this.lookup(kind, name);
-      const world = { options: { program, entities, slots: { at: (slot: number) => {
-        const reference = slot === 0 ? services.engine?.world() : this.actorsBySlot.get(slot);
-        return reference == null ? null : services.actors.resolveOwned(reference);
-      } } }, host, actor: (slot: number) => {
-        const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
-        if (actor === null) throw new Error("Presentation references a released mod actor");
-        return actor;
-      } };
-      this.messages = new QcModMessages(world, services, media.content, (kind, index) => {
-        for (const [name, resource] of this.precached) if (name.startsWith(`${kind}:`) && resource.index === index) return name.slice(kind.length + 1);
-        throw new Error(`Unknown mod ${kind} index ${index}`);
-      }, { loading: () => this.loading, phs: () => this.cvars.variableValue("sv_phs") !== 0,
-        publishesKills: declaration.objectives?.some(objective => objective.role === "borrowed" && objective.writable) !== true });
+      const world = {
+        options: {
+          program,
+          entities,
+          slots: {
+            at: (slot: number) => {
+              const reference = slot === 0 ? services.engine?.world() : this.actorsBySlot.get(slot);
+              return reference == null ? null : services.actors.resolveOwned(reference);
+            },
+          },
+        },
+        host,
+        actor: (slot: number) => {
+          const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+          if (actor === null) throw new Error("Presentation references a released mod actor");
+          return actor;
+        },
+      };
+      this.messages = new QcModMessages(
+        world,
+        services,
+        media.content,
+        (kind, index) => {
+          for (const [name, resource] of this.precached) if (name.startsWith(`${kind}:`) && resource.index === index) return name.slice(kind.length + 1);
+          throw new Error(`Unknown mod ${kind} index ${index}`);
+        },
+        {
+          loading: () => this.loading,
+          phs: () => this.cvars.variableValue("sv_phs") !== 0,
+          publishesKills: declaration.objectives?.some(objective => objective.role === "borrowed" && objective.writable) !== true,
+        },
+      );
       const qw = this.messages.routes.qw;
       for (const [name, builtin] of this.messages.messages.host) host.set(name, builtin);
-      for (const [name, builtin] of createQcPresentationBindings(world, { ...services.engine, ...this.messages.routes, content: media.content, printBroadcastsToClients: true,
-        ...(qw === undefined ? {} : { broadcastPrint: (text: string, level: number) =>
-          qw.route([{ message: { kind: "print", text, level }, actor: null }], { kind: "broadcast", reliable: true }) }),
-        loading: () => this.loading, lookup, precache: (kind, name) => {
-          const resource = lookup(kind, name); if (resource === null) throw new Error(`Mod resource was not prepared: ${kind}/${name}`); return resource;
-        } })) host.set(name, builtin);
+      for (const [name, builtin] of createQcPresentationBindings(world, {
+        ...services.engine,
+        ...this.messages.routes,
+        content: media.content,
+        printBroadcastsToClients: true,
+        ...(qw === undefined
+          ? {}
+          : {
+              broadcastPrint: (text: string, level: number) =>
+                qw.route([{ message: { kind: "print", text, level }, actor: null }], { kind: "broadcast", reliable: true }),
+            }),
+        loading: () => this.loading,
+        lookup,
+        precache: (kind, name) => {
+          const resource = lookup(kind, name);
+          if (resource === null) throw new Error(`Mod resource was not prepared: ${kind}/${name}`);
+          return resource;
+        },
+      }))
+        host.set(name, builtin);
     }
     for (const [name, builtin] of this.environment.host) host.set(name, builtin);
     if (declaration.clients !== undefined && program.api.kind === "q1-quakeworld") {
       host.set("infokey", vm => {
-        const reference = vm.argInt(0), key = vm.argString(1);
+        const reference = vm.argInt(0),
+          key = vm.argString(1);
         const actor = reference === 0 ? null : this.actorsBySlot.get(vm.entities.slot(reference));
-        const value = reference === 0 ? this.cvars.variableString(key)
-          : actor === undefined || actor === null || this.clients?.slot(actor) == null ? "" : this.clients.userinfo(actor, key);
-        const world = reference === 0 && value === "" ? this.cvars.localInfo.get(key) ?? "" : value;
+        const value =
+          reference === 0
+            ? this.cvars.variableString(key)
+            : actor === undefined || actor === null || this.clients?.slot(actor) == null
+              ? ""
+              : this.clients.userinfo(actor, key);
+        const world = reference === 0 && value === "" ? (this.cvars.localInfo.get(key) ?? "") : value;
         vm.returnInt(vm.strings.setEngine(`mod-infokey:${reference}:${key}`, world, Math.max(1024, world.length + 1)));
       });
-      if (this.messages === null) for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) host.set(name, vm => {
-        const actor = this.actor(vm.argInt(0));
-        if (this.clients?.slot(actor) == null) { services.engine?.print(`tried to ${name} to a non-client\n`); return; }
-        const message = services.engine?.message; if (message === undefined) return vm.fail("Mod client message requires a destination message sink");
-        const text = vm.varString(name === "sprint" ? 2 : 1);
-        return message(name === "sprint" ? { kind: "print", level: Math.trunc(vm.argFloat(1)), text }
-          : name === "centerprint" ? { kind: "center-print", text } : { kind: "command-text", text }, actor);
-      });
+      if (this.messages === null)
+        for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[])
+          host.set(name, vm => {
+            const actor = this.actor(vm.argInt(0));
+            if (this.clients?.slot(actor) == null) {
+              services.engine?.print(`tried to ${name} to a non-client\n`);
+              return;
+            }
+            const message = services.engine?.message;
+            if (message === undefined) return vm.fail("Mod client message requires a destination message sink");
+            const text = vm.varString(name === "sprint" ? 2 : 1);
+            return message(
+              name === "sprint"
+                ? { kind: "print", level: Math.trunc(vm.argFloat(1)), text }
+                : name === "centerprint"
+                  ? { kind: "center-print", text }
+                  : { kind: "command-text", text },
+              actor,
+            );
+          });
     }
     host.set("localcmd", vm => {
       if (this.commands === null) return vm.fail("Mod localcmd requires the destination command service");
       this.commands.append(vm.argString(0));
     });
     if (declaration.items !== undefined && media === undefined) throw new Error("QC source items require their prepared content owner");
-    this.items = declaration.items === undefined || media === undefined ? null : new QcModItems(declaration.items, module.id, services, media, {
-      machine: () => this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs) => this.invoke(call, inputs),
-    }, program);
+    this.items =
+      declaration.items === undefined || media === undefined
+        ? null
+        : new QcModItems(
+            declaration.items,
+            module.id,
+            services,
+            media,
+            {
+              machine: () => this.machine,
+              reference: actor => this.reference(actor),
+              actor: reference => this.actor(reference),
+              invoke: (call, inputs) => this.invoke(call, inputs),
+            },
+            program,
+          );
     const weaponFunctions = this.items?.weapons?.composeFunctions({ functions: new Set(), run: (_call, execute) => execute() });
     const armorRegions: QcInlineBoundary = {
       regions: (() => {
         const primary = declaration.combat === undefined ? null : qcArmorStage(program, declaration.combat.armorStage);
-        return [...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values()];
-      })(), run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
+        return [
+          ...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values(),
+        ];
+      })(),
+      run: (region, execute) => (this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute)),
     };
-    this.machine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), serverActive: () => !this.loading,
-      builtins: createQcBuiltins({ kind: qcHostKindForProgram(program), random, host,
+    this.machine = new QcMachine({
+      program,
+      entities,
+      numeric: createNumericOperations(Q1_DONOR_PROFILE),
+      serverActive: () => !this.loading,
+      builtins: createQcBuiltins({
+        kind: qcHostKindForProgram(program),
+        random,
+        host,
         prepareEntities: () => this.prepareEntities(),
-        isFreeEntity: slot => { const actor = this.actorsBySlot.get(slot); return actor === undefined || !services.actors.isLive(actor); } }),
+        isFreeEntity: slot => {
+          const actor = this.actorsBySlot.get(slot);
+          return actor === undefined || !services.actors.isLive(actor);
+        },
+      }),
       validateEntityAccess: (reference, word, words, kind) => {
         // A freed edict still reads as plain words in id's engine; only writes need a live actor.
         if (kind === "read" && reference !== 0) {
@@ -245,204 +395,437 @@ export class QcModProvider {
         }
         const actor = this.actor(reference);
         if (services.actors.observe(actor)?.owner === module.id) return undefined;
-        for (let offset = word; offset < word + words; offset++) if (!this.mappedWords.has(offset))
-          throw new Error(`Mod ${module.id} accessed unmapped actor field word ${offset}`);
+        for (let offset = word; offset < word + words; offset++)
+          if (!this.mappedWords.has(offset)) throw new Error(`Mod ${module.id} accessed unmapped actor field word ${offset}`);
         if (kind === "read") this.refresh(actor, entities.slot(reference), word, words);
         return undefined;
-      }, functionBoundary: {
-        functions: declaration.combat === undefined ? weaponFunctions?.functions ?? new Set()
-          : new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
+      },
+      functionBoundary: {
+        functions:
+          declaration.combat === undefined
+            ? (weaponFunctions?.functions ?? new Set())
+            : new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
         run: (call, execute) => {
           if (weaponFunctions === undefined || !weaponFunctions.functions.has(call.functionIndex))
             return this.combat === null ? execute() : this.combat.damage.functionBoundary.run(call, execute);
-          const wrapped: QcFunctionExecution = Object.assign((prepare?: (machine: QcMachine) => undefined) => {
-            const selected: QcFunctionExecution = Object.assign((inner?: (machine: QcMachine) => undefined) => execute(machine => {
-              prepare?.(machine); inner?.(machine); return undefined;
-            }), { skip: execute.skip, cancel: execute.cancel });
-            return weaponFunctions.run(call, selected);
-          }, { skip: execute.skip, cancel: execute.cancel });
+          const wrapped: QcFunctionExecution = Object.assign(
+            (prepare?: (machine: QcMachine) => undefined) => {
+              const selected: QcFunctionExecution = Object.assign(
+                (inner?: (machine: QcMachine) => undefined) =>
+                  execute(machine => {
+                    prepare?.(machine);
+                    inner?.(machine);
+                    return undefined;
+                  }),
+                { skip: execute.skip, cancel: execute.cancel },
+              );
+              return weaponFunctions.run(call, selected);
+            },
+            { skip: execute.skip, cancel: execute.cancel },
+          );
           return this.combat === null ? wrapped() : this.combat.damage.functionBoundary.run(call, wrapped);
         },
-      }, inlineBoundary: this.items?.weapons?.composeRegions(armorRegions) ?? armorRegions, observeCall: call => { this.objectives.flush(); this.objectives.refresh(); this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
-        this.validatePickupStore(store); this.protection?.observe(store);
+      },
+      inlineBoundary: this.items?.weapons?.composeRegions(armorRegions) ?? armorRegions,
+      observeCall: call => {
+        this.objectives.flush();
+        this.objectives.refresh();
+        this.input.observeCall(call);
+        return this.combat?.damage.observeCall(call);
+      },
+      observeEntityStore: store => {
+        this.validatePickupStore(store);
+        this.protection?.observe(store);
         const pickup = this.pickupScopes.at(-1);
         this.items?.observe(store, pickup?.actor.equals(this.actor(store.reference)) === true && pickup.depth === this.depth ? pickup.execution : undefined);
-        this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
-      } });
-    this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference),
-      invoke: (call, inputs, region) => this.invoke(call, inputs, region), pickups: (actor, channel) => this.pickups?.protection(actor, channel) ?? [] });
-    this.pickups = declaration.pickups === undefined ? null : new QcModPickups(declaration, module.id, services, {
-      invoke: (call, inputs) => this.invoke(call, inputs), watch: (actor, execution, run) => {
-        this.pickupScopes.push({ actor, execution, depth: this.depth + 1 });
-        try { return this.protection === null ? run() : this.protection.watch(actor, execution, run); }
-        finally { this.pickupScopes.pop(); }
+        this.writeThrough(store);
+        return this.combat?.damage.observeEntityStore(store);
       },
     });
-    this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
+    this.protection =
+      declaration.protection === undefined
+        ? null
+        : new QcModProtection(declaration, module.id, services, {
+            machine: this.machine,
+            reference: actor => this.reference(actor),
+            actor: reference => this.actor(reference),
+            invoke: (call, inputs, region) => this.invoke(call, inputs, region),
+            pickups: (actor, channel) => this.pickups?.protection(actor, channel) ?? [],
+          });
+    this.pickups =
+      declaration.pickups === undefined
+        ? null
+        : new QcModPickups(declaration, module.id, services, {
+            invoke: (call, inputs) => this.invoke(call, inputs),
+            watch: (actor, execution, run) => {
+              this.pickupScopes.push({ actor, execution, depth: this.depth + 1 });
+              try {
+                return this.protection === null ? run() : this.protection.watch(actor, execution, run);
+              } finally {
+                this.pickupScopes.pop();
+              }
+            },
+          });
+    this.input = new QcModInput(
+      this.machine,
+      this.fields.flatMap(field => (field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : [])),
+      actor => this.reference(actor),
+      actor => services.actors.isLive(actor),
+    );
     this.clientOutputs = new SourceModClientOutputs(module.id, declaration.clients?.outputs ?? [], services.clients?.claimOutputs, {
       scalar: (actor, field) => this.machine.entities.fromReference(this.reference(actor)).float(this.machine.fieldOffset(field)),
       vector: (actor, field) => this.machine.entities.fromReference(this.reference(actor)).vector(this.machine.fieldOffset(field)),
     });
-    this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
-      ...(declaration.actorFields.some(field => field.binding === "think") ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) } : {}),
-      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.clientOutputs.publish(actor); this.items?.admit(actor); this.pickups?.admit(actor); this.protection?.activate(actor); },
-      project: actor => { this.reference(actor); }, release: actor => { this.releaseClientBindings(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
-        const previous = this.frame, now = frame?.time ?? services.time();
-        if (frame !== undefined) this.frame = frame;
-        try {
-          const inputs = new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
-            ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]);
-          if (frame !== undefined) inputs.set("elapsed", { kind: "float", value: frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000 });
-          this.invoke(call, inputs);
-        } finally { this.frame = previous; }
-      }, input: {
-        open: application => { const close = this.input.open(application); return () => { try { close(); } finally { this.drainRetiredProjections(); } }; },
-        invoke: (call, application) => { this.invoke(call, this.input.values(application)); },
-        output: (outputs, application, run) => this.input.output(outputs, application, run),
-      } });
+    this.clients =
+      declaration.clients === undefined || services.clients === undefined
+        ? null
+        : new QcModClientBindings({
+            services: services.clients,
+            declaration: declaration.clients,
+            ...(declaration.actorFields.some(field => field.binding === "think")
+              ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) }
+              : {}),
+            reserve: actor => this.protection?.reserve(actor),
+            admitted: actor => {
+              this.clientOutputs.publish(actor);
+              this.items?.admit(actor);
+              this.pickups?.admit(actor);
+              this.protection?.activate(actor);
+            },
+            project: actor => {
+              this.reference(actor);
+            },
+            release: actor => {
+              this.releaseClientBindings(actor);
+              return this.releaseClientProjection(actor);
+            },
+            invoke: (call, actor, frame) => {
+              const previous = this.frame,
+                now = frame?.time ?? services.time();
+              if (frame !== undefined) this.frame = frame;
+              try {
+                const inputs = new Map<ModCallbackInput, QcModValue>([
+                  ["self", { kind: "actor", value: actor }],
+                  ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }],
+                ]);
+                if (frame !== undefined)
+                  inputs.set("elapsed", { kind: "float", value: frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000 });
+                this.invoke(call, inputs);
+              } finally {
+                this.frame = previous;
+              }
+            },
+            input: {
+              open: application => {
+                const close = this.input.open(application);
+                return () => {
+                  try {
+                    close();
+                  } finally {
+                    this.drainRetiredProjections();
+                  }
+                };
+              },
+              invoke: (call, application) => {
+                this.invoke(call, this.input.values(application));
+              },
+              output: (outputs, application, run) => this.input.output(outputs, application, run),
+            },
+          });
     this.environment.initializeGlobals(this.machine);
-    this.actorState = new QcActorState({ machine: this.machine, rerelease: media?.content.includes(":rerelease:") === true,
-      sourceSlot: actor => { const source = services.actors.sourceOf(actor); return source?.provider === module.id ? source.slot : null; },
-      reference: reference => this.actor(reference), isClient: () => false });
-    this.ownedActors = new QcModActors({ machine: this.machine, services, provider: module.id, firstDynamicSlot: (declaration.clients?.maximum ?? 0) + 1,
-      ...(declaration.clients === undefined || (declaration.clients.frame?.length ?? 0) === 0 && !declaration.actorFields.some(field => field.binding === "think")
-        ? {} : { clientFrame: (slot: number, frame: FrameContext) => this.clients?.frame(slot, frame) ?? false }),
+    this.actorState = new QcActorState({
+      machine: this.machine,
+      rerelease: media?.content.includes(":rerelease:") === true,
+      sourceSlot: actor => {
+        const source = services.actors.sourceOf(actor);
+        return source?.provider === module.id ? source.slot : null;
+      },
+      reference: reference => this.actor(reference),
+      isClient: () => false,
+    });
+    this.ownedActors = new QcModActors({
+      machine: this.machine,
+      services,
+      provider: module.id,
+      firstDynamicSlot: (declaration.clients?.maximum ?? 0) + 1,
+      ...(declaration.clients === undefined ||
+      ((declaration.clients.frame?.length ?? 0) === 0 && !declaration.actorFields.some(field => field.binding === "think"))
+        ? {}
+        : { clientFrame: (slot: number, frame: FrameContext) => this.clients?.frame(slot, frame) ?? false }),
       think: program.fieldsByName.get("think")?.offset ?? null,
       nextthink: program.fieldsByName.get("nextthink")?.offset ?? null,
-      body: slot => createQcBodyBinding(program, entities, slot, { reference: actor => this.reference(actor), actor: reference => {
-        if (reference === 0) return services.engine?.world() ?? null;
-        const actor = this.actorsBySlot.get(entities.slot(reference)); return actor !== undefined && services.actors.isLive(actor) ? actor : null;
-      } }),
-      retired: actor => { this.sourcePhysics.get(actor.id)?.(); this.sourcePhysics.delete(actor.id); },
+      body: slot =>
+        createQcBodyBinding(program, entities, slot, {
+          reference: actor => this.reference(actor),
+          actor: reference => {
+            if (reference === 0) return services.engine?.world() ?? null;
+            const actor = this.actorsBySlot.get(entities.slot(reference));
+            return actor !== undefined && services.actors.isLive(actor) ? actor : null;
+          },
+        }),
+      retired: actor => {
+        this.sourcePhysics.get(actor.id)?.();
+        this.sourcePhysics.delete(actor.id);
+      },
       admitted: actor => {
         this.combat?.admit(actor);
         this.sourcePhysics.get(actor.id)?.();
         const physics = services.engine?.physics;
-        if (physics !== undefined) this.sourcePhysics.set(actor.id, physics.bindSource(actor, {
-          collision: () => this.actorState.collision(actor), motion: () => {
-            const body = services.bodies.read(actor.id); return body === null ? null : this.actorState.motion(actor, body);
-          }, flags: () => this.actorState.flags(actor), writeFlags: value => this.actorState.writeFlags(actor, value),
-          writeAngularVelocity: value => this.actorState.writeAngularVelocity(actor, value), waterTransition: () => this.waterTransition(actor.id),
-        }));
+        if (physics !== undefined)
+          this.sourcePhysics.set(
+            actor.id,
+            physics.bindSource(actor, {
+              collision: () => this.actorState.collision(actor),
+              motion: () => {
+                const body = services.bodies.read(actor.id);
+                return body === null ? null : this.actorState.motion(actor, body);
+              },
+              flags: () => this.actorState.flags(actor),
+              writeFlags: value => this.actorState.writeFlags(actor, value),
+              writeAngularVelocity: value => this.actorState.writeAngularVelocity(actor, value),
+              waterTransition: () => this.waterTransition(actor.id),
+            }),
+          );
       },
       touch: (actor, other) => {
-        const source = services.actors.sourceOf(actor.id); if (source === null) return undefined;
+        const source = services.actors.sourceOf(actor.id);
+        if (source === null) return undefined;
         const index = entities.at(source.slot).int(this.machine.fieldOffset("touch"));
         if (index !== 0) this.invokeOwned(index, actor.id, other, this.frame?.time ?? services.time());
         return undefined;
       },
       use: (actor, other, activator) => this.invokeActorField(actor.id, "use", other, activator),
-      pain: reaction => this.combat?.pain(reaction), die: reaction => this.combat?.die(reaction),
+      pain: reaction => this.combat?.pain(reaction),
+      die: reaction => this.combat?.die(reaction),
       step: (actor, frame, think) => {
         this.frame = frame;
         try {
-          const source = services.actors.sourceOf(actor.id); if (source === null) return undefined;
+          const source = services.actors.sourceOf(actor.id);
+          if (source === null) return undefined;
           const move = entities.at(source.slot).float(this.machine.fieldOffset("movetype"));
           if (move === 0) return think();
-          const physics = services.engine?.physics, pusherServices = this.pusherServices;
+          const physics = services.engine?.physics,
+            pusherServices = this.pusherServices;
           if (physics === undefined || pusherServices === null) throw new Error("Moving mod actors require destination source physics");
-          return executeQuakeCPhysics({ readMoveType: () => move, runThink: think, pusherServices,
-            motion: (actor, body) => this.actorState.motion(actor, body), checkWaterTransition: () => this.waterTransition(actor.id) },
-            actor, { actors: services.actors, bodies: services.bodies, frame, elapsed: frame.elapsed.value, physics });
-        } finally { this.frame = null; }
+          return executeQuakeCPhysics(
+            {
+              readMoveType: () => move,
+              runThink: think,
+              pusherServices,
+              motion: (actor, body) => this.actorState.motion(actor, body),
+              checkWaterTransition: () => this.waterTransition(actor.id),
+            },
+            actor,
+            { actors: services.actors, bodies: services.bodies, frame, elapsed: frame.elapsed.value, physics },
+          );
+        } finally {
+          this.frame = null;
+        }
       },
       remember: (actor, slot) => {
-        const previous = this.actorsBySlot.get(slot); if (previous !== undefined) this.projections.delete(previous);
-        this.projections.set(actor, slot); this.actorsBySlot.set(slot, actor);
-      }, invoke: (actor, index, frame) => {
+        const previous = this.actorsBySlot.get(slot);
+        if (previous !== undefined) this.projections.delete(previous);
+        this.projections.set(actor, slot);
+        this.actorsBySlot.set(slot, actor);
+      },
+      invoke: (actor, index, frame) => {
         this.invokeOwned(index, actor.id, null, frame.time);
         return undefined;
-      } });
-    this.combat = declaration.combat === undefined ? null : new QcModCombat({ program, module, services, machine: this.machine,
-      slots: this.ownedActors.slots, declaration: declaration.combat,
-      actor: reference => this.actor(reference), reference: actor => this.reference(actor),
-      invoke: (call, inputs) => this.invoke(call, inputs) });
-    if (services.engine?.physics !== undefined) for (const [name, builtin] of createQcMovementBindings({
-      options: { actors: services.actors, bodies: services.bodies, entities, slots: this.ownedActors.slots, program, numeric: Q1_DONOR_PROFILE },
-      actor: slot => { const actor = services.actors.resolveOwned(this.actor(entities.reference(slot))); if (actor === null) throw new Error("Movement references a released mod actor"); return actor; },
-      reference: actor => this.reference(actor), link: slot => { const actor = this.ownedActors.slots.at(slot); if (actor !== null) services.bodies.link(actor); },
-    }, { scene: services.engine.scene, random, touchTriggers: actor => services.engine?.physics?.touchTriggers(actor), actorReference: reference => {
-      const actor = this.actorsBySlot.get(entities.slot(reference)); return actor !== undefined && services.actors.isLive(actor) ? actor : null;
-    } })) movement.set(name, builtin);
+      },
+    });
+    this.combat =
+      declaration.combat === undefined
+        ? null
+        : new QcModCombat({
+            program,
+            module,
+            services,
+            machine: this.machine,
+            slots: this.ownedActors.slots,
+            declaration: declaration.combat,
+            actor: reference => this.actor(reference),
+            reference: actor => this.reference(actor),
+            invoke: (call, inputs) => this.invoke(call, inputs),
+          });
+    if (services.engine?.physics !== undefined)
+      for (const [name, builtin] of createQcMovementBindings(
+        {
+          options: { actors: services.actors, bodies: services.bodies, entities, slots: this.ownedActors.slots, program, numeric: Q1_DONOR_PROFILE },
+          actor: slot => {
+            const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+            if (actor === null) throw new Error("Movement references a released mod actor");
+            return actor;
+          },
+          reference: actor => this.reference(actor),
+          link: slot => {
+            const actor = this.ownedActors.slots.at(slot);
+            if (actor !== null) services.bodies.link(actor);
+          },
+        },
+        {
+          scene: services.engine.scene,
+          random,
+          touchTriggers: actor => services.engine?.physics?.touchTriggers(actor),
+          actorReference: reference => {
+            const actor = this.actorsBySlot.get(entities.slot(reference));
+            return actor !== undefined && services.actors.isLive(actor) ? actor : null;
+          },
+        },
+      ))
+        movement.set(name, builtin);
     const physics = services.engine?.physics;
-    this.pusherServices = physics === undefined || services.engine === undefined ? null : createQcPusherServices({
-      options: { program, entities, actors: services.actors, slots: this.ownedActors.slots, bodies: services.bodies, scene: services.engine.scene, numeric: Q1_DONOR_PROFILE,
-        model: () => null, foreignReference: actor => this.reference(actor) }, reference: actor => this.reference(actor),
-      link: slot => { const actor = this.ownedActors.slots.at(slot); if (actor !== null) services.bodies.link(actor); },
-    }, this.machine, { physical: projection => physics.q1PusherServices(projection), foreign: { read: actor => physics.readQ1Pusher(actor), write: entity => physics.writeQ1Pusher(entity) },
-      touchTriggers: actor => physics.touchTriggers(actor), serverTime: () => {
-        const now = this.frame?.time ?? services.time(); return now.kind === "seconds" ? now.value : now.value / 1000;
-      }, invoke: (actor, callback, other) => {
-        const frame = this.frame;
-        if (frame === null) throw new Error("Mod pusher callback needs an active source frame");
-        if (callback === "think") {
-          if (services.callbacks === undefined) throw new Error("Mod pusher think requires shared callbacks");
-          services.callbacks.think(actor, frame);
-        } else {
-          const source = services.actors.sourceOf(actor.id);
-          if (source !== null) this.invokeOwned(entities.at(source.slot).int(this.machine.fieldOffset("blocked")), actor.id, other, frame.time);
-        }
-        return undefined;
-      } });
+    this.pusherServices =
+      physics === undefined || services.engine === undefined
+        ? null
+        : createQcPusherServices(
+            {
+              options: {
+                program,
+                entities,
+                actors: services.actors,
+                slots: this.ownedActors.slots,
+                bodies: services.bodies,
+                scene: services.engine.scene,
+                numeric: Q1_DONOR_PROFILE,
+                model: () => null,
+                foreignReference: actor => this.reference(actor),
+              },
+              reference: actor => this.reference(actor),
+              link: slot => {
+                const actor = this.ownedActors.slots.at(slot);
+                if (actor !== null) services.bodies.link(actor);
+              },
+            },
+            this.machine,
+            {
+              physical: projection => physics.q1PusherServices(projection),
+              foreign: { read: actor => physics.readQ1Pusher(actor), write: entity => physics.writeQ1Pusher(entity) },
+              touchTriggers: actor => physics.touchTriggers(actor),
+              serverTime: () => {
+                const now = this.frame?.time ?? services.time();
+                return now.kind === "seconds" ? now.value : now.value / 1000;
+              },
+              invoke: (actor, callback, other) => {
+                const frame = this.frame;
+                if (frame === null) throw new Error("Mod pusher callback needs an active source frame");
+                if (callback === "think") {
+                  if (services.callbacks === undefined) throw new Error("Mod pusher think requires shared callbacks");
+                  services.callbacks.think(actor, frame);
+                } else {
+                  const source = services.actors.sourceOf(actor.id);
+                  if (source !== null) this.invokeOwned(entities.at(source.slot).int(this.machine.fieldOffset("blocked")), actor.id, other, frame.time);
+                }
+                return undefined;
+              },
+            },
+          );
     this.hostState = {
-      checkpoint: () => ({ state: { module, format: "quakec:mod-host-v3", bytes: encodeCheckpointValue({
-        projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot })), precached: [...this.precached.keys()],
-        messages: this.messages?.capture() ?? null, cvars: this.environment.cvars.captureQuakeCState(), visibility: this.environment.visibility?.capture() ?? null,
-        initialized: this.initialized, clients: this.clients?.checkpoint().map(entry => ({ ...entry, actor: savedActorId(entry.actor) })) ?? null }) }, random: [random.checkpoint()], callbacks: [] }),
+      checkpoint: () => ({
+        state: {
+          module,
+          format: "quakec:mod-host-v3",
+          bytes: encodeCheckpointValue({
+            projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot })),
+            precached: [...this.precached.keys()],
+            messages: this.messages?.capture() ?? null,
+            cvars: this.environment.cvars.captureQuakeCState(),
+            visibility: this.environment.visibility?.capture() ?? null,
+            initialized: this.initialized,
+            clients: this.clients?.checkpoint().map(entry => ({ ...entry, actor: savedActorId(entry.actor) })) ?? null,
+          }),
+        },
+        random: [random.checkpoint()],
+        callbacks: [],
+      }),
       restore: state => {
         if (state.state.format !== "quakec:mod-host-v3" || state.random.length !== 1) throw new Error("Invalid gameplay mod host state");
-        const savedRandom = state.random[0]; if (savedRandom === undefined) throw new Error("Missing gameplay mod random state");
-        random.restore(savedRandom); this.projections.clear(); this.actorsBySlot.clear(); this.freeSlots = [];
+        const savedRandom = state.random[0];
+        if (savedRandom === undefined) throw new Error("Missing gameplay mod random state");
+        random.restore(savedRandom);
+        this.projections.clear();
+        this.actorsBySlot.clear();
+        this.freeSlots = [];
         const savedHost = new SaveReader(decodeCheckpointValue(state.state.bytes));
-        const resolve = (saved: Parameters<NonNullable<ModHostServices["referenceSaved"]>>[0]) => services.referenceSaved?.(saved) ?? services.actors.referenceSaved(saved, "current");
+        const resolve = (saved: Parameters<NonNullable<ModHostServices["referenceSaved"]>>[0]) =>
+          services.referenceSaved?.(saved) ?? services.actors.referenceSaved(saved, "current");
         savedHost.field("projections").list(entry => {
-          const slot = entry.field("slot").integer(1), saved = readSavedActor(entry.field("actor"));
+          const slot = entry.field("slot").integer(1),
+            saved = readSavedActor(entry.field("actor"));
           const actor = resolve(saved);
           if (slot >= entities.count || this.actorsBySlot.has(slot) || this.projections.has(actor)) throw new Error("Invalid gameplay mod actor projection");
-          this.projections.set(actor, slot); this.actorsBySlot.set(slot, actor);
+          this.projections.set(actor, slot);
+          this.actorsBySlot.set(slot, actor);
         });
         for (let slot = (declaration.clients?.maximum ?? 0) + 1; slot < entities.count; slot++) if (!this.actorsBySlot.has(slot)) this.freeSlots.push(slot);
         this.precached.clear();
         for (const key of savedHost.field("precached").list(entry => entry.string())) {
           const kind = key.startsWith("model:") ? "model" : key.startsWith("sound:") ? "sound" : null;
-          if (kind === null || this.precached.has(key) || this.lookup(kind, key.slice(kind.length + 1)) === null) throw new Error("Saved mod resource no longer resolves");
+          if (kind === null || this.precached.has(key) || this.lookup(kind, key.slice(kind.length + 1)) === null)
+            throw new Error("Saved mod resource no longer resolves");
         }
         const messages = savedHost.field("messages");
         if (this.messages === null ? messages.value !== null : messages.value === null) throw new Error("Saved mod message services differ");
         this.messages?.restore(messages, resolve);
         this.environment.cvars.restoreQuakeCState(savedHost.field("cvars").value);
         const visibility = savedHost.field("visibility");
-        if (this.environment.visibility === null ? visibility.value !== null : visibility.value === null) throw new Error("Saved mod client visibility differs");
+        if (this.environment.visibility === null ? visibility.value !== null : visibility.value === null)
+          throw new Error("Saved mod client visibility differs");
         this.environment.visibility?.restore(visibility.value);
         this.initialized = savedHost.field("initialized").boolean();
         this.clientOutputs.clear();
         const clients = savedHost.field("clients");
         if (this.clients !== null) {
-          this.clients.restore(clients.list(entry => ({ actor: resolve(readSavedActor(entry.field("actor"))), slot: entry.field("slot").integer(1), admitted: entry.field("admitted").boolean() })));
+          this.clients.restore(
+            clients.list(entry => ({
+              actor: resolve(readSavedActor(entry.field("actor"))),
+              slot: entry.field("slot").integer(1),
+              admitted: entry.field("admitted").boolean(),
+            })),
+          );
           const projected = this.clients.checkpoint();
-          if (entities.count <= (declaration.clients?.maximum ?? 0) || projected.some(entry => this.projections.get(entry.actor) !== entry.slot)
-            || [...this.actorsBySlot].some(([slot, actor]) => slot <= (declaration.clients?.maximum ?? 0) && !projected.some(entry => entry.slot === slot && entry.actor.equals(actor))))
+          if (
+            entities.count <= (declaration.clients?.maximum ?? 0) ||
+            projected.some(entry => this.projections.get(entry.actor) !== entry.slot) ||
+            [...this.actorsBySlot].some(
+              ([slot, actor]) => slot <= (declaration.clients?.maximum ?? 0) && !projected.some(entry => entry.slot === slot && entry.actor.equals(actor)),
+            )
+          )
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
-        this.ownedActors.restored(); this.objectives.restored();
-        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.clientOutputs.publish(client.actor); this.items?.admit(client.actor); this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
+        this.ownedActors.restored();
+        this.objectives.restored();
+        for (const client of this.clients?.checkpoint() ?? []) {
+          this.protection?.reserve(client.actor);
+          if (client.admitted) {
+            this.clientOutputs.publish(client.actor);
+            this.items?.admit(client.actor);
+            this.pickups?.admit(client.actor);
+            this.protection?.activate(client.actor);
+          }
+        }
         this.clients?.start();
         return undefined;
       },
     };
     this.releaseProjection = services.actors.onRelease(actor => {
-      try { this.releaseClientBindings(actor.id); }
-      finally { this.retiredProjections.add(actor.id); this.drainRetiredProjections(); }
+      try {
+        this.releaseClientBindings(actor.id);
+      } finally {
+        this.retiredProjections.add(actor.id);
+        this.drainRetiredProjections();
+      }
       return undefined;
     });
   }
   private lookup(kind: "model" | "sound", name: string): QcPrecachedResource | null {
-    const key = `${kind}:${name}`, previous = this.precached.get(key);
+    const key = `${kind}:${name}`,
+      previous = this.precached.get(key);
     if (previous !== undefined) return previous;
     const resource = this.media?.resources.get(name);
     if (resource === undefined) return null;
     const value = { index: [...this.precached.keys()].filter(key => key.startsWith(`${kind}:`)).length + 1, resource: resource.resource };
-    this.precached.set(key, value); return value;
+    this.precached.set(key, value);
+    return value;
   }
   private objectiveStorage(storage: QcModObjectiveStorage) {
     return resolveQcObjectiveStorage(this.machine, storage, reference => {
@@ -473,22 +856,31 @@ export class QcModProvider {
     const slot = clientSlot ?? reused ?? this.machine.entities.count;
     if (clientSlot === null && reused === undefined) this.machine.entities.setCount(slot + 1);
     else this.machine.entities.at(slot).bytes.fill(0);
-    this.projections.set(current, slot); this.actorsBySlot.set(slot, current);
-    for (const field of this.fields) if (field.declaration.binding === "constant") writeQcSourceValue(this.machine, this.machine.entities.at(slot), field.offset, field.declaration.value, actor => this.reference(actor));
+    this.projections.set(current, slot);
+    this.actorsBySlot.set(slot, current);
+    for (const field of this.fields)
+      if (field.declaration.binding === "constant")
+        writeQcSourceValue(this.machine, this.machine.entities.at(slot), field.offset, field.declaration.value, actor => this.reference(actor));
     if (clientSlot !== null) {
-      const body = this.services.bodies.read(current), words = this.machine.entities.at(slot);
-      if (body !== null) for (const field of this.fields) {
-        if (field.declaration.binding === "bounds-min") words.setVector(field.offset, body.bounds.min);
-        else if (field.declaration.binding === "bounds-max") words.setVector(field.offset, body.bounds.max);
-      }
+      const body = this.services.bodies.read(current),
+        words = this.machine.entities.at(slot);
+      if (body !== null)
+        for (const field of this.fields) {
+          if (field.declaration.binding === "bounds-min") words.setVector(field.offset, body.bounds.min);
+          else if (field.declaration.binding === "bounds-max") words.setVector(field.offset, body.bounds.max);
+        }
     }
     return this.machine.entities.reference(slot);
   }
   private releaseClientProjection(actor: ActorId): "released" | "deferred" {
-    if (this.depth !== 0 || this.input.active) { this.retiredProjections.add(actor); return "deferred"; }
+    if (this.depth !== 0 || this.input.active) {
+      this.retiredProjections.add(actor);
+      return "deferred";
+    }
     const slot = this.projections.get(actor);
     if (slot !== undefined) {
-      this.projections.delete(actor); this.actorsBySlot.delete(slot);
+      this.projections.delete(actor);
+      this.actorsBySlot.delete(slot);
       // Foreign edicts keep their last words, as a freed edict does; clients are zeroed because their slots are reserved.
       if (slot > (this.declaration.clients?.maximum ?? 0)) this.freeSlots.push(slot);
       else this.machine.entities.at(slot).bytes.fill(0);
@@ -498,87 +890,148 @@ export class QcModProvider {
   private releaseClientBindings(actor: ActorId): void {
     this.clientOutputs.release(actor);
     const errors: unknown[] = [];
-    for (const release of [() => this.pickups?.release(actor), () => this.items?.release(actor), () => this.protection?.release(actor)]) try { release(); } catch (error) { errors.push(error); }
+    for (const release of [() => this.pickups?.release(actor), () => this.items?.release(actor), () => this.protection?.release(actor)])
+      try {
+        release();
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding release failed");
   }
   private closeClientBindings(): void {
     this.clientOutputs.close();
     const errors: unknown[] = [];
-    for (const close of [() => this.pickups?.close(), () => this.items?.close(), () => this.protection?.close()]) try { close(); } catch (error) { errors.push(error); }
+    for (const close of [() => this.pickups?.close(), () => this.items?.close(), () => this.protection?.close()])
+      try {
+        close();
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding close failed");
   }
   private drainRetiredProjections(): void {
     if (this.depth !== 0 || this.input.active) return;
     for (const actor of this.retiredProjections) {
-      this.clients?.forget(actor); this.releaseClientProjection(actor); this.retiredProjections.delete(actor);
+      this.clients?.forget(actor);
+      this.releaseClientProjection(actor);
+      this.retiredProjections.delete(actor);
     }
   }
-  private prepareEntities(): void { for (const actor of this.services.actors.observations()) this.reference(actor.id); }
+  private prepareEntities(): void {
+    for (const actor of this.services.actors.observations()) this.reference(actor.id);
+  }
   private refresh(actor: ActorId, slot: number, word: number, count: number): void {
     const words = this.machine.entities.at(slot);
     for (const field of this.fields) {
       if (word + count <= field.offset || word >= field.offset + field.words) continue;
       const declared = field.declaration;
       switch (declared.binding) {
-        case "constant": case "private": case "client-input": case "think": case "nextthink": break;
+        case "constant":
+        case "private":
+        case "client-input":
+        case "think":
+        case "nextthink":
+          break;
         case "userinfo": {
           if (this.clients === null) throw new Error("Mod userinfo field requires client services");
           if (this.clients.slot(actor) === null) break;
           const value = this.clients.userinfo(actor, declared.key);
-          words.setInt(field.offset, this.machine.strings.setEngine(`mod-userinfo:${slot}:${declared.key}`, value, Math.max(128, value.length + 1))); break;
+          words.setInt(field.offset, this.machine.strings.setEngine(`mod-userinfo:${slot}:${declared.key}`, value, Math.max(128, value.length + 1)));
+          break;
         }
         case "classname": {
           const name = this.services.engine?.classname?.(actor);
           if (name === undefined) throw new Error("Mod classname field requires canonical actor metadata");
-          words.setInt(field.offset, this.machine.strings.setEngine(`mod-classname:${name}`, name, Math.max(128, name.length + 1))); break;
+          words.setInt(field.offset, this.machine.strings.setEngine(`mod-classname:${name}`, name, Math.max(128, name.length + 1)));
+          break;
         }
         case "client-flags": {
           const client = this.environment.client(actor);
           let canonical = client === null ? 0 : 8 | (client.notarget ? 128 : 0);
           if (client !== null && declared.grounded) {
-            const identity = this.services.clients?.forActor(actor), grounded = this.services.clients?.grounded;
+            const identity = this.services.clients?.forActor(actor),
+              grounded = this.services.clients?.grounded;
             if (identity == null || grounded === undefined) throw new Error("Mod grounded flags require canonical client movement state");
             if (grounded(identity)) canonical |= 512;
           }
-          words.setFloat(field.offset, canonical | (Math.trunc(words.float(field.offset)) & (declared.privateMask ?? 0))); break;
+          words.setFloat(field.offset, canonical | (Math.trunc(words.float(field.offset)) & (declared.privateMask ?? 0)));
+          break;
         }
-        case "view-offset": { if (this.outputFieldOwned(actor, field.declaration.field)) break; words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 }); break; }
-        case "team": case "score": { words.setFloat(field.offset, readSourceMatchField(this.services.match, actor, declared)); break; }
+        case "view-offset": {
+          if (this.outputFieldOwned(actor, field.declaration.field)) break;
+          words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 });
+          break;
+        }
+        case "team":
+        case "score": {
+          words.setFloat(field.offset, readSourceMatchField(this.services.match, actor, declared));
+          break;
+        }
         case "health": {
-          words.setFloat(field.offset, this.services.combat.read(actor)?.health ?? 0); break;
+          words.setFloat(field.offset, this.services.combat.read(actor)?.health ?? 0);
+          break;
         }
         case "inventory": {
           const entry = this.services.inventory.entries(actor).find(entry => entry.item === declared.item);
-          words.setFloat(field.offset, entry?.count ?? 0); break;
+          words.setFloat(field.offset, entry?.count ?? 0);
+          break;
         }
-        case "origin": case "angles": case "velocity": case "bounds-min": case "bounds-max": {
+        case "origin":
+        case "angles":
+        case "velocity":
+        case "bounds-min":
+        case "bounds-max": {
           if (this.outputFieldOwned(actor, field.declaration.field)) break;
           const body = this.services.bodies.read(actor);
-          words.setVector(field.offset, body === null ? { x: 0, y: 0, z: 0 }
-            : declared.binding === "bounds-min" ? body.bounds.min : declared.binding === "bounds-max" ? body.bounds.max : body[declared.binding]); break;
+          words.setVector(
+            field.offset,
+            body === null
+              ? { x: 0, y: 0, z: 0 }
+              : declared.binding === "bounds-min"
+                ? body.bounds.min
+                : declared.binding === "bounds-max"
+                  ? body.bounds.max
+                  : body[declared.binding],
+          );
+          break;
         }
       }
     }
   }
   private outputFieldOwned(actor: ActorId, field: string): boolean {
-    return this.clients?.admitted(actor) === true && this.declaration.clients?.outputs?.some(output => output.kind === "body-shape" ? output.min === field || output.max === field : output.kind === "view-offset" && "field" in output && output.field === field) === true;
+    return (
+      this.clients?.admitted(actor) === true &&
+      this.declaration.clients?.outputs?.some(output =>
+        output.kind === "body-shape"
+          ? output.min === field || output.max === field
+          : output.kind === "view-offset" && "field" in output && output.field === field,
+      ) === true
+    );
   }
   private publishClientOutputs(): void {
     if (!this.clientOutputs.enabled) return;
     if (this.closed) return;
-    for (const entry of this.clients?.checkpoint() ?? []) if (entry.admitted && this.clientOutputs.has(entry.actor) && this.services.actors.isLive(entry.actor)) this.clientOutputs.publish(entry.actor);
+    for (const entry of this.clients?.checkpoint() ?? [])
+      if (entry.admitted && this.clientOutputs.has(entry.actor) && this.services.actors.isLive(entry.actor)) this.clientOutputs.publish(entry.actor);
   }
-  private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.depth === this.depth ? scope : undefined; }
+  private pickupScope() {
+    const scope = this.pickupScopes.at(-1);
+    return scope?.depth === this.depth ? scope : undefined;
+  }
   private validatePickupStore(store: QcEntityStoreObservation): void {
-    const scope = this.pickupScope(); if (scope === undefined) return;
+    const scope = this.pickupScope();
+    if (scope === undefined) return;
     if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
     const actor = this.actor(store.reference);
     for (const field of this.fields) {
       if (store.word + store.after.length / 4 <= field.offset || store.word >= field.offset + field.words) continue;
       const declaration = field.declaration;
       if (declaration.binding === "constant" || declaration.binding === "private") continue;
-      if (!actor.equals(scope.actor) || declaration.binding !== "inventory"
-        || !scope.execution.writes.some(write => write.kind === "inventory" && write.item === declaration.item && write.fields !== "capacity"))
+      if (
+        !actor.equals(scope.actor) ||
+        declaration.binding !== "inventory" ||
+        !scope.execution.writes.some(write => write.kind === "inventory" && write.item === declaration.item && write.fields !== "capacity")
+      )
         throw new Error("Original pickup changed an undeclared resource");
     }
   }
@@ -595,16 +1048,21 @@ export class QcModProvider {
     }
     const pickup = this.pickupScope();
     if (pickup !== undefined) {
-      const writes = this.fields.flatMap(field => field.declaration.binding === "inventory" && store.word < field.offset + field.words
-        && store.word + store.after.length / 4 > field.offset ? [{ item: field.declaration.item, offset: field.offset, count: words.float(field.offset) }] : []);
+      const writes = this.fields.flatMap(field =>
+        field.declaration.binding === "inventory" && store.word < field.offset + field.words && store.word + store.after.length / 4 > field.offset
+          ? [{ item: field.declaration.item, offset: field.offset, count: words.float(field.offset) }]
+          : [],
+      );
       let cursor = 0;
       const commit = (): undefined => {
-        const write = writes[cursor++]; if (write === undefined) return undefined;
+        const write = writes[cursor++];
+        if (write === undefined) return undefined;
         if (!pickup.execution.current()) throw new Error("Original pickup resource binding is no longer current");
         const entry = this.services.inventory.entries(actor.id).find(entry => entry.item === write.item);
         if (entry === undefined) throw new Error(`Mod inventory store requires ${write.item}`);
         this.services.inventory.configure(actor, { ...entry, count: write.count }, change => {
-          words.setFloat(write.offset, change.after.count); return commit();
+          words.setFloat(write.offset, change.after.count);
+          return commit();
         });
         if (!pickup.execution.current()) throw new Error("Original pickup resource binding is no longer current");
         return undefined;
@@ -615,7 +1073,10 @@ export class QcModProvider {
       if (store.word + store.after.length / 4 <= field.offset || store.word >= field.offset + field.words) continue;
       const declared = field.declaration;
       switch (declared.binding) {
-        case "constant": case "private": case "client-input": break;
+        case "constant":
+        case "private":
+        case "client-input":
+          break;
         case "userinfo": {
           if (this.clients === null) throw new Error("Mod userinfo field requires client services");
           if (this.clients.slot(actor.id) !== null) this.clients.setUserinfo(actor.id, declared.key, this.machine.strings.get(words.int(field.offset)));
@@ -633,48 +1094,70 @@ export class QcModProvider {
           }
           break;
         }
-        case "view-offset": if (this.declaration.clients?.outputs?.some(output => output.kind === "view-offset" && "field" in output && output.field === declared.field) === true
-          && this.clients?.slot(actor.id) != null) break;
+        case "view-offset":
+          if (
+            this.declaration.clients?.outputs?.some(output => output.kind === "view-offset" && "field" in output && output.field === declared.field) === true &&
+            this.clients?.slot(actor.id) != null
+          )
+            break;
           throw new Error("Mod view-offset store requires its declared client output owner");
-        case "classname": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
-        case "think": case "nextthink":
+        case "classname":
+          throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
+        case "think":
+        case "nextthink":
           if (this.machine.entities.slot(store.reference) > (this.declaration.clients?.maximum ?? 0)) this.ownedActors.schedule(actor);
           break;
-        case "team": case "score": {
+        case "team":
+        case "score": {
           writeSourceMatchField(this.services.match, actor.id, declared, words.float(field.offset));
           if (this.services.actors.isLive(actor.id)) words.setFloat(field.offset, readSourceMatchField(this.services.match, actor.id, declared));
           break;
         }
         case "health":
           if (this.services.combat.read(actor.id) === null) throw new Error("Mod health store requires a combat actor");
-          this.services.combat.setHealth(actor, words.float(field.offset)); break;
+          this.services.combat.setHealth(actor, words.float(field.offset));
+          break;
         case "inventory": {
           if (pickup !== undefined) break;
           const entry = this.services.inventory.entries(actor.id).find(entry => entry.item === declared.item);
           if (entry === undefined) throw new Error(`Mod inventory store requires ${declared.item}`);
-          this.services.inventory.configure(actor, { ...entry, count: words.float(field.offset) }); break;
+          this.services.inventory.configure(actor, { ...entry, count: words.float(field.offset) });
+          break;
         }
-        case "origin": case "angles": case "velocity": {
-          const body = this.services.bodies.read(actor.id); if (body === null) throw new Error("Mod body binding disappeared");
-          this.services.bodies.write(actor, { ...body, [declared.binding]: words.vector(field.offset) }); break;
+        case "origin":
+        case "angles":
+        case "velocity": {
+          const body = this.services.bodies.read(actor.id);
+          if (body === null) throw new Error("Mod body binding disappeared");
+          this.services.bodies.write(actor, { ...body, [declared.binding]: words.vector(field.offset) });
+          break;
         }
-        case "bounds-min": case "bounds-max": {
+        case "bounds-min":
+        case "bounds-max": {
           if (this.outputFieldOwned(actor.id, declared.field)) break;
-          const body = this.services.bodies.read(actor.id); if (body === null) throw new Error("Mod bounds store requires a physical actor");
-          this.services.bodies.write(actor, { ...body, bounds: { ...body.bounds, [declared.binding === "bounds-min" ? "min" : "max"]: words.vector(field.offset) } }); break;
+          const body = this.services.bodies.read(actor.id);
+          if (body === null) throw new Error("Mod bounds store requires a physical actor");
+          this.services.bodies.write(actor, {
+            ...body,
+            bounds: { ...body.bounds, [declared.binding === "bounds-min" ? "min" : "max"]: words.vector(field.offset) },
+          });
+          break;
         }
       }
     }
     return undefined;
   }
-  get cvars() { return this.environment.cvars; }
+  get cvars() {
+    return this.environment.cvars;
+  }
   bindCommands(commands: ModCommandPort): void {
     if (this.commands !== null) throw new Error("Mod commands are already bound");
     this.commands = commands;
   }
   consoleCommand(invocation: CommandInvocation): boolean {
     invocation.assertActive();
-    const name = asciiFold(invocation.argv[0] ?? ""), command = this.declaration.commands?.find(command => asciiFold(command.name) === name);
+    const name = asciiFold(invocation.argv[0] ?? ""),
+      command = this.declaration.commands?.find(command => asciiFold(command.name) === name);
     if (command === undefined) return false;
     this.invoke(qcConsoleCall(command, invocation.argv, invocation.argsText), new Map<ModCallbackInput, QcModValue>());
     return true;
@@ -682,41 +1165,79 @@ export class QcModProvider {
   invoke(call: ModSourceCall, inputs: QcModInputs, region?: QcArmorStage): number {
     if (this.closed) throw new Error("Gameplay mod is closed");
     if (this.depth >= 64) throw new Error("Gameplay mod callback recursion exceeded 64 calls");
-    this.objectives.flush(); this.objectives.refresh();
+    this.objectives.flush();
+    this.objectives.refresh();
     this.depth++;
     try {
-      return withQcSourceCall(this.machine, call, inputs, actor => this.reference(actor), count => {
-        let result: number;
-        if (region === undefined) { this.machine.execute(this.program.functionNamed(call.function).index, count); result = this.machine.globals.float(1); }
-        else result = this.machine.executeRegion(region.region, count);
-        this.publishClientOutputs();
-        return result;
-      });
+      return withQcSourceCall(
+        this.machine,
+        call,
+        inputs,
+        actor => this.reference(actor),
+        count => {
+          let result: number;
+          if (region === undefined) {
+            this.machine.execute(this.program.functionNamed(call.function).index, count);
+            result = this.machine.globals.float(1);
+          } else result = this.machine.executeRegion(region.region, count);
+          this.publishClientOutputs();
+          return result;
+        },
+      );
     } finally {
-      try { this.objectives.flush(); } finally { this.depth--; this.drainRetiredProjections(); }
+      try {
+        this.objectives.flush();
+      } finally {
+        this.depth--;
+        this.drainRetiredProjections();
+      }
     }
   }
   private invokeOwned(index: number, actor: ActorId, other: ActorId | null, time: FrameContext["time"]): void {
     const fn = this.program.functionAt(index);
     if (fn.parameterSizes.length !== 0 || fn.index === 0) throw new Error("Mod actor callback must be a no-argument source function");
-    this.invoke({ function: fn.name, arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } },
-      { name: "other", value: { kind: "input", name: "other" } }, { name: "time", value: { kind: "input", name: "time" } }] },
-      new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }], ["other", { kind: "actor", value: other }],
-        ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }]]));
+    this.invoke(
+      {
+        function: fn.name,
+        arguments: [],
+        globals: [
+          { name: "self", value: { kind: "input", name: "self" } },
+          { name: "other", value: { kind: "input", name: "other" } },
+          { name: "time", value: { kind: "input", name: "time" } },
+        ],
+      },
+      new Map<ModCallbackInput, QcModValue>([
+        ["self", { kind: "actor", value: actor }],
+        ["other", { kind: "actor", value: other }],
+        ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }],
+      ]),
+    );
   }
   private runClientThink(actor: ActorId, frame: FrameContext, live: () => boolean): void {
-    const nextthink = this.machine.fieldOffset("nextthink"), think = this.machine.fieldOffset("think");
-    const profile = this.program.api.kind === "q1-quakeworld"
-      ? { kind: "q1-quakeworld", maximumCommandMilliseconds: 100 } satisfies import("../../contracts/time.ts").ClockProfile
-      : { kind: "q1-netquake", minimumFrameSeconds: 0, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } satisfies import("../../contracts/time.ts").ClockProfile;
+    const nextthink = this.machine.fieldOffset("nextthink"),
+      think = this.machine.fieldOffset("think");
+    const profile =
+      this.program.api.kind === "q1-quakeworld"
+        ? ({ kind: "q1-quakeworld", maximumCommandMilliseconds: 100 } satisfies import("../../contracts/time.ts").ClockProfile)
+        : ({
+            kind: "q1-netquake",
+            minimumFrameSeconds: 0,
+            maximumFrameSeconds: 0.1,
+            fixedFrameSeconds: null,
+          } satisfies import("../../contracts/time.ts").ClockProfile);
     while (live()) {
       const words = this.machine.entities.fromReference(this.reference(actor));
       const time = thinkCallbackTime(profile, { kind: "seconds", value: words.float(nextthink) }, frame);
       if (time === null) return;
-      const index = words.int(think); words.setFloat(nextthink, 0);
-      const previous = this.frame; this.frame = { ...frame, time, phase: "entity-think" };
-      try { this.invokeOwned(index, actor, null, time); }
-      finally { this.frame = previous; }
+      const index = words.int(think);
+      words.setFloat(nextthink, 0);
+      const previous = this.frame;
+      this.frame = { ...frame, time, phase: "entity-think" };
+      try {
+        this.invokeOwned(index, actor, null, time);
+      } finally {
+        this.frame = previous;
+      }
       if (profile.kind !== "q1-quakeworld") return;
     }
   }
@@ -725,86 +1246,173 @@ export class QcModProvider {
     if (source === null) return undefined;
     const index = this.machine.entities.at(source.slot).int(this.machine.fieldOffset(field));
     if (index === 0) return undefined;
-    const fn = this.program.functionAt(index), now = this.frame?.time ?? this.services.time();
-    this.invoke({ function: fn.name, arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } },
-      { name: "other", value: { kind: "input", name: "other" } }, { name: "activator", value: { kind: "input", name: "activator" } },
-      { name: "time", value: { kind: "input", name: "time" } }] },
-      new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }], ["other", { kind: "actor", value: other }],
-        ["activator", { kind: "actor", value: activator }], ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]));
+    const fn = this.program.functionAt(index),
+      now = this.frame?.time ?? this.services.time();
+    this.invoke(
+      {
+        function: fn.name,
+        arguments: [],
+        globals: [
+          { name: "self", value: { kind: "input", name: "self" } },
+          { name: "other", value: { kind: "input", name: "other" } },
+          { name: "activator", value: { kind: "input", name: "activator" } },
+          { name: "time", value: { kind: "input", name: "time" } },
+        ],
+      },
+      new Map<ModCallbackInput, QcModValue>([
+        ["self", { kind: "actor", value: actor }],
+        ["other", { kind: "actor", value: other }],
+        ["activator", { kind: "actor", value: activator }],
+        ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }],
+      ]),
+    );
     return undefined;
   }
   private waterTransition(actor: ActorId): undefined {
-    const engine = this.services.engine, source = this.services.actors.sourceOf(actor);
+    const engine = this.services.engine,
+      source = this.services.actors.sourceOf(actor);
     if (engine === undefined || source === null) return undefined;
-    const words = this.machine.entities.at(source.slot), field = (name: string) => this.machine.fieldOffset(name);
-    const contents = engine.scene.pointContents({ point: words.vector(field("origin")), target: { kind: "world" },
-      policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: actor });
+    const words = this.machine.entities.at(source.slot),
+      field = (name: string) => this.machine.fieldOffset(name);
+    const contents = engine.scene.pointContents({
+      point: words.vector(field("origin")),
+      target: { kind: "world" },
+      policy: { kind: "q1", move: "normal", hull: null },
+      numeric: Q1_DONOR_PROFILE,
+      passActor: actor,
+    });
     if (contents.kind !== "q1") throw new Error("QC mod water transition requires source Q1 contents");
     const decision = q1WaterTransition(words.float(field("watertype")), contents.contents);
     if (decision.splash && this.media !== undefined) {
-      const path = "misc/h2ohit1.wav", asset = this.media.resources.get(path);
+      const path = "misc/h2ohit1.wav",
+        asset = this.media.resources.get(path);
       if (asset !== undefined) {
         engine.events.registerResource(this.media.content, asset.resource.requestedPath, asset.resource);
         engine.events.emit(this.media.content, { kind: "q1", event: { kind: "sound", actor, path, channel: "auto", volume: 1, attenuation: 1 } });
       }
     }
-    words.setFloat(field("watertype"), decision.waterType); words.setFloat(field("waterlevel"), decision.waterLevel);
+    words.setFloat(field("watertype"), decision.waterType);
+    words.setFloat(field("waterlevel"), decision.waterLevel);
     return undefined;
   }
   clientPresentation(): ModClientPresentationSource {
     const provider = this;
-    return this.clientSource ??= { get generation() { return provider.presentationGeneration; },
-      frame: actor => this.clientFrame(actor), assertCurrent: () => { if (this.closed) throw new Error("QC client presentation is retired"); } };
+    return (this.clientSource ??= {
+      get generation() {
+        return provider.presentationGeneration;
+      },
+      frame: actor => this.clientFrame(actor),
+      assertCurrent: () => {
+        if (this.closed) throw new Error("QC client presentation is retired");
+      },
+    });
   }
   private clientFrame(actor: ActorId): ModClientPresentationFrame | null {
     if (this.closed || this.depth !== 0) throw new Error("QC client presentation requires an idle live source");
-    const declaration = this.declaration.clientPresentation, slot = this.projections.get(actor);
+    const declaration = this.declaration.clientPresentation,
+      slot = this.projections.get(actor);
     if (declaration === undefined || slot === undefined || !this.services.actors.isLive(actor) || this.clients?.admitted(actor) !== true) return null;
     const local = this.messages?.clientState();
     if (local === undefined) throw new Error("QC client presentation has no source messages");
-    const words = this.machine.entities.at(slot), field = (name: string) => this.machine.fieldOffset(name);
+    const words = this.machine.entities.at(slot),
+      field = (name: string) => this.machine.fieldOffset(name);
     const hud = declaration.hud === "none" ? null : { health: words.float(field("health")), armor: words.float(field("armorvalue")) };
-    return { kind: "quakec", hud, view: declaration.view === "none" ? null : quakeCLocalView(actor, local, {
-      read: target => { const targetSlot = this.projections.get(target);
-        if (targetSlot === undefined || !this.services.actors.isLive(target)) return null;
-        const value = this.machine.entities.at(targetSlot); return { origin: value.vector(field("origin")), angles: value.vector(field("angles")) }; },
-      offset: () => words.vector(field("view_ofs")) }) };
+    return {
+      kind: "quakec",
+      hud,
+      view:
+        declaration.view === "none"
+          ? null
+          : quakeCLocalView(actor, local, {
+              read: target => {
+                const targetSlot = this.projections.get(target);
+                if (targetSlot === undefined || !this.services.actors.isLive(target)) return null;
+                const value = this.machine.entities.at(targetSlot);
+                return { origin: value.vector(field("origin")), angles: value.vector(field("angles")) };
+              },
+              offset: () => words.vector(field("view_ofs")),
+            }),
+    };
   }
   presentations(): readonly SimulationPresentation[] {
     const result: SimulationPresentation[] = [];
     for (const actor of this.services.actors.ownedBy(this.module.id)) {
-      const source = this.services.actors.sourceOf(actor.id); if (source === null) continue;
-      const words = this.machine.entities.at(source.slot), field = (name: string) => this.machine.fieldOffset(name);
+      const source = this.services.actors.sourceOf(actor.id);
+      if (source === null) continue;
+      const words = this.machine.entities.at(source.slot),
+        field = (name: string) => this.machine.fieldOffset(name);
       const path = this.machine.strings.get(words.int(field("model")));
       if (path === "") continue;
       const asset = this.media?.resources.get(path);
       if (asset === undefined || this.media === undefined) throw new Error(`Mod model was not prepared: ${path}`);
       this.services.engine?.events.registerResource(this.media.content, asset.resource.requestedPath, asset.resource);
-      const scalar = (name: string): number => { const field = this.program.fieldsByName.get(name); return field === undefined ? 0 : words.float(field.offset); };
-      const frame = scalar("frame"), alpha = scalar("alpha"), scale = scalar("scale");
-      result.push({ actor: actor.id, content: this.media.content, family: "q1", path, frame, oldFrame: frame, skin: scalar("skin"), effects: scalar("effects"), renderFlags: 0,
-        origin: words.vector(field("origin")), angles: words.vector(field("angles")), scale: scale === 0 ? 1 : scale,
-        alpha: alpha === 0 ? 1 : Math.max(0, Math.min(1, alpha)), visible: true, viewWeapon: false });
+      const scalar = (name: string): number => {
+        const field = this.program.fieldsByName.get(name);
+        return field === undefined ? 0 : words.float(field.offset);
+      };
+      const frame = scalar("frame"),
+        alpha = scalar("alpha"),
+        scale = scalar("scale");
+      result.push({
+        actor: actor.id,
+        content: this.media.content,
+        family: "q1",
+        path,
+        frame,
+        oldFrame: frame,
+        skin: scalar("skin"),
+        effects: scalar("effects"),
+        renderFlags: 0,
+        origin: words.vector(field("origin")),
+        angles: words.vector(field("angles")),
+        scale: scale === 0 ? 1 : scale,
+        alpha: alpha === 0 ? 1 : Math.max(0, Math.min(1, alpha)),
+        visible: true,
+        viewWeapon: false,
+      });
     }
     return result;
   }
-  checkpoint(): QuakeCCheckpoint { this.protection?.assertIdle(); if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary"); this.messages?.messages.flush(); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
+  checkpoint(): QuakeCCheckpoint {
+    this.protection?.assertIdle();
+    if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary");
+    this.messages?.messages.flush();
+    return captureQcCheckpoint(this.machine, this.module, this.hostState);
+  }
   activateMatch(): void {
     this.objectives.activate();
     if (this.releaseMatch !== null || !this.fields.some(field => field.declaration.binding === "team" || field.declaration.binding === "score")) return;
-    const match = this.services.match; if (match === undefined) throw new Error("Declared match fields require destination match services");
+    const match = this.services.match;
+    if (match === undefined) throw new Error("Declared match fields require destination match services");
     this.releaseMatch = match.bindSource(this.module.id, actor => this.matchPlayer(actor));
   }
   private matchPlayer(actor: ActorId): SourceMatchPlayer | null {
-    const owned = this.services.actors.resolveOwned(actor), slot = this.services.actors.sourceOf(actor);
+    const owned = this.services.actors.resolveOwned(actor),
+      slot = this.services.actors.sourceOf(actor);
     if (this.closed || owned?.owner !== this.module.id || slot?.provider !== this.module.id) return null;
-    const team = this.fields.find(field => field.declaration.binding === "team"), score = this.fields.find(field => field.declaration.binding === "score");
-    const current = () => { if (this.closed || this.services.actors.resolveOwned(actor) !== owned || this.services.actors.sourceOf(actor)?.slot !== slot.slot) throw new Error("QuakeC match actor was retired"); return this.machine.entities.at(slot.slot); };
-    return { owner: this.module.id,
-      team: () => team?.declaration.binding === "team" ? sourceTeam(team.declaration.values, current().float(team.offset)) : null,
-      score: () => { if (score === undefined) throw new Error("QuakeC match actor has no score field"); return current().float(score.offset); },
-      setTeam: value => { if (team?.declaration.binding !== "team") throw new Error("QuakeC match actor has no team field"); current().setFloat(team.offset, originalTeam(team.declaration.values, value)); },
-      setScore: value => { if (score === undefined || !Number.isFinite(value)) throw new Error("QuakeC match actor has no finite score field"); current().setFloat(score.offset, value); } };
+    const team = this.fields.find(field => field.declaration.binding === "team"),
+      score = this.fields.find(field => field.declaration.binding === "score");
+    const current = () => {
+      if (this.closed || this.services.actors.resolveOwned(actor) !== owned || this.services.actors.sourceOf(actor)?.slot !== slot.slot)
+        throw new Error("QuakeC match actor was retired");
+      return this.machine.entities.at(slot.slot);
+    };
+    return {
+      owner: this.module.id,
+      team: () => (team?.declaration.binding === "team" ? sourceTeam(team.declaration.values, current().float(team.offset)) : null),
+      score: () => {
+        if (score === undefined) throw new Error("QuakeC match actor has no score field");
+        return current().float(score.offset);
+      },
+      setTeam: value => {
+        if (team?.declaration.binding !== "team") throw new Error("QuakeC match actor has no team field");
+        current().setFloat(team.offset, originalTeam(team.declaration.values, value));
+      },
+      setScore: value => {
+        if (score === undefined || !Number.isFinite(value)) throw new Error("QuakeC match actor has no finite score field");
+        current().setFloat(score.offset, value);
+      },
+    };
   }
   initialize(): undefined {
     if (this.initialized || this.depth !== 0) throw new Error("Mod source initialization must run once at an idle boundary");
@@ -812,10 +1420,15 @@ export class QcModProvider {
     try {
       for (const client of this.services.clients?.clients() ?? []) this.protection?.reserve(client.actor);
       const now = this.services.time();
-      const inputs = new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: null }], ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]);
+      const inputs = new Map<ModCallbackInput, QcModValue>([
+        ["self", { kind: "actor", value: null }],
+        ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }],
+      ]);
       for (const call of this.declaration.initialize ?? []) this.invoke(call, inputs);
       this.initialized = true;
-    } finally { this.loading = false; }
+    } finally {
+      this.loading = false;
+    }
     this.clients?.start();
     this.messages?.start();
     return undefined;
@@ -825,9 +1438,15 @@ export class QcModProvider {
     const time = (frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000) - elapsed;
     const frametime = this.program.globalsByName.get("frametime");
     if (frametime?.type === "float") this.machine.globals.setFloat(frametime.offset, elapsed);
-    if (this.declaration.frame !== undefined) this.invoke(this.declaration.frame, new Map<ModCallbackInput, QcModValue>([
-      ["self", { kind: "actor", value: null }], ["time", { kind: "float", value: time }], ["elapsed", { kind: "float", value: elapsed }],
-    ]));
+    if (this.declaration.frame !== undefined)
+      this.invoke(
+        this.declaration.frame,
+        new Map<ModCallbackInput, QcModValue>([
+          ["self", { kind: "actor", value: null }],
+          ["time", { kind: "float", value: time }],
+          ["elapsed", { kind: "float", value: elapsed }],
+        ]),
+      );
     // Source datagrams are built across callbacks and sent when the frame ends (SV_SendClientMessages), so a message split between
     // two callbacks is whole by now.
     this.messages?.messages.flush();
@@ -842,14 +1461,28 @@ export class QcModProvider {
     return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved);
   }
   close(): undefined {
-    this.objectives.close(); this.releaseMatch?.(); this.releaseMatch = null;
+    this.objectives.close();
+    this.releaseMatch?.();
+    this.releaseMatch = null;
     if (this.closed) return undefined;
     this.closed = true;
     const errors: unknown[] = [];
-    for (const close of [() => this.closeClientBindings(), () => this.clients?.close(), () => this.ownedActors.close(),
-      () => this.releaseProjection(), () => this.messages?.close(), ...this.sourcePhysics.values()])
-      try { close(); } catch (error) { errors.push(error); }
-    this.sourcePhysics.clear(); this.projections.clear(); this.actorsBySlot.clear();
+    for (const close of [
+      () => this.closeClientBindings(),
+      () => this.clients?.close(),
+      () => this.ownedActors.close(),
+      () => this.releaseProjection(),
+      () => this.messages?.close(),
+      ...this.sourcePhysics.values(),
+    ])
+      try {
+        close();
+      } catch (error) {
+        errors.push(error);
+      }
+    this.sourcePhysics.clear();
+    this.projections.clear();
+    this.actorsBySlot.clear();
     if (errors.length !== 0) throw new AggregateError(errors, "QC component close failed");
     return undefined;
   }

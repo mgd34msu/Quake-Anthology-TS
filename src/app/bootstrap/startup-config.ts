@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readFile } from "node:fs/promises";
 import { findContentPath } from "../../content/mounts/paths.ts";
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
@@ -23,23 +24,34 @@ export interface StartupConfigOptions {
 
 function scriptDepth(origin: CommandOrigin): number {
   let depth = 0;
-  while (origin.kind === "script") { depth++; origin = origin.caller; }
+  while (origin.kind === "script") {
+    depth++;
+    origin = origin.caller;
+  }
   return depth;
 }
 
 function startupScripts(dialect: CommandDialect, hasMod: boolean, dedicatedQuakeWorld: boolean): readonly StartupScript[] {
   if (dedicatedQuakeWorld) return [{ name: "server.cfg", scope: "user" }];
   if (dialect === "q1-netquake" || dialect === "q1-quakeworld") return [{ name: "quake.rc", scope: "mounted" }];
-  if (dialect === "q3") return [
-    { name: "default.cfg", scope: "mounted" }, { name: "q3config.cfg", scope: "user" }, { name: "autoexec.cfg", scope: "user" },
-  ];
-  if (dialect === "q2-rerelease") return [
-    { name: "default.cfg", scope: "mounted" }, { name: "config.cfg", scope: "loose" },
-    ...(hasMod ? [{ name: "autoexec.cfg", scope: "base-loose" } satisfies StartupScript] : []),
-    { name: "autoexec.cfg", scope: "game-loose" }, { name: "postexec.cfg", scope: "loose" },
-  ];
+  if (dialect === "q3")
+    return [
+      { name: "default.cfg", scope: "mounted" },
+      { name: "q3config.cfg", scope: "user" },
+      { name: "autoexec.cfg", scope: "user" },
+    ];
+  if (dialect === "q2-rerelease")
+    return [
+      { name: "default.cfg", scope: "mounted" },
+      { name: "config.cfg", scope: "loose" },
+      ...(hasMod ? [{ name: "autoexec.cfg", scope: "base-loose" } satisfies StartupScript] : []),
+      { name: "autoexec.cfg", scope: "game-loose" },
+      { name: "postexec.cfg", scope: "loose" },
+    ];
   return [
-    { name: "default.cfg", scope: "mounted" }, { name: "config.cfg", scope: "user" }, { name: "autoexec.cfg", scope: "game-loose" },
+    { name: "default.cfg", scope: "mounted" },
+    { name: "config.cfg", scope: "user" },
+    { name: "autoexec.cfg", scope: "game-loose" },
   ];
 }
 
@@ -58,28 +70,43 @@ export class StartupConfig {
     let origin = options.context.origin;
     while (origin.kind === "script") origin = origin.caller;
     this.dedicatedQuakeWorld = options.dialect === "q1-quakeworld" && origin.kind === "server-console";
-    this.scripts = options.scope === "seat" ? [
-      { name: options.dialect === "q3" ? "q3config.cfg" : "config.cfg", scope: "seat" }, { name: "autoexec.cfg", scope: "seat" },
-    ] : startupScripts(options.dialect, options.hasMod, this.dedicatedQuakeWorld);
+    this.scripts =
+      options.scope === "seat"
+        ? [
+            { name: options.dialect === "q3" ? "q3config.cfg" : "config.cfg", scope: "seat" },
+            { name: "autoexec.cfg", scope: "seat" },
+          ]
+        : startupScripts(options.dialect, options.hasMod, this.dedicatedQuakeWorld);
     this.defaultsApplied = options.scope === "seat";
     this.callerDepth = scriptDepth(options.context.origin);
   }
 
   ownsSource(source: CommandContext): boolean {
     if (this.active === undefined || source.session !== this.options.context.session) return false;
-    let root = source.origin, depth = scriptDepth(root);
-    while (root.kind === "script" && depth > this.callerDepth + 1) { root = root.caller; depth--; }
+    let root = source.origin,
+      depth = scriptDepth(root);
+    while (root.kind === "script" && depth > this.callerDepth + 1) {
+      root = root.caller;
+      depth--;
+    }
     if (root.kind !== "script" || depth !== this.callerDepth + 1 || root.name !== this.active.name) return false;
-    let caller = root.caller, expected = this.options.context.origin;
+    let caller = root.caller,
+      expected = this.options.context.origin;
     while (caller.kind === "script" && expected.kind === "script") {
       if (caller.name !== expected.name) return false;
-      caller = caller.caller; expected = expected.caller;
+      caller = caller.caller;
+      expected = expected.caller;
     }
     switch (caller.kind) {
-      case "local-console": case "server-console": return caller.kind === expected.kind;
-      case "local-seat": return expected.kind === "local-seat" && caller.seat.equals(expected.seat) && caller.client.equals(expected.client);
-      case "remote-client": return expected.kind === "remote-client" && caller.client.equals(expected.client);
-      case "script": return false;
+      case "local-console":
+      case "server-console":
+        return caller.kind === expected.kind;
+      case "local-seat":
+        return expected.kind === "local-seat" && caller.seat.equals(expected.seat) && caller.client.equals(expected.client);
+      case "remote-client":
+        return expected.kind === "remote-client" && caller.client.equals(expected.client);
+      case "script":
+        return false;
     }
   }
 
@@ -91,8 +118,12 @@ export class StartupConfig {
     const depth = scriptDepth(source.origin);
     const active = this.active;
     const direct = active !== undefined && depth === this.callerDepth && name === active.name;
-    const q1Default = active?.name === "quake.rc" && depth === this.callerDepth + 1
-      && source.origin.kind === "script" && source.origin.name === "quake.rc" && name === "default.cfg";
+    const q1Default =
+      active?.name === "quake.rc" &&
+      depth === this.callerDepth + 1 &&
+      source.origin.kind === "script" &&
+      source.origin.name === "quake.rc" &&
+      name === "default.cfg";
     return this.options.read(name, source, direct ? active.scope : q1Default ? "mounted" : this.options.scope === "seat" ? "seat" : "user");
   };
 
@@ -102,34 +133,56 @@ export class StartupConfig {
     const origin = event.source.origin;
     const depth = scriptDepth(origin);
     const direct = depth === this.callerDepth + 1 && event.name === active.name;
-    const q1Child = active.name === "quake.rc" && depth === this.callerDepth + 2
-      && origin.kind === "script" && origin.caller.kind === "script" && origin.caller.name === "quake.rc";
+    const q1Child =
+      active.name === "quake.rc" &&
+      depth === this.callerDepth + 2 &&
+      origin.kind === "script" &&
+      origin.caller.kind === "script" &&
+      origin.caller.name === "quake.rc";
     if (event.result.kind === "failed") throw event.result.error;
     if (!direct && !q1Child) return;
     if (event.name === "default.cfg" && !this.defaultsApplied) {
-      this.defaultsApplied = true; this.options.applySelectedDefaults();
+      this.defaultsApplied = true;
+      this.options.applySelectedDefaults();
     }
     if ((event.name === "config.cfg" || event.name === "q3config.cfg") && !this.archiveApplied) {
-      this.archiveApplied = true; this.options.applyArchive();
+      this.archiveApplied = true;
+      this.options.applyArchive();
     }
-    if ((this.options.dialect === "q3" && direct && event.name === "autoexec.cfg")
-      || ((this.options.dialect === "q2-classic" || this.options.dialect === "q2-rerelease") && direct && event.name === "config.cfg"))
+    if (
+      (this.options.dialect === "q3" && direct && event.name === "autoexec.cfg") ||
+      ((this.options.dialect === "q2-classic" || this.options.dialect === "q2-rerelease") && direct && event.name === "config.cfg")
+    )
       this.options.replayStartupVariables?.();
     if (direct) this.active = undefined;
   };
 
   /** Use an exclusively owned startup buffer. False means a native wait left work for another frame. */
-  async executeFrame(commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
+  async executeFrame(
+    commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">,
+    afterDispatch: () => Promise<void>,
+    shouldContinue?: () => boolean,
+  ): Promise<boolean> {
     if (this.failure !== undefined) throw this.failure.error;
-    try { return await this.advanceFrame(commands, afterDispatch, shouldContinue); }
-    catch (error: unknown) { this.failure = { error }; throw error; }
+    try {
+      return await this.advanceFrame(commands, afterDispatch, shouldContinue);
+    } catch (error: unknown) {
+      this.failure = { error };
+      throw error;
+    }
   }
 
-  private async advanceFrame(commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
+  private async advanceFrame(
+    commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">,
+    afterDispatch: () => Promise<void>,
+    shouldContinue?: () => boolean,
+  ): Promise<boolean> {
     if (this.completed) return true;
     if (this.dedicatedQuakeWorld && !this.archiveApplied) {
-      this.defaultsApplied = true; this.options.applySelectedDefaults();
-      this.archiveApplied = true; this.options.applyArchive();
+      this.defaultsApplied = true;
+      this.options.applySelectedDefaults();
+      this.archiveApplied = true;
+      this.options.applyArchive();
     }
     while (true) {
       if (this.active === undefined) {
@@ -177,8 +230,12 @@ export function createStartupScriptReader(options: StartupScriptReaderOptions): 
       const bytes = await options.mounted(name);
       return bytes === undefined ? undefined : Buffer.from(bytes).toString("latin1");
     }
-    const roots = scope === "base-loose" ? options.baseLooseRoots : scope === "game-loose" ? options.gameLooseRoots
-      : [...options.gameLooseRoots, ...options.baseLooseRoots];
+    const roots =
+      scope === "base-loose"
+        ? options.baseLooseRoots
+        : scope === "game-loose"
+          ? options.gameLooseRoots
+          : [...options.gameLooseRoots, ...options.baseLooseRoots];
     for (const root of roots) {
       const path = await findContentPath(root, name);
       if (path !== null) return (await readFile(path)).toString("latin1");

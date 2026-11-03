@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { sweepQ2Body } from "../../../src/movement/q2/swept.ts";
 import { corpusFile } from "../../support/corpus.ts";
 
@@ -7,22 +8,46 @@ import type { Vec3 as SourceVector } from "../../../src/movement/q2/types.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
-import type { MovementServices, MovementTouchContact, Q2MovementInput, Q2MovementState, Q2RereleaseMovementInput, Q2RereleaseMovementState } from "../../../src/contracts/movement.ts";
+import type {
+  MovementServices,
+  MovementTouchContact,
+  Q2MovementInput,
+  Q2MovementState,
+  Q2RereleaseMovementInput,
+  Q2RereleaseMovementState,
+} from "../../../src/contracts/movement.ts";
 import type { NumericProfile } from "../../../src/contracts/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createNumericOperations } from "../../../src/core/numeric.ts";
 import { decodeQ2Map } from "../../../src/formats/q2-map/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
-import { applyQ2MovementContacts, ButtonT, createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider, moveQ2Rerelease, Q2RereleaseMovementContext, PmflagsT, q2PlayerShape } from "../../../src/movement/q2/index.ts";
+import {
+  applyQ2MovementContacts,
+  ButtonT,
+  createQ2ClassicMovementProvider,
+  createQ2RereleaseMovementProvider,
+  moveQ2Rerelease,
+  Q2RereleaseMovementContext,
+  PmflagsT,
+  q2PlayerShape,
+} from "../../../src/movement/q2/index.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-const numericProfile: NumericProfile = { id: "q2:binary32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" };
+const numericProfile: NumericProfile = {
+  id: "q2:binary32",
+  arithmetic: { kind: "binary32", round: "each-operation" },
+  scalarStorage: "binary32",
+  floatToInt: "checked-c-truncation",
+  integerOverflow: "wrap32",
+};
 const numeric = createNumericOperations(numericProfile);
 const identities = createIdentityOwner("q2-movement-smoke");
 const actor = identities.ownedActor(identities.actor(1, 1), "q2:game");
 const base = {
-  actor, commandSequence: 0, shape: q2PlayerShape(),
+  actor,
+  commandSequence: 0,
+  shape: q2PlayerShape(),
   frame: { frame: 1, time: { kind: "milliseconds", value: 100 }, elapsed: { kind: "milliseconds", value: 16 }, phase: "client-command" },
   environment: { health: 100, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
   arsenal: { provider: "q3:weapons", activeWeapon: null, state: { kind: "q3", sourceWeapon: 2, state: 0, timeMilliseconds: 0 }, ammo: [] },
@@ -31,14 +56,47 @@ const base = {
 } satisfies Omit<Q2MovementInput, "kind" | "command" | "state" | "profile">;
 
 function classic(origin: Vec3): Q2MovementInput {
-  return { ...base, kind: "q2-classic", command: { kind: "q2-classic", milliseconds: 16, angleShorts: [0, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 0 },
-    state: { kind: "q2-classic", type: 0, originEighths: [origin.x * 8, origin.y * 8, origin.z * 8], velocityEighths: [0, 0, 0], flags: 0, timeEightMilliseconds: 0, gravity: 800, deltaAngleShorts: [0, 0, 0] },
-    profile: { kind: "q2-classic", id: "q2:classic", airAccelerate: 0, snapInitial: false, clock: { kind: "q2-classic", frameMilliseconds: 100 }, numeric: numericProfile } };
+  return {
+    ...base,
+    kind: "q2-classic",
+    command: { kind: "q2-classic", milliseconds: 16, angleShorts: [0, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 0 },
+    state: {
+      kind: "q2-classic",
+      type: 0,
+      originEighths: [origin.x * 8, origin.y * 8, origin.z * 8],
+      velocityEighths: [0, 0, 0],
+      flags: 0,
+      timeEightMilliseconds: 0,
+      gravity: 800,
+      deltaAngleShorts: [0, 0, 0],
+    },
+    profile: {
+      kind: "q2-classic",
+      id: "q2:classic",
+      airAccelerate: 0,
+      snapInitial: false,
+      clock: { kind: "q2-classic", frameMilliseconds: 100 },
+      numeric: numericProfile,
+    },
+  };
 }
 function rerelease(origin: Vec3, n64Physics = false): Q2RereleaseMovementInput {
-  return { ...base, kind: "q2-rerelease", viewOffset: zero, snapInitial: false, command: { kind: "q2-rerelease", milliseconds: 16, angles: zero, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: 1 },
+  return {
+    ...base,
+    kind: "q2-rerelease",
+    viewOffset: zero,
+    snapInitial: false,
+    command: { kind: "q2-rerelease", milliseconds: 16, angles: zero, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: 1 },
     state: { kind: "q2-rerelease", type: 0, origin, velocity: zero, flags: 0, timeMilliseconds: 0, gravity: 800, deltaAngles: zero, viewHeight: 22 },
-    profile: { kind: "q2-rerelease", id: "q2:rerelease", airAccelerate: 0, n64Physics, clock: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" }, numeric: numericProfile } };
+    profile: {
+      kind: "q2-rerelease",
+      id: "q2:rerelease",
+      airAccelerate: 0,
+      n64Physics,
+      clock: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" },
+      numeric: numericProfile,
+    },
+  };
 }
 
 async function level() {
@@ -47,59 +105,90 @@ async function level() {
     const entry = archive.findEntries("maps/base1.bsp")[0];
     if (entry === undefined) throw new Error("Retail base1 missing");
     const world = decodeQ2Map(await archive.readEntry(entry));
-    const spawn = [...world.entities.matchAll(/\{[^}]*"classname"\s+"info_player_start"[^}]*\}/g)].find(match => !match[0].includes("\"targetname\""));
+    const spawn = [...world.entities.matchAll(/\{[^}]*"classname"\s+"info_player_start"[^}]*\}/g)].find(match => !match[0].includes('"targetname"'));
     if (spawn === undefined) throw new Error("Retail base1 spawn missing");
     const originMatch = spawn[0].match(/"origin"\s+"([^\"]+)"/);
     if (originMatch?.[1] === undefined) throw new Error("Retail base1 spawn has no origin");
     const [x, y, z] = originMatch[1].split(/\s+/).map(Number);
     if (x === undefined || y === undefined || z === undefined) throw new Error("Invalid retail spawn origin");
     return { world, origin: { x, y, z } };
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 }
 const installed = await Bun.file(corpusFile("q2/baseq2/pak0.pak")).exists();
 
-const q1ClassicArchive = await Bun.file(corpusFile("q1/id1/pak0.pak")).exists()
-  ? corpusFile("q1/id1/pak0.pak") : corpusFile("q1/id1/PAK0.PAK");
+const q1ClassicArchive = (await Bun.file(corpusFile("q1/id1/pak0.pak")).exists()) ? corpusFile("q1/id1/pak0.pak") : corpusFile("q1/id1/PAK0.PAK");
 for (const path of [q1ClassicArchive, corpusFile("q1/rerelease/id1/pak0.pak")]) {
-test.skipIf(!await Bun.file(path).exists())(`both Q2 movement profiles stop on Q1 floors after directional input ends: ${path}`, async () => {
-  const archive = await openArchive(path);
-  try {
-    const entry = archive.findEntries("maps/start.bsp")[0];
-    if (entry === undefined) throw new Error("Q1 start map missing");
-    const world = readQ1Bsp(await archive.readEntry(entry));
-    const scene = createSceneQueries(world);
-    const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-      weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
-    const origin = { x: 544, y: 288, z: 28 };
-    const classicProvider = createQ2ClassicMovementProvider("q2:classic");
-    const rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
-    for (const direction of [{ forwardMove: 200, sideMove: 0 }, { forwardMove: -200, sideMove: 0 },
-      { forwardMove: 0, sideMove: 200 }, { forwardMove: 0, sideMove: -200 }]) {
-      let old = classic(origin), modern = rerelease(origin);
-      for (let frame = 0; frame < 100; frame++) {
-        const movement = frame >= 20 && frame < 25 ? direction : { forwardMove: 0, sideMove: 0 };
-        const a = classicProvider.move({ ...old, command: { ...old.command, ...movement } }, services);
-        const b = rereleaseProvider.move({ ...modern, command: { ...modern.command, ...movement } }, services);
-        if (a.status !== "active" || b.status !== "active") throw new Error("Unexpected removal");
-        old = { ...old, state: a.state }; modern = { ...modern, state: b.state };
-        if (frame === 24) {
-          expect(Math.hypot(...a.state.velocityEighths)).toBeGreaterThan(0);
-          expect(Math.hypot(b.state.velocity.x, b.state.velocity.y)).toBeGreaterThan(0);
+  test.skipIf(!(await Bun.file(path).exists()))(
+    `both Q2 movement profiles stop on Q1 floors after directional input ends: ${path}`,
+    async () => {
+      const archive = await openArchive(path);
+      try {
+        const entry = archive.findEntries("maps/start.bsp")[0];
+        if (entry === undefined) throw new Error("Q1 start map missing");
+        const world = readQ1Bsp(await archive.readEntry(entry));
+        const scene = createSceneQueries(world);
+        const services: MovementServices = {
+          scene,
+          numeric,
+          touch: (_contact, state) => ({ kind: "continue", state }),
+          weaponStep: () => {
+            throw new Error("Unexpected weapon step");
+          },
+          animationStep: () => {
+            throw new Error("Unexpected animation step");
+          },
+        };
+        const origin = { x: 544, y: 288, z: 28 };
+        const classicProvider = createQ2ClassicMovementProvider("q2:classic");
+        const rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
+        for (const direction of [
+          { forwardMove: 200, sideMove: 0 },
+          { forwardMove: -200, sideMove: 0 },
+          { forwardMove: 0, sideMove: 200 },
+          { forwardMove: 0, sideMove: -200 },
+        ]) {
+          let old = classic(origin),
+            modern = rerelease(origin);
+          for (let frame = 0; frame < 100; frame++) {
+            const movement = frame >= 20 && frame < 25 ? direction : { forwardMove: 0, sideMove: 0 };
+            const a = classicProvider.move({ ...old, command: { ...old.command, ...movement } }, services);
+            const b = rereleaseProvider.move({ ...modern, command: { ...modern.command, ...movement } }, services);
+            if (a.status !== "active" || b.status !== "active") throw new Error("Unexpected removal");
+            old = { ...old, state: a.state };
+            modern = { ...modern, state: b.state };
+            if (frame === 24) {
+              expect(Math.hypot(...a.state.velocityEighths)).toBeGreaterThan(0);
+              expect(Math.hypot(b.state.velocity.x, b.state.velocity.y)).toBeGreaterThan(0);
+            }
+          }
+          expect(old.state.velocityEighths).toEqual([0, 0, 0]);
+          expect(modern.state.velocity).toEqual(zero);
         }
+      } finally {
+        archive.close();
       }
-      expect(old.state.velocityEighths).toEqual([0, 0, 0]);
-      expect(modern.state.velocity).toEqual(zero);
-    }
-  } finally { archive.close(); }
-}, 30000);
+    },
+    30000,
+  );
 }
 
 describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
   test("classic fixed-point movement, jump release, and crouch retain independent arsenal and animation", async () => {
     const map = await level();
     const scene = createSceneQueries(map.world);
-    const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-      weaponStep: () => { throw new Error("Q2 pmove must not own Q3 weapon frames"); }, animationStep: () => { throw new Error("Q2 pmove must not own Q3 animation"); } };
+    const services: MovementServices = {
+      scene,
+      numeric,
+      touch: (_contact, state) => ({ kind: "continue", state }),
+      weaponStep: () => {
+        throw new Error("Q2 pmove must not own Q3 weapon frames");
+      },
+      animationStep: () => {
+        throw new Error("Q2 pmove must not own Q3 animation");
+      },
+    };
     const provider = createQ2ClassicMovementProvider("q2:classic");
     let input = classic(map.origin);
     let state: Q2MovementState = input.state;
@@ -135,8 +224,17 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
 
   test("rerelease and Quake 64 use identical authority and prediction configs", async () => {
     const map = await level();
-    const services: MovementServices = { scene: createSceneQueries(map.world), numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-      weaponStep: () => { throw new Error("Unexpected weapon simulation"); }, animationStep: () => { throw new Error("Unexpected animation simulation"); } };
+    const services: MovementServices = {
+      scene: createSceneQueries(map.world),
+      numeric,
+      touch: (_contact, state) => ({ kind: "continue", state }),
+      weaponStep: () => {
+        throw new Error("Unexpected weapon simulation");
+      },
+      animationStep: () => {
+        throw new Error("Unexpected animation simulation");
+      },
+    };
     const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     for (const n64Physics of [false, true]) {
       const input = rerelease(map.origin, n64Physics);
@@ -152,7 +250,11 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
       expect(authority).toEqual(prediction);
       if (authority.status !== "active") throw new Error("Unexpected removal");
       expect(authority.bounds.max.z).toBe(n64Physics ? 32 : 4);
-      const detailed = moveQ2Rerelease({ ...input, state, snapInitial: true, command: { ...input.command, buttons: ButtonT.BUTTON_JUMP } }, services, new Q2RereleaseMovementContext());
+      const detailed = moveQ2Rerelease(
+        { ...input, state, snapInitial: true, command: { ...input.command, buttons: ButtonT.BUTTON_JUMP } },
+        services,
+        new Q2RereleaseMovementContext(),
+      );
       if (detailed.status !== "active") throw new Error("Unexpected removal");
       expect(detailed.jumpSound).toBe(true);
       expect(detailed.state.velocity.z).toBeGreaterThan(0);
@@ -165,11 +267,21 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     const input = rerelease(map.origin);
     let count = 0;
     const seen: MovementTouchContact[] = [];
-    const services: MovementServices = { scene, numeric, touch: (contact, state) => {
-      seen.push(contact);
-      count++;
-      return state.kind === "q2-rerelease" ? { kind: "continue", state: { ...state, velocity: { x: 123, y: 0, z: 0 } } } : { kind: "continue", state };
-    }, weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+    const services: MovementServices = {
+      scene,
+      numeric,
+      touch: (contact, state) => {
+        seen.push(contact);
+        count++;
+        return state.kind === "q2-rerelease" ? { kind: "continue", state: { ...state, velocity: { x: 123, y: 0, z: 0 } } } : { kind: "continue", state };
+      },
+      weaponStep: () => {
+        throw new Error("Unexpected weapon step");
+      },
+      animationStep: () => {
+        throw new Error("Unexpected animation step");
+      },
+    };
     const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     let state = input.state;
     for (let i = 0; i < 30 && count === 0; i++) {
@@ -180,7 +292,8 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
       if (step.status !== "active") throw new Error("Unexpected movement removal");
       for (const [index, contact] of seen.slice(first).entries()) {
         const original = step.contacts[index];
-        if (original === undefined || original.target.kind === "none" || original.trace.kind !== "q2" || contact.sourceTrace === undefined) throw new Error("Missing full rerelease contact");
+        if (original === undefined || original.target.kind === "none" || original.trace.kind !== "q2" || contact.sourceTrace === undefined)
+          throw new Error("Missing full rerelease contact");
         expect(contact.sourceTrace.kind).toBe("q2-rerelease");
         expect(contact.sourceTrace.inverted).toBe(true);
         expect(contact.sourceTrace.trace).toBe(original.trace);
@@ -196,18 +309,37 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     expect(state.velocity.x).toBe(123);
     const moved = provider.move({ ...input, state }, services);
     let removedCalls = 0;
-    const removed = applyQ2MovementContacts(input, { ...services, touch: () => { removedCalls++; return { kind: "actor-removed" }; } }, moved);
+    const removed = applyQ2MovementContacts(
+      input,
+      {
+        ...services,
+        touch: () => {
+          removedCalls++;
+          return { kind: "actor-removed" };
+        },
+      },
+      moved,
+    );
     expect(removed.status).toBe("actor-removed");
     expect(removedCalls).toBe(1);
     expect("state" in removed).toBe(false);
-    const classicInput = classic(map.origin), classicProvider = createQ2ClassicMovementProvider("q2:classic");
+    const classicInput = classic(map.origin),
+      classicProvider = createQ2ClassicMovementProvider("q2:classic");
     let classicState = classicInput.state;
     const classicContacts: MovementTouchContact[] = [];
     for (let i = 0; i < 30 && classicContacts.length === 0; i++) {
       const step = classicProvider.move({ ...classicInput, state: classicState }, services);
-      const result = applyQ2MovementContacts(classicInput, { ...services, touch: (contact, state) => {
-        classicContacts.push(contact); return { kind: "continue", state };
-      } }, step);
+      const result = applyQ2MovementContacts(
+        classicInput,
+        {
+          ...services,
+          touch: (contact, state) => {
+            classicContacts.push(contact);
+            return { kind: "continue", state };
+          },
+        },
+        step,
+      );
       if (result.status !== "active") throw new Error("Unexpected classic removal");
       classicState = result.state;
     }
@@ -221,7 +353,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
 });
 
 const q3ArchivePath = corpusFile("q3a/baseq3/pak0.pk3");
-test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses Q3 retail geometry and a separately selected character body", async () => {
+test.skipIf(!(await Bun.file(q3ArchivePath).exists()))("Q2 rerelease movement uses Q3 retail geometry and a separately selected character body", async () => {
   const archive = await openArchive(q3ArchivePath);
   try {
     const entry = archive.findEntries("maps/q3dm1.bsp")[0];
@@ -233,11 +365,23 @@ test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses
     if (origin === undefined) throw new Error("Retail q3dm1 spawn missing");
     const [x, y, z] = origin.split(/\s+/).map(Number);
     if (x === undefined || y === undefined || z === undefined) throw new Error("Invalid Q3 spawn");
-    const input: Q2RereleaseMovementInput = { ...rerelease({ x, y, z }),
-      shape: { kind: "box", bounds: { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 32 } } } };
-    const services: MovementServices = { scene: createSceneQueries(adaptQ3Bsp(map)), numeric,
-      touch: () => { throw new Error("Pmove must return contacts before ClientThink's link/trigger phase"); },
-      weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+    const input: Q2RereleaseMovementInput = {
+      ...rerelease({ x, y, z }),
+      shape: { kind: "box", bounds: { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 32 } } },
+    };
+    const services: MovementServices = {
+      scene: createSceneQueries(adaptQ3Bsp(map)),
+      numeric,
+      touch: () => {
+        throw new Error("Pmove must return contacts before ClientThink's link/trigger phase");
+      },
+      weaponStep: () => {
+        throw new Error("Unexpected weapon step");
+      },
+      animationStep: () => {
+        throw new Error("Unexpected animation step");
+      },
+    };
     const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     let state = input.state;
     for (let frame = 0; frame < 60; frame++) {
@@ -251,25 +395,54 @@ test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses
     if (jump.status !== "active") throw new Error("Unexpected removal");
     expect(jump.state.velocity.z).toBeGreaterThan(0);
     expect(jump.jumpSound).toBe(true);
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
-
 
 test("Q2 shared sweep clips rejected candidates sequentially and only writes z on allsolid", () => {
   const math = createMovementMath(numeric);
   for (const allsolid of [false, true]) {
-    const origin: SourceVector = [0, 0, 0], velocity: SourceVector = allsolid ? [1 / 3, 2 / 3, 7] : [10, 10, 10];
-    let traces = 0, touches = 0;
-    const stop = sweepQ2Body({ origin, velocity, elapsed: 1, numeric,
+    const origin: SourceVector = [0, 0, 0],
+      velocity: SourceVector = allsolid ? [1 / 3, 2 / 3, 7] : [10, 10, 10];
+    let traces = 0,
+      touches = 0;
+    const stop = sweepQ2Body({
+      origin,
+      velocity,
+      elapsed: 1,
+      numeric,
       trace: (_start, end) => {
         traces++;
-        return { allsolid, startsolid: allsolid, fraction: traces <= 2 ? 0 : 1, endpos: traces <= 2 ? [...origin] : end,
+        return {
+          allsolid,
+          startsolid: allsolid,
+          fraction: traces <= 2 ? 0 : 1,
+          endpos: traces <= 2 ? [...origin] : end,
           plane: { ...plane(), normal: traces === 1 ? [-1, 0, 0] : [Math.fround(-0.6), Math.fround(-0.8), 0] },
-          surface: null, contents: 0, ent: { kind: "world", model: 0 }, plane2: plane(), surface2: null,
-          source: { kind: "q1", fraction: 0, end: zero, allSolid: allsolid, startSolid: allsolid, contact: { kind: "none" },
-            hit: { kind: "world", model: 0 }, inOpen: true, inWater: false, sourcePlane: { normal: zero, distance: 0 } } };
+          surface: null,
+          contents: 0,
+          ent: { kind: "world", model: 0 },
+          plane2: plane(),
+          surface2: null,
+          source: {
+            kind: "q1",
+            fraction: 0,
+            end: zero,
+            allSolid: allsolid,
+            startSolid: allsolid,
+            contact: { kind: "none" },
+            hit: { kind: "world", model: 0 },
+            inOpen: true,
+            inWater: false,
+            sourcePlane: { normal: zero, distance: 0 },
+          },
+        };
       },
-      clip: (speed, normal) => math.SlideClipVelocity(speed, normal, 1.01), touch: () => { touches++; },
+      clip: (speed, normal) => math.SlideClipVelocity(speed, normal, 1.01),
+      touch: () => {
+        touches++;
+      },
     });
     expect(stop).toBe(allsolid ? "solid" : "complete");
     expect(touches).toBe(allsolid ? 0 : 2);
@@ -282,84 +455,148 @@ test("Q2 shared sweep clips rejected candidates sequentially and only writes z o
   }
 });
 
-for (const edition of ["classic", "rerelease"]) test.skipIf(!installed)(`Q2 ${edition} flight uses the player hull and collides without gravity`, async () => {
-  const map = await level(), scene = createSceneQueries(map.world);
-  const host: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-    weaponStep: input => ({ arsenal: input.arsenal, animation: input.animation, effects: [] }), animationStep: input => ({ animation: input.animation, effects: [] }) };
-  const initial = { ...map.origin, z: map.origin.z + 24 };
-  let current: Q2MovementInput | Q2RereleaseMovementInput = edition === "classic" ? classic(initial) : rerelease(initial);
-  current = { ...current, environment: { ...current.environment, flight: true } };
-  const classicProvider = createQ2ClassicMovementProvider("q2:classic"), rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
-  const step = (forward: number, up: number) => {
-    if (current.kind === "q2-classic") {
-      const result = classicProvider.move({ ...current, command: { ...current.command, forwardMove: forward, upMove: up } }, host);
+for (const edition of ["classic", "rerelease"])
+  test.skipIf(!installed)(`Q2 ${edition} flight uses the player hull and collides without gravity`, async () => {
+    const map = await level(),
+      scene = createSceneQueries(map.world);
+    const host: MovementServices = {
+      scene,
+      numeric,
+      touch: (_contact, state) => ({ kind: "continue", state }),
+      weaponStep: input => ({ arsenal: input.arsenal, animation: input.animation, effects: [] }),
+      animationStep: input => ({ animation: input.animation, effects: [] }),
+    };
+    const initial = { ...map.origin, z: map.origin.z + 24 };
+    let current: Q2MovementInput | Q2RereleaseMovementInput = edition === "classic" ? classic(initial) : rerelease(initial);
+    current = { ...current, environment: { ...current.environment, flight: true } };
+    const classicProvider = createQ2ClassicMovementProvider("q2:classic"),
+      rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
+    const step = (forward: number, up: number) => {
+      if (current.kind === "q2-classic") {
+        const result = classicProvider.move({ ...current, command: { ...current.command, forwardMove: forward, upMove: up } }, host);
+        if (result.status !== "active") throw new Error("Flight removed player");
+        current = { ...current, state: result.state };
+        return {
+          origin: { x: result.state.originEighths[0] / 8, y: result.state.originEighths[1] / 8, z: result.state.originEighths[2] / 8 },
+          bounds: result.bounds,
+        };
+      }
+      const result = rereleaseProvider.move(
+        { ...current, command: { ...current.command, forwardMove: forward, buttons: up > 0 ? ButtonT.BUTTON_JUMP : up < 0 ? ButtonT.BUTTON_CROUCH : 0 } },
+        host,
+      );
       if (result.status !== "active") throw new Error("Flight removed player");
       current = { ...current, state: result.state };
-      return { origin: { x: result.state.originEighths[0] / 8, y: result.state.originEighths[1] / 8, z: result.state.originEighths[2] / 8 }, bounds: result.bounds };
+      return { origin: result.state.origin, bounds: result.bounds };
+    };
+    if (current.kind === "q2-rerelease") {
+      const vertical = { ...current, command: { ...current.command, buttons: ButtonT.BUTTON_JUMP } };
+      const normal = rereleaseProvider.move(vertical, host);
+      const accelerated = rereleaseProvider.move({ ...vertical, environment: { ...vertical.environment, speedMultiplier: 1.5 } }, host);
+      if (normal.status !== "active" || accelerated.status !== "active") throw new Error("Flight removed player");
+      expect(normal.state.velocity.z).toBeGreaterThan(0);
+      expect(accelerated.state.velocity.z).toBeCloseTo(normal.state.velocity.z * 1.5, 4);
     }
-    const result = rereleaseProvider.move({ ...current, command: { ...current.command, forwardMove: forward, buttons: up > 0 ? ButtonT.BUTTON_JUMP : up < 0 ? ButtonT.BUTTON_CROUCH : 0 } }, host);
-    if (result.status !== "active") throw new Error("Flight removed player");
-    current = { ...current, state: result.state }; return { origin: result.state.origin, bounds: result.bounds };
-  };
-  if (current.kind === "q2-rerelease") {
-    const vertical = { ...current, command: { ...current.command, buttons: ButtonT.BUTTON_JUMP } };
-    const normal = rereleaseProvider.move(vertical, host);
-    const accelerated = rereleaseProvider.move({ ...vertical, environment: { ...vertical.environment, speedMultiplier: 1.5 } }, host);
-    if (normal.status !== "active" || accelerated.status !== "active") throw new Error("Flight removed player");
-    expect(normal.state.velocity.z).toBeGreaterThan(0);
-    expect(accelerated.state.velocity.z).toBeCloseTo(normal.state.velocity.z * 1.5, 4);
-  }
-  let position = initial;
-  for (let index = 0; index < 10; index++) position = step(0, 300).origin;
-  expect(position.z).toBeGreaterThan(initial.z);
-  const peak = position.z;
-  for (let index = 0; index < 15; index++) position = step(0, -300).origin;
-  if (base.shape.kind !== "box") throw new Error("Q2 flight fixture requires a box collision hull");
-  expect(step(0, 0).bounds).toEqual(base.shape.bounds);
-  expect(position.z).toBeLessThan(peak);
-  const wallOrigin = { ...position, x: position.x + 100 }, wallBounds = { min: { x: -8, y: -2048, z: -2048 }, max: { x: 8, y: 2048, z: 2048 } };
-  scene.link({ actor: identities.actor(999, 1), state: { origin: wallOrigin, angles: zero, velocity: zero, bounds: wallBounds, ground: null }, linkCount: 1,
-    absoluteBounds: { min: { x: wallOrigin.x - 8, y: wallOrigin.y - 2048, z: wallOrigin.z - 2048 }, max: { x: wallOrigin.x + 8, y: wallOrigin.y + 2048, z: wallOrigin.z + 2048 } } },
-    { family: "q2", shape: { kind: "box" }, contents: 1, owner: null, role: "solid", monster: false, deadMonster: false });
-  const wall = scene.trace({ start: position, end: { ...position, x: position.x + 1024 }, shape: base.shape, target: { kind: "world" }, policy: { kind: "q2", contentsMask: 0x02010003, leafContents: "merged" }, numeric: numericProfile, passActor: actor.id });
-  expect(wall.fraction).toBeLessThan(1);
-  for (let index = 0; index < 250; index++) position = step(300, 0).origin;
-  expect(position.x).toBeLessThanOrEqual(wallOrigin.x - 8 - base.shape.bounds.max.x + 0.2);
-  expect(position.x).toBeGreaterThan(wallOrigin.x - 8 - base.shape.bounds.max.x - 1); // flight reaches the wall, not just stays short of it
-  expect(current.state.type).toBe(0);
-});
-
+    let position = initial;
+    for (let index = 0; index < 10; index++) position = step(0, 300).origin;
+    expect(position.z).toBeGreaterThan(initial.z);
+    const peak = position.z;
+    for (let index = 0; index < 15; index++) position = step(0, -300).origin;
+    if (base.shape.kind !== "box") throw new Error("Q2 flight fixture requires a box collision hull");
+    expect(step(0, 0).bounds).toEqual(base.shape.bounds);
+    expect(position.z).toBeLessThan(peak);
+    const wallOrigin = { ...position, x: position.x + 100 },
+      wallBounds = { min: { x: -8, y: -2048, z: -2048 }, max: { x: 8, y: 2048, z: 2048 } };
+    scene.link(
+      {
+        actor: identities.actor(999, 1),
+        state: { origin: wallOrigin, angles: zero, velocity: zero, bounds: wallBounds, ground: null },
+        linkCount: 1,
+        absoluteBounds: {
+          min: { x: wallOrigin.x - 8, y: wallOrigin.y - 2048, z: wallOrigin.z - 2048 },
+          max: { x: wallOrigin.x + 8, y: wallOrigin.y + 2048, z: wallOrigin.z + 2048 },
+        },
+      },
+      { family: "q2", shape: { kind: "box" }, contents: 1, owner: null, role: "solid", monster: false, deadMonster: false },
+    );
+    const wall = scene.trace({
+      start: position,
+      end: { ...position, x: position.x + 1024 },
+      shape: base.shape,
+      target: { kind: "world" },
+      policy: { kind: "q2", contentsMask: 0x02010003, leafContents: "merged" },
+      numeric: numericProfile,
+      passActor: actor.id,
+    });
+    expect(wall.fraction).toBeLessThan(1);
+    for (let index = 0; index < 250; index++) position = step(300, 0).origin;
+    expect(position.x).toBeLessThanOrEqual(wallOrigin.x - 8 - base.shape.bounds.max.x + 0.2);
+    expect(position.x).toBeGreaterThan(wallOrigin.x - 8 - base.shape.bounds.max.x - 1); // flight reaches the wall, not just stays short of it
+    expect(current.state.type).toBe(0);
+  });
 
 test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove policies and movement input resumes after the freeze ends", async () => {
-  const map = await level(), scene = createSceneQueries(map.world);
-  const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const map = await level(),
+    scene = createSceneQueries(map.world);
+  const services: MovementServices = {
+    scene,
+    numeric,
+    touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => {
+      throw new Error("Unexpected weapon step");
+    },
+    animationStep: () => {
+      throw new Error("Unexpected animation step");
+    },
+  };
   const providers = [createQ2ClassicMovementProvider("q2:classic"), createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext())];
   for (const provider of providers) {
     if (provider.kind === "q2-classic") {
-      const original = classic(map.origin), input = { ...original, state: { ...original.state, flags: 4 } }, crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
+      const original = classic(map.origin),
+        input = { ...original, state: { ...original.state, flags: 4 } },
+        crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
       if (crouched.status !== "active") throw new Error("Unexpected removal");
-      expect(crouched.bounds.max.z).toBe(4); expect(crouched.viewHeight).toBe(-2);
-      const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
+      expect(crouched.bounds.max.z).toBe(4);
+      expect(crouched.viewHeight).toBe(-2);
+      const frozen = provider.move(
+        { ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } },
+        services,
+      );
       if (frozen.status !== "active") throw new Error("Unexpected removal");
-      expect(frozen.state.originEighths).toEqual(input.state.originEighths); expect(frozen.state.type).toBe(0);
+      expect(frozen.state.originEighths).toEqual(input.state.originEighths);
+      expect(frozen.state.type).toBe(0);
       // In the air the fixture's air acceleration is zero, so input only shows once the player has settled onto the floor.
       let grounded = input.state;
-      for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: grounded, commandSequence: i }, services); if (step.status !== "active") throw new Error("Unexpected removal"); grounded = step.state; }
+      for (let i = 0; i < 30; i++) {
+        const step = provider.move({ ...input, state: grounded, commandSequence: i }, services);
+        if (step.status !== "active") throw new Error("Unexpected removal");
+        grounded = step.state;
+      }
       const resumed = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 200 } }, services);
       const idle = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 0 } }, services);
       if (resumed.status !== "active" || idle.status !== "active") throw new Error("Unexpected removal");
       // Falling alone also moves the origin, so movement input resuming must show in the horizontal plane against an idle step.
       expect(resumed.state.originEighths.slice(0, 2)).not.toEqual(idle.state.originEighths.slice(0, 2));
     } else {
-      const original = rerelease(map.origin), input = { ...original, state: { ...original.state, flags: 4 } }, crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
+      const original = rerelease(map.origin),
+        input = { ...original, state: { ...original.state, flags: 4 } },
+        crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
       if (crouched.status !== "active") throw new Error("Unexpected removal");
-      expect(crouched.bounds.max.z).toBe(4); expect(crouched.viewHeight).toBeLessThan(22);
-      const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
+      expect(crouched.bounds.max.z).toBe(4);
+      expect(crouched.viewHeight).toBeLessThan(22);
+      const frozen = provider.move(
+        { ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } },
+        services,
+      );
       if (frozen.status !== "active") throw new Error("Unexpected removal");
-      expect(frozen.state.origin).toEqual(input.state.origin); expect(frozen.state.type).toBe(0);
+      expect(frozen.state.origin).toEqual(input.state.origin);
+      expect(frozen.state.type).toBe(0);
       let grounded = input.state;
-      for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: grounded, command: { ...input.command, serverFrame: i } }, services); if (step.status !== "active") throw new Error("Unexpected removal"); grounded = step.state; }
+      for (let i = 0; i < 30; i++) {
+        const step = provider.move({ ...input, state: grounded, command: { ...input.command, serverFrame: i } }, services);
+        if (step.status !== "active") throw new Error("Unexpected removal");
+        grounded = step.state;
+      }
       const resumed = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 200 } }, services);
       const idle = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 0 } }, services);
       if (resumed.status !== "active" || idle.status !== "active") throw new Error("Unexpected removal");
@@ -368,54 +605,107 @@ test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove p
   }
 });
 
-
 test.skipIf(!installed)("authored body bounds survive selected Q2 steps and blocked expansion", async () => {
-  const { world, origin } = await level(), scene = createSceneQueries(world);
-  const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const { world, origin } = await level(),
+    scene = createSceneQueries(world);
+  const services: MovementServices = {
+    scene,
+    numeric,
+    touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => {
+      throw new Error("Unexpected weapon step");
+    },
+    animationStep: () => {
+      throw new Error("Unexpected animation step");
+    },
+  };
   const small = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
   const blocked = { min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } };
-  const input = classic(origin), provider = createQ2ClassicMovementProvider("q2:movement");
-  const moved = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { bodyBounds: small } } }, services);
+  const input = classic(origin),
+    provider = createQ2ClassicMovementProvider("q2:movement");
+  const moved = provider.move(
+    { ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { bodyBounds: small } } },
+    services,
+  );
   if (moved.status !== "active") throw new Error("Player removed");
   const smallEnvironment = { ...input.environment, clientOutputs: { bodyBounds: small } };
   let settled = input.state;
-  for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: settled, environment: smallEnvironment, commandSequence: i }, services); if (step.status !== "active") throw new Error("Player removed"); settled = step.state; }
+  for (let i = 0; i < 30; i++) {
+    const step = provider.move({ ...input, state: settled, environment: smallEnvironment, commandSequence: i }, services);
+    if (step.status !== "active") throw new Error("Player removed");
+    settled = step.state;
+  }
   const movedOnFloor = provider.move({ ...input, state: settled, command: { ...input.command, forwardMove: 200 }, environment: smallEnvironment }, services);
   const idleSmall = provider.move({ ...input, state: settled, environment: smallEnvironment }, services);
   if (idleSmall.status !== "active" || movedOnFloor.status !== "active") throw new Error("Player removed");
-  expect(moved.bounds).toEqual(small); expect(movedOnFloor.state.originEighths.slice(0, 2)).not.toEqual(idleSmall.state.originEighths.slice(0, 2));
-  const held = provider.move({ ...input, state: moved.state, currentBounds: moved.bounds, environment: { ...input.environment, clientOutputs: { bodyBounds: blocked } } }, services);
+  expect(moved.bounds).toEqual(small);
+  expect(movedOnFloor.state.originEighths.slice(0, 2)).not.toEqual(idleSmall.state.originEighths.slice(0, 2));
+  const held = provider.move(
+    { ...input, state: moved.state, currentBounds: moved.bounds, environment: { ...input.environment, clientOutputs: { bodyBounds: blocked } } },
+    services,
+  );
   if (held.status !== "active") throw new Error("Player removed");
   expect(held.bounds).toEqual(small);
-  const rr = rerelease(origin), rrProvider = createQ2RereleaseMovementProvider("q2:movement", new Q2RereleaseMovementContext());
-  const rrMoved = rrProvider.move({ ...rr, command: { ...rr.command, forwardMove: 200 }, environment: { ...rr.environment, clientOutputs: { bodyBounds: small } } }, services);
+  const rr = rerelease(origin),
+    rrProvider = createQ2RereleaseMovementProvider("q2:movement", new Q2RereleaseMovementContext());
+  const rrMoved = rrProvider.move(
+    { ...rr, command: { ...rr.command, forwardMove: 200 }, environment: { ...rr.environment, clientOutputs: { bodyBounds: small } } },
+    services,
+  );
   if (rrMoved.status !== "active") throw new Error("Player removed");
   const rrSmallEnvironment = { ...rr.environment, clientOutputs: { bodyBounds: small } };
   let rrSettled = rr.state;
-  for (let i = 0; i < 30; i++) { const step = rrProvider.move({ ...rr, state: rrSettled, environment: rrSmallEnvironment, command: { ...rr.command, serverFrame: i } }, services); if (step.status !== "active") throw new Error("Player removed"); rrSettled = step.state; }
+  for (let i = 0; i < 30; i++) {
+    const step = rrProvider.move({ ...rr, state: rrSettled, environment: rrSmallEnvironment, command: { ...rr.command, serverFrame: i } }, services);
+    if (step.status !== "active") throw new Error("Player removed");
+    rrSettled = step.state;
+  }
   const rrOnFloor = rrProvider.move({ ...rr, state: rrSettled, command: { ...rr.command, forwardMove: 200 }, environment: rrSmallEnvironment }, services);
   const rrIdle = rrProvider.move({ ...rr, state: rrSettled, environment: rrSmallEnvironment }, services);
   if (rrIdle.status !== "active" || rrOnFloor.status !== "active") throw new Error("Player removed");
-  expect(rrMoved.bounds).toEqual(small); expect([rrOnFloor.state.origin.x, rrOnFloor.state.origin.y]).not.toEqual([rrIdle.state.origin.x, rrIdle.state.origin.y]);
-  const rrHeld = rrProvider.move({ ...rr, state: rrMoved.state, currentBounds: rrMoved.bounds, environment: { ...rr.environment, clientOutputs: { bodyBounds: blocked } } }, services);
+  expect(rrMoved.bounds).toEqual(small);
+  expect([rrOnFloor.state.origin.x, rrOnFloor.state.origin.y]).not.toEqual([rrIdle.state.origin.x, rrIdle.state.origin.y]);
+  const rrHeld = rrProvider.move(
+    { ...rr, state: rrMoved.state, currentBounds: rrMoved.bounds, environment: { ...rr.environment, clientOutputs: { bodyBounds: blocked } } },
+    services,
+  );
   if (rrHeld.status !== "active") throw new Error("Player removed");
   expect(rrHeld.bounds).toEqual(small);
 });
 
 test.skipIf(!installed)("classic authoritative movement of a dead player traces with the dead mask but prediction keeps the live mask", async () => {
-  const map = await level(), scene = createSceneQueries(map.world);
+  const map = await level(),
+    scene = createSceneQueries(map.world);
   const masks: number[] = [];
-  const spy = new Proxy(scene, { get: (target, property) => {
-    if (property === "trace") return (query: Parameters<typeof scene.trace>[0]) => { if (query.policy.kind === "q2") masks.push(query.policy.contentsMask); return target.trace(query); };
-    const value: unknown = Reflect.get(target, property, target);
-    if (typeof value !== "function") return value;
-    return (...args: unknown[]): unknown => { const result: unknown = Reflect.apply(value, target, args); return result; };
-  } });
-  const services: MovementServices = { scene: spy, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
-    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const spy = new Proxy(scene, {
+    get: (target, property) => {
+      if (property === "trace")
+        return (query: Parameters<typeof scene.trace>[0]) => {
+          if (query.policy.kind === "q2") masks.push(query.policy.contentsMask);
+          return target.trace(query);
+        };
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]): unknown => {
+        const result: unknown = Reflect.apply(value, target, args);
+        return result;
+      };
+    },
+  });
+  const services: MovementServices = {
+    scene: spy,
+    numeric,
+    touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => {
+      throw new Error("Unexpected weapon step");
+    },
+    animationStep: () => {
+      throw new Error("Unexpected animation step");
+    },
+  };
   const provider = createQ2ClassicMovementProvider("q2:classic");
-  const input = classic(map.origin), MONSTER = 0x02000000;
+  const input = classic(map.origin),
+    MONSTER = 0x02000000;
   provider.move({ ...input, environment: { ...input.environment, health: 0 } }, services);
   expect(masks.length).toBeGreaterThan(0);
   expect(masks.every(mask => (mask & MONSTER) === 0)).toBe(true);

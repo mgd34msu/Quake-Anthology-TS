@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_active.c client effects, timers,
 // event publication and ClientEndFrame. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
@@ -77,8 +78,7 @@ export function worldEffects(context: ClientEffectsContext, entity: GameEntity):
       client.airOutTime = (client.airOutTime + 1000) | 0;
       if (entity.health > 0) {
         entity.damage = Math.min(15, (entity.damage + 2) | 0);
-        const path = entity.health <= entity.damage ? "*drown.wav"
-          : (context.randomInt() & 1) !== 0 ? "sound/player/gurp1.wav" : "sound/player/gurp2.wav";
+        const path = entity.health <= entity.damage ? "*drown.wav" : (context.randomInt() & 1) !== 0 ? "sound/player/gurp1.wav" : "sound/player/gurp2.wav";
         context.sound(entity, CHAN_VOICE, context.soundIndex(path));
         entity.painDebounceTime = (time + 200) | 0;
         damage(context.combat, entity, null, null, null, null, entity.damage, DamageFlags.NO_ARMOR, 14);
@@ -88,8 +88,7 @@ export function worldEffects(context: ClientEffectsContext, entity: GameEntity):
     client.airOutTime = (time + 12000) | 0;
     entity.damage = 2;
   }
-  if (waterlevel !== 0 && (entity.watertype & (CONTENTS_LAVA | CONTENTS_SLIME)) !== 0 &&
-    entity.health > 0 && entity.painDebounceTime <= time) {
+  if (waterlevel !== 0 && (entity.watertype & (CONTENTS_LAVA | CONTENTS_SLIME)) !== 0 && entity.health > 0 && entity.painDebounceTime <= time) {
     if (suit) context.combat.entities.addEvent(entity, EntityEvent.EV_POWERUP_BATTLESUIT, 0);
     else {
       if ((entity.watertype & CONTENTS_LAVA) !== 0) damage(context.combat, entity, null, null, null, null, Math.imul(30, waterlevel), 0, 16);
@@ -99,12 +98,20 @@ export function worldEffects(context: ClientEffectsContext, entity: GameEntity):
 }
 
 export function setClientSound(context: ClientEffectsContext, entity: GameEntity): void {
-  clientOf(entity).ps.loopSound = context.combat.product === "missionpack" && (entity.s.eFlags & EF_TICKING) !== 0
-    ? context.soundIndex("sound/weapons/proxmine/wstbtick.wav")
-    : entity.waterlevel !== 0 && (entity.watertype & (CONTENTS_LAVA | CONTENTS_SLIME)) !== 0 ? context.frySound : 0;
+  clientOf(entity).ps.loopSound =
+    context.combat.product === "missionpack" && (entity.s.eFlags & EF_TICKING) !== 0
+      ? context.soundIndex("sound/weapons/proxmine/wstbtick.wav")
+      : entity.waterlevel !== 0 && (entity.watertype & (CONTENTS_LAVA | CONTENTS_SLIME)) !== 0
+        ? context.frySound
+        : 0;
 }
 
-export interface Q3AmmoRegenerationRule { readonly weapon: Weapon; readonly max: number; readonly increment: number; readonly time: number; }
+export interface Q3AmmoRegenerationRule {
+  readonly weapon: Weapon;
+  readonly max: number;
+  readonly increment: number;
+  readonly time: number;
+}
 const ammoRegeneration: readonly Q3AmmoRegenerationRule[] = [
   { weapon: Weapon.WP_MACHINEGUN, max: 50, increment: 4, time: 1000 },
   { weapon: Weapon.WP_SHOTGUN, max: 10, increment: 1, time: 1500 },
@@ -136,7 +143,12 @@ export function q3AmmoRegenerationRule(weapon: number): Q3AmmoRegenerationRule {
   return rule;
 }
 
-export function stepQ3AmmoRegeneration(rule: Q3AmmoRegenerationRule, count: number, milliseconds: number, msec: number): { readonly milliseconds: number; readonly count: number | null } {
+export function stepQ3AmmoRegeneration(
+  rule: Q3AmmoRegenerationRule,
+  count: number,
+  milliseconds: number,
+  msec: number,
+): { readonly milliseconds: number; readonly count: number | null } {
   let elapsed = (milliseconds + msec) | 0;
   if (count >= rule.max) elapsed = 0;
   if (elapsed < rule.time) return { milliseconds: elapsed, count: null };
@@ -165,8 +177,12 @@ export function clientTimerActions(context: EventContext, entity: GameEntity, ms
   while (client.timeResidual >= 1000) {
     client.timeResidual -= 1000;
     const maximum = ps.stats.get(schema.maxHealth);
-    const maxHealth = ps.product === "missionpack" && persistentTag(client) === Powerup.PW_GUARD
-      ? Math.trunc(maximum / 2) : ps.powerups.get(Powerup.PW_REGEN) !== 0 ? maximum : 0;
+    const maxHealth =
+      ps.product === "missionpack" && persistentTag(client) === Powerup.PW_GUARD
+        ? Math.trunc(maximum / 2)
+        : ps.powerups.get(Powerup.PW_REGEN) !== 0
+          ? maximum
+          : 0;
     if ((ps.product === "baseq3" && ps.powerups.get(Powerup.PW_REGEN) !== 0) || maxHealth !== 0) {
       if (entity.health < maxHealth) {
         entity.health = (entity.health + 15) | 0;
@@ -182,16 +198,19 @@ export function clientTimerActions(context: EventContext, entity: GameEntity, ms
     if (ownership.ordinaryDecay && ps.stats.get(schema.armor) > maximum) ps.stats.set(schema.armor, ps.stats.get(schema.armor) - 1);
   }
   if (ps.product === "missionpack" && persistentTag(client) === Powerup.PW_AMMOREGEN) {
-    if (ownership.ammo === null) for (const rule of ammoRegeneration) {
-      const next = stepQ3AmmoRegeneration(rule, ps.ammo.get(rule.weapon), client.ammoTimes.get(rule.weapon), msec);
-      if (next.count !== null) ps.ammo.set(rule.weapon, next.count);
-      client.ammoTimes.set(rule.weapon, next.milliseconds);
-    } else for (const timer of ownership.ammo) {
-      if (!timer.current()) break;
-      const next = stepQ3AmmoRegeneration(timer.rule, timer.count, timer.elapsedMilliseconds, msec);
-      if (next.count !== null) timer.count = next.count;
-      if (timer.current()) timer.elapsedMilliseconds = next.milliseconds;
-    }
+    if (ownership.ammo === null)
+      for (const rule of ammoRegeneration) {
+        const next = stepQ3AmmoRegeneration(rule, ps.ammo.get(rule.weapon), client.ammoTimes.get(rule.weapon), msec);
+        if (next.count !== null) ps.ammo.set(rule.weapon, next.count);
+        client.ammoTimes.set(rule.weapon, next.milliseconds);
+      }
+    else
+      for (const timer of ownership.ammo) {
+        if (!timer.current()) break;
+        const next = stepQ3AmmoRegeneration(timer.rule, timer.count, timer.elapsedMilliseconds, msec);
+        if (next.count !== null) timer.count = next.count;
+        if (timer.current()) timer.elapsedMilliseconds = next.milliseconds;
+      }
   }
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 
 /** Reliable source commands carry canonical configstring indices into the client ABI; null means the command has no legacy mapping and is dropped. */

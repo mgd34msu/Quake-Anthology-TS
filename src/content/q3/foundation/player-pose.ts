@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Player pose angles translated from Quake III Arena's cgame/cg_players.c
  * CG_SwingAngles, CG_PlayerAngles and CG_AddPainTwitch.
@@ -165,11 +166,7 @@ export function addPainTwitch(torsoAngles: Vec3, input: PainTwitchInput): Vec3 {
 }
 
 function subtractAngles(first: Vec3, second: Vec3): Vec3 {
-  return vec3(
-    angleSubtract(first.x, second.x),
-    angleSubtract(first.y, second.y),
-    angleSubtract(first.z, second.z),
-  );
+  return vec3(angleSubtract(first.x, second.x), angleSubtract(first.y, second.y), angleSubtract(first.z, second.z));
 }
 
 function movementOffset(entity: PoseEntityState): number {
@@ -208,8 +205,10 @@ export function calculatePlayerPose(state: PlayerPoseState, input: CalculatePlay
   let legsAngles = vec3(0, 0, 0);
   let torsoAngles = vec3(0, 0, 0);
 
-  if ((input.entity.legsAnim & ~ANIMATION_TOGGLE_BIT) !== PlayerAnimation.LEGS_IDLE
-    || (input.entity.torsoAnim & ~ANIMATION_TOGGLE_BIT) !== PlayerAnimation.TORSO_STAND) {
+  if (
+    (input.entity.legsAnim & ~ANIMATION_TOGGLE_BIT) !== PlayerAnimation.LEGS_IDLE ||
+    (input.entity.torsoAnim & ~ANIMATION_TOGGLE_BIT) !== PlayerAnimation.TORSO_STAND
+  ) {
     state.torso.yawing = true;
     state.torso.pitching = true;
     state.legs.yawing = true;
@@ -223,9 +222,7 @@ export function calculatePlayerPose(state: PlayerPoseState, input: CalculatePlay
   torsoAngles = vec3(0, torsoYaw, 0);
   legsAngles = vec3(0, legsYaw, 0);
 
-  const pitchDestination = headAngles.x > 180
-    ? Math.fround(Math.fround(-360 + headAngles.x) * 0.75)
-    : Math.fround(headAngles.x * 0.75);
+  const pitchDestination = headAngles.x > 180 ? Math.fround(Math.fround(-360 + headAngles.x) * 0.75) : Math.fround(headAngles.x * 0.75);
   const pitch = swingAngles({
     destination: pitchDestination,
     swingTolerance: 15,

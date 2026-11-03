@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { gunzipSync } from "node:zlib";
 import { BinaryReader } from "../core/binary/index.ts";
 import { byteText, readFixed } from "./source-bytes.ts";
@@ -30,7 +31,8 @@ export function decodeKexQ2ServerSave(bytes: Uint8Array): KexQ2SaveInfo {
   const kind = reader.u8();
   if (kind !== 0 && kind !== 1 && kind !== 2) throw new SaveFormatError("q2-kex", "unknown save type");
   const comment = readLengthString(reader);
-  const low = reader.u32(), high = reader.u32();
+  const low = reader.u32(),
+    high = reader.u32();
   const timestamp = (BigInt(high) << 32n) | BigInt(low);
   const mapCommand = readLengthString(reader);
   let gameDirectory: string | null = null;
@@ -65,27 +67,39 @@ const MAX_KEX_SAVE_BYTES = 256 * 1024 * 1024;
 /** Read the whole retail KEX Quake II save archive (server metadata + JSON game state). */
 export async function readKexQ2SaveArchive(path: string): Promise<KexQ2SaveArchive> {
   let pak: Uint8Array;
-  try { pak = new Uint8Array(gunzipSync(await Bun.file(path).bytes(), { maxOutputLength: MAX_KEX_SAVE_BYTES })); }
-  catch (error) { throw new SaveFormatError("q2-kex", `cannot decompress save archive: ${error instanceof Error ? error.message : String(error)}`); }
+  try {
+    pak = new Uint8Array(gunzipSync(await Bun.file(path).bytes(), { maxOutputLength: MAX_KEX_SAVE_BYTES }));
+  } catch (error) {
+    throw new SaveFormatError("q2-kex", `cannot decompress save archive: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const reader = new BinaryReader(pak, "q2-kex/save.pak");
   if (readFixed(reader, 4) !== "PACK") throw new SaveFormatError("q2-kex", "save archive is not a PAK");
-  const directoryOffset = reader.u32(), directoryLength = reader.u32();
+  const directoryOffset = reader.u32(),
+    directoryLength = reader.u32();
   if (directoryLength % 64 !== 0 || directoryOffset + directoryLength > pak.length)
     throw new SaveFormatError("q2-kex", "save archive directory is out of bounds");
   reader.seek(directoryOffset);
-  const files: string[] = [], entries = new Map<string, Uint8Array>();
+  const files: string[] = [],
+    entries = new Map<string, Uint8Array>();
   for (let index = 0; index < directoryLength / 64; index++) {
-    const name = readFixed(reader, 56).toLowerCase(), offset = reader.u32(), length = reader.u32();
+    const name = readFixed(reader, 56).toLowerCase(),
+      offset = reader.u32(),
+      length = reader.u32();
     if (offset + length > pak.length) throw new SaveFormatError("q2-kex", `save entry ${name} is out of bounds`);
-    files.push(name); entries.set(name, pak.subarray(offset, offset + length));
+    files.push(name);
+    entries.set(name, pak.subarray(offset, offset + length));
   }
   const server = entries.get("server.ssv");
   if (server === undefined) throw new SaveFormatError("q2-kex", "save archive has no server.ssv");
   const gameBytes = entries.get("game.ssv");
   let game: unknown = null;
   if (gameBytes !== undefined) {
-    try { const parsed: unknown = JSON.parse(new TextDecoder().decode(gameBytes)); game = parsed; }
-    catch { throw new SaveFormatError("q2-kex", "game.ssv is not JSON"); }
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(gameBytes));
+      game = parsed;
+    } catch {
+      throw new SaveFormatError("q2-kex", "game.ssv is not JSON");
+    }
   }
   return { info: decodeKexQ2ServerSave(server), files, game };
 }

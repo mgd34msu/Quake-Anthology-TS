@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 /** Hipnotic weapons a foreign weapon also grants: source weapon to the Hipnotic items stacked on it. */
 export type HipnoticOverlay = ReadonlyMap<ItemId, readonly ItemId[]>;
 
-export function hipnoticOverlay(entries: readonly (readonly [ItemId, readonly ItemId[]])[]): HipnoticOverlay { return new Map(entries); }
+export function hipnoticOverlay(entries: readonly (readonly [ItemId, readonly ItemId[]])[]): HipnoticOverlay {
+  return new Map(entries);
+}
 
 /** Adds each overlay item to the destinations of its source weapon. */
 export function overlayWeapons(weapons: PickupSupplyProfile["weapons"], overlay: HipnoticOverlay): PickupSupplyProfile["weapons"] {

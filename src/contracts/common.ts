@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModuleIdentity } from "./execution.ts";
 import type { ClientId, SeatId, SessionId } from "./identity.ts";
 
@@ -20,4 +21,3 @@ export interface CommandContext {
 }
 
 export type CvarInfoTarget = "client-userinfo" | "server-info";
-

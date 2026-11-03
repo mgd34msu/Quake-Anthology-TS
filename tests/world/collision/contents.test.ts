@@ -1,10 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { actorContents, convertContents } from "../../../src/world/collision/contents.ts";
 import type { ActorCollision } from "../../../src/world/spatial/index.ts";
 
-const CORPSE = 0x04000000, BODY = 0x02000000;
-const corpse = (family: "q1" | "q2" | "q3"): ActorCollision => ({ family, shape: { kind: "box" }, contents: CORPSE,
-  owner: null, role: "solid", monster: false, deadMonster: true });
+const CORPSE = 0x04000000,
+  BODY = 0x02000000;
+const corpse = (family: "q1" | "q2" | "q3"): ActorCollision => ({
+  family,
+  shape: { kind: "box" },
+  contents: CORPSE,
+  owner: null,
+  role: "solid",
+  monster: false,
+  deadMonster: true,
+});
 
 test("dead bodies never read as solid to Q1 movement, from any family", () => {
   // Q1 policy has no contents mask: -2 is solid, anything else passes.

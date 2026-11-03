@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's server/sv_rankings.c ASCII and 64-bit game ID encoder. The decoder halves
 // (SV_RankAsciiDecode, SV_RankDecodePlayerID) read client-supplied IDs, which the provider interface never carries as text.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -13,9 +14,8 @@ export function rankAsciiEncode(destination: Uint8Array, source: Uint8Array): nu
     const first = input.getUint8(index);
     const second = index + 1 < source.length ? input.getUint8(index + 1) : 0;
     const third = index + 2 < source.length ? input.getUint8(index + 2) : 0;
-    const text = [first >> 2, ((first << 4) | (second >> 4)) & 63,
-      ((second << 2) | (third >> 6)) & 63, third & 63];
-    const count = index + 2 < source.length ? 4 : Math.floor((source.length - index) * 4 / 3) + 1;
+    const text = [first >> 2, ((first << 4) | (second >> 4)) & 63, ((second << 2) | (third >> 6)) & 63, third & 63];
+    const count = index + 2 < source.length ? 4 : Math.floor(((source.length - index) * 4) / 3) + 1;
     for (const value of text.slice(0, count)) output.setUint8(length++, asciiEncoding.charCodeAt(value));
   }
   output.setUint8(length, 0);

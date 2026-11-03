@@ -20,13 +20,27 @@ export interface UiRenderServices {
 class UiDrawSink implements TextDrawSink {
   private color: Vec4 = { x: 1, y: 1, z: 1, w: 1 };
   clip: Rect;
-  constructor(readonly seat: SeatId, readonly target: Rect, private readonly services: UiRenderServices) { this.clip = target; }
-  setColor(color: Vec4 | null): void { this.color = color ?? { x: 1, y: 1, z: 1, w: 1 }; }
+  constructor(
+    readonly seat: SeatId,
+    readonly target: Rect,
+    private readonly services: UiRenderServices,
+  ) {
+    this.clip = target;
+  }
+  setColor(color: Vec4 | null): void {
+    this.color = color ?? { x: 1, y: 1, z: 1, w: 1 };
+  }
   stretchPixels(rect: Rect, uv: TextureRect, picture: PictureAsset): void {
     const clipped = clipPicture(rect, { s1: uv.s, t1: uv.t, s2: uv.s2, t2: uv.t2 }, this.clip);
     if (clipped === null) return;
-    if (picture.kind === "material") this.services.material({ seat: this.seat, rect: clipped.rect,
-      uv: { s: clipped.uv.s1, t: clipped.uv.t1, s2: clipped.uv.s2, t2: clipped.uv.t2 }, color: this.color, picture });
+    if (picture.kind === "material")
+      this.services.material({
+        seat: this.seat,
+        rect: clipped.rect,
+        uv: { s: clipped.uv.s1, t: clipped.uv.t1, s2: clipped.uv.s2, t2: clipped.uv.t2 },
+        color: this.color,
+        picture,
+      });
     else {
       this.services.emit({ kind: "set-color", color: this.color });
       this.services.emit({ kind: "stretch-pic", image: picture.image, ...clipped });
@@ -35,13 +49,28 @@ class UiDrawSink implements TextDrawSink {
 }
 /** UiDrawCommand coordinates are absolute drawable pixels; all glyphs and images are seat-clipped. */
 export function renderUiCommands(context: UiDrawContext, commands: readonly UiDrawCommand[], services: UiRenderServices): void {
-  const sink = new UiDrawSink(context.binding.seat, context.binding.viewport, services), draw = new Draw2D(sink, "pixels");
-  for (const command of commands) switch (command.kind) {
-    case "clip": sink.clip = command.rect === null ? context.binding.viewport : intersect(context.binding.viewport, command.rect); break;
-    case "text": services.text.draw(context, command, draw); break;
-    case "fill": sink.setColor(command.color); sink.stretchPixels(command.rect, { s: 0, t: 0, s2: 0, t2: 0 }, services.white); break;
-    case "image": sink.setColor(command.color); sink.stretchPixels(command.rect,
-      { s: command.texCoords[0].x, t: command.texCoords[0].y, s2: command.texCoords[1].x, t2: command.texCoords[1].y }, services.picture(command.resource)); break;
-  }
+  const sink = new UiDrawSink(context.binding.seat, context.binding.viewport, services),
+    draw = new Draw2D(sink, "pixels");
+  for (const command of commands)
+    switch (command.kind) {
+      case "clip":
+        sink.clip = command.rect === null ? context.binding.viewport : intersect(context.binding.viewport, command.rect);
+        break;
+      case "text":
+        services.text.draw(context, command, draw);
+        break;
+      case "fill":
+        sink.setColor(command.color);
+        sink.stretchPixels(command.rect, { s: 0, t: 0, s2: 0, t2: 0 }, services.white);
+        break;
+      case "image":
+        sink.setColor(command.color);
+        sink.stretchPixels(
+          command.rect,
+          { s: command.texCoords[0].x, t: command.texCoords[0].y, s2: command.texCoords[1].x, t2: command.texCoords[1].y },
+          services.picture(command.resource),
+        );
+        break;
+    }
   services.emit({ kind: "set-color", color: { x: 1, y: 1, z: 1, w: 1 } });
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source clustering and portal discovery from id Software be_aas_cluster.c; GPL-2.0-or-later.
 import type { AasAsset } from "./aas.ts";
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -8,23 +9,52 @@ interface AasClusteringOptions {
   readonly log: { write(text: string): undefined };
 }
 class ClusteringWorld {
-  readonly areas; readonly faces; readonly faceIndexes; readonly edgeIndexes; readonly reachability;
+  readonly areas;
+  readonly faces;
+  readonly faceIndexes;
+  readonly edgeIndexes;
+  readonly reachability;
   readonly settings: Mutable<AasAsset["settings"][number]>[];
-  portals: Portal[] = []; clusters: Mutable<AasAsset["clusters"][number]>[] = []; portalIndexes: number[] = [];
-  numPortals = 0; numClusters = 0; portalIndexSize = 0; saveFile = false;
+  portals: Portal[] = [];
+  clusters: Mutable<AasAsset["clusters"][number]>[] = [];
+  portalIndexes: number[] = [];
+  numPortals = 0;
+  numClusters = 0;
+  portalIndexSize = 0;
+  saveFile = false;
   constructor(readonly asset: AasAsset) {
-    this.areas = asset.areas; this.faces = asset.faces; this.faceIndexes = asset.faceIndexes;
-    this.edgeIndexes = asset.edgeIndexes; this.reachability = asset.reachability;
+    this.areas = asset.areas;
+    this.faces = asset.faces;
+    this.faceIndexes = asset.faceIndexes;
+    this.edgeIndexes = asset.edgeIndexes;
+    this.reachability = asset.reachability;
     this.settings = asset.settings.map(setting => ({ ...setting }));
   }
-  areaSettingsRecord(index: number) { return at(this.settings, index); }
-  portalRecord(index: number) { return at(this.portals, index); }
-  clusterRecord(index: number) { return at(this.clusters, index); }
-  portalIndexValue(index: number): number { return at(this.portalIndexes, index); }
-  setPortalIndex(index: number, value: number): void { at(this.portalIndexes, index); this.portalIndexes[index] = value; }
-  allocatePortals(count: number): void { this.portals = Array.from({ length: count }, (): Portal => ({ area: 0, frontCluster: 0, backCluster: 0, clusterAreas: [0, 0] })); }
-  allocateClusters(count: number): void { this.clusters = Array.from({ length: count }, () => ({ areaCount: 0, reachabilityAreaCount: 0, portalCount: 0, firstPortal: 0 })); }
-  allocatePortalIndexes(count: number): void { this.portalIndexes = Array.from({ length: count }, () => 0); }
+  areaSettingsRecord(index: number) {
+    return at(this.settings, index);
+  }
+  portalRecord(index: number) {
+    return at(this.portals, index);
+  }
+  clusterRecord(index: number) {
+    return at(this.clusters, index);
+  }
+  portalIndexValue(index: number): number {
+    return at(this.portalIndexes, index);
+  }
+  setPortalIndex(index: number, value: number): void {
+    at(this.portalIndexes, index);
+    this.portalIndexes[index] = value;
+  }
+  allocatePortals(count: number): void {
+    this.portals = Array.from({ length: count }, (): Portal => ({ area: 0, frontCluster: 0, backCluster: 0, clusterAreas: [0, 0] }));
+  }
+  allocateClusters(count: number): void {
+    this.clusters = Array.from({ length: count }, () => ({ areaCount: 0, reachabilityAreaCount: 0, portalCount: 0, firstPortal: 0 }));
+  }
+  allocatePortalIndexes(count: number): void {
+    this.portalIndexes = Array.from({ length: count }, () => 0);
+  }
 }
 const MAX_PORTALS = 65536;
 const MAX_PORTAL_INDEX = 65536;
@@ -85,7 +115,8 @@ function connectedAreas(world: ClusteringWorld, areaNumbers: readonly number[]):
   return true;
 }
 
-type FloodFrame = { readonly kind: "enter"; readonly areaNumber: number }
+type FloodFrame =
+  | { readonly kind: "enter"; readonly areaNumber: number }
   | { readonly kind: "faces"; readonly areaNumber: number; readonly area: AasAsset["areas"][number]; readonly index: number }
   | { readonly kind: "reachabilities"; readonly areaNumber: number; readonly index: number };
 
@@ -93,7 +124,10 @@ type FloodFrame = { readonly kind: "enter"; readonly areaNumber: number }
 class AasClustering {
   noFaceFlood = true;
 
-  constructor(private readonly world: ClusteringWorld, private readonly options: AasClusteringOptions) {}
+  constructor(
+    private readonly world: ClusteringWorld,
+    private readonly options: AasClusteringOptions,
+  ) {}
 
   removeClusterAreas(): void {
     for (let area = 1; area < this.world.areas.length; area++) this.world.areaSettingsRecord(area).cluster = 0;
@@ -170,9 +204,11 @@ class AasClustering {
         settings.clusterArea = cluster.areaCount;
         cluster.areaCount++;
         const area = at(this.world.areas, frame.areaNumber);
-        pending.push(this.noFaceFlood
-          ? { kind: "reachabilities", areaNumber: frame.areaNumber, index: 0 }
-          : { kind: "faces", areaNumber: frame.areaNumber, area, index: 0 });
+        pending.push(
+          this.noFaceFlood
+            ? { kind: "reachabilities", areaNumber: frame.areaNumber, index: 0 }
+            : { kind: "faces", areaNumber: frame.areaNumber, area, index: 0 },
+        );
       } else if (frame.kind === "faces") {
         if (frame.index >= frame.area.faceCount) {
           pending.push({ kind: "reachabilities", areaNumber: frame.areaNumber, index: 0 });
@@ -304,9 +340,12 @@ class AasClustering {
     const areaNumbers: number[] = [];
     const frontFaceCounts = new Int32Array(MAX_PORTAL_AREAS);
     const backFaceCounts = new Int32Array(MAX_PORTAL_AREAS);
-    const frontFaces: number[] = [], backFaces: number[] = [];
-    const frontAreas: number[] = [], backAreas: number[] = [];
-    let frontPlane = -1, backPlane = -1;
+    const frontFaces: number[] = [],
+      backFaces: number[] = [];
+    const frontAreas: number[] = [],
+      backAreas: number[] = [];
+    let frontPlane = -1,
+      backPlane = -1;
     this.adjacentAreasWithLessPresenceTypes(areaNumbers, areaNumber);
     for (let index = 0; index < areaNumbers.length; index++) {
       const currentArea = at(areaNumbers, index);
@@ -409,9 +448,12 @@ class AasClustering {
 
   /** AAS_InitClustering, called only after the runtime has loaded this world. */
   initialize(): void {
-    if (this.world.numClusters >= 1
-      && sourceInteger(this.options.variables.getValue("forceclustering")) === 0
-      && sourceInteger(this.options.variables.getValue("forcereachability")) === 0) return;
+    if (
+      this.world.numClusters >= 1 &&
+      sourceInteger(this.options.variables.getValue("forceclustering")) === 0 &&
+      sourceInteger(this.options.variables.getValue("forcereachability")) === 0
+    )
+      return;
     this.setViewPortalsAsClusterPortals();
     this.countForcedClusterPortals();
     this.removeClusterAreas();
@@ -443,7 +485,8 @@ class AasClustering {
     for (let cluster = 1; cluster < this.world.numClusters; cluster++) {
       this.options.print(1, `cluster ${cluster} has ${this.world.clusterRecord(cluster).reachabilityAreaCount} reachability areas\n`);
     }
-    let reachabilityAreas = 0, total = 0;
+    let reachabilityAreas = 0,
+      total = 0;
     for (let cluster = 0; cluster < this.world.numClusters; cluster++) {
       const count = this.world.clusterRecord(cluster).reachabilityAreaCount;
       reachabilityAreas = (reachabilityAreas + count) | 0;
@@ -466,9 +509,26 @@ class AasClustering {
 /** Rebuild clusters on borrowed area geometry/reachabilities; no engine heap or VFS is introduced. */
 export function clusterAas(asset: AasAsset, print: (text: string) => void = () => {}): AasAsset {
   const world = new ClusteringWorld(asset);
-  const clustering = new AasClustering(world, { variables: { getValue: () => 1 },
-    print: (_severity, text) => { print(text); return undefined; }, log: { write: text => { print(text); return undefined; } } });
+  const clustering = new AasClustering(world, {
+    variables: { getValue: () => 1 },
+    print: (_severity, text) => {
+      print(text);
+      return undefined;
+    },
+    log: {
+      write: text => {
+        print(text);
+        return undefined;
+      },
+    },
+  });
   clustering.initialize();
-  return { ...asset, lumps: [], settings: world.settings, portals: world.portals.slice(0, world.numPortals),
-    portalIndexes: world.portalIndexes.slice(0, world.portalIndexSize), clusters: world.clusters.slice(0, world.numClusters) };
+  return {
+    ...asset,
+    lumps: [],
+    settings: world.settings,
+    portals: world.portals.slice(0, world.numPortals),
+    portalIndexes: world.portalIndexes.slice(0, world.portalIndexSize),
+    clusters: world.clusters.slice(0, world.numClusters),
+  };
 }

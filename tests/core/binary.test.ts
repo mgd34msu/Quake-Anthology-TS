@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { BinaryError, BinaryReader, BinaryWriter } from "../../src/core/binary/index.ts";
 

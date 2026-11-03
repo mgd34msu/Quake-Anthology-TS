@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { EnemySelection, MonsterDefinitionReference } from "../../../contracts/content.ts";
 import { parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { Q2SpawnFields } from "../../../content/q2/foundation/host.ts";
@@ -11,7 +12,10 @@ export interface GuestMonsterReplacement {
   readonly fields: ReadonlyMap<string, string>;
   readonly definition: MonsterDefinitionReference;
 }
-export interface GuestMonsterKept { readonly classname: string; readonly reason: string; }
+export interface GuestMonsterKept {
+  readonly classname: string;
+  readonly reason: string;
+}
 export interface GuestMonsterPlan {
   /** Entity text handed to the guest with replaced monsters removed. */
   readonly entities: string;
@@ -36,20 +40,33 @@ function inhibited(fields: Q2SpawnFields, edition: "classic" | "rerelease", skil
  * a loadable entity string. */
 export function filterEntityText(text: string, keep: ReadonlySet<number>): string {
   const spans = entitySpans(text);
-  return spans.flatMap((span, ordinal) => ordinal === 0 || keep.has(ordinal) ? [text.slice(span[0], span[1]) + "\n"] : []).join("");
+  return spans.flatMap((span, ordinal) => (ordinal === 0 || keep.has(ordinal) ? [text.slice(span[0], span[1]) + "\n"] : [])).join("");
 }
 
 /** Top-level brace spans of each entity in authored order, so unreplaced
  * entities keep their exact authored bytes (escapes included). */
 function entitySpans(text: string): readonly (readonly [number, number])[] {
   const spans: [number, number][] = [];
-  let depth = 0, start = -1, quoted = false;
+  let depth = 0,
+    start = -1,
+    quoted = false;
   for (let index = 0; index < text.length; index++) {
     const char = text[index];
-    if (quoted) { if (char === '"') quoted = false; continue; }
+    if (quoted) {
+      if (char === '"') quoted = false;
+      continue;
+    }
     if (char === '"') quoted = true;
-    else if (char === "{") { if (depth === 0) start = index; depth++; }
-    else if (char === "}") { depth--; if (depth === 0 && start >= 0) { spans.push([start, index + 1]); start = -1; } }
+    else if (char === "{") {
+      if (depth === 0) start = index;
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        spans.push([start, index + 1]);
+        start = -1;
+      }
+    }
   }
   return spans;
 }
@@ -61,29 +78,62 @@ function entitySpans(text: string): readonly (readonly [number, number])[] {
  * guest alone can discharge (triggered dormancy, death/kill target chains
  * into guest entities, item drops) keep the guest monster, visibly.
  */
-export function planGuestMonsters(entities: string, edition: "classic" | "rerelease", authoredFamily: "q1" | "q2" | "q3",
-  selection: ReplaceSelection, skill: number, mode: "singleplayer" | "coop" | "deathmatch", projection: boolean): GuestMonsterPlan {
+export function planGuestMonsters(
+  entities: string,
+  edition: "classic" | "rerelease",
+  authoredFamily: "q1" | "q2" | "q3",
+  selection: ReplaceSelection,
+  skill: number,
+  mode: "singleplayer" | "coop" | "deathmatch",
+  projection: boolean,
+): GuestMonsterPlan {
   const authored = parseQ2Entities(entities, edition);
   // Q3-authored maps carry no native monster classes of their own; authored
   // monster spawns found there use Q1/Q2 classnames, so both ordinary sets apply.
-  const ordinary = authoredFamily === "q1" ? q1OrdinaryMonsters : authoredFamily === "q2" ? q2OrdinaryMonsters
-    : new Set([...q1OrdinaryMonsters, ...q2OrdinaryMonsters]);
+  const ordinary =
+    authoredFamily === "q1" ? q1OrdinaryMonsters : authoredFamily === "q2" ? q2OrdinaryMonsters : new Set([...q1OrdinaryMonsters, ...q2OrdinaryMonsters]);
   const inhibition = authoredFamily === "q1" ? 0xf00 : edition === "rerelease" ? 0xff00 : 0x1f00;
-  const replacements: GuestMonsterReplacement[] = [], kept: GuestMonsterKept[] = [], removed = new Set<number>();
+  const replacements: GuestMonsterReplacement[] = [],
+    kept: GuestMonsterKept[] = [],
+    removed = new Set<number>();
   for (const entity of authored) {
     const classname = entity.classname;
     if (!classname.startsWith("monster_")) continue;
     const target = selection.byClassname[classname] ?? selection.default;
     if ("kind" in target) continue;
-    const fields = entity.values, flags = Number(fields.get("spawnflags") ?? 0);
-    const keep = (reason: string): void => { kept.push({ classname, reason }); };
-    if (!projection) { keep("guest has no declared combat profile to project selected monsters"); continue; }
-    if (!ordinary.has(classname)) { keep("authored obligations are not preserved by selected admission"); continue; }
-    if ((flags & ~inhibition & ~1) !== 0) { keep(`spawn flags ${flags} need guest-native handling`); continue; }
-    if ((fields.get("targetname") ?? "") !== "") { keep("triggered monsters stay guest-native"); continue; }
-    if ((fields.get("deathtarget") ?? "") !== "" || (fields.get("killtarget") ?? "") !== "") { keep("death target chains stay guest-native"); continue; }
-    if ((fields.get("combattarget") ?? "") !== "") { keep("combat targets stay guest-native"); continue; }
-    if ((fields.get("item") ?? "") !== "") { keep("item drops stay guest-native"); continue; }
+    const fields = entity.values,
+      flags = Number(fields.get("spawnflags") ?? 0);
+    const keep = (reason: string): void => {
+      kept.push({ classname, reason });
+    };
+    if (!projection) {
+      keep("guest has no declared combat profile to project selected monsters");
+      continue;
+    }
+    if (!ordinary.has(classname)) {
+      keep("authored obligations are not preserved by selected admission");
+      continue;
+    }
+    if ((flags & ~inhibition & ~1) !== 0) {
+      keep(`spawn flags ${flags} need guest-native handling`);
+      continue;
+    }
+    if ((fields.get("targetname") ?? "") !== "") {
+      keep("triggered monsters stay guest-native");
+      continue;
+    }
+    if ((fields.get("deathtarget") ?? "") !== "" || (fields.get("killtarget") ?? "") !== "") {
+      keep("death target chains stay guest-native");
+      continue;
+    }
+    if ((fields.get("combattarget") ?? "") !== "") {
+      keep("combat targets stay guest-native");
+      continue;
+    }
+    if ((fields.get("item") ?? "") !== "") {
+      keep("item drops stay guest-native");
+      continue;
+    }
     if (inhibited(entity, edition, skill, mode)) continue;
     replacements.push({ ordinal: entity.ordinal, classname, fields, definition: target });
     removed.add(entity.ordinal);
@@ -91,7 +141,9 @@ export function planGuestMonsters(entities: string, edition: "classic" | "rerele
   if (replacements.length === 0) return { entities, replacements, kept };
   const spans = entitySpans(entities);
   if (spans.length !== authored.length) throw new Error("Native monster admission could not segment the authored entities");
-  const text = authored.flatMap(entity => removed.has(entity.ordinal) ? [] : [entities.slice(spans[entity.ordinal]?.[0] ?? 0, spans[entity.ordinal]?.[1] ?? 0) + "\n"]).join("");
+  const text = authored
+    .flatMap(entity => (removed.has(entity.ordinal) ? [] : [entities.slice(spans[entity.ordinal]?.[0] ?? 0, spans[entity.ordinal]?.[1] ?? 0) + "\n"]))
+    .join("");
   return { entities: text, replacements, kept };
 }
 
@@ -109,7 +161,8 @@ export class GuestMonsterPlans {
   constructor(private readonly compute: (text: string, edition: "classic" | "rerelease") => GuestMonsterPlan | null) {}
 
   plan(text: string, edition: "classic" | "rerelease"): GuestMonsterPlan | null {
-    const key = this.#texts.intern(text), discriminator = edition === "classic" ? 0 : 1;
+    const key = this.#texts.intern(text),
+      discriminator = edition === "classic" ? 0 : 1;
     const found = this.#index.find(key, discriminator);
     if (found >= 0) return this.#plans[found] ?? null;
     const plan = this.compute(text, edition);
@@ -120,5 +173,7 @@ export class GuestMonsterPlans {
   }
 
   /** The guest entity string with replaced monsters stripped, or the text unchanged when nothing is selected. */
-  entities(text: string, edition: "classic" | "rerelease"): string { return this.plan(text, edition)?.entities ?? text; }
+  entities(text: string, edition: "classic" | "rerelease"): string {
+    return this.plan(text, edition)?.entities ?? text;
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ProviderReference } from "../../src/contracts/content.ts";
@@ -7,11 +8,27 @@ import { classicGuestLocalCommand, classicGuestPlayerUi, classicGuestPlayerView 
 
 const source: ProviderReference = { provider: "q2:weapons", content: "q2:classic:baseq2:installed" };
 const state: Q2PlayerState = {
-  kind: "q2-classic", movement: { kind: "q2-classic", type: 0, originEighths: [800, -1600, 2400], velocityEighths: [0, 0, 0],
-    flags: 0, timeEightMilliseconds: 0, gravity: 800, deltaAngleShorts: [16384, 32768, 65535] },
-  viewAngles: { x: 10, y: 20, z: 30 }, viewOffset: { x: 2, y: -3, z: 22 }, kickAngles: { x: -4, y: 5, z: 6 },
-  gunAngles: { x: 0, y: 0, z: 0 }, gunOffset: { x: 0, y: 0, z: 0 }, gunIndex: 7, gunFrame: 3, fov: 105,
-  renderFlags: 0, stats: Array.from({ length: 32 }, (_, index) => index === 1 ? -17 : index === 3 ? 11 : index === 5 ? 23 : 0),
+  kind: "q2-classic",
+  movement: {
+    kind: "q2-classic",
+    type: 0,
+    originEighths: [800, -1600, 2400],
+    velocityEighths: [0, 0, 0],
+    flags: 0,
+    timeEightMilliseconds: 0,
+    gravity: 800,
+    deltaAngleShorts: [16384, 32768, 65535],
+  },
+  viewAngles: { x: 10, y: 20, z: 30 },
+  viewOffset: { x: 2, y: -3, z: 22 },
+  kickAngles: { x: -4, y: 5, z: 6 },
+  gunAngles: { x: 0, y: 0, z: 0 },
+  gunOffset: { x: 0, y: 0, z: 0 },
+  gunIndex: 7,
+  gunFrame: 3,
+  fov: 105,
+  renderFlags: 0,
+  stats: Array.from({ length: 32 }, (_, index) => (index === 1 ? -17 : index === 3 ? 11 : index === 5 ? 23 : 0)),
   blend: { x: 0, y: 0, z: 0, w: 0 },
 };
 
@@ -49,13 +66,26 @@ test("native HUD uses reported stats and leaves private inventory and unknown mo
 
 test("native local aim removes the source delta once and rejects already-decoded network commands", () => {
   const identity = createIdentityOwner("native-public-command");
-  const command: Q2UserCommand = { kind: "q2-classic", milliseconds: 17, angleShorts: [0, 65535, 17], forwardMove: 300,
-    sideMove: -125, upMove: 200, buttons: 3, impulse: 9, lightLevel: 128 };
+  const command: Q2UserCommand = {
+    kind: "q2-classic",
+    milliseconds: 17,
+    angleShorts: [0, 65535, 17],
+    forwardMove: 300,
+    sideMove: -125,
+    upMove: 200,
+    buttons: 3,
+    impulse: 9,
+    lightLevel: 128,
+  };
   const input: ActorCommand = { actor: identity.actor(1, 0), source: { kind: "bot", provider: "q2:bot" }, sequence: 9, command };
   const converted = classicGuestLocalCommand(input, state);
   expect(converted).toEqual({ ...command, angleShorts: [49152, 32767, 18] });
   expect(command.angleShorts).toEqual([0, 65535, 17]);
   expect(() => classicGuestLocalCommand({ ...input, source: { kind: "remote-client", client: identity.client(0, 0) } }, state)).toThrow("wire endpoint");
-  expect(() => classicGuestLocalCommand({ ...input, command: { kind: "q3", serverTimeMilliseconds: 20, angleWords: [0, 0, 0],
-    forwardMove: 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 1 } }, state)).toThrow("classic Quake II");
+  expect(() =>
+    classicGuestLocalCommand(
+      { ...input, command: { kind: "q3", serverTimeMilliseconds: 20, angleWords: [0, 0, 0], forwardMove: 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 1 } },
+      state,
+    ),
+  ).toThrow("classic Quake II");
 });

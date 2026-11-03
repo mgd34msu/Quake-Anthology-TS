@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Derived from RSA Data Security, Inc.'s MD4 Message-Digest Algorithm as used
 // by id Software's code/qcommon/md4.c.
 //
@@ -170,19 +171,25 @@ export class Md4Context {
   }
 
   final(): Uint8Array {
-    const bits = new Uint8Array(8), countView = new DataView(bits.buffer);
+    const bits = new Uint8Array(8),
+      countView = new DataView(bits.buffer);
     countView.setUint32(0, this.count[0], true);
     countView.setUint32(4, this.count[1], true);
     const index = (this.count[0] >>> 3) & 63;
     this.update(PADDING.subarray(0, index < 56 ? 56 - index : 120 - index));
     this.update(bits);
-    const digest = new Uint8Array(16), digestView = new DataView(digest.buffer);
+    const digest = new Uint8Array(16),
+      digestView = new DataView(digest.buffer);
     digestView.setUint32(0, this.state.a, true);
     digestView.setUint32(4, this.state.b, true);
     digestView.setUint32(8, this.state.c, true);
     digestView.setUint32(12, this.state.d, true);
-    this.state.a = 0; this.state.b = 0; this.state.c = 0; this.state.d = 0;
-    this.count[0] = 0; this.count[1] = 0;
+    this.state.a = 0;
+    this.state.b = 0;
+    this.state.c = 0;
+    this.state.d = 0;
+    this.count[0] = 0;
+    this.count[1] = 0;
     this.buffer.fill(0);
     return digest;
   }
@@ -196,11 +203,12 @@ export function md4(data: Uint8Array): Uint8Array {
 
 function foldDigest(digest: Uint8Array): number {
   const view = new DataView(digest.buffer, digest.byteOffset, digest.byteLength);
-  return (view.getUint32(0, true) ^ view.getUint32(4, true)
-    ^ view.getUint32(8, true) ^ view.getUint32(12, true)) >>> 0;
+  return (view.getUint32(0, true) ^ view.getUint32(4, true) ^ view.getUint32(8, true) ^ view.getUint32(12, true)) >>> 0;
 }
 
-export function blockChecksum(data: Uint8Array): number { return foldDigest(md4(data)); }
+export function blockChecksum(data: Uint8Array): number {
+  return foldDigest(md4(data));
+}
 
 function checksumKeyBytes(key: number): Uint8Array {
   if (!Number.isInteger(key) || key < -0x80000000 || key > 0xffffffff) {

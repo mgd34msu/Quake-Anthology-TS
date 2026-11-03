@@ -1,19 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { RenderWorkerTransport } from "../../src/render/worker-transport.ts";
 const workerUrl = new URL("./fixtures/transport-worker.ts", import.meta.url);
 
 test("worker issue completion, copied ownership and synchronous order", async () => {
   const completed: unknown[] = [];
-  const worker = await RenderWorkerTransport.open(workerUrl, { renderer: "test" }, {
-    request() { throw new Error("Unexpected callback"); }, completed: value => { completed.push(value); return undefined; },
-  });
+  const worker = await RenderWorkerTransport.open(
+    workerUrl,
+    { renderer: "test" },
+    {
+      request() {
+        throw new Error("Unexpected callback");
+      },
+      completed: value => {
+        completed.push(value);
+        return undefined;
+      },
+    },
+  );
   try {
     expect(worker.description).toEqual({ renderer: "test" });
-    const bytes = new Uint8Array([1, 2, 3]); worker.issue(bytes); bytes[0] = 99;
+    const bytes = new Uint8Array([1, 2, 3]);
+    worker.issue(bytes);
+    bytes[0] = 99;
     expect(worker.call("values")).toEqual([new Uint8Array([1, 2, 3])]);
-    expect(completed).toEqual([new Uint8Array([1, 2, 3])]); expect(worker.settled).toBe(true);
-  } finally { worker.close(); }
-  expect(worker.retired).toBe(true); worker.close();
+    expect(completed).toEqual([new Uint8Array([1, 2, 3])]);
+    expect(worker.settled).toBe(true);
+  } finally {
+    worker.close();
+  }
+  expect(worker.retired).toBe(true);
+  worker.close();
 });
 
 test("nested reached callbacks route subcalls to their exact suspended parent", async () => {
@@ -21,26 +38,60 @@ test("nested reached callbacks route subcalls to their exact suspended parent", 
   const worker = await RenderWorkerTransport.open(workerUrl, null, {
     request(payload) {
       if (payload === "outer-callback") {
-        order.push("outer"); expect(() => worker.call("unrelated")).toThrow("Reentrant"); expect(() => worker.close()).toThrow("Reentrant");
-        const value = worker.callbackCall("inner"); order.push("outer-return"); return value;
+        order.push("outer");
+        expect(() => worker.call("unrelated")).toThrow("Reentrant");
+        expect(() => worker.close()).toThrow("Reentrant");
+        const value = worker.callbackCall("inner");
+        order.push("outer-return");
+        return value;
       }
-      if (payload === "inner-callback") { order.push("inner"); return worker.callbackCall("leaf"); }
+      if (payload === "inner-callback") {
+        order.push("inner");
+        return worker.callbackCall("leaf");
+      }
       throw new Error("Unexpected callback");
-    }, completed() { return undefined; },
+    },
+    completed() {
+      return undefined;
+    },
   });
-  try { expect(worker.call("outer")).toBe("leaf-result"); expect(order).toEqual(["outer", "inner", "outer-return"]); }
-  finally { worker.close(); }
+  try {
+    expect(worker.call("outer")).toBe("leaf-result");
+    expect(order).toEqual(["outer", "inner", "outer-return"]);
+  } finally {
+    worker.close();
+  }
 });
 
 test("nested host failures retain exact thrown identity and remain sticky", async () => {
   const original = new Error("original host error");
   const worker = await RenderWorkerTransport.open(workerUrl, null, {
-    request(payload) { if (payload === "outer-callback") return worker.callbackCall("inner"); throw original; }, completed() { return undefined; },
+    request(payload) {
+      if (payload === "outer-callback") return worker.callbackCall("inner");
+      throw original;
+    },
+    completed() {
+      return undefined;
+    },
   });
-  try { worker.call("outer"); throw new Error("Expected failure"); } catch (error) { expect(error).toBe(original); }
-  try { worker.call("leaf"); throw new Error("Expected sticky failure"); } catch (error) { expect(error).toBe(original); }
+  try {
+    worker.call("outer");
+    throw new Error("Expected failure");
+  } catch (error) {
+    expect(error).toBe(original);
+  }
+  try {
+    worker.call("leaf");
+    throw new Error("Expected sticky failure");
+  } catch (error) {
+    expect(error).toBe(original);
+  }
   let closeFailure: unknown = null;
-  try { worker.close(); } catch (error) { closeFailure = error; }
+  try {
+    worker.close();
+  } catch (error) {
+    closeFailure = error;
+  }
   expect(closeFailure).toBe(original);
   expect(worker.retired).toBe(true);
 });
@@ -49,7 +100,10 @@ test("nested host failures retain exact thrown identity and remain sticky", asyn
 async function closeAfterLateCompletion(worker: { close(): void }): Promise<void> {
   const deadline = performance.now() + 10000;
   for (;;) {
-    try { worker.close(); return; } catch (error) {
+    try {
+      worker.close();
+      return;
+    } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect(String(error)).toContain("did not complete its issued buffer");
       if (performance.now() > deadline) throw error;
@@ -60,22 +114,32 @@ async function closeAfterLateCompletion(worker: { close(): void }): Promise<void
 
 test("failed close acknowledgment never retires the worker", async () => {
   const worker = await RenderWorkerTransport.open(workerUrl, "close-fails-once", { request() {}, completed() {} });
-  expect(() => worker.close()).toThrow("release failed"); expect(worker.retired).toBe(false);
+  expect(() => worker.close()).toThrow("release failed");
+  expect(worker.retired).toBe(false);
   expect(() => worker.close()).toThrow("release failed");
   expect(worker.retired).toBe(true);
 });
 
 test("timeout does not retire pending ownership; late completion permits acknowledged close", async () => {
   const worker = await RenderWorkerTransport.open(workerUrl, null, { request() {}, completed() {} }, 60);
-  expect(() => worker.call("slow")).toThrow("did not complete"); expect(worker.retired).toBe(false);
+  expect(() => worker.call("slow")).toThrow("did not complete");
+  expect(worker.retired).toBe(false);
   await closeAfterLateCompletion(worker);
   expect(worker.retired).toBe(true);
 });
 
 test("timed out nested subcall retains ownership of its late completion", async () => {
-  const worker = await RenderWorkerTransport.open(workerUrl, null, {
-    request() { return worker.callbackCall("slow"); }, completed() {},
-  }, 60);
+  const worker = await RenderWorkerTransport.open(
+    workerUrl,
+    null,
+    {
+      request() {
+        return worker.callbackCall("slow");
+      },
+      completed() {},
+    },
+    60,
+  );
   expect(() => worker.call("outer")).toThrow("did not complete");
   expect(worker.retired).toBe(false);
   await closeAfterLateCompletion(worker);
@@ -84,31 +148,61 @@ test("timed out nested subcall retains ownership of its late completion", async 
 
 test("completion publication cannot replace the operation being settled", async () => {
   const worker = await RenderWorkerTransport.open(workerUrl, null, {
-    request() {}, completed() { expect(() => worker.call("unrelated")).toThrow("Reentrant"); },
+    request() {},
+    completed() {
+      expect(() => worker.call("unrelated")).toThrow("Reentrant");
+    },
   });
-  try { worker.issue("first"); worker.synchronize(); expect(worker.call("values")).toEqual(["first"]); }
-  finally { worker.close(); }
+  try {
+    worker.issue("first");
+    worker.synchronize();
+    expect(worker.call("values")).toEqual(["first"]);
+  } finally {
+    worker.close();
+  }
 });
 
 test("issued failure notifies asynchronous waiters exactly once without a renderer barrier", async () => {
   for (const command of ["failure", "outer", "slow"]) {
-    const original = new Error("asynchronous host failure"), notifications: unknown[] = [];
+    const original = new Error("asynchronous host failure"),
+      notifications: unknown[] = [];
     let deliver: ((error: unknown) => void) | null = null;
-    const notification = new Promise<unknown>(resolve => { deliver = resolve; });
-    const worker = await RenderWorkerTransport.open(workerUrl, null, {
-      request() { throw original; }, completed() {},
-      failed(error) { notifications.push(error); if (deliver === null) throw new Error("Missing failure waiter"); deliver(error); },
-    }, command === "slow" ? 60 : 1000);
+    const notification = new Promise<unknown>(resolve => {
+      deliver = resolve;
+    });
+    const worker = await RenderWorkerTransport.open(
+      workerUrl,
+      null,
+      {
+        request() {
+          throw original;
+        },
+        completed() {},
+        failed(error) {
+          notifications.push(error);
+          if (deliver === null) throw new Error("Missing failure waiter");
+          deliver(error);
+        },
+      },
+      command === "slow" ? 60 : 1000,
+    );
     worker.issue(command);
     const error = await notification;
     if (command === "outer") expect(error).toBe(original);
-    else if (command === "failure") { expect(error).toBeInstanceOf(RangeError); expect(String(error)).toContain("worker failure"); }
-    else expect(String(error)).toContain("did not complete");
+    else if (command === "failure") {
+      expect(error).toBeInstanceOf(RangeError);
+      expect(String(error)).toContain("worker failure");
+    } else expect(String(error)).toContain("did not complete");
     expect(notifications).toHaveLength(1);
     let closeFailure: unknown = null;
-    try { worker.close(); } catch (closeError) { closeFailure = closeError; }
+    try {
+      worker.close();
+    } catch (closeError) {
+      closeFailure = closeError;
+    }
     expect(closeFailure).toBe(error);
     expect(worker.retired).toBe(true);
-    await Bun.sleep(1); expect(notifications).toHaveLength(1);
+    await Bun.sleep(1);
+    expect(notifications).toHaveLength(1);
   }
 });

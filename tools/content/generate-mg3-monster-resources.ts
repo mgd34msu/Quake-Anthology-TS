@@ -20,7 +20,9 @@ const functionOffsets = new Set(program.globals.filter(definition => definition.
 const stringOffsets = new Set(program.globals.filter(definition => definition.type === "string").map(definition => definition.offset));
 
 function reachable(program: QcProgram, spawn: string): Set<string> {
-  const seen = new Set<number>(), stack = [program.functionNamed(spawn).index], paths = new Set<string>();
+  const seen = new Set<number>(),
+    stack = [program.functionNamed(spawn).index],
+    paths = new Set<string>();
   while (stack.length > 0) {
     const index = stack.pop();
     if (index === undefined || seen.has(index)) continue;
@@ -48,5 +50,7 @@ const result: Record<string, { readonly resources: readonly string[] }> = {};
 for (const [classname, declared] of Object.entries(mg3MonsterResources)) {
   result[classname] = { resources: [...new Set([...declared.resources.filter(path => !path.endsWith(".bsp")), ...reachable(program, classname)])].sort() };
 }
-await Bun.write(resolve(import.meta.dir, "../../src/content/monsters/mg3-resources.ts"),
-  `// SPDX-License-Identifier: GPL-2.0-or-later\n// Generated from the MG3 progs.dat spawn-function closure plus the module precache declarations.\n// Regenerate with tools/content/generate-mg3-monster-resources.ts.\nexport const mg3MonsterResources: Readonly<Record<string, { readonly resources: readonly string[] }>> = ${JSON.stringify(result, null, 2)};\n`);
+await Bun.write(
+  resolve(import.meta.dir, "../../src/content/monsters/mg3-resources.ts"),
+  `// SPDX-License-Identifier: GPL-2.0-or-later\n// Generated from the MG3 progs.dat spawn-function closure plus the module precache declarations.\n// Regenerate with tools/content/generate-mg3-monster-resources.ts.\nexport const mg3MonsterResources: Readonly<Record<string, { readonly resources: readonly string[] }>> = ${JSON.stringify(result, null, 2)};\n`,
+);

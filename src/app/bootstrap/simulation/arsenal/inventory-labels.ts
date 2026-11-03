@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import { q2ItemPickupName } from "../../../../content/q2/foundation/items.ts";
 import { q2MissionWeaponDisplayName } from "../../../../content/q2/missionpacks/items.ts";
@@ -6,8 +7,13 @@ import { ItemType } from "../../../../content/q3/base/shared/definitions.ts";
 import { Q3_WEAPON_ITEMS } from "../../../../content/q3/foundation/arsenal.ts";
 
 const q1Ammo: ReadonlyMap<ItemId, string> = new Map([
-  ["q1:ammo/shells", "Shells"], ["q1:ammo/nails", "Nails"], ["q1:ammo/rockets", "Rockets"], ["q1:ammo/cells", "Cells"],
-  ["rogue:ammo/lava-nails", "Lava Nails"], ["rogue:ammo/multi-rockets", "Multi Rockets"], ["rogue:ammo/plasma", "Plasma"],
+  ["q1:ammo/shells", "Shells"],
+  ["q1:ammo/nails", "Nails"],
+  ["q1:ammo/rockets", "Rockets"],
+  ["q1:ammo/cells", "Cells"],
+  ["rogue:ammo/lava-nails", "Lava Nails"],
+  ["rogue:ammo/multi-rockets", "Multi Rockets"],
+  ["rogue:ammo/plasma", "Plasma"],
 ]);
 export function selectedAmmoLabel(family: "q1" | "q2" | "q3", item: ItemId): string {
   let label: string | null | undefined;

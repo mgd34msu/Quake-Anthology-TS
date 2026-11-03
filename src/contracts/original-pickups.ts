@@ -1,15 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId, ProtectionChannel, ProtectionObserver } from "./gameplay.ts";
 import type { ActorId, ProviderId } from "./identity.ts";
 import type { SourceTime } from "./time.ts";
 
-export type PickupResource =
-  | { readonly kind: "protection"; readonly channel: ProtectionChannel }
-  | { readonly kind: "inventory"; readonly item: ItemId };
-export type PickupWrite = Extract<PickupResource, { readonly kind: "protection" }>
+export type PickupResource = { readonly kind: "protection"; readonly channel: ProtectionChannel } | { readonly kind: "inventory"; readonly item: ItemId };
+export type PickupWrite =
+  | Extract<PickupResource, { readonly kind: "protection" }>
   | { readonly kind: "inventory"; readonly item: ItemId; readonly fields: "count" | "capacity" | "count-and-capacity" };
 export type PickupWrites = readonly [PickupWrite, ...PickupWrite[]];
 export type PickupCount = { readonly kind: "default" } | { readonly kind: "override"; readonly amount: number };
-export interface PickupCargoEntry { readonly kind: "counter" | "weapon"; readonly item: ItemId; readonly count: number; }
+export interface PickupCargoEntry {
+  readonly kind: "counter" | "weapon";
+  readonly item: ItemId;
+  readonly count: number;
+}
 export interface OriginalPickupOffer {
   readonly recipient: ActorId;
   readonly pickup: ActorId;
@@ -64,7 +68,10 @@ export interface SourcePickupLifetime {
 }
 export interface OriginalPickupAdmission {
   /** Keep the current grant owner and item scope until the complete original caller unwinds. */
-  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection, lifetime: SourcePickupLifetime) => Result | Promise<Result>): Result | Promise<Result>;
+  runSource<Result>(
+    offer: OriginalPickupOffer,
+    execute: (selection: SourcePickupSelection, lifetime: SourcePickupLifetime) => Result | Promise<Result>,
+  ): Result | Promise<Result>;
   touch(offer: OriginalPickupOffer, continuation: OriginalPickupContinuation): OriginalPickupOutcome;
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { Q3ServerCommandExecutor } from "../../../network/q3/client-server-command.ts";
@@ -22,7 +23,9 @@ export interface LocalQ3ClientBindings {
 
 /** A local seat receives authoritative server records without a network channel. */
 export class LocalQ3ClientState implements Q3ClientState {
-  readonly gameState = new ClientGameStateStorage(message => { throw new CommonError("drop", message); });
+  readonly gameState = new ClientGameStateStorage(message => {
+    throw new CommonError("drop", message);
+  });
   readonly commands = new Q3CommandHistory();
   readonly source: ApplicationQ3ClientSource;
   readonly clientNumber: number;
@@ -37,31 +40,74 @@ export class LocalQ3ClientState implements Q3ClientState {
   serverCommandSequence: number;
   lastExecutedServerCommand: number;
 
-  constructor(initial: Gamestate, private readonly bindings: LocalQ3ClientBindings) {
+  constructor(
+    initial: Gamestate,
+    private readonly bindings: LocalQ3ClientBindings,
+  ) {
     this.clientNumber = initial.clientNumber;
     this.serverCommandSequence = initial.commandSequence;
     this.lastExecutedServerCommand = initial.commandSequence;
     this.gameState.beginEntries();
     for (const entry of initial.entries) if (entry.kind === "configstring") this.gameState.append(entry.index, entry.value);
-    const snapshots = new HistorySnapshotSource(this.history, () => this.parseEntities.number, text => bindings.print(text));
+    const snapshots = new HistorySnapshotSource(
+      this.history,
+      () => this.parseEntities.number,
+      text => bindings.print(text),
+    );
     const owner = this;
     this.source = {
-      sourceMode: 'live',
+      sourceMode: "live",
       clientNumber: this.clientNumber,
-      get time() { owner.assertCurrent(); return snapshots.current().serverTime; },
-      get serverMessageSequence() { return owner.serverMessageSequence; },
-      get lastExecutedServerCommand() { return owner.lastExecutedServerCommand; },
-      commands: { get currentNumber() { return owner.commands.currentNumber; }, read: number => {
-        owner.assertCurrent(); const command = owner.commands.read(number);
-        return command === null ? null : { ...command, angles: { x: command.angles[0], y: command.angles[1], z: command.angles[2] } };
-      } },
-      current: () => { this.assertCurrent(); return snapshots.current(); },
-      read: number => { this.assertCurrent(); return snapshots.read(number); },
-      getGameState: () => { this.assertCurrent(); return this.gameState.copyStrings(); },
-      systemInfo: () => { this.assertCurrent(); return this.gameState.get(1) ?? ""; },
+      get time() {
+        owner.assertCurrent();
+        return snapshots.current().serverTime;
+      },
+      get serverMessageSequence() {
+        return owner.serverMessageSequence;
+      },
+      get lastExecutedServerCommand() {
+        return owner.lastExecutedServerCommand;
+      },
+      commands: {
+        get currentNumber() {
+          return owner.commands.currentNumber;
+        },
+        read: number => {
+          owner.assertCurrent();
+          const command = owner.commands.read(number);
+          return command === null ? null : { ...command, angles: { x: command.angles[0], y: command.angles[1], z: command.angles[2] } };
+        },
+      },
+      current: () => {
+        this.assertCurrent();
+        return snapshots.current();
+      },
+      read: number => {
+        this.assertCurrent();
+        return snapshots.read(number);
+      },
+      getGameState: () => {
+        this.assertCurrent();
+        return this.gameState.copyStrings();
+      },
+      systemInfo: () => {
+        this.assertCurrent();
+        return this.gameState.get(1) ?? "";
+      },
       getServerCommand: number => this.getServerCommand(number),
-      actorAt: number => { this.assertCurrent(); return bindings.actorAt(number); },
-      ...(bindings.soundActor === undefined ? {} : { soundActor: (number: number) => { this.assertCurrent(); const soundActor = bindings.soundActor; return soundActor === undefined ? null : soundActor(number); } }),
+      actorAt: number => {
+        this.assertCurrent();
+        return bindings.actorAt(number);
+      },
+      ...(bindings.soundActor === undefined
+        ? {}
+        : {
+            soundActor: (number: number) => {
+              this.assertCurrent();
+              const soundActor = bindings.soundActor;
+              return soundActor === undefined ? null : soundActor(number);
+            },
+          }),
       snapshotPing: number => this.snapshotPing(number),
     };
   }
@@ -73,7 +119,8 @@ export class LocalQ3ClientState implements Q3ClientState {
 
   receiveServerCommand(sequence: number, text: string): void {
     this.assertCurrent();
-    if (!Number.isInteger(sequence) || sequence !== this.serverCommandSequence + 1) throw new Error("Local Q3 reliable command sequence must advance without gaps");
+    if (!Number.isInteger(sequence) || sequence !== this.serverCommandSequence + 1)
+      throw new Error("Local Q3 reliable command sequence must advance without gaps");
     this.serverCommandSequence = sequence;
     this.serverCommands.set(sequence, text.slice(0, 1023));
     this.serverCommands.delete(sequence - 64);
@@ -84,7 +131,10 @@ export class LocalQ3ClientState implements Q3ClientState {
     if (snapshot.messageNumber <= this.serverMessageSequence) throw new Error("Local Q3 snapshot sequence must advance");
     if (snapshot.serverCommandNumber !== this.serverCommandSequence) throw new Error("Local Q3 snapshot must follow its reliable commands");
     const start = this.parseEntities.number;
-    for (const entity of snapshot.entities) { this.parseEntities.at(this.parseEntities.number).copyFrom(entity); this.parseEntities.advance(); }
+    for (const entity of snapshot.entities) {
+      this.parseEntities.at(this.parseEntities.number).copyFrom(entity);
+      this.parseEntities.advance();
+    }
     this.history.publish({ kind: "snapshot", validity: { kind: "valid" }, snapshot: { ...snapshot, parseEntitiesNumber: start } });
     this.serverMessageSequence = snapshot.messageNumber;
     for (const number of this.pings.keys()) if (((snapshot.messageNumber - number) | 0) >= 32) this.pings.delete(number);
@@ -93,7 +143,7 @@ export class LocalQ3ClientState implements Q3ClientState {
 
   snapshotPing(number: number): number | null {
     this.assertCurrent();
-    return this.source.read(number) === null ? null : this.pings.get(number) ?? null;
+    return this.source.read(number) === null ? null : (this.pings.get(number) ?? null);
   }
 
   async getServerCommand(sequence: number): Promise<readonly string[] | null> {
@@ -105,16 +155,28 @@ export class LocalQ3ClientState implements Q3ClientState {
     this.lastExecutedServerCommand = sequence;
     return this.serverCommandExecutor.execute(command, this.gameState, {
       assertCurrent: () => this.assertCurrent(),
-      systemInfo: async () => { await this.bindings.systemInfo(this.gameState.get(1) ?? ""); },
-      mapRestart: () => { this.commands.restart(); this.bindings.mapRestart(); },
-      localServerRunning: () => true, levelShot: () => this.bindings.levelShot(),
+      systemInfo: async () => {
+        await this.bindings.systemInfo(this.gameState.get(1) ?? "");
+      },
+      mapRestart: () => {
+        this.commands.restart();
+        this.bindings.mapRestart();
+      },
+      localServerRunning: () => true,
+      levelShot: () => this.bindings.levelShot(),
     });
   }
 
   retire(): void {
     if (this.retired) return;
-    this.retired = true; this.generation++;
-    this.history.clear(); this.parseEntities.clear(); this.commands.clear(); this.gameState.clear();
-    this.serverCommands.clear(); this.pings.clear(); this.serverCommandExecutor.clear();
+    this.retired = true;
+    this.generation++;
+    this.history.clear();
+    this.parseEntities.clear();
+    this.commands.clear();
+    this.gameState.clear();
+    this.serverCommands.clear();
+    this.pings.clear();
+    this.serverCommandExecutor.clear();
   }
 }

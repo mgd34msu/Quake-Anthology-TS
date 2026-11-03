@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponBehaviorProjectilePort, WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 /* Q2 gameplay provider boundary. Gameplay logic is adapted from id Software's
  * Quake II game and the rerelease game DLL. GPL-2.0-or-later. */
@@ -43,9 +44,33 @@ export interface Q2SpawnFields {
 }
 
 export type Q2PresentationEvent =
-  | { readonly kind: "model"; readonly actor: ActorId; readonly path: string; readonly attachedModels: readonly string[]; readonly frame: number; readonly oldFrame: number; readonly scale: number; readonly alpha: number; readonly skin: number; readonly effects: number; readonly renderFlags: number }
+  | {
+      readonly kind: "model";
+      readonly actor: ActorId;
+      readonly path: string;
+      readonly attachedModels: readonly string[];
+      readonly frame: number;
+      readonly oldFrame: number;
+      readonly scale: number;
+      readonly alpha: number;
+      readonly skin: number;
+      readonly effects: number;
+      readonly renderFlags: number;
+    }
   | { readonly kind: "visibility"; readonly actor: ActorId; readonly visible: boolean }
-  | { readonly kind: "sound"; readonly actor: ActorId | null; readonly origin: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly attenuation: number; readonly reliable: boolean; readonly loop: "start" | "stop" | "once"; readonly loopOwner?: ProviderId; /** gi.local_sound: heard only by the entity it is attached to. */ readonly local?: boolean }
+  | {
+      readonly kind: "sound";
+      readonly actor: ActorId | null;
+      readonly origin: Vec3;
+      readonly path: string;
+      readonly channel: number;
+      readonly volume: number;
+      readonly attenuation: number;
+      readonly reliable: boolean;
+      readonly loop: "start" | "stop" | "once";
+      readonly loopOwner?: ProviderId /** gi.local_sound: heard only by the entity it is attached to. */;
+      readonly local?: boolean;
+    }
   | { readonly kind: "centerprint"; readonly actor: ActorId; readonly text: string; readonly instant?: boolean; readonly durationSeconds?: number }
   | { readonly kind: "print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string }
   | { readonly kind: "help"; readonly slot: 1 | 2; readonly text: string }
@@ -56,7 +81,15 @@ export type Q2PresentationEvent =
   | { readonly kind: "pickup"; readonly player: ActorId; readonly item: ItemId; readonly icon: string; readonly name: string }
   | { readonly kind: "poi"; readonly origin: Vec3; readonly message: string; readonly fields: ReadonlyMap<string, string> }
   | ({ readonly kind: "dynamic-light" } & import("./shadow-lights.ts").Q2ShadowLightState)
-  | { readonly kind: "beam"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3; readonly width: number; readonly color: number; readonly visible: boolean }
+  | {
+      readonly kind: "beam";
+      readonly actor: ActorId;
+      readonly start: Vec3;
+      readonly end: Vec3;
+      readonly width: number;
+      readonly color: number;
+      readonly visible: boolean;
+    }
   | { readonly kind: "monster-beam"; readonly effect: "parasite" | "medic"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3 }
   | { readonly kind: "monster-muzzleflash"; readonly actor: ActorId; readonly flash: number; readonly origin: Vec3; readonly direction: Vec3 }
   | { readonly kind: "entity-event"; readonly actor: ActorId; readonly event: number };
@@ -233,14 +266,21 @@ export class Q2Entity {
   get flare(): SceneFlare | null {
     if ((this.renderFlags & 0x200000) === 0) return null;
     const shell = this.renderFlags & 0x1c00;
-    return { image: (this.renderFlags & 256) !== 0 ? this.spawn.values.get("image") || "misc/flare.tga" : "misc/flare.tga",
-      fadeStart: Math.trunc(numberField(this.spawn, "fade_start_dist", 96)), fadeEnd: Math.trunc(numberField(this.spawn, "fade_end_dist", 384)),
-      scale: this.scale || 1, lockAngle: (this.renderFlags & 1) !== 0,
-      color: this.skin === 0 ? { x: 255, y: 255, z: 255 } : { x: this.skin >>> 24, y: this.skin >>> 16 & 255, z: this.skin >>> 8 & 255 },
-      rimColor: shell === 0 ? null : { x: shell & 0x400 ? 255 : 0, y: shell & 0x800 ? 255 : 0, z: shell & 0x1000 ? 255 : 0 } };
+    return {
+      image: (this.renderFlags & 256) !== 0 ? this.spawn.values.get("image") || "misc/flare.tga" : "misc/flare.tga",
+      fadeStart: Math.trunc(numberField(this.spawn, "fade_start_dist", 96)),
+      fadeEnd: Math.trunc(numberField(this.spawn, "fade_end_dist", 384)),
+      scale: this.scale || 1,
+      lockAngle: (this.renderFlags & 1) !== 0,
+      color: this.skin === 0 ? { x: 255, y: 255, z: 255 } : { x: this.skin >>> 24, y: (this.skin >>> 16) & 255, z: (this.skin >>> 8) & 255 },
+      rimColor: shell === 0 ? null : { x: shell & 0x400 ? 255 : 0, y: shell & 0x800 ? 255 : 0, z: shell & 0x1000 ? 255 : 0 },
+    };
   }
 
-  constructor(readonly actor: OwnedActor, readonly spawn: Q2SpawnFields) {
+  constructor(
+    readonly actor: OwnedActor,
+    readonly spawn: Q2SpawnFields,
+  ) {
     this.classname = spawn.classname;
     this.target = spawn.values.get("target") ?? "";
     this.targetname = spawn.values.get("targetname") ?? "";
@@ -253,7 +293,6 @@ export class Q2Entity {
     this.model = spawn.values.get("model") ?? "";
     this.spawnflags = 0;
   }
-
 }
 
 export interface Q2GameServices {
@@ -269,7 +308,15 @@ export interface Q2GameServices {
   /** game.helpchanged: counts use_target_help firings. */
   helpChanged: number;
   disguiseViolation: { readonly actor: ActorId; readonly until: number } | null;
-  readonly counters: { totalSecrets: number; foundSecrets: number; totalGoals: number; foundGoals: number; totalMonsters: number; killedMonsters: number; serverFlags: number };
+  readonly counters: {
+    totalSecrets: number;
+    foundSecrets: number;
+    totalGoals: number;
+    foundGoals: number;
+    totalMonsters: number;
+    killedMonsters: number;
+    serverFlags: number;
+  };
   spawn(fields: Q2SpawnFields): Q2Entity;
   create(classname: string, values?: ReadonlyMap<string, string>): Q2Entity;
   remove(entity: Q2Entity): undefined;
@@ -291,8 +338,29 @@ export interface Q2GameServices {
   pickTarget(name: string): Q2Entity | null;
   show(entity: Q2Entity): undefined;
   sound(entity: Pick<Q2Entity, "actor">, path: string, channel?: number, volume?: number, attenuation?: number): undefined;
-  damage(target: ActorId, inflictor: Q2Entity | ActorId, attacker: ActorId | null, amount: number, knockback: number, direction: Vec3, point: Vec3, normal: Vec3, meansOfDeath: number, flags?: number, weapon?: ItemId | null): DamageOutcome;
-  radiusDamage(inflictor: Q2Entity, attacker: ActorId | null, damage: number, ignore: ActorId | null, radius: number, meansOfDeath: number, damageFlags?: number, weapon?: ItemId | null): undefined;
+  damage(
+    target: ActorId,
+    inflictor: Q2Entity | ActorId,
+    attacker: ActorId | null,
+    amount: number,
+    knockback: number,
+    direction: Vec3,
+    point: Vec3,
+    normal: Vec3,
+    meansOfDeath: number,
+    flags?: number,
+    weapon?: ItemId | null,
+  ): DamageOutcome;
+  radiusDamage(
+    inflictor: Q2Entity,
+    attacker: ActorId | null,
+    damage: number,
+    ignore: ActorId | null,
+    radius: number,
+    meansOfDeath: number,
+    damageFlags?: number,
+    weapon?: ItemId | null,
+  ): undefined;
   canDamage(target: ActorId, inflictor: Pick<Q2Entity, "actor">): boolean;
   attack(inflictor: Q2Entity | ActorId, attacker: ActorId | null, meansOfDeath: number, flags: number, weapon: ItemId | null): AttackProvenance;
 }

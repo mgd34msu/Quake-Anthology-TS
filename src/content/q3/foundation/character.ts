@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ClientSpawn, player_die and source character animation admission.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { CombatState, InventoryEntry } from "../../../contracts/gameplay.ts";
@@ -33,10 +34,11 @@ interface Q3CharacterAuthorities {
   deathContext(actor: OwnedActor): Q3CharacterDeathContext;
 }
 
-export type Q3CharacterServices = Q3CharacterAuthorities & (
-  | { readonly placement: "source-game" }
-  | { readonly placement?: "character"; spawnTargets(actor: OwnedActor): undefined; killBox(actor: OwnedActor): undefined }
-);
+export type Q3CharacterServices = Q3CharacterAuthorities &
+  (
+    | { readonly placement: "source-game" }
+    | { readonly placement?: "character"; spawnTargets(actor: OwnedActor): undefined; killBox(actor: OwnedActor): undefined }
+  );
 
 export interface Q3CharacterDeathContext {
   readonly blood: boolean;
@@ -64,12 +66,17 @@ export interface Q3CharacterCheckpoint {
   readonly initialized: boolean;
 }
 
-export interface Q3DeathAnimationCheckpoint { readonly version: 1; readonly index: number; }
+export interface Q3DeathAnimationCheckpoint {
+  readonly version: 1;
+  readonly index: number;
+}
 
 /** Global source death animation cycling belongs to the game instance, never to a static variable. */
 export class Q3DeathAnimationSequence {
   private index = 0;
-  capture(): Q3DeathAnimationCheckpoint { return { version: 1, index: this.index }; }
+  capture(): Q3DeathAnimationCheckpoint {
+    return { version: 1, index: this.index };
+  }
   restore(checkpoint: Q3DeathAnimationCheckpoint): undefined {
     if (checkpoint.version !== 1 || !Number.isInteger(checkpoint.index) || checkpoint.index < 0 || checkpoint.index > 2) {
       throw new TypeError("Invalid Q3 death animation checkpoint");
@@ -78,9 +85,12 @@ export class Q3DeathAnimationSequence {
     return undefined;
   }
   next(): { readonly animation: PlayerAnimation; readonly event: EntityEvent } {
-    const result = this.index === 0 ? { animation: PlayerAnimation.BOTH_DEATH1, event: EntityEvent.EV_DEATH1 }
-      : this.index === 1 ? { animation: PlayerAnimation.BOTH_DEATH2, event: EntityEvent.EV_DEATH2 }
-        : { animation: PlayerAnimation.BOTH_DEATH3, event: EntityEvent.EV_DEATH3 };
+    const result =
+      this.index === 0
+        ? { animation: PlayerAnimation.BOTH_DEATH1, event: EntityEvent.EV_DEATH1 }
+        : this.index === 1
+          ? { animation: PlayerAnimation.BOTH_DEATH2, event: EntityEvent.EV_DEATH2 }
+          : { animation: PlayerAnimation.BOTH_DEATH3, event: EntityEvent.EV_DEATH3 };
     this.index = (this.index + 1) % 3;
     return result;
   }
@@ -92,8 +102,14 @@ export function q3MaximumHealth(handicap: string): number {
 }
 
 export function q3InitialCombat(handicap: string, team: string | null): CombatState {
-  return { health: (q3MaximumHealth(handicap) + 25) | 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
-    mass: 200, canTakeDamage: true, invulnerable: false, team };
+  return {
+    health: (q3MaximumHealth(handicap) + 25) | 0,
+    armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
+    mass: 200,
+    canTakeDamage: true,
+    invulnerable: false,
+    team,
+  };
 }
 
 /** Gameplay keeps health, body and inventory in the shared tables. This owns only Q3 character state. */
@@ -107,21 +123,47 @@ export class Q3CharacterActor {
   private gibbed = false;
   private initialized = false;
 
-  constructor(readonly actor: OwnedActor, readonly provider: ProviderId, readonly product: "baseq3" | "missionpack",
-    readonly services: Q3CharacterServices, readonly deathAnimations: Q3DeathAnimationSequence) {}
+  constructor(
+    readonly actor: OwnedActor,
+    readonly provider: ProviderId,
+    readonly product: "baseq3" | "missionpack",
+    readonly services: Q3CharacterServices,
+    readonly deathAnimations: Q3DeathAnimationSequence,
+  ) {}
 
-  get animation(): ActorAnimationState { return { provider: this.provider, state: this.currentAnimation }; }
-  get sourceFlags(): number { return this.flags; }
-  get eventSequence(): number { return this.sequence; }
-  get respawnEligibleAfterMilliseconds(): number { return this.respawnTime; }
-  get spawns(): number { return this.spawnCount; }
+  get animation(): ActorAnimationState {
+    return { provider: this.provider, state: this.currentAnimation };
+  }
+  get sourceFlags(): number {
+    return this.flags;
+  }
+  get eventSequence(): number {
+    return this.sequence;
+  }
+  get respawnEligibleAfterMilliseconds(): number {
+    return this.respawnTime;
+  }
+  get spawns(): number {
+    return this.spawnCount;
+  }
 
-  jump(): undefined { return this.emit(EntityEvent.EV_JUMP); }
+  jump(): undefined {
+    return this.emit(EntityEvent.EV_JUMP);
+  }
 
   capture(): Q3CharacterCheckpoint {
-    return { version: 1, product: this.product, animation: { ...this.currentAnimation }, flags: this.flags,
-      eventSequence: this.sequence, respawnTime: this.respawnTime, spawnCount: this.spawnCount,
-      dead: this.dead, gibbed: this.gibbed, initialized: this.initialized };
+    return {
+      version: 1,
+      product: this.product,
+      animation: { ...this.currentAnimation },
+      flags: this.flags,
+      eventSequence: this.sequence,
+      respawnTime: this.respawnTime,
+      spawnCount: this.spawnCount,
+      dead: this.dead,
+      gibbed: this.gibbed,
+      initialized: this.initialized,
+    };
   }
 
   /** The session restores shared stores and existing callback bindings separately. */
@@ -131,8 +173,8 @@ export class Q3CharacterActor {
     }
     if (!checkpoint.initialized && this.initialized) throw new Error("Cannot restore an unadmitted Q3 character over an admitted binding");
     if (checkpoint.initialized && !this.initialized) {
-      if (this.services.bodies.read(this.actor.id) === null || this.services.combat.read(this.actor.id) === null
-        || !this.services.inventory.has(this.actor.id)) throw new Error("Restore shared Q3 character stores before private state");
+      if (this.services.bodies.read(this.actor.id) === null || this.services.combat.read(this.actor.id) === null || !this.services.inventory.has(this.actor.id))
+        throw new Error("Restore shared Q3 character stores before private state");
       this.bindCallbacks();
     }
     this.currentAnimation = { ...checkpoint.animation };
@@ -151,10 +193,20 @@ export class Q3CharacterActor {
 
   private bindCallbacks(): void {
     if (this.initialized) return;
-    this.services.callbacks.bind(this.actor, { think: null, touch: null, use: null,
-      pain: reaction => { const health = this.services.combat.read(reaction.self.id)?.health ?? 0;
-        this.emit(EntityEvent.EV_PAIN, health); return undefined; },
-      die: () => { this.die(); return undefined; } });
+    this.services.callbacks.bind(this.actor, {
+      think: null,
+      touch: null,
+      use: null,
+      pain: reaction => {
+        const health = this.services.combat.read(reaction.self.id)?.health ?? 0;
+        this.emit(EntityEvent.EV_PAIN, health);
+        return undefined;
+      },
+      die: () => {
+        this.die();
+        return undefined;
+      },
+    });
     this.initialized = true;
   }
 
@@ -205,17 +257,22 @@ export class Q3CharacterActor {
     this.respawnTime = (this.services.timeMilliseconds() + 1700) | 0;
     const body = this.services.bodies.read(this.actor.id);
     if (body !== null) {
-      this.services.bodies.write(this.actor, { ...body, angles: { x: 0, y: body.angles.y, z: 0 },
-        bounds: { ...body.bounds, max: { ...body.bounds.max, z: -8 } } });
+      this.services.bodies.write(this.actor, {
+        ...body,
+        angles: { x: 0, y: body.angles.y, z: 0 },
+        bounds: { ...body.bounds, max: { ...body.bounds.max, z: -8 } },
+      });
       this.services.bodies.link(this.actor);
     }
     if ((health <= -40 && !context.noDrop && context.blood) || context.suicide) this.gib(context.killerSourceSlot);
     else {
       if (health <= -40) this.services.combat.setHealth(this.actor, -39);
       const next = this.deathAnimations.next();
-      this.currentAnimation = { ...this.currentAnimation,
+      this.currentAnimation = {
+        ...this.currentAnimation,
         legs: ((this.currentAnimation.legs & 128) ^ 128) | next.animation,
-        torso: ((this.currentAnimation.torso & 128) ^ 128) | next.animation };
+        torso: ((this.currentAnimation.torso & 128) ^ 128) | next.animation,
+      };
       this.emit(next.event, context.killerSourceSlot);
     }
     return undefined;
@@ -242,22 +299,37 @@ export class Q3CharacterActor {
 }
 
 /** Semantic locomotion from Q1/Q2 selects the native Q3 character clips. */
-export function stepQ3CharacterAnimation(input: AnimationStepInput, product: "baseq3" | "missionpack", dead: boolean,
-  eventSequence = 0): AnimationStepResult {
+export function stepQ3CharacterAnimation(input: AnimationStepInput, product: "baseq3" | "missionpack", dead: boolean, eventSequence = 0): AnimationStepResult {
   if (input.animation.state.kind !== "q3") throw new TypeError("Q3 character requires a Q3 animation state");
   const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : Math.trunc(input.frame.elapsed.value * 1000);
   const context = { animation: input.animation, dead, elapsedMilliseconds: elapsed, buttons: 0, product, eventSequence };
   const dropped = runQ3AnimationOperation({ kind: "drop-timers" }, context);
   let animation: PlayerAnimation;
   switch (input.locomotion) {
-    case "idle": animation = PlayerAnimation.LEGS_IDLE; break;
-    case "walk": animation = input.backwards ? PlayerAnimation.LEGS_BACKWALK : PlayerAnimation.LEGS_WALK; break;
-    case "run": animation = input.backwards ? PlayerAnimation.LEGS_BACK : PlayerAnimation.LEGS_RUN; break;
-    case "backward": animation = PlayerAnimation.LEGS_BACK; break;
-    case "crouch": animation = input.backwards ? PlayerAnimation.LEGS_BACKCR : PlayerAnimation.LEGS_WALKCR; break;
-    case "jump": animation = input.backwards ? PlayerAnimation.LEGS_JUMPB : PlayerAnimation.LEGS_JUMP; break;
-    case "land": animation = input.backwards ? PlayerAnimation.LEGS_LANDB : PlayerAnimation.LEGS_LAND; break;
-    case "swim": animation = PlayerAnimation.LEGS_SWIM; break;
+    case "idle":
+      animation = PlayerAnimation.LEGS_IDLE;
+      break;
+    case "walk":
+      animation = input.backwards ? PlayerAnimation.LEGS_BACKWALK : PlayerAnimation.LEGS_WALK;
+      break;
+    case "run":
+      animation = input.backwards ? PlayerAnimation.LEGS_BACK : PlayerAnimation.LEGS_RUN;
+      break;
+    case "backward":
+      animation = PlayerAnimation.LEGS_BACK;
+      break;
+    case "crouch":
+      animation = input.backwards ? PlayerAnimation.LEGS_BACKCR : PlayerAnimation.LEGS_WALKCR;
+      break;
+    case "jump":
+      animation = input.backwards ? PlayerAnimation.LEGS_JUMPB : PlayerAnimation.LEGS_JUMP;
+      break;
+    case "land":
+      animation = input.backwards ? PlayerAnimation.LEGS_LANDB : PlayerAnimation.LEGS_LAND;
+      break;
+    case "swim":
+      animation = PlayerAnimation.LEGS_SWIM;
+      break;
   }
   const selected = runQ3AnimationOperation({ kind: "legs", animation, force: input.force }, { ...context, animation: dropped.animation });
   if (input.locomotion !== "land") return { animation: selected.animation, effects: [...dropped.effects, ...selected.effects] };

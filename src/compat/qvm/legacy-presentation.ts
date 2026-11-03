@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Public base-game enum translation from the extracted id Software 1.16n/1.17 SDK bg_public.h.
-import type { QvmAbiProfile } from '../../contracts/execution.ts';
+import type { QvmAbiProfile } from "../../contracts/execution.ts";
 const events: readonly number[] = [
   0, // EV_NONE: legacy 0
   1, // EV_FOOTSTEP: legacy 1
@@ -69,8 +70,9 @@ const events: readonly number[] = [
 ];
 /** Remote servers choose these values, so the client paths pass lenient and unrepresentable ones become none/general/absent. */
 export function qvmEvent(value: number, profile: QvmAbiProfile, reverse = false, lenient = false): number {
-  if (profile === 'q3-modern') return value;
-  const event = value & 255, flags = value & ~255;
+  if (profile === "q3-modern") return value;
+  const event = value & 255,
+    flags = value & ~255;
   const mapped = reverse ? events.indexOf(event) : events[event];
   if (mapped === undefined || mapped < 0) {
     if (lenient) return 0;
@@ -79,17 +81,21 @@ export function qvmEvent(value: number, profile: QvmAbiProfile, reverse = false,
   return mapped | flags;
 }
 export function qvmEntityType(value: number, profile: QvmAbiProfile, reverse = false, lenient = false): number {
-  if (profile === 'q3-modern') return value;
-  const sourceEvents = reverse ? 13 : 12, targetEvents = reverse ? 12 : 13;
+  if (profile === "q3-modern") return value;
+  const sourceEvents = reverse ? 13 : 12,
+    targetEvents = reverse ? 12 : 13;
   if (value >= sourceEvents) {
     const event = qvmEvent(value - sourceEvents, profile, reverse, lenient);
     return event === 0 && lenient ? 0 : targetEvents + event;
   }
-  if (reverse && value === 12) { if (lenient) return 0; throw new Error('Legacy QVM has no team entity type'); }
+  if (reverse && value === 12) {
+    if (lenient) return 0;
+    throw new Error("Legacy QVM has no team entity type");
+  }
   return value;
 }
 export function qvmPersistent(values: readonly number[], profile: QvmAbiProfile): readonly number[] {
-  if (profile === 'q3-modern') return values;
+  if (profile === "q3-modern") return values;
   // Source-only reward and accuracy counters remain in the guest memory/checkpoint.
   const result = Array<number>(16).fill(0);
   result[0] = values[0] ?? 0; // PERS_SCORE
@@ -106,18 +112,19 @@ export function qvmPersistent(values: readonly number[], profile: QvmAbiProfile)
 }
 
 export function qvmConfigstring(index: number, profile: QvmAbiProfile): number {
-  if (profile === 'q3-modern') return index;
+  if (profile === "q3-modern") return index;
   if (index >= 12 && index <= 15) return index + 8;
   if (index >= 16 && index <= 26) throw new Error(`Legacy private configstring ${index} has no declared modern presentation mapping`);
   return index;
 }
 export function qvmPowerupBits(bits: number, profile: QvmAbiProfile, lenient = false): number {
-  if (profile !== 'q3-modern' && lenient) return bits & 0x1ff;
-  if (profile !== 'q3-modern' && (bits & ~0x1ff) !== 0) throw new Error('Legacy ball or private powerup has no modern presentation mapping');
+  if (profile !== "q3-modern" && lenient) return bits & 0x1ff;
+  if (profile !== "q3-modern" && (bits & ~0x1ff) !== 0) throw new Error("Legacy ball or private powerup has no modern presentation mapping");
   return bits;
 }
 export function qvmPowerups(values: readonly number[], profile: QvmAbiProfile, lenient = false): readonly number[] {
-  if (profile !== 'q3-modern' && lenient) return values.map((value, index) => index < 9 ? value : 0);
-  if (profile !== 'q3-modern' && values.slice(9).some(value => value !== 0)) throw new Error('Legacy ball or private powerup has no modern presentation mapping');
+  if (profile !== "q3-modern" && lenient) return values.map((value, index) => (index < 9 ? value : 0));
+  if (profile !== "q3-modern" && values.slice(9).some(value => value !== 0))
+    throw new Error("Legacy ball or private powerup has no modern presentation mapping");
   return values;
 }

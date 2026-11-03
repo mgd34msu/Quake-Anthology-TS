@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { nightdiveAddonDirectories, type NightdiveAddonRoot } from "./roots.ts";
 import { pathWithinRoot } from "./mounts/paths.ts";
 
-export function defaultUserContentRoot(): string { return resolve(homedir(), ".local/share/quake-typescript/content"); }
+export function defaultUserContentRoot(): string {
+  return resolve(homedir(), ".local/share/quake-typescript/content");
+}
 
 /** Saves and settings sit beside the content root by default and inside a custom --user-content-root. */
 export function userDataDirectory(kind: "saves" | "settings", userContentRoot?: string): string {

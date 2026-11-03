@@ -7,17 +7,29 @@ import { FormatArguments } from "./arguments.ts";
 
 export class UnsupportedGuestScan extends Error {}
 
-type ScanDirective = { readonly kind: "space" } | { readonly kind: "literal"; readonly value: string }
+type ScanDirective =
+  | { readonly kind: "space" }
+  | { readonly kind: "literal"; readonly value: string }
   | { readonly kind: "number"; readonly code: "d" | "i" | "f"; readonly width: number; readonly suppressed: boolean; readonly bytes: 4 | 8 };
 const whitespace = (value: string): boolean => /^[\t\n\v\f\r ]$/.test(value);
 
 function directives(format: string): readonly ScanDirective[] {
   const result: ScanDirective[] = [];
-  for (let index = 0; index < format.length;) {
+  for (let index = 0; index < format.length; ) {
     const value = format.charAt(index++);
-    if (whitespace(value)) { result.push({ kind: "space" }); continue; }
-    if (value !== "%") { result.push({ kind: "literal", value }); continue; }
-    if (format.charAt(index) === "%") { index++; result.push({ kind: "literal", value: "%" }); continue; }
+    if (whitespace(value)) {
+      result.push({ kind: "space" });
+      continue;
+    }
+    if (value !== "%") {
+      result.push({ kind: "literal", value });
+      continue;
+    }
+    if (format.charAt(index) === "%") {
+      index++;
+      result.push({ kind: "literal", value: "%" });
+      continue;
+    }
     const suppressed = format.charAt(index) === "*";
     if (suppressed) index++;
     let digits = "";
@@ -37,8 +49,10 @@ function directives(format: string): readonly ScanDirective[] {
 /** Convert decimal directly to the destination precision, avoiding binary64 to binary32 double rounding. */
 function decimalBytes(token: string, bytes: 4 | 8): Uint8Array {
   const sign = token.startsWith("-") ? 1 : 0;
-  const unsigned = token.replace(/^[+-]/, ""), parts = unsigned.toLowerCase().split("e");
-  const mantissa = parts[0] ?? "", dot = mantissa.indexOf(".");
+  const unsigned = token.replace(/^[+-]/, ""),
+    parts = unsigned.toLowerCase().split("e");
+  const mantissa = parts[0] ?? "",
+    dot = mantissa.indexOf(".");
   const digits = mantissa.replace(".", "").replace(/^0+/, "");
   const exponent = Number(parts[1] ?? "0") - (dot < 0 ? 0 : mantissa.length - dot - 1);
   const width = bytes === 4 ? 32 : 64;
@@ -46,36 +60,55 @@ function decimalBytes(token: string, bytes: 4 | 8): Uint8Array {
   // Values beyond these bounds round to infinity or signed zero in both supported formats.
   if (exponent + digits.length > 400) return writeBits(encodeBinary({ kind: "infinity", sign }, width), bytes);
   if (exponent + digits.length < -400) return writeBits(encodeBinary({ kind: "finite", sign, coefficient: 0n, exponent: 0, denormal: false }, width), bytes);
-  const coefficient = BigInt(digits), power = 10n ** BigInt(Math.abs(exponent));
-  return writeBits(encodeBinary(roundRational(sign, exponent >= 0 ? coefficient * power : coefficient,
-    exponent >= 0 ? 1n : power, 0, formatFor(width), "nearest").value, width), bytes);
+  const coefficient = BigInt(digits),
+    power = 10n ** BigInt(Math.abs(exponent));
+  return writeBits(
+    encodeBinary(
+      roundRational(sign, exponent >= 0 ? coefficient * power : coefficient, exponent >= 0 ? 1n : power, 0, formatFor(width), "nearest").value,
+      width,
+    ),
+    bytes,
+  );
 }
 
 export function scanWindowsBuffer(options: {
-  readonly memory: MappedGuestMemory; readonly input: GuestAddress; readonly capacity: bigint;
-  readonly format: GuestAddress; readonly arguments: GuestAddress | null;
+  readonly memory: MappedGuestMemory;
+  readonly input: GuestAddress;
+  readonly capacity: bigint;
+  readonly format: GuestAddress;
+  readonly arguments: GuestAddress | null;
 }): number {
   const { memory, input, capacity } = options;
-  const parsed = directives(readString(memory, options.format)), args = new FormatArguments(memory, "windows", options.arguments);
-  let cursor = 0, assigned = 0, converted = false;
+  const parsed = directives(readString(memory, options.format)),
+    args = new FormatArguments(memory, "windows", options.arguments);
+  let cursor = 0,
+    assigned = 0,
+    converted = false;
   const peek = (): string => {
     if (BigInt(cursor) >= capacity) return "";
     const byte = memory.readUint8(memory.offset(input, BigInt(cursor)));
     return byte === 0 ? "" : String.fromCharCode(byte);
   };
-  const failure = (): number => !converted && peek() === "" ? -1 : assigned;
+  const failure = (): number => (!converted && peek() === "" ? -1 : assigned);
   for (const directive of parsed) {
-    if (directive.kind === "space") { while (whitespace(peek())) cursor++; continue; }
+    if (directive.kind === "space") {
+      while (whitespace(peek())) cursor++;
+      continue;
+    }
     if (directive.kind === "literal") {
       if (peek() !== directive.value) return failure();
-      cursor++; continue;
+      cursor++;
+      continue;
     }
     while (whitespace(peek())) cursor++;
     if (peek() === "") return failure();
     const start = cursor;
     let token = "";
-    const take = (): void => { token += peek(); cursor++; };
-    const current = (): string => cursor - start < directive.width ? peek() : "";
+    const take = (): void => {
+      token += peek();
+      cursor++;
+    };
+    const current = (): string => (cursor - start < directive.width ? peek() : "");
     if (current() === "+" || current() === "-") take();
     if (directive.code === "f") {
       if (/^[iInN]$/.test(current())) {
@@ -84,18 +117,27 @@ export function scanWindowsBuffer(options: {
         return assigned;
       }
       while (/^[0-9]$/.test(current())) take();
-      if (/^[+-]?0$/.test(token) && (current() === "x" || current() === "X")) throw new UnsupportedGuestScan("scanf hexadecimal floating input is not implemented");
-      if (current() === ".") { take(); while (/^[0-9]$/.test(current())) take(); }
+      if (/^[+-]?0$/.test(token) && (current() === "x" || current() === "X"))
+        throw new UnsupportedGuestScan("scanf hexadecimal floating input is not implemented");
+      if (current() === ".") {
+        take();
+        while (/^[0-9]$/.test(current())) take();
+      }
       if (current() === "e" || current() === "E") {
-        take(); if (current() === "+" || current() === "-") take();
+        take();
+        if (current() === "+" || current() === "-") take();
         while (/^[0-9]$/.test(current())) take();
       }
       if (!/^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(token)) return assigned;
     } else {
       let base = 10;
       if (directive.code === "i" && current() === "0") {
-        take(); base = 8;
-        if (current() === "x" || current() === "X") { take(); base = 16; }
+        take();
+        base = 8;
+        if (current() === "x" || current() === "X") {
+          take();
+          base = 16;
+        }
       }
       const digit = base === 16 ? /^[0-9a-fA-F]$/ : base === 8 ? /^[0-7]$/ : /^[0-9]$/;
       while (digit.test(current())) take();

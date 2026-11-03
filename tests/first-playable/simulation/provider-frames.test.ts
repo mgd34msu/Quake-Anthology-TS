@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { ClockProfile, FrameContext } from "../../../src/contracts/time.ts";
 import { providerFrame } from "../../../src/app/bootstrap/simulation/provider-frames.ts";

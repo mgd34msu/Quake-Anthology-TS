@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { nativeMoveSlices } from "../../src/app/bootstrap/simulation/native-commands.ts";
@@ -33,10 +34,14 @@ describe("native Pmove slicing", () => {
     expect(second.carry).toBeCloseTo(0, 9);
   });
   test("slices plus carry always conserve the guest interval", () => {
-    let carry = 0, total = 0, quoted = 0;
+    let carry = 0,
+      total = 0,
+      quoted = 0;
     for (const milliseconds of [100, 33, 100, 75, 100, 12]) {
       const result = nativeMoveSlices(fixedNetquake, milliseconds, carry);
-      total += milliseconds; quoted += result.slices.reduce((sum, value) => sum + value, 0); carry = result.carry;
+      total += milliseconds;
+      quoted += result.slices.reduce((sum, value) => sum + value, 0);
+      carry = result.carry;
     }
     expect(quoted + carry).toBeCloseTo(total, 9);
   });
@@ -44,22 +49,57 @@ describe("native Pmove slicing", () => {
 
 describe("native Pmove contacts", () => {
   test("touches keep the plane the provider reported, in report order, without repeats", () => {
-    const a = owner.actor(3, 0), b = owner.actor(5, 0);
-    const slots = new Map([[a, 3], [b, 5]]);
-    const touches = pmoveTouchList([{ actor: b, plane: wall }, { actor: null, plane: up }, { actor: a, plane: up }, { actor: b, plane: up }], [],
-      actor => slots.get(actor));
-    expect(touches).toEqual([{ slot: 5, plane: wall }, { slot: 3, plane: up }]);
+    const a = owner.actor(3, 0),
+      b = owner.actor(5, 0);
+    const slots = new Map([
+      [a, 3],
+      [b, 5],
+    ]);
+    const touches = pmoveTouchList(
+      [
+        { actor: b, plane: wall },
+        { actor: null, plane: up },
+        { actor: a, plane: up },
+        { actor: b, plane: up },
+      ],
+      [],
+      actor => slots.get(actor),
+    );
+    expect(touches).toEqual([
+      { slot: 5, plane: wall },
+      { slot: 3, plane: up },
+    ]);
   });
   test("solids the sweep did not name follow with overlap-derived planes, and slotless actors are dropped", () => {
-    const named = owner.actor(2, 0), door = owner.actor(7, 0), loose = owner.actor(9, 0);
-    const slots = new Map([[named, 2], [door, 7]]);
+    const named = owner.actor(2, 0),
+      door = owner.actor(7, 0),
+      loose = owner.actor(9, 0);
+    const slots = new Map([
+      [named, 2],
+      [door, 7],
+    ]);
     const derived = { normal: { x: 1, y: 0, z: 0 }, distance: 4 };
-    const touches = pmoveTouchList([{ actor: named, plane: wall }], [{ actor: named, plane: up }, { actor: door, plane: derived }, { actor: loose, plane: up }],
-      actor => slots.get(actor));
-    expect(touches).toEqual([{ slot: 2, plane: wall }, { slot: 7, plane: derived }]);
+    const touches = pmoveTouchList(
+      [{ actor: named, plane: wall }],
+      [
+        { actor: named, plane: up },
+        { actor: door, plane: derived },
+        { actor: loose, plane: up },
+      ],
+      actor => slots.get(actor),
+    );
+    expect(touches).toEqual([
+      { slot: 2, plane: wall },
+      { slot: 7, plane: derived },
+    ]);
   });
   test("the ground plane is the latest standable contact, never a wall", () => {
-    expect(reportedGroundPlane([{ actor: null, plane: up }, { actor: null, plane: wall }])).toBe(up);
+    expect(
+      reportedGroundPlane([
+        { actor: null, plane: up },
+        { actor: null, plane: wall },
+      ]),
+    ).toBe(up);
     expect(reportedGroundPlane([{ actor: null, plane: wall }])).toBeNull();
     expect(reportedGroundPlane([])).toBeNull();
   });
@@ -74,10 +114,28 @@ describe("native Pmove contacts", () => {
 
 describe("native Pmove field disposition", () => {
   test("every rerelease pmove_t field the guest reads has a stated disposition", () => {
-    const groups = new Map<string, string>([["s.origin", "origin"], ["s.velocity", "velocity"], ["s.pm_flags", "pm_flags_ducked_grounded"], ["s.pm_time", "pm_time"],
-      ["s.delta_angles", "delta_angles"], ["s.viewheight", "viewheight"], ["touch.num", "touch_list"], ["viewangles", "viewangles"], ["mins", "mins_maxs"], ["maxs", "mins_maxs"],
-      ["groundentity", "groundentity"], ["groundplane.normal", "groundplane"], ["watertype", "watertype_waterlevel"], ["waterlevel", "watertype_waterlevel"],
-      ["viewoffset", "viewoffset"], ["screen_blend", "screen_blend"], ["rdflags", "rdflags"], ["jump_sound", "jump_sound"], ["step_clip", "step_clip"], ["impact_delta", "impact_delta"]]);
+    const groups = new Map<string, string>([
+      ["s.origin", "origin"],
+      ["s.velocity", "velocity"],
+      ["s.pm_flags", "pm_flags_ducked_grounded"],
+      ["s.pm_time", "pm_time"],
+      ["s.delta_angles", "delta_angles"],
+      ["s.viewheight", "viewheight"],
+      ["touch.num", "touch_list"],
+      ["viewangles", "viewangles"],
+      ["mins", "mins_maxs"],
+      ["maxs", "mins_maxs"],
+      ["groundentity", "groundentity"],
+      ["groundplane.normal", "groundplane"],
+      ["watertype", "watertype_waterlevel"],
+      ["waterlevel", "watertype_waterlevel"],
+      ["viewoffset", "viewoffset"],
+      ["screen_blend", "screen_blend"],
+      ["rdflags", "rdflags"],
+      ["jump_sound", "jump_sound"],
+      ["step_clip", "step_clip"],
+      ["impact_delta", "impact_delta"],
+    ]);
     const names = new Set(pmoveLayout.fields.map(field => field.name));
     for (const [field, key] of groups) {
       expect(names.has(field)).toBe(true);

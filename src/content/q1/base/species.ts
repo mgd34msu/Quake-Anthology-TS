@@ -1,8 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* QuakeC monster spawn defaults. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Bounds } from "../../../contracts/math.ts";
 import type { Q1Monster } from "../foundation/entity.ts";
-export type BaseSpecies = "army" | "dog" | "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
+export type BaseSpecies =
+  | "army"
+  | "dog"
+  | "knight"
+  | "enforcer"
+  | "demon"
+  | "ogre"
+  | "hellknight"
+  | "shambler"
+  | "wizard"
+  | "shalrath"
+  | "tarbaby"
+  | "fish"
+  | "zombie"
+  | "boss"
+  | "oldone";
 export interface MonsterSpecies {
   readonly species: Q1Monster["species"];
   readonly killString?: string;
@@ -26,21 +42,276 @@ const large: Bounds = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z:
 const gibs: readonly string[] = ["gib1", "gib2", "gib3"];
 const large25: Bounds = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 40 } };
 export const baseSpecies: readonly MonsterSpecies[] = [
-  { species: "army", killString: "$qc_ks_grunt", classnames: ["monster_army"], model: "soldier", head: "h_guard", health: 30, gibHealth: -35, gibs, bounds: human, stand: "army_stand1", walk: "army_walk1", run: "army_run1", sight: "soldier/sight1.wav", missile: "army_atk1", melee: false, movement: "walk" },
-  { species: "dog", killString: "$qc_ks_rottweiler", classnames: ["monster_dog"], model: "dog", head: "h_dog", health: 25, gibHealth: -35, gibs: ["gib3", "gib3", "gib3"], bounds: large25, stand: "dog_stand1", walk: "dog_walk1", run: "dog_run1", sight: "dog/dsight.wav", missile: "dog_leap1", melee: true, movement: "walk" },
-  { species: "knight", killString: "$qc_ks_knight", classnames: ["monster_knight"], model: "knight", head: "h_knight", health: 75, gibHealth: -40, gibs, bounds: human, stand: "knight_stand1", walk: "knight_walk1", run: "knight_run1", sight: "knight/ksight.wav", missile: null, melee: true, movement: "walk" },
-  { species: "enforcer", killString: "$qc_ks_enforcer", classnames: ["monster_enforcer"], model: "enforcer", head: "h_mega", health: 80, gibHealth: -35, gibs, bounds: human, stand: "enf_stand1", walk: "enf_walk1", run: "enf_run1", sight: "enforcer/sight1.wav", missile: "enf_atk1", melee: false, movement: "walk" },
-  { species: "demon", killString: "$qc_ks_fiend", classnames: ["monster_demon1"], model: "demon", head: "h_demon", health: 300, gibHealth: -80, gibs: ["gib1", "gib1", "gib1"], bounds: large, stand: "demon1_stand1", walk: "demon1_walk1", run: "demon1_run1", sight: "demon/sight2.wav", missile: "demon1_jump1", melee: true, movement: "walk" },
-  { species: "ogre", killString: "$qc_ks_ogre", classnames: ["monster_ogre", "monster_ogre_marksman"], model: "ogre", head: "h_ogre", health: 200, gibHealth: -80, gibs: ["gib3", "gib3", "gib3"], bounds: large, stand: "ogre_stand1", walk: "ogre_walk1", run: "ogre_run1", sight: "ogre/ogwake.wav", missile: "ogre_nail1", melee: true, movement: "walk" },
-  { species: "hellknight", killString: "$qc_ks_deathknight", classnames: ["monster_hell_knight"], model: "hknight", head: "h_hellkn", health: 250, gibHealth: -40, gibs, bounds: human, stand: "hknight_stand1", walk: "hknight_walk1", run: "hknight_run1", sight: "hknight/sight1.wav", missile: "hknight_magicc1", melee: true, movement: "walk" },
-  { species: "shambler", killString: "$qc_ks_shambler", classnames: ["monster_shambler"], model: "shambler", head: "h_shams", health: 600, gibHealth: -60, gibs, bounds: large, stand: "sham_stand1", walk: "sham_walk1", run: "sham_run1", sight: "shambler/ssight.wav", missile: "sham_magic1", melee: true, movement: "walk" },
-  { species: "wizard", killString: "$qc_ks_scrag", classnames: ["monster_wizard"], model: "wizard", head: "h_wizard", health: 80, gibHealth: -40, gibs: ["gib2", "gib2", "gib2"], bounds: human, stand: "wiz_stand1", walk: "wiz_walk1", run: "wiz_run1", sight: "wizard/wsight.wav", missile: "wiz_fast1", melee: false, movement: "fly" },
-  { species: "shalrath", killString: "$qc_ks_vore", classnames: ["monster_shalrath"], model: "shalrath", head: "h_shal", health: 400, gibHealth: -90, gibs, bounds: large, stand: "shal_stand", walk: "shal_walk1", run: "shal_run1", sight: "shalrath/sight.wav", missile: "shal_attack1", melee: false, movement: "walk" },
-  { species: "tarbaby", killString: "$qc_ks_spawn", classnames: ["monster_tarbaby"], model: "tarbaby", head: null, health: 80, gibHealth: -Infinity, gibs: [], bounds: human, stand: "tbaby_stand1", walk: "tbaby_walk1", run: "tbaby_run1", sight: "blob/sight1.wav", missile: "tbaby_jump1", melee: true, movement: "walk" },
-  { species: "fish", killString: "$qc_ks_rotfish", classnames: ["monster_fish"], model: "fish", head: null, health: 25, gibHealth: -Infinity, gibs: [], bounds: { min: human.min, max: { x: 16, y: 16, z: 24 } }, stand: "f_stand1", walk: "f_walk1", run: "f_run1", sight: "fish/idle.wav", missile: null, melee: true, movement: "swim" },
-  { species: "zombie", killString: "$qc_ks_zombie", classnames: ["monster_zombie"], model: "zombie", head: "h_zombie", health: 60, gibHealth: 0, gibs, bounds: human, stand: "zombie_stand1", walk: "zombie_walk1", run: "zombie_run1", sight: "zombie/z_idle.wav", missile: "zombie_atta1", melee: false, movement: "walk" },
-  { species: "boss", killString: "$qc_ks_chthon", classnames: ["monster_boss"], model: "boss", head: null, health: 3, gibHealth: -Infinity, gibs: [], bounds: { min: { x: -128, y: -128, z: -24 }, max: { x: 128, y: 128, z: 256 } }, stand: "boss_idle1", walk: "boss_idle1", run: "boss_missile1", sight: "boss1/sight1.wav", missile: "boss_missile1", melee: false, movement: "boss" },
-  { species: "oldone", killString: "$qc_ks_shub", classnames: ["monster_oldone"], model: "oldone", head: null, health: 40000, gibHealth: -Infinity, gibs: [], bounds: { min: { x: -160, y: -128, z: -24 }, max: { x: 160, y: 128, z: 256 } }, stand: "old_idle1", walk: "old_idle1", run: "old_idle1", sight: "boss2/sight.wav", missile: null, melee: false, movement: "boss" },
+  {
+    species: "army",
+    killString: "$qc_ks_grunt",
+    classnames: ["monster_army"],
+    model: "soldier",
+    head: "h_guard",
+    health: 30,
+    gibHealth: -35,
+    gibs,
+    bounds: human,
+    stand: "army_stand1",
+    walk: "army_walk1",
+    run: "army_run1",
+    sight: "soldier/sight1.wav",
+    missile: "army_atk1",
+    melee: false,
+    movement: "walk",
+  },
+  {
+    species: "dog",
+    killString: "$qc_ks_rottweiler",
+    classnames: ["monster_dog"],
+    model: "dog",
+    head: "h_dog",
+    health: 25,
+    gibHealth: -35,
+    gibs: ["gib3", "gib3", "gib3"],
+    bounds: large25,
+    stand: "dog_stand1",
+    walk: "dog_walk1",
+    run: "dog_run1",
+    sight: "dog/dsight.wav",
+    missile: "dog_leap1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "knight",
+    killString: "$qc_ks_knight",
+    classnames: ["monster_knight"],
+    model: "knight",
+    head: "h_knight",
+    health: 75,
+    gibHealth: -40,
+    gibs,
+    bounds: human,
+    stand: "knight_stand1",
+    walk: "knight_walk1",
+    run: "knight_run1",
+    sight: "knight/ksight.wav",
+    missile: null,
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "enforcer",
+    killString: "$qc_ks_enforcer",
+    classnames: ["monster_enforcer"],
+    model: "enforcer",
+    head: "h_mega",
+    health: 80,
+    gibHealth: -35,
+    gibs,
+    bounds: human,
+    stand: "enf_stand1",
+    walk: "enf_walk1",
+    run: "enf_run1",
+    sight: "enforcer/sight1.wav",
+    missile: "enf_atk1",
+    melee: false,
+    movement: "walk",
+  },
+  {
+    species: "demon",
+    killString: "$qc_ks_fiend",
+    classnames: ["monster_demon1"],
+    model: "demon",
+    head: "h_demon",
+    health: 300,
+    gibHealth: -80,
+    gibs: ["gib1", "gib1", "gib1"],
+    bounds: large,
+    stand: "demon1_stand1",
+    walk: "demon1_walk1",
+    run: "demon1_run1",
+    sight: "demon/sight2.wav",
+    missile: "demon1_jump1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "ogre",
+    killString: "$qc_ks_ogre",
+    classnames: ["monster_ogre", "monster_ogre_marksman"],
+    model: "ogre",
+    head: "h_ogre",
+    health: 200,
+    gibHealth: -80,
+    gibs: ["gib3", "gib3", "gib3"],
+    bounds: large,
+    stand: "ogre_stand1",
+    walk: "ogre_walk1",
+    run: "ogre_run1",
+    sight: "ogre/ogwake.wav",
+    missile: "ogre_nail1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "hellknight",
+    killString: "$qc_ks_deathknight",
+    classnames: ["monster_hell_knight"],
+    model: "hknight",
+    head: "h_hellkn",
+    health: 250,
+    gibHealth: -40,
+    gibs,
+    bounds: human,
+    stand: "hknight_stand1",
+    walk: "hknight_walk1",
+    run: "hknight_run1",
+    sight: "hknight/sight1.wav",
+    missile: "hknight_magicc1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "shambler",
+    killString: "$qc_ks_shambler",
+    classnames: ["monster_shambler"],
+    model: "shambler",
+    head: "h_shams",
+    health: 600,
+    gibHealth: -60,
+    gibs,
+    bounds: large,
+    stand: "sham_stand1",
+    walk: "sham_walk1",
+    run: "sham_run1",
+    sight: "shambler/ssight.wav",
+    missile: "sham_magic1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "wizard",
+    killString: "$qc_ks_scrag",
+    classnames: ["monster_wizard"],
+    model: "wizard",
+    head: "h_wizard",
+    health: 80,
+    gibHealth: -40,
+    gibs: ["gib2", "gib2", "gib2"],
+    bounds: human,
+    stand: "wiz_stand1",
+    walk: "wiz_walk1",
+    run: "wiz_run1",
+    sight: "wizard/wsight.wav",
+    missile: "wiz_fast1",
+    melee: false,
+    movement: "fly",
+  },
+  {
+    species: "shalrath",
+    killString: "$qc_ks_vore",
+    classnames: ["monster_shalrath"],
+    model: "shalrath",
+    head: "h_shal",
+    health: 400,
+    gibHealth: -90,
+    gibs,
+    bounds: large,
+    stand: "shal_stand",
+    walk: "shal_walk1",
+    run: "shal_run1",
+    sight: "shalrath/sight.wav",
+    missile: "shal_attack1",
+    melee: false,
+    movement: "walk",
+  },
+  {
+    species: "tarbaby",
+    killString: "$qc_ks_spawn",
+    classnames: ["monster_tarbaby"],
+    model: "tarbaby",
+    head: null,
+    health: 80,
+    gibHealth: -Infinity,
+    gibs: [],
+    bounds: human,
+    stand: "tbaby_stand1",
+    walk: "tbaby_walk1",
+    run: "tbaby_run1",
+    sight: "blob/sight1.wav",
+    missile: "tbaby_jump1",
+    melee: true,
+    movement: "walk",
+  },
+  {
+    species: "fish",
+    killString: "$qc_ks_rotfish",
+    classnames: ["monster_fish"],
+    model: "fish",
+    head: null,
+    health: 25,
+    gibHealth: -Infinity,
+    gibs: [],
+    bounds: { min: human.min, max: { x: 16, y: 16, z: 24 } },
+    stand: "f_stand1",
+    walk: "f_walk1",
+    run: "f_run1",
+    sight: "fish/idle.wav",
+    missile: null,
+    melee: true,
+    movement: "swim",
+  },
+  {
+    species: "zombie",
+    killString: "$qc_ks_zombie",
+    classnames: ["monster_zombie"],
+    model: "zombie",
+    head: "h_zombie",
+    health: 60,
+    gibHealth: 0,
+    gibs,
+    bounds: human,
+    stand: "zombie_stand1",
+    walk: "zombie_walk1",
+    run: "zombie_run1",
+    sight: "zombie/z_idle.wav",
+    missile: "zombie_atta1",
+    melee: false,
+    movement: "walk",
+  },
+  {
+    species: "boss",
+    killString: "$qc_ks_chthon",
+    classnames: ["monster_boss"],
+    model: "boss",
+    head: null,
+    health: 3,
+    gibHealth: -Infinity,
+    gibs: [],
+    bounds: { min: { x: -128, y: -128, z: -24 }, max: { x: 128, y: 128, z: 256 } },
+    stand: "boss_idle1",
+    walk: "boss_idle1",
+    run: "boss_missile1",
+    sight: "boss1/sight1.wav",
+    missile: "boss_missile1",
+    melee: false,
+    movement: "boss",
+  },
+  {
+    species: "oldone",
+    killString: "$qc_ks_shub",
+    classnames: ["monster_oldone"],
+    model: "oldone",
+    head: null,
+    health: 40000,
+    gibHealth: -Infinity,
+    gibs: [],
+    bounds: { min: { x: -160, y: -128, z: -24 }, max: { x: 160, y: 128, z: 256 } },
+    stand: "old_idle1",
+    walk: "old_idle1",
+    run: "old_idle1",
+    sight: "boss2/sight.wav",
+    missile: null,
+    melee: false,
+    movement: "boss",
+  },
 ];
 
 /** progs106 monster spawn declarations, before model assignment and startup. */
@@ -48,10 +319,20 @@ export function precacheId1Monster(game: Q1EntityServices, species: Q1Monster["s
   switch (species) {
     case "army":
       for (const model of ["soldier", "h_guard", "gib1", "gib2", "gib3"]) game.precacheModel(`progs/${model}.mdl`);
-      for (const sound of ["soldier/death1.wav", "soldier/idle.wav", "soldier/pain1.wav", "soldier/pain2.wav", "soldier/sattck1.wav", "soldier/sight1.wav", "player/udeath.wav"]) game.precacheSound(sound);
+      for (const sound of [
+        "soldier/death1.wav",
+        "soldier/idle.wav",
+        "soldier/pain1.wav",
+        "soldier/pain2.wav",
+        "soldier/sattck1.wav",
+        "soldier/sight1.wav",
+        "player/udeath.wav",
+      ])
+        game.precacheSound(sound);
       return undefined;
     case "dog":
-      game.precacheModel("progs/h_dog.mdl"); game.precacheModel("progs/dog.mdl");
+      game.precacheModel("progs/h_dog.mdl");
+      game.precacheModel("progs/dog.mdl");
       for (const sound of ["dog/dattack1.wav", "dog/ddeath.wav", "dog/dpain1.wav", "dog/dsight.wav", "dog/idle.wav"]) game.precacheSound(sound);
       return undefined;
     case "knight":
@@ -201,6 +482,7 @@ export function precacheId1Monster(game: Q1EntityServices, species: Q1Monster["s
       game.precacheSound("boss2/sight.wav");
       game.precacheSound("boss2/pop2.wav");
       return undefined;
-    default: throw new Error(`No id1 base monster precaches for ${species}`);
+    default:
+      throw new Error(`No id1 base monster precaches for ${species}`);
   }
 }

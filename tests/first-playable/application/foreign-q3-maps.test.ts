@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterEach, expect } from "bun:test";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,8 +21,12 @@ let application: Application | null = null;
 let directory: string | null = null;
 
 afterEach(async () => {
-  await application?.close(); application = null;
-  if (directory !== null) { await rm(directory, { recursive: true, force: true }); directory = null; }
+  await application?.close();
+  application = null;
+  if (directory !== null) {
+    await rm(directory, { recursive: true, force: true });
+    directory = null;
+  }
 });
 
 async function foreignQ3Lane(args: string[], modelNeedle: string, expectedWeapon: ItemId): Promise<void> {
@@ -31,8 +36,11 @@ async function foreignQ3Lane(args: string[], modelNeedle: string, expectedWeapon
   if (parsed.kind !== "run") throw new Error("Missing foreign Q3 launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   const preset = applicationPreset(catalog, parsed.options);
-  application = await Application.open(parsed.options, { saveDirectory: join(directory, "saves"), print: () => undefined },
-    await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) }));
+  application = await Application.open(
+    parsed.options,
+    { saveDirectory: join(directory, "saves"), print: () => undefined },
+    await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) }),
+  );
   const simulation = application.simulation;
   const admission = simulation.admitPlayer(application.session.createClient(0).id);
   const player = simulation.actors.resolveOwned(admission.actor);
@@ -62,14 +70,46 @@ async function foreignQ3Lane(args: string[], modelNeedle: string, expectedWeapon
 
 describe("Q3-authored maps on TS Q1/Q2 primaries", () => {
   test("Q1 source hosts q3dm17 and grants the railgun destination", async () => {
-    await foreignQ3Lane(["--game", "q1-classic-id1", "--map-game", "q3-baseq3", "--map", "q3dm17",
-      "--movement", "q1", "--character", "q1", "--mode", "deathmatch", "--dedicated"],
-      "weapons2/railgun", "q1:weapon/supernailgun");
+    await foreignQ3Lane(
+      [
+        "--game",
+        "q1-classic-id1",
+        "--map-game",
+        "q3-baseq3",
+        "--map",
+        "q3dm17",
+        "--movement",
+        "q1",
+        "--character",
+        "q1",
+        "--mode",
+        "deathmatch",
+        "--dedicated",
+      ],
+      "weapons2/railgun",
+      "q1:weapon/supernailgun",
+    );
   }, 300_000);
 
   test("Q2 source hosts q3dm1 and grants the plasmagun destination", async () => {
-    await foreignQ3Lane(["--game", "q2-classic-baseq2", "--map-game", "q3-baseq3", "--map", "q3dm1",
-      "--movement", "q2", "--character", "q2", "--mode", "deathmatch", "--dedicated"],
-      "weapons2/plasma", "q2:weapon_hyperblaster");
+    await foreignQ3Lane(
+      [
+        "--game",
+        "q2-classic-baseq2",
+        "--map-game",
+        "q3-baseq3",
+        "--map",
+        "q3dm1",
+        "--movement",
+        "q2",
+        "--character",
+        "q2",
+        "--mode",
+        "deathmatch",
+        "--dedicated",
+      ],
+      "weapons2/plasma",
+      "q2:weapon_hyperblaster",
+    );
   }, 300_000);
 });

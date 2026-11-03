@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { setImmediate } from "node:timers/promises";
 
 /** The wall-clock loop shared by the local and remote applications. */
@@ -16,14 +17,21 @@ export interface FrameLoopHost {
 export async function runFrameLoop(host: FrameLoopHost): Promise<void> {
   let previous = performance.now();
   while (host.alive()) {
-    const now = performance.now(), elapsed = now - previous, minimum = host.minimumMilliseconds();
-    if (elapsed < minimum) { await Bun.sleep(Math.max(1, minimum - elapsed)); continue; }
+    const now = performance.now(),
+      elapsed = now - previous,
+      minimum = host.minimumMilliseconds();
+    if (elapsed < minimum) {
+      await Bun.sleep(Math.max(1, minimum - elapsed));
+      continue;
+    }
     previous = now;
     const state = host.clockState();
-    try { await host.step(elapsed); }
-    catch (error) {
+    try {
+      await host.step(elapsed);
+    } catch (error) {
       if (host.recover === undefined) throw error;
-      await host.recover(error); previous = performance.now();
+      await host.recover(error);
+      previous = performance.now();
     }
     if (host.clockState() !== state) previous = performance.now();
     await setImmediate();

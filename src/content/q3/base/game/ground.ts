@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { ActorTraceResult } from "../world.ts";
 import type { EntityPool } from "./entities.ts";
@@ -5,7 +6,7 @@ import type { GameEntity } from "./state.ts";
 
 /** Native numbers are a projection; support identity belongs to the shared body. */
 export function groundNumber(ground: ActorId | null, entities: EntityPool): number {
-  return ground === null ? 1023 : entities.options.records.nativeByActor(ground)?.slot ?? 1023;
+  return ground === null ? 1023 : (entities.options.records.nativeByActor(ground)?.slot ?? 1023);
 }
 
 export function writeGround(entity: GameEntity, ground: ActorId | null, entities: EntityPool): void {

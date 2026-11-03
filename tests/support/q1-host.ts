@@ -33,18 +33,41 @@ export interface Q1TestHost {
 }
 
 type Contents = ReturnType<Q1FoundationHost["contents"]>;
-const contentsByCode = new Map<number, Contents>([[-2, "solid"], [-3, "water"], [-4, "slime"], [-5, "lava"], [-6, "sky"]]);
+const contentsByCode = new Map<number, Contents>([
+  [-2, "solid"],
+  [-3, "water"],
+  [-4, "slime"],
+  [-5, "lava"],
+  [-6, "sky"],
+]);
 
 /** Body linking as the production scene does: a live solid or trigger entity links as a box or its brush model, anything else is unlinked. */
 export function q1SceneBodies(actors: SessionActorRegistry, scene: SharedSceneQueries, entity: Q1HostParts["entity"]): SharedBodyTable {
-  return new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
-    const source = entity(body.actor);
-    if (source === null || source === undefined || source.solid === "none" || source.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }
-    const model = source.model.startsWith("*") ? Number(source.model.slice(1)) : null;
-    scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: source.owner,
-      role: source.solid === "trigger" ? "trigger" : "solid", monster: source.monster !== null, deadMonster: false });
-    return undefined;
-  } });
+  return new SharedBodyTable(actors, {
+    absoluteBounds: translatedBodyBounds,
+    onUnlink: actor => {
+      scene.unlink(actor);
+      return undefined;
+    },
+    onLink: body => {
+      const source = entity(body.actor);
+      if (source === null || source === undefined || source.solid === "none" || source.classname === "worldspawn") {
+        scene.unlink(body.actor);
+        return undefined;
+      }
+      const model = source.model.startsWith("*") ? Number(source.model.slice(1)) : null;
+      scene.link(body, {
+        family: "q1",
+        shape: model === null ? { kind: "box" } : { kind: "model", model },
+        contents: -2,
+        owner: source.owner,
+        role: source.solid === "trigger" ? "trigger" : "solid",
+        monster: source.monster !== null,
+        deadMonster: false,
+      });
+      return undefined;
+    },
+  });
 }
 
 /**
@@ -52,29 +75,96 @@ export function q1SceneBodies(actors: SessionActorRegistry, scene: SharedSceneQu
  * scheduling and events recorded in the returned collections. Anything a test needs differently is an explicit override.
  */
 export function q1TestHost(parts: Q1HostParts, overrides: Partial<Q1FoundationHost> = {}): Q1TestHost {
-  const { scene } = parts, pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], transitions: TransitionIntent[] = [];
-  const trace: Q1FoundationHost["trace"] = scene === undefined
-    ? request => ({ fraction: 1, end: request.end, normal: { x: 0, y: 0, z: 0 }, actor: null, startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false })
-    : request => {
-      const result = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" },
-        policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-      if (result.kind !== "q1") throw new Error("Q1 trace expected");
-      return { fraction: result.fraction, end: result.end, normal: result.sourcePlane.normal,
-        actor: result.hit.kind === "actor" ? result.hit.actor : result.hit.kind === "world" ? parts.world?.() ?? null : null,
-        startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
-    };
-  const contents: Q1FoundationHost["contents"] = scene === undefined ? () => "empty" : point => {
-    const result = scene.pointContents({ point, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: null });
-    if (result.kind !== "q1") throw new Error("Q1 contents expected");
-    return contentsByCode.get(result.contents) ?? "empty";
-  };
+  const { scene } = parts,
+    pending = new Map<OwnedActor, number>(),
+    events: Q1Event[] = [],
+    transitions: TransitionIntent[] = [];
+  const trace: Q1FoundationHost["trace"] =
+    scene === undefined
+      ? request => ({
+          fraction: 1,
+          end: request.end,
+          normal: { x: 0, y: 0, z: 0 },
+          actor: null,
+          startSolid: false,
+          allSolid: false,
+          sky: false,
+          inOpen: true,
+          inWater: false,
+        })
+      : request => {
+          const result = scene.trace({
+            start: request.start,
+            end: request.end,
+            shape: { kind: "box", bounds: request.bounds },
+            target: { kind: "world" },
+            policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null },
+            numeric: Q1_DONOR_PROFILE,
+            passActor: request.ignore,
+          });
+          if (result.kind !== "q1") throw new Error("Q1 trace expected");
+          return {
+            fraction: result.fraction,
+            end: result.end,
+            normal: result.sourcePlane.normal,
+            actor: result.hit.kind === "actor" ? result.hit.actor : result.hit.kind === "world" ? (parts.world?.() ?? null) : null,
+            startSolid: result.startSolid,
+            allSolid: result.allSolid,
+            sky: false,
+            inOpen: result.inOpen,
+            inWater: result.inWater,
+          };
+        };
+  const contents: Q1FoundationHost["contents"] =
+    scene === undefined
+      ? () => "empty"
+      : point => {
+          const result = scene.pointContents({
+            point,
+            target: { kind: "world" },
+            policy: { kind: "q1", move: "normal", hull: null },
+            numeric: Q1_DONOR_PROFILE,
+            passActor: null,
+          });
+          if (result.kind !== "q1") throw new Error("Q1 contents expected");
+          return contentsByCode.get(result.contents) ?? "empty";
+        };
   const host: Q1FoundationHost = {
-    actors: parts.actors, callbacks: parts.callbacks, bodies: parts.bodies, combat: parts.combat, inventory: parts.inventory, random: () => 0.4,
-    trace, contents, walkMove: () => false, moveToGoal: () => undefined, changeYaw: () => undefined, checkBottom: () => false,
-    pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
-    scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: intent => { transitions.push(intent); return undefined; },
-    players: parts.players, checkClient: () => null, classname: actor => parts.entity(actor)?.classname ?? "player", powerup: () => undefined,
+    actors: parts.actors,
+    callbacks: parts.callbacks,
+    bodies: parts.bodies,
+    combat: parts.combat,
+    inventory: parts.inventory,
+    random: () => 0.4,
+    trace,
+    contents,
+    walkMove: () => false,
+    moveToGoal: () => undefined,
+    changeYaw: () => undefined,
+    checkBottom: () => false,
+    pusherServices: () => {
+      throw new Error("This fixture does not step native pushers");
+    },
+    scheduleThink: (actor, due) => {
+      pending.set(actor, due);
+      return undefined;
+    },
+    cancelThink: actor => {
+      pending.delete(actor);
+      return undefined;
+    },
+    emit: event => {
+      events.push(event);
+      return undefined;
+    },
+    transition: intent => {
+      transitions.push(intent);
+      return undefined;
+    },
+    players: parts.players,
+    checkClient: () => null,
+    classname: actor => parts.entity(actor)?.classname ?? "player",
+    powerup: () => undefined,
     ...overrides,
   };
   return { host, pending, events, transitions };

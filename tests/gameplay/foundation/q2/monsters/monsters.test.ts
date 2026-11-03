@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { testCorpusRoot, corpusTest, corpusDescribe } from "../../../../support/corpus.ts";
 
@@ -20,14 +21,43 @@ const test = corpusTest("q2/baseq2/pak0.pak");
 const describe = corpusDescribe("q2/baseq2/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-interface Shot { readonly type: "bullet" | "shotgun"; readonly damage: number; readonly count: number; readonly hspread: number; readonly vspread: number; }
+interface Shot {
+  readonly type: "bullet" | "shotgun";
+  readonly damage: number;
+  readonly count: number;
+  readonly hspread: number;
+  readonly vspread: number;
+}
 class RecordedWeapons extends Q2Weapons {
   readonly shots: Shot[] = [];
-  override fireBullet(_self: Q2Entity, _game: Q2GameServices, _start: Vec3, _direction: Vec3, damage: number, _kick: number, hspread: number, vspread: number, _mod: number): undefined {
-    this.shots.push({ type: "bullet", damage, count: 1, hspread, vspread }); return undefined;
+  override fireBullet(
+    _self: Q2Entity,
+    _game: Q2GameServices,
+    _start: Vec3,
+    _direction: Vec3,
+    damage: number,
+    _kick: number,
+    hspread: number,
+    vspread: number,
+    _mod: number,
+  ): undefined {
+    this.shots.push({ type: "bullet", damage, count: 1, hspread, vspread });
+    return undefined;
   }
-  override fireShotgun(_self: Q2Entity, _game: Q2GameServices, _start: Vec3, _direction: Vec3, damage: number, _kick: number, hspread: number, vspread: number, count: number, _mod: number): undefined {
-    this.shots.push({ type: "shotgun", damage, count, hspread, vspread }); return undefined;
+  override fireShotgun(
+    _self: Q2Entity,
+    _game: Q2GameServices,
+    _start: Vec3,
+    _direction: Vec3,
+    damage: number,
+    _kick: number,
+    hspread: number,
+    vspread: number,
+    count: number,
+    _mod: number,
+  ): undefined {
+    this.shots.push({ type: "shotgun", damage, count, hspread, vspread });
+    return undefined;
   }
 }
 
@@ -37,30 +67,114 @@ function fixture(edition: Q2Edition, step = 0.1) {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors);
-  const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
+  const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"),
+    player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-  bodies.create(player, { origin: { x: 500, y: 0, z: 24 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: world.id });
-  combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
-  let now = 0, touches = 0;
+  bodies.create(player, {
+    origin: { x: 500, y: 0, z: 24 },
+    angles: zero,
+    velocity: zero,
+    bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
+    ground: world.id,
+  });
+  combat.create(player, {
+    health: 1000,
+    armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+    mass: 200,
+    canTakeDamage: true,
+    invulnerable: false,
+    team: null,
+  });
+  let now = 0,
+    touches = 0;
   const random: number[] = [];
   const plane = { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 };
   const trace = (request: Q2TraceRequest): TraceResult => {
-    const clear: TraceResult = { kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0, surface: null, sourcePlane: plane, secondary: null };
+    const clear: TraceResult = {
+      kind: "q2",
+      fraction: 1,
+      startSolid: false,
+      allSolid: false,
+      end: request.end,
+      hit: { kind: "none" },
+      contact: { kind: "none" },
+      contents: 0,
+      surface: null,
+      sourcePlane: plane,
+      secondary: null,
+    };
     if (request.bounds !== null && request.end.z < request.start.z) {
       const z = -request.bounds.min.z;
-      return { ...clear, fraction: (request.start.z - z) / (request.start.z - request.end.z), end: { ...request.end, z }, hit: { kind: "world", model: 0 }, contact: { kind: "plane", plane }, contents: 1 };
+      return {
+        ...clear,
+        fraction: (request.start.z - z) / (request.start.z - request.end.z),
+        end: { ...request.end, z },
+        hit: { kind: "world", model: 0 },
+        contact: { kind: "plane", plane },
+        contents: 1,
+      };
     }
     if (request.bounds === null && (request.mask & 0x2000000) !== 0) return { ...clear, fraction: 0.8, hit: { kind: "actor", actor: player.id } };
     return clear;
   };
-  const { host, scheduled, events } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) }, {
-    now: () => now, frameSeconds: () => step, random: () => random.shift() ?? 0.5, trace, pointContents: point => point.z < 0 ? 1 : 0,
-    touchTriggers: () => { touches++; return undefined; }, });
-  const weapons = new RecordedWeapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
+  const { host, scheduled, events } = q2TestHost(
+    { actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) },
+    {
+      now: () => now,
+      frameSeconds: () => step,
+      random: () => random.shift() ?? 0.5,
+      trace,
+      pointContents: point => (point.z < 0 ? 1 : 0),
+      touchTriggers: () => {
+        touches++;
+        return undefined;
+      },
+    },
+  );
+  const weapons = new RecordedWeapons({
+    emit: () => undefined,
+    noise: () => undefined,
+    dodge: () => undefined,
+    lagCompensation: { kind: "current-world" },
+    ammoChanged: () => undefined,
+    canTarget: () => true,
+  });
   const monsters = new Q2Monsters(weapons);
-  const game = new Q2Foundation(host, { edition, mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1, provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q2:movement" }, [monsters]);
+  const game = new Q2Foundation(
+    host,
+    {
+      edition,
+      mapName: "base1",
+      skill: 1,
+      mode: "singleplayer",
+      deathmatchFlags: 0,
+      maxClients: 1,
+      provider: "q2:game",
+      campaign: "q2:base",
+      combatProvider: "q2:combat",
+      inventoryProvider: "q2:inventory",
+      movementProvider: "q2:movement",
+    },
+    [monsters],
+  );
   game.attachPlayer(player);
-  return { actors, bodies, combat, player, game, host, monsters, weapons, events, random, setTime(seconds: number) { now = seconds; }, get touches() { return touches; },
+  return {
+    actors,
+    bodies,
+    combat,
+    player,
+    game,
+    host,
+    monsters,
+    weapons,
+    events,
+    random,
+    setTime(seconds: number) {
+      now = seconds;
+    },
+    get touches() {
+      return touches;
+    },
     spawn(classname: string) {
       const entity = game.spawn({ classname, ordinal: 0, values: new Map([["origin", "0 0 24"]]) });
       const context = monsters.context(entity.actor.id);
@@ -68,11 +182,17 @@ function fixture(edition: Q2Edition, step = 0.1) {
       return context;
     },
     advance(seconds: number) {
-      now = seconds; monsters.beginFrame(game);
+      now = seconds;
+      monsters.beginFrame(game);
       for (const [actor, due] of [...scheduled].sort(([a], [b]) => a.id.slot - b.id.slot)) {
         if (due > now + 1e-9 || !actors.isLive(actor.id)) continue;
         scheduled.delete(actor);
-        callbacks.think(actor, { frame: Math.round(now / step), time: { kind: "seconds", value: now }, elapsed: { kind: "seconds", value: step }, phase: "entity-think" });
+        callbacks.think(actor, {
+          frame: Math.round(now / step),
+          time: { kind: "seconds", value: now },
+          elapsed: { kind: "seconds", value: step },
+          phase: "entity-think",
+        });
       }
     },
   };
@@ -92,27 +212,51 @@ describe("source soldier and infantry behavior", () => {
           if (inhibitQ2Spawn(row, scene.game.options)) continue;
           const entity = scene.game.spawn(row);
           expect(scene.monsters.context(entity.actor.id)).not.toBeNull();
-          expect(scene.combat.read(entity.actor.id)?.health).toBe(entity.classname === "monster_infantry" ? 100 : entity.classname === "monster_soldier_light" ? 20 : entity.classname === "monster_soldier" ? 30 : 40);
+          expect(scene.combat.read(entity.actor.id)?.health).toBe(
+            entity.classname === "monster_infantry"
+              ? 100
+              : entity.classname === "monster_soldier_light"
+                ? 20
+                : entity.classname === "monster_soldier"
+                  ? 30
+                  : 40,
+          );
         }
-      } finally { archive.close(); scene.actors.close(); }
+      } finally {
+        archive.close();
+        scene.actors.close();
+      }
     }
   });
 
   test("rerelease Xatrix soldiers spawn as soldier-family variants with their own skin, count and health", () => {
     const scene = fixture("rerelease");
     try {
-      const expected = [["monster_soldier_ripper", 50, 6, 0, "blaster"], ["monster_soldier_hypergun", 60, 8, 2, "shotgun"], ["monster_soldier_lasergun", 70, 10, 4, "machinegun"]] as const;
+      const expected = [
+        ["monster_soldier_ripper", 50, 6, 0, "blaster"],
+        ["monster_soldier_hypergun", 60, 8, 2, "shotgun"],
+        ["monster_soldier_lasergun", 70, 10, 4, "machinegun"],
+      ] as const;
       for (const [classname, health, skin, count, weapon] of expected) {
         const context = scene.spawn(classname);
-        expect([classname, scene.combat.read(context.entity.actor.id)?.health, context.entity.skin, context.entity.count, context.state.weapon, context.state.kind])
-          .toEqual([classname, health, skin, count, weapon, "soldier"]);
+        expect([
+          classname,
+          scene.combat.read(context.entity.actor.id)?.health,
+          context.entity.skin,
+          context.entity.count,
+          context.state.weapon,
+          context.state.kind,
+        ]).toEqual([classname, health, skin, count, weapon, "soldier"]);
         expect(context.entity.model).toBe("models/monsters/soldier/tris.md2");
       }
-    } finally { scene.actors.close(); }
+    } finally {
+      scene.actors.close();
+    }
   });
 
   test("rerelease shotgun fire marks the uncocked gun and skips into its cock sequence", () => {
-    const scene = fixture("rerelease"), context = scene.spawn("monster_soldier");
+    const scene = fixture("rerelease"),
+      context = scene.spawn("monster_soldier");
     scene.advance(0.1);
     context.entity.enemy = scene.player.id;
     context.setMove("soldier_move_attack1");
@@ -129,7 +273,8 @@ describe("source soldier and infantry behavior", () => {
   });
 
   test("rerelease movement runs between 10 Hz gun callbacks", () => {
-    const scene = fixture("rerelease", 0.025), context = scene.spawn("monster_infantry");
+    const scene = fixture("rerelease", 0.025),
+      context = scene.spawn("monster_infantry");
     scene.advance(0.1);
     context.entity.enemy = scene.player.id;
     context.setMove("infantry_move_attack4");
@@ -137,7 +282,9 @@ describe("source soldier and infantry behavior", () => {
     context.state.fireWait = 5;
     scene.advance(0.125);
     const firstOrigin = scene.game.body(context.entity).origin.x;
-    scene.advance(0.15); scene.advance(0.175); scene.advance(0.2);
+    scene.advance(0.15);
+    scene.advance(0.175);
+    scene.advance(0.2);
     expect(scene.weapons.shots).toHaveLength(1);
     expect(scene.game.body(context.entity).origin.x).toBeGreaterThan(firstOrigin);
     expect(scene.touches).toBeGreaterThan(3);
@@ -147,11 +294,20 @@ describe("source soldier and infantry behavior", () => {
   });
 
   test("classic infantry death sprays all twelve authored death gun frames", () => {
-    const scene = fixture("classic"), context = scene.spawn("monster_infantry");
+    const scene = fixture("classic"),
+      context = scene.spawn("monster_infantry");
     scene.advance(0.1);
     scene.combat.setHealth(context.entity.actor, -10);
     scene.random.push(0.4);
-    context.entity.die?.(context.entity, scene.game, { attack: null, self: context.entity.actor, attacker: scene.player.id, inflictor: scene.player.id, damage: 10, kick: 0, point: zero });
+    context.entity.die?.(context.entity, scene.game, {
+      attack: null,
+      self: context.entity.actor,
+      attacker: scene.player.id,
+      inflictor: scene.player.id,
+      damage: 10,
+      kick: 0,
+      point: zero,
+    });
     expect(context.state.move.name).toBe("infantry_move_death2");
     context.entity.frame = classic_infantryFrames.death211 - 1;
     for (let tick = 2; tick <= 17; tick++) scene.advance(tick / 10);
@@ -163,7 +319,8 @@ describe("source soldier and infantry behavior", () => {
   });
 
   test("rerelease combines pain before the source frame-end callback", () => {
-    const scene = fixture("rerelease"), context = scene.spawn("monster_infantry");
+    const scene = fixture("rerelease"),
+      context = scene.spawn("monster_infantry");
     scene.advance(0.1);
     const prior = context.state.move;
     scene.combat.setHealth(context.entity.actor, 40);
@@ -180,7 +337,8 @@ describe("source soldier and infantry behavior", () => {
   });
 
   test("an AI move switch still executes the callback captured from its original frame", () => {
-    const scene = fixture("classic"), context = scene.spawn("monster_soldier");
+    const scene = fixture("classic"),
+      context = scene.spawn("monster_soldier");
     scene.advance(0.1);
     context.setMove("soldier_move_stand1");
     context.entity.frame = context.state.move.firstFrame - 1;
@@ -191,39 +349,62 @@ describe("source soldier and infantry behavior", () => {
     scene.actors.close();
   });
   test("source saves restore named callbacks, pending pain and animation timing without spawning", () => {
-    const scene = fixture("rerelease", 0.025), infantry = scene.spawn("monster_infantry"), soldier = scene.spawn("monster_soldier_light");
+    const scene = fixture("rerelease", 0.025),
+      infantry = scene.spawn("monster_infantry"),
+      soldier = scene.spawn("monster_soldier_light");
     scene.advance(0.1);
     infantry.entity.enemy = scene.player.id;
-    infantry.setMove("infantry_move_attack4"); infantry.entity.frame = rerelease_infantryFrames.run201 - 1; infantry.state.fireWait = 5;
+    infantry.setMove("infantry_move_attack4");
+    infantry.entity.frame = rerelease_infantryFrames.run201 - 1;
+    infantry.state.fireWait = 5;
     scene.advance(0.125);
     scene.monsters.reportNoise(scene.player.id, { x: 100, y: 0, z: 24 });
     scene.combat.setHealth(soldier.entity.actor, 5);
     const attack = scene.game.attack(scene.player.id, scene.player.id, 1, 0, "q2:blaster");
     soldier.entity.pain?.(soldier.entity, scene.game, { attack, self: soldier.entity.actor, attacker: scene.player.id, damage: 7, kick: 3 });
     throwGib(soldier.entity, scene.game, "models/objects/gibs/sm_meat/tris.md2", 5);
-    const source = structuredClone(scene.game.capture()), snapshot = structuredClone(scene.monsters.capture());
+    const source = structuredClone(scene.game.capture()),
+      snapshot = structuredClone(scene.monsters.capture());
     const pending = snapshot.actors.find(actor => actor.actor.slot === soldier.entity.actor.id.slot)?.pendingDamage;
     expect(pending?.attack?.cause).toEqual(attack.cause);
     expect(pending?.reaction).not.toHaveProperty("attack");
-    const random = [...scene.random], counters = { ...scene.game.counters };
+    const random = [...scene.random],
+      counters = { ...scene.game.counters };
     const actors = SessionActorRegistry.restore(createIdentityOwner("q2-monsters-restored"), scene.actors.checkpoint(), scene.actors.sourceCheckpoint());
-    const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+    const callbacks = new ActorCallbackTable(actors),
+      bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
     const combat = inertAuthority(actors, callbacks);
     for (const entry of scene.actors.observations()) {
-      const actor = actors.resolveSaved(entry.id), body = scene.bodies.read(entry.id), health = scene.combat.read(entry.id);
+      const actor = actors.resolveSaved(entry.id),
+        body = scene.bodies.read(entry.id),
+        health = scene.combat.read(entry.id);
       if (actor === null) throw new Error("Missing restored actor");
       if (body !== null) bodies.create(actor, { ...body, ground: body.ground === null ? null : actors.referenceSaved(body.ground) });
       if (health !== null) combat.create(actor, health);
     }
-    const player = actors.referenceSaved(scene.player.id), world = actors.referenceSaved(scene.host.worldActor());
-    const { host } = q2TestHost({ actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors), world, players: () => [player], entity: actor => game.entity(actor) }, {
-      now: scene.host.now, frameSeconds: scene.host.frameSeconds, random: scene.host.random, pointContents: scene.host.pointContents, touchTriggers: scene.host.touchTriggers,
-      schedule: scene.host.schedule, emit: scene.host.emit,
-      trace: request => { const trace = scene.host.trace(request); return trace.hit.kind === "actor" ? { ...trace, hit: { kind: "actor", actor: actors.referenceSaved(trace.hit.actor) } } : trace; },
-    });
+    const player = actors.referenceSaved(scene.player.id),
+      world = actors.referenceSaved(scene.host.worldActor());
+    const { host } = q2TestHost(
+      { actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors), world, players: () => [player], entity: actor => game.entity(actor) },
+      {
+        now: scene.host.now,
+        frameSeconds: scene.host.frameSeconds,
+        random: scene.host.random,
+        pointContents: scene.host.pointContents,
+        touchTriggers: scene.host.touchTriggers,
+        schedule: scene.host.schedule,
+        emit: scene.host.emit,
+        trace: request => {
+          const trace = scene.host.trace(request);
+          return trace.hit.kind === "actor" ? { ...trace, hit: { kind: "actor", actor: actors.referenceSaved(trace.hit.actor) } } : trace;
+        },
+      },
+    );
 
-    const restored = new Q2Monsters(scene.weapons), game = new Q2Foundation(host, scene.game.options, [restored]);
-    game.restore(source); restored.restore(game, snapshot);
+    const restored = new Q2Monsters(scene.weapons),
+      game = new Q2Foundation(host, scene.game.options, [restored]);
+    game.restore(source);
+    restored.restore(game, snapshot);
     expect(scene.random).toEqual(random);
     expect(game.counters).toEqual(counters);
     expect(game.capture().entities.map(entity => entity.callbacks)).toEqual(source.entities.map(entity => entity.callbacks));
@@ -233,9 +414,11 @@ describe("source soldier and infantry behavior", () => {
     expect(resumed.entity.enemy).toBe(player);
     expect(resumed.state.move.name).toBe(infantry.state.move.name);
     expect(resumed.state.nextMoveTime).toBe(infantry.state.nextMoveTime);
-    scene.setTime(0.15); resumed.entity.think?.(resumed.entity, game);
+    scene.setTime(0.15);
+    resumed.entity.think?.(resumed.entity, game);
     expect(scene.weapons.shots).toHaveLength(1);
-    scene.setTime(0.225); resumed.entity.think?.(resumed.entity, game);
+    scene.setTime(0.225);
+    resumed.entity.think?.(resumed.entity, game);
     expect(scene.weapons.shots).toHaveLength(2);
     const before = scene.events.filter(event => event.kind === "sound" && event.path.startsWith("soldier/solpain")).length;
     restored.endFrame(game);
@@ -244,7 +427,7 @@ describe("source soldier and infantry behavior", () => {
     expect(restoredAttack?.cause).toEqual(attack.cause);
     expect(scene.events.filter(event => event.kind === "sound" && event.path.startsWith("soldier/solpain"))).toHaveLength(before + 1);
     expect(restored.capture().actors.find(actor => actor.actor.slot === soldier.entity.actor.id.slot)?.pendingDamage).toBeNull();
-    actors.close(); scene.actors.close();
+    actors.close();
+    scene.actors.close();
   });
-
 });

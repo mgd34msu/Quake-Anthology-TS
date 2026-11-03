@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -25,7 +26,13 @@ export interface RereleaseWorldOptions {
   sounds(): readonly BotSoundT[];
   readonly snapshot: RereleaseFrameSnapshot;
 }
-function normalized(name: string): string { return name.replace(/^.*:/, "").replace(/^.*weapon[/_]/, "").replaceAll("_", "").replaceAll("/", ""); }
+function normalized(name: string): string {
+  return name
+    .replace(/^.*:/, "")
+    .replace(/^.*weapon[/_]/, "")
+    .replaceAll("_", "")
+    .replaceAll("/", "");
+}
 /**
  * Nothing the simulation exposes to bots changes while their commands are
  * being collected, so within one frame the entity list is the same for every
@@ -36,58 +43,97 @@ export class RereleaseFrameSnapshot {
   private open = false;
   private serial = 0;
   private list: readonly BotEntityT[] | null = null;
-  begin(): void { this.open = true; this.serial++; this.list = null; }
-  end(): void { this.open = false; this.list = null; }
-  get active(): boolean { return this.open; }
-  get frame(): number { return this.serial; }
+  begin(): void {
+    this.open = true;
+    this.serial++;
+    this.list = null;
+  }
+  end(): void {
+    this.open = false;
+    this.list = null;
+  }
+  get active(): boolean {
+    return this.open;
+  }
+  get frame(): number {
+    return this.serial;
+  }
   entities(build: () => readonly BotEntityT[]): readonly BotEntityT[] {
     if (!this.open) return build();
-    return this.list ??= build();
+    return (this.list ??= build());
   }
 }
 export function nativeWeaponItem(simulation: SharedSimulation, actor: ActorId, knowledge: BotKnowledge, number: number): ItemId | null {
   const weapon = knowledge.weaponByNumber(number);
-  return weapon === undefined ? null : simulation.playerUi(actor).items.find(item => item.kind === "weapon" && normalized(item.id) === normalized(weapon.name))?.id ?? null;
+  return weapon === undefined
+    ? null
+    : (simulation.playerUi(actor).items.find(item => item.kind === "weapon" && normalized(item.id) === normalized(weapon.name))?.id ?? null);
 }
 export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: ActorId): BotWorldT {
   const { simulation, knowledge, objectives } = options;
   const numeric = simulation.recipe.timing.find(entry => entry.provider === simulation.recipe.engineBehavior.provider)?.numeric;
   if (numeric === undefined) throw new Error("Native bot world requires source numeric policy");
   const policy = { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } satisfies import("../../../contracts/scene.ts").TracePolicy;
-  const player = () => { const value = simulation.movementPlayer(actor); if (value === null) throw new Error("Native bot lost shared player"); return value; };
+  const player = () => {
+    const value = simulation.movementPlayer(actor);
+    if (value === null) throw new Error("Native bot lost shared player");
+    return value;
+  };
   const nav = new SourceRereleaseNavigation(options.navigation.forClient(player().client.slot), () => simulation.bodies.read(actor)?.ground ?? null);
   const trace = (start: Vec3, end: Vec3, shape: import("../../../contracts/scene.ts").TraceShape) => {
     const result = simulation.scene.trace({ start, end, shape, target: { kind: "world" }, policy, numeric, passActor: actor });
-    return { fraction: result.fraction, endpos: result.end, startsolid: result.startSolid || result.allSolid, hitId: result.hit.kind === "actor" ? options.identify(result.hit.actor) : -1 };
+    return {
+      fraction: result.fraction,
+      endpos: result.end,
+      startsolid: result.startSolid || result.allSolid,
+      hitId: result.hit.kind === "actor" ? options.identify(result.hit.actor) : -1,
+    };
   };
   let remembered: { readonly frame: number; readonly value: BotSelfT } | null = null;
   const self = (): BotSelfT => {
-      const movement = player(), body = simulation.bodies.read(actor), ui = simulation.playerUi(actor);
-      if (body === null) throw new Error("Native bot lost shared body");
-      const groundClass = body.ground === null ? null : simulation.botEntity(body.ground)?.classname;
-      let items = 0, currentWeapon = 0;
-      const ammo: Record<string, number> = {};
-      for (const weapon of knowledge.weapons) {
-        const item = nativeWeaponItem(simulation, actor, knowledge, weapon.number);
-        if (item !== null && simulation.inventory.count(actor, item) > 0) items |= weapon.number;
-        if (item === ui.activeWeapon) currentWeapon = weapon.number;
-        const ammoName = weapon.ammoName;
-        const match = ui.inventory.find(entry => normalized(entry.item) === normalized(ammoName));
-        // Selected arsenals carry ammo on the weapon entry (and in the
-        // shared inventory under foreign ids), not in the source inventory
-        // projection, which lists the map game's own empty ammo slots.
-        const carried = item === null ? 0 : ui.items.find(entry => entry.id === item)?.count ?? 0;
-        if (ammoName !== "") ammo[ammoName] = Math.max(match?.count ?? 0, carried);
-      }
-      return { id: options.identify(actor), origin: body.origin, velocity: body.velocity, viewAngles: movement.viewAngles,
-        eye: { ...body.origin, z: body.origin.z + movement.viewHeight }, health: ui.health,
-        armor: ui.armor.regular.kind === "none" ? 0 : ui.armor.regular.points, items, ammo, currentWeapon,
-        onGround: body.ground !== null, onLift: groundClass === "func_plat" || groundClass === "func_plat2" || groundClass === "func_train",
-        waterLevel: movement.waterLevel, team: objectives.team(actor), dead: ui.health <= 0,
-        hasProtection: simulation.combat.read(actor)?.invulnerable ?? false, carryingObjective: objectives.carrying(actor) };
+    const movement = player(),
+      body = simulation.bodies.read(actor),
+      ui = simulation.playerUi(actor);
+    if (body === null) throw new Error("Native bot lost shared body");
+    const groundClass = body.ground === null ? null : simulation.botEntity(body.ground)?.classname;
+    let items = 0,
+      currentWeapon = 0;
+    const ammo: Record<string, number> = {};
+    for (const weapon of knowledge.weapons) {
+      const item = nativeWeaponItem(simulation, actor, knowledge, weapon.number);
+      if (item !== null && simulation.inventory.count(actor, item) > 0) items |= weapon.number;
+      if (item === ui.activeWeapon) currentWeapon = weapon.number;
+      const ammoName = weapon.ammoName;
+      const match = ui.inventory.find(entry => normalized(entry.item) === normalized(ammoName));
+      // Selected arsenals carry ammo on the weapon entry (and in the
+      // shared inventory under foreign ids), not in the source inventory
+      // projection, which lists the map game's own empty ammo slots.
+      const carried = item === null ? 0 : (ui.items.find(entry => entry.id === item)?.count ?? 0);
+      if (ammoName !== "") ammo[ammoName] = Math.max(match?.count ?? 0, carried);
+    }
+    return {
+      id: options.identify(actor),
+      origin: body.origin,
+      velocity: body.velocity,
+      viewAngles: movement.viewAngles,
+      eye: { ...body.origin, z: body.origin.z + movement.viewHeight },
+      health: ui.health,
+      armor: ui.armor.regular.kind === "none" ? 0 : ui.armor.regular.points,
+      items,
+      ammo,
+      currentWeapon,
+      onGround: body.ground !== null,
+      onLift: groundClass === "func_plat" || groundClass === "func_plat2" || groundClass === "func_train",
+      waterLevel: movement.waterLevel,
+      team: objectives.team(actor),
+      dead: ui.health <= 0,
+      hasProtection: simulation.combat.read(actor)?.invulnerable ?? false,
+      carryingObjective: objectives.carrying(actor),
+    };
   };
   return {
-    time: () => simulation.timeSeconds, frameTime: () => options.elapsed() / 1000,
+    time: () => simulation.timeSeconds,
+    frameTime: () => options.elapsed() / 1000,
     self: () => {
       if (!options.snapshot.active) return self();
       if (remembered?.frame === options.snapshot.frame) return remembered.value;
@@ -100,29 +146,64 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
     pointContents: point => {
       const result = simulation.scene.pointContents({ point, target: { kind: "world" }, policy, numeric, passActor: actor });
       if (result.kind !== "q3") throw new Error("Native bot contents projection lost its selected policy");
-      return (result.contents & 8) !== 0 ? BotContents.Lava : (result.contents & 16) !== 0 ? BotContents.Slime
-        : (result.contents & 32) !== 0 ? BotContents.Water : (result.contents & 1) !== 0 ? BotContents.Solid : BotContents.Empty;
+      return (result.contents & 8) !== 0
+        ? BotContents.Lava
+        : (result.contents & 16) !== 0
+          ? BotContents.Slime
+          : (result.contents & 32) !== 0
+            ? BotContents.Water
+            : (result.contents & 1) !== 0
+              ? BotContents.Solid
+              : BotContents.Empty;
     },
-    entities: () => options.snapshot.entities(() => {
-      const entities: BotEntityT[] = [];
-      for (const observation of simulation.actors.observations()) {
-        const target = observation.id, body = simulation.bodies.read(target);
-        if (body === null || !simulation.bodies.linked(target)) continue;
-        const movement = simulation.movementPlayer(target), combat = simulation.combat.read(target);
-        const entity = simulation.botEntity(target);
-        if (entity?.hidden === true || entity === null && movement === null) continue;
-        const classname = movement !== null ? "player" : entity?.classname ?? "";
-        const kind = movement !== null ? BotEntityKind.Player : classname.startsWith("monster_") ? BotEntityKind.Monster
-          : knowledge.item(classname) !== undefined ? BotEntityKind.Item : BotEntityKind.Interactable;
-        entities.push({ id: options.identify(target), kind, classname, origin: body.origin, velocity: body.velocity,
-          center: { x: body.origin.x + (body.bounds.min.x + body.bounds.max.x) / 2, y: body.origin.y + (body.bounds.min.y + body.bounds.max.y) / 2, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 },
-          head: { ...body.origin, z: body.origin.z + body.bounds.max.z }, feet: { ...body.origin, z: body.origin.z + body.bounds.min.z },
-          health: combat?.health ?? entity?.health ?? 0, team: objectives.team(target), dead: combat !== null && combat.health <= 0,
-          invisible: false, waterLevel: movement?.waterLevel ?? 0, isBot: options.isBot(target), spawnflags: entity?.spawnflags ?? 0,
-          hasHealth: (combat?.health ?? entity?.health ?? 0) > 0, hasTargetname: entity !== null && entity.targetname !== "", carryingObjective: objectives.carrying(target) });
-      }
-      return entities;
-    }),
-    hearing: options.sounds, nav: () => nav,
+    entities: () =>
+      options.snapshot.entities(() => {
+        const entities: BotEntityT[] = [];
+        for (const observation of simulation.actors.observations()) {
+          const target = observation.id,
+            body = simulation.bodies.read(target);
+          if (body === null || !simulation.bodies.linked(target)) continue;
+          const movement = simulation.movementPlayer(target),
+            combat = simulation.combat.read(target);
+          const entity = simulation.botEntity(target);
+          if (entity?.hidden === true || (entity === null && movement === null)) continue;
+          const classname = movement !== null ? "player" : (entity?.classname ?? "");
+          const kind =
+            movement !== null
+              ? BotEntityKind.Player
+              : classname.startsWith("monster_")
+                ? BotEntityKind.Monster
+                : knowledge.item(classname) !== undefined
+                  ? BotEntityKind.Item
+                  : BotEntityKind.Interactable;
+          entities.push({
+            id: options.identify(target),
+            kind,
+            classname,
+            origin: body.origin,
+            velocity: body.velocity,
+            center: {
+              x: body.origin.x + (body.bounds.min.x + body.bounds.max.x) / 2,
+              y: body.origin.y + (body.bounds.min.y + body.bounds.max.y) / 2,
+              z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2,
+            },
+            head: { ...body.origin, z: body.origin.z + body.bounds.max.z },
+            feet: { ...body.origin, z: body.origin.z + body.bounds.min.z },
+            health: combat?.health ?? entity?.health ?? 0,
+            team: objectives.team(target),
+            dead: combat !== null && combat.health <= 0,
+            invisible: false,
+            waterLevel: movement?.waterLevel ?? 0,
+            isBot: options.isBot(target),
+            spawnflags: entity?.spawnflags ?? 0,
+            hasHealth: (combat?.health ?? entity?.health ?? 0) > 0,
+            hasTargetname: entity !== null && entity.targetname !== "",
+            carryingObjective: objectives.carrying(target),
+          });
+        }
+        return entities;
+      }),
+    hearing: options.sounds,
+    nav: () => nav,
   };
 }

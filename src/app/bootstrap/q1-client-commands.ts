@@ -1,11 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ActorId, ClientId, SeatId } from "../../contracts/identity.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
 
 /** Quake host_cmd.c registers these client names before forwarding them to authority. */
-export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: CommandDialect,
-  execute: (name: string, args: readonly string[], seat: SeatId | null, source: CommandContext) => undefined): () => void {
+export function registerQ1ClientCommands(
+  commands: CommandBuffer,
+  _dialect: CommandDialect,
+  execute: (name: string, args: readonly string[], seat: SeatId | null, source: CommandContext) => undefined,
+): () => void {
   const registered: string[] = [];
   const releaseView = registerQ1ViewCommands(commands);
   for (const { name, summary } of [
@@ -17,26 +21,57 @@ export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: Comm
     { name: "kill", summary: "Suicide through the source game's player lifecycle." },
     { name: "suicide", summary: "Alias for kill." },
     { name: "fly", summary: "Toggle flying with collision; source authority controls cheat access." },
-    ...(_dialect === "q1-netquake" || _dialect === "q1-quakeworld" ? [
-      { name: "pause", summary: "Toggle server pause when pausable permits it." },
-      { name: "status", summary: "Show the current source server and connected players." },
-      { name: "ping", summary: "Show measured client round trip times." },
-    ] : []),
+    ...(_dialect === "q1-netquake" || _dialect === "q1-quakeworld"
+      ? [
+          { name: "pause", summary: "Toggle server pause when pausable permits it." },
+          { name: "status", summary: "Show the current source server and connected players." },
+          { name: "ping", summary: "Show measured client round trip times." },
+        ]
+      : []),
   ]) {
     if (commands.exists(name)) continue;
-    if (commands.register(name, invocation => {
-      let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
-      const args = name === "giveall" ? origin.kind === "server-console" ? [...invocation.args, "all"] : ["all"] : invocation.args;
-      return execute(name === "giveall" ? "give" : name === "suicide" ? "kill" : name, args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
-    }, { summary, usage: name === "give" ? "give [client slot: server console only] <all|health|armor|weapons|ammo|keys|item> [amount]"
-      : `${name} [client slot: server console only]`, examples: name === "give" ? ["give all", "give health 100"] : [name] })) registered.push(name);
+    if (
+      commands.register(
+        name,
+        invocation => {
+          let origin = invocation.source.origin;
+          while (origin.kind === "script") origin = origin.caller;
+          const args = name === "giveall" ? (origin.kind === "server-console" ? [...invocation.args, "all"] : ["all"]) : invocation.args;
+          return execute(
+            name === "giveall" ? "give" : name === "suicide" ? "kill" : name,
+            args,
+            origin.kind === "local-seat" ? origin.seat : null,
+            invocation.source,
+          );
+        },
+        {
+          summary,
+          usage:
+            name === "give"
+              ? "give [client slot: server console only] <all|health|armor|weapons|ammo|keys|item> [amount]"
+              : `${name} [client slot: server console only]`,
+          examples: name === "give" ? ["give all", "give health 100"] : [name],
+        },
+      )
+    )
+      registered.push(name);
   }
-  return () => { releaseView(); for (const name of registered) commands.unregister(name); };
+  return () => {
+    releaseView();
+    for (const name of registered) commands.unregister(name);
+  };
 }
 
-export function resolveQ1HostCommandActor(name: string, args: readonly string[], source: CommandContext | undefined,
-  players: readonly { readonly actor: ActorId; readonly client: ClientId }[], localActor: () => ActorId, takesArguments = false): ActorId {
-  let origin = source?.origin; while (origin?.kind === "script") origin = origin.caller;
+export function resolveQ1HostCommandActor(
+  name: string,
+  args: readonly string[],
+  source: CommandContext | undefined,
+  players: readonly { readonly actor: ActorId; readonly client: ClientId }[],
+  localActor: () => ActorId,
+  takesArguments = false,
+): ActorId {
+  let origin = source?.origin;
+  while (origin?.kind === "script") origin = origin.caller;
   if (origin?.kind === "server-console") {
     const target = args[0];
     if ((!takesArguments && args.length !== 1) || target === undefined || !/^\d+$/.test(target))
@@ -47,7 +82,8 @@ export function resolveQ1HostCommandActor(name: string, args: readonly string[],
   }
   if (!takesArguments && args.length !== 0) throw new Error(`${name}: only the server console may select a client slot`);
   if (origin?.kind === "remote-client" || origin?.kind === "local-seat") {
-    const client = origin.client, player = players.find(player => player.client.equals(client));
+    const client = origin.client,
+      player = players.find(player => player.client.equals(client));
     if (player === undefined) throw new Error("Command requires an admitted client");
     return player.actor;
   }

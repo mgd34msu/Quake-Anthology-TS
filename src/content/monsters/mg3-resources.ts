@@ -2,8 +2,8 @@
 // Generated from the MG3 progs.dat spawn-function closure plus the module precache declarations.
 // Regenerate with tools/content/generate-mg3-monster-resources.ts.
 export const mg3MonsterResources: Readonly<Record<string, { readonly resources: readonly string[] }>> = {
-  "monster_ogre_rocket": {
-    "resources": [
+  monster_ogre_rocket: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -59,11 +59,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_demodog": {
-    "resources": [
+  monster_demodog: {
+    resources: [
       "progs/dog_explosive.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -109,11 +109,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_army_infected": {
-    "resources": [
+  monster_army_infected: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -168,11 +168,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/zombie/z_miss.wav",
       "sound/zombie/z_pain.wav",
       "sound/zombie/z_pain1.wav",
-      "sound/zombie/z_shot1.wav"
-    ]
+      "sound/zombie/z_shot1.wav",
+    ],
   },
-  "monster_knight_infected": {
-    "resources": [
+  monster_knight_infected: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -224,11 +224,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/zombie/z_miss.wav",
       "sound/zombie/z_pain.wav",
       "sound/zombie/z_pain1.wav",
-      "sound/zombie/z_shot1.wav"
-    ]
+      "sound/zombie/z_shot1.wav",
+    ],
   },
-  "monster_enforcer_infected": {
-    "resources": [
+  monster_enforcer_infected: {
+    resources: [
       "progs/demon.mdl",
       "progs/enforcer.mdl",
       "progs/gib1.mdl",
@@ -280,11 +280,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_hell_knight_infected": {
-    "resources": [
+  monster_hell_knight_infected: {
+    resources: [
       "progs/demon.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -339,11 +339,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_ranged_knight": {
-    "resources": [
+  monster_ranged_knight: {
+    resources: [
       "progs/diamond_trail.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -394,11 +394,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_super_shambler": {
-    "resources": [
+  monster_super_shambler: {
+    resources: [
       "progs/bolt.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -452,11 +452,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
       "sound/zombie/z_idle.wav",
-      "sound/zombie/z_shot1.wav"
-    ]
+      "sound/zombie/z_shot1.wav",
+    ],
   },
-  "monster_lava_man": {
-    "resources": [
+  monster_lava_man: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -497,11 +497,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle1.wav",
       "sound/wizard/widle2.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_ghost": {
-    "resources": [
+  monster_ghost: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -518,11 +518,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/player/death4.wav",
       "sound/player/death5.wav",
       "sound/player/h2odeath.wav",
-      "sound/player/udeath.wav"
-    ]
+      "sound/player/udeath.wav",
+    ],
   },
-  "monster_orb": {
-    "resources": [
+  monster_orb: {
+    resources: [
       "progs/gib1.mdl",
       "progs/gib2.mdl",
       "progs/gib3.mdl",
@@ -569,11 +569,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/wizard/widle2.wav",
       "sound/wizard/wpain.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
+      "sound/zombie/z_idle.wav",
+    ],
   },
-  "monster_szombie": {
-    "resources": [
+  monster_szombie: {
+    resources: [
       "progs/flame2.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -617,11 +617,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/zombie/z_miss.wav",
       "sound/zombie/z_pain.wav",
       "sound/zombie/z_pain1.wav",
-      "sound/zombie/z_shot1.wav"
-    ]
+      "sound/zombie/z_shot1.wav",
+    ],
   },
-  "monster_oldone_new": {
-    "resources": [
+  monster_oldone_new: {
+    resources: [
       "progs/diamond.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -685,11 +685,11 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/zombie/z_miss.wav",
       "sound/zombie/z_pain.wav",
       "sound/zombie/z_pain1.wav",
-      "sound/zombie/z_shot1.wav"
-    ]
+      "sound/zombie/z_shot1.wav",
+    ],
   },
-  "monster_boss_final": {
-    "resources": [
+  monster_boss_final: {
+    resources: [
       "progs/boss.mdl",
       "progs/gib1.mdl",
       "progs/gib2.mdl",
@@ -737,7 +737,7 @@ export const mg3MonsterResources: Readonly<Record<string, { readonly resources: 
       "sound/soldier/sight1.wav",
       "sound/weapons/rocket1i.wav",
       "sound/wizard/wsight.wav",
-      "sound/zombie/z_idle.wav"
-    ]
-  }
+      "sound/zombie/z_idle.wav",
+    ],
+  },
 };

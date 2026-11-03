@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Ported from id Software's code/game/g_client.c ClientCleanName,
  * ClientUserinfoChanged, ClientConnect, ClientBegin and ClientDisconnect.
@@ -37,11 +38,12 @@ export interface ClientAdmissionCommands {
 }
 
 export type ClientBotServices =
-  | { readonly kind: "available";
-    removeQueuedBegin(clientNum: number): void;
-    connect(clientNum: number, restart: boolean): boolean;
-    shutdownClient(clientNum: number, restart: boolean): void;
-  }
+  | {
+      readonly kind: "available";
+      removeQueuedBegin(clientNum: number): void;
+      connect(clientNum: number, restart: boolean): boolean;
+      shutdownClient(clientNum: number, restart: boolean): void;
+    }
   | { readonly kind: "unavailable"; readonly reason: string };
 
 export interface ClientAdmissionHost {
@@ -138,7 +140,10 @@ export function cleanClientName(input: string): string {
     if (character === 94) {
       if (cursor === source.length) break;
       const color = source.charCodeAt(cursor);
-      if (((color - 48) & 7) === 0) { cursor++; continue; }
+      if (((color - 48) & 7) === 0) {
+        cursor++;
+        continue;
+      }
       if (output.length > outputSize - 2) break;
       output += `^${String.fromCharCode(color)}`;
       cursor++;
@@ -177,9 +182,15 @@ function resetPlayerState(state: PlayerState): void {
 /** ClientConnect's gclient_t memset, preserving the pool's stable object graph. */
 function resetClient(client: GameClient, product: Product): void {
   const fresh = new GameClient(product);
-  const ps = client.ps, pers = client.pers, sess = client.sess, ammoTimes = client.ammoTimes;
-  const oldOrigin = client.oldOrigin, damageFrom = client.damageFrom;
-  const command = pers.cmd, commandAngles = command.angles, teamState = pers.teamState;
+  const ps = client.ps,
+    pers = client.pers,
+    sess = client.sess,
+    ammoTimes = client.ammoTimes;
+  const oldOrigin = client.oldOrigin,
+    damageFrom = client.damageFrom;
+  const command = pers.cmd,
+    commandAngles = command.angles,
+    teamState = pers.teamState;
   Object.assign(client, fresh, { ps, pers, sess, ammoTimes, oldOrigin, damageFrom });
   resetPlayerState(ps);
   Object.assign(pers, new ClientPersistant(), { cmd: command, teamState });
@@ -197,16 +208,40 @@ function resetClient(client: GameClient, product: Product): void {
 export function clientPresentationConfig(client: GameClient, userinfo: string, gameType: number, botTeam: Team | null): string {
   const model = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_model" : "model"), MAX_QPATH, "model");
   const headModel = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_headmodel" : "headmodel"), MAX_QPATH, "head model");
-  const teamTask = gameAtoi(clientInfoValue(userinfo, "teamtask")), teamLeader = client.sess.teamLeader;
-  const color1 = clientInfoValue(userinfo, "color1"), color2 = clientInfoValue(userinfo, "color2");
+  const teamTask = gameAtoi(clientInfoValue(userinfo, "teamtask")),
+    teamLeader = client.sess.teamLeader;
+  const color1 = clientInfoValue(userinfo, "color1"),
+    color2 = clientInfoValue(userinfo, "color2");
   return botTeam !== null
-    ? gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
-      [client.pers.netname, botTeam, model, headModel, color1, color2, client.pers.maxHealth,
-        client.sess.wins, client.sess.losses, clientInfoValue(userinfo, "skill"), teamTask, teamLeader])
-    : gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
-      [client.pers.netname, client.sess.sessionTeam, model, headModel, clientInfoValue(userinfo, "g_redteam"),
-        clientInfoValue(userinfo, "g_blueteam"), color1, color2, client.pers.maxHealth,
-        client.sess.wins, client.sess.losses, teamTask, teamLeader]);
+    ? gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d", [
+        client.pers.netname,
+        botTeam,
+        model,
+        headModel,
+        color1,
+        color2,
+        client.pers.maxHealth,
+        client.sess.wins,
+        client.sess.losses,
+        clientInfoValue(userinfo, "skill"),
+        teamTask,
+        teamLeader,
+      ])
+    : gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d", [
+        client.pers.netname,
+        client.sess.sessionTeam,
+        model,
+        headModel,
+        clientInfoValue(userinfo, "g_redteam"),
+        clientInfoValue(userinfo, "g_blueteam"),
+        color1,
+        color2,
+        client.pers.maxHealth,
+        client.sess.wins,
+        client.sess.losses,
+        teamTask,
+        teamLeader,
+      ]);
 }
 
 export class ClientAdmissionRuntime {
@@ -227,7 +262,8 @@ export class ClientAdmissionRuntime {
   }
 
   userinfoChanged(clientNum: number): void {
-    const entity = this.clientEntity(clientNum), client = this.host.pool.clientAt(clientNum);
+    const entity = this.clientEntity(clientNum),
+      client = this.host.pool.clientAt(clientNum);
     let userinfo = this.userinfo(clientNum);
     if (!validInfo(userinfo)) userinfo = "\\name\\badinfo";
 
@@ -248,14 +284,14 @@ export class ClientAdmissionRuntime {
     client.pers.maxHealth = health;
     client.ps.stats.set(statSchema(this.host.product).maxHealth, health);
 
-    const settings = this.host.settings(), gameType = settings.gameType;
+    const settings = this.host.settings(),
+      gameType = settings.gameType;
     let team = client.sess.sessionTeam;
     if (gameType >= GameType.GT_TEAM && (entity.r.svFlags & ServerEntityFlags.BOT) !== 0) {
       const requested = clientInfoValue(userinfo, "team");
       if (caseInsensitiveEqual(requested, "red") || caseInsensitiveEqual(requested, "r")) team = Team.TEAM_RED;
       else if (caseInsensitiveEqual(requested, "blue") || caseInsensitiveEqual(requested, "b")) team = Team.TEAM_BLUE;
-      else team = pickTeam({ clients: this.host.pool.clients, maxClients: this.host.pool.maxClients,
-        teamScores: this.host.teamScores }, clientNum);
+      else team = pickTeam({ clients: this.host.pool.clients, maxClients: this.host.pool.maxClients, teamScores: this.host.teamScores }, clientNum);
     }
 
     if (this.host.product === "missionpack" && gameType >= GameType.GT_TEAM) client.pers.teamInfo = true;
@@ -269,12 +305,19 @@ export class ClientAdmissionRuntime {
   }
 
   connect(clientNum: number, firstTime: boolean, isBot: boolean): string | null {
-    const entity = this.clientEntity(clientNum), userinfo = this.userinfo(clientNum);
+    const entity = this.clientEntity(clientNum),
+      userinfo = this.userinfo(clientNum);
     const address = clientInfoValue(userinfo, "ip");
     if (this.host.filterPacket(address)) return "You are banned from this server.";
     const password = byteBuffer(this.host.settings().password, MAX_INFO_STRING, "password");
-    if ((entity.r.svFlags & ServerEntityFlags.BOT) === 0 && address !== "localhost" && password.length !== 0 &&
-      !caseInsensitiveEqual(password, "none") && password !== clientInfoValue(userinfo, "password")) return "Invalid password";
+    if (
+      (entity.r.svFlags & ServerEntityFlags.BOT) === 0 &&
+      address !== "localhost" &&
+      password.length !== 0 &&
+      !caseInsensitiveEqual(password, "none") &&
+      password !== clientInfoValue(userinfo, "password")
+    )
+      return "Invalid password";
 
     const client = this.host.pool.clientAt(clientNum);
     entity.client = client;
@@ -301,7 +344,8 @@ export class ClientAdmissionRuntime {
   }
 
   begin(clientNum: number): void {
-    const entity = this.clientEntity(clientNum), client = this.host.pool.clientAt(clientNum);
+    const entity = this.clientEntity(clientNum),
+      client = this.host.pool.clientAt(clientNum);
     if (this.host.world.linkState(entity.slot)?.linked === true) this.host.world.unlink(entity.slot);
     initGameEntity(entity);
     entity.touch = null;
@@ -333,8 +377,12 @@ export class ClientAdmissionRuntime {
     const client = entity.client;
     for (let index = 0; index < this.host.pool.maxClients; index++) {
       const follower = this.host.pool.clientAt(index);
-      if (follower.sess.sessionTeam === Team.TEAM_SPECTATOR && follower.sess.spectatorState === SpectatorState.FOLLOW &&
-        follower.sess.spectatorClient === clientNum) this.host.commands.stopFollowing(this.host.pool.at(index));
+      if (
+        follower.sess.sessionTeam === Team.TEAM_SPECTATOR &&
+        follower.sess.spectatorState === SpectatorState.FOLLOW &&
+        follower.sess.spectatorClient === clientNum
+      )
+        this.host.commands.stopFollowing(this.host.pool.at(index));
     }
     if (client.pers.connected === ConnectionState.CONNECTED && client.sess.sessionTeam !== Team.TEAM_SPECTATOR) {
       const temporary = this.host.pool.tempEntity(client.ps.origin, EntityEvent.EV_PLAYER_TELEPORT_OUT);
@@ -347,8 +395,12 @@ export class ClientAdmissionRuntime {
     }
     this.host.log(gameFormat("ClientDisconnect: %i\n", [clientNum]));
     const gameType = this.host.settings().gameType;
-    if (gameType === GameType.GT_TOURNAMENT && this.host.state.intermissionTime === 0 && this.host.state.warmupTime === 0 &&
-      this.host.state.sortedClients[1] === clientNum) {
+    if (
+      gameType === GameType.GT_TOURNAMENT &&
+      this.host.state.intermissionTime === 0 &&
+      this.host.state.warmupTime === 0 &&
+      this.host.state.sortedClients[1] === clientNum
+    ) {
       const winner = this.host.state.sortedClients[0];
       if (winner === undefined) throw new RangeError("tournament winner is absent from sorted clients");
       const winnerClient = this.host.pool.clientAt(winner);

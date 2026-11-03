@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // View calculations and model tools from id Software's code/cgame/cg_view.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -57,20 +58,31 @@ function multiplyAdd(origin: Vec3, scale: number, direction: Vec3): Vec3 {
 export class ViewRuntime {
   private modelRevision = 0;
 
-  constructor(readonly state: ClientGameState, readonly prediction: Pick<PredictionRuntime, "state" | "trace" | "pointContents">, readonly host: ViewHost) {
+  constructor(
+    readonly state: ClientGameState,
+    readonly prediction: Pick<PredictionRuntime, "state" | "trace" | "pointContents">,
+    readonly host: ViewHost,
+  ) {
     if (prediction.state !== state) throw new Error("View and prediction must share one client state");
   }
 
   /** Requires a current snapshot and completed prediction; scene population follows this call. */
   calculateViewValues(): boolean {
-    const state = this.state, snapshot = state.snap;
+    const state = this.state,
+      snapshot = state.snap;
     if (snapshot === null) throw new Error("CG_CalcViewValues requires a current snapshot");
-    const settings = this.host.settings(), ps = state.predictedPlayerState;
+    const settings = this.host.settings(),
+      ps = state.predictedPlayerState;
     state.refdef = createRefdef();
     const refdef = state.refdef;
     let size = snapshot.playerState.pmType === MoveType.PM_INTERMISSION ? 100 : settings.viewSize;
-    if (size < 30) { this.host.setViewSize(30); size = 30; }
-    else if (size > 100) { this.host.setViewSize(100); size = 100; }
+    if (size < 30) {
+      this.host.setViewSize(30);
+      size = 30;
+    } else if (size > 100) {
+      this.host.setViewSize(100);
+      size = 100;
+    }
     refdef.width = Math.trunc(Math.imul(settings.videoWidth, size) / 100) & ~1;
     refdef.height = Math.trunc(Math.imul(settings.videoHeight, size) / 100) & ~1;
     refdef.x = ((settings.videoWidth - refdef.width) / 2) | 0;
@@ -127,7 +139,9 @@ export class ViewRuntime {
   }
 
   private offsetThirdPerson(settings: ViewSettings, angle: number): void {
-    const state = this.state, refdef = state.refdef, ps = state.predictedPlayerState;
+    const state = this.state,
+      refdef = state.refdef,
+      ps = state.predictedPlayerState;
     refdef.viewOrigin = vec3(refdef.viewOrigin.x, refdef.viewOrigin.y, refdef.viewOrigin.z + f32(ps.viewheight));
     let focusAngles = { ...state.refdefViewAngles };
     if (ps.health <= 0) {
@@ -155,15 +169,20 @@ export class ViewRuntime {
     focusPoint = sub3(focusPoint, view);
     const distance = Math.max(1, f32(Math.sqrt(f32(f32(focusPoint.x * focusPoint.x) + f32(focusPoint.y * focusPoint.y)))));
     // q3lcc folds this quotient before storing its float32 constant.
-    state.refdefViewAngles = vec3(f32(f32(-180 / Math.PI) * f32(Math.atan2(focusPoint.z, distance))),
-      f32(state.refdefViewAngles.y - angle), state.refdefViewAngles.z);
+    state.refdefViewAngles = vec3(
+      f32(f32(-180 / Math.PI) * f32(Math.atan2(focusPoint.z, distance))),
+      f32(state.refdefViewAngles.y - angle),
+      state.refdefViewAngles.z,
+    );
   }
 
   private offsetFirstPerson(settings: ViewSettings): void {
-    const state = this.state, snapshot = state.snap;
+    const state = this.state,
+      snapshot = state.snap;
     if (snapshot === null) throw new Error("First-person offset requires a snapshot");
     if (snapshot.playerState.pmType === MoveType.PM_INTERMISSION) return;
-    const refdef = state.refdef, ps = state.predictedPlayerState;
+    const refdef = state.refdef,
+      ps = state.predictedPlayerState;
     if (snapshot.playerState.health <= 0) {
       state.refdefViewAngles = vec3(-15, snapshot.playerState.stats.get(statSchema(ps.product).deadYaw), 40);
       refdef.viewOrigin = vec3(refdef.viewOrigin.x, refdef.viewOrigin.y, refdef.viewOrigin.z + f32(ps.viewheight));
@@ -179,12 +198,18 @@ export class ViewRuntime {
       }
     }
     // Source refdef was zeroed before this function; the final view axis is built afterward.
-    angles = vec3(angles.x + f32(dot3(ps.velocity, refdef.viewAxis[0]) * f32(settings.runPitch)), angles.y,
-      angles.z - f32(dot3(ps.velocity, refdef.viewAxis[1]) * f32(settings.runRoll)));
+    angles = vec3(
+      angles.x + f32(dot3(ps.velocity, refdef.viewAxis[0]) * f32(settings.runPitch)),
+      angles.y,
+      angles.z - f32(dot3(ps.velocity, refdef.viewAxis[1]) * f32(settings.runRoll)),
+    );
     const speed = Math.max(state.xyspeed, 200);
     let pitch = f32(f32(state.bobFracSin * f32(settings.bobPitch)) * speed);
     let roll = f32(f32(state.bobFracSin * f32(settings.bobRoll)) * speed);
-    if ((ps.pmFlags & MoveFlags.DUCKED) !== 0) { pitch = f32(pitch * 3); roll = f32(roll * 3); }
+    if ((ps.pmFlags & MoveFlags.DUCKED) !== 0) {
+      pitch = f32(pitch * 3);
+      roll = f32(roll * 3);
+    }
     if ((state.bobCycle & 1) !== 0) roll = -roll;
     state.refdefViewAngles = vec3(angles.x + pitch, angles.y, angles.z + roll);
     let height = f32(refdef.viewOrigin.z + f32(ps.viewheight));
@@ -203,7 +228,8 @@ export class ViewRuntime {
   }
 
   private calculateFov(settings: ViewSettings): boolean {
-    const state = this.state, refdef = state.refdef;
+    const state = this.state,
+      refdef = state.refdef;
     let fov = 90;
     if (state.predictedPlayerState.pmType !== MoveType.PM_INTERMISSION) {
       fov = (settings.dmFlags & 16) !== 0 ? 90 : Math.max(1, Math.min(160, f32(settings.fov)));
@@ -230,7 +256,8 @@ export class ViewRuntime {
   }
 
   damageBlendBlob(shader: SceneShader | null, ragePro: boolean): RefSpriteEntity | null {
-    const state = this.state, elapsed = Math.trunc(f32(f32(state.time) - state.damageTime)) | 0;
+    const state = this.state,
+      elapsed = Math.trunc(f32(f32(state.time) - state.damageTime)) | 0;
     if (state.damageValue === 0 || ragePro || elapsed <= 0 || elapsed >= 500) return null;
     const entity = createSpriteEntity();
     entity.renderFlags = RF_FIRST_PERSON;
@@ -259,7 +286,8 @@ export class ViewRuntime {
   }
 
   private async requestTestModel(name: string | null, backLerp: number | null, gun: boolean): Promise<void> {
-    const revision = ++this.modelRevision, entity = createModelEntity();
+    const revision = ++this.modelRevision,
+      entity = createModelEntity();
     this.state.testModelEntity = entity;
     if (name !== null) {
       const nul = name.indexOf("\0");
@@ -267,7 +295,10 @@ export class ViewRuntime {
       const model = await this.host.registerModel(this.state.testModelName);
       if (revision !== this.modelRevision) return;
       entity.model = model;
-      if (backLerp !== null) { entity.backLerp = f32(backLerp); entity.frame = 1; }
+      if (backLerp !== null) {
+        entity.backLerp = f32(backLerp);
+        entity.frame = 1;
+      }
       if (model.kind === "default") this.host.print("Can't register model\n");
       else {
         entity.origin = multiplyAdd(this.state.refdef.viewOrigin, 100, this.state.refdef.viewAxis[0]);
@@ -276,7 +307,10 @@ export class ViewRuntime {
       }
     }
     if (revision !== this.modelRevision) return;
-    if (gun) { this.state.testGun = true; entity.renderFlags = RF_MINLIGHT | RF_DEPTHHACK | RF_FIRST_PERSON; }
+    if (gun) {
+      this.state.testGun = true;
+      entity.renderFlags = RF_MINLIGHT | RF_DEPTHHACK | RF_FIRST_PERSON;
+    }
   }
 
   nextModelFrame(): void {
@@ -300,14 +334,19 @@ export class ViewRuntime {
   }
 
   async addTestModel(): Promise<RefEntity | null> {
-    const revision = this.modelRevision, entity = this.state.testModelEntity;
+    const revision = this.modelRevision,
+      entity = this.state.testModelEntity;
     if (entity.model.kind === "default") return null;
     const model = await this.host.registerModel(this.state.testModelName);
     if (revision !== this.modelRevision) return null;
     entity.model = model;
-    if (model.kind === "default") { this.host.print("Can't register model\n"); return null; }
+    if (model.kind === "default") {
+      this.host.print("Can't register model\n");
+      return null;
+    }
     if (this.state.testGun) {
-      const refdef = this.state.refdef, settings = this.host.settings();
+      const refdef = this.state.refdef,
+        settings = this.host.settings();
       entity.axis = [{ ...refdef.viewAxis[0] }, { ...refdef.viewAxis[1] }, { ...refdef.viewAxis[2] }];
       entity.origin = multiplyAdd(refdef.viewOrigin, f32(settings.gunX), refdef.viewAxis[0]);
       entity.origin = multiplyAdd(entity.origin, f32(settings.gunY), refdef.viewAxis[1]);

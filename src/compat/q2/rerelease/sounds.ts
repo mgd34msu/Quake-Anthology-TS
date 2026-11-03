@@ -18,7 +18,11 @@ export interface RereleaseSoundEvent {
 
 /** Preserves game.h sound arguments for server transport or shared audio playback. */
 export class RereleaseSoundImports {
-  constructor(readonly memory: MappedGuestMemory, readonly emit: (event: RereleaseSoundEvent) => void, readonly sourceSlot: (address: GuestAddress) => number) {}
+  constructor(
+    readonly memory: MappedGuestMemory,
+    readonly emit: (event: RereleaseSoundEvent) => void,
+    readonly sourceSlot: (address: GuestAddress) => number,
+  ) {}
   invoke(call: RereleaseImportCall): GuestCallResult | undefined {
     if (call.api !== "game" || (call.name !== "sound" && call.name !== "positioned_sound" && call.name !== "local_sound")) return undefined;
     const args = call.arguments;
@@ -32,10 +36,23 @@ export class RereleaseSoundImports {
     };
     this.emit({
       entitySlot: entity === null ? null : this.sourceSlot(entity),
-      origin: origin === null ? null : { x: this.memory.readFloat32(origin), y: this.memory.readFloat32(this.memory.offset(origin, 4n)), z: this.memory.readFloat32(this.memory.offset(origin, 8n)) },
-      channel: Number(integer(args, offset + 1)), soundIndex: Number(integer(args, offset + 2)),
-      volume: float(offset + 3), attenuation: float(offset + 4), timeOffset: float(offset + 5),
-      audience: call.name === "local_sound" ? { kind: "client", clientSlot: this.sourceSlot(requiredPointer(args, 0)), dupeKey: Number(integer(args, 8)) } : { kind: "world" },
+      origin:
+        origin === null
+          ? null
+          : {
+              x: this.memory.readFloat32(origin),
+              y: this.memory.readFloat32(this.memory.offset(origin, 4n)),
+              z: this.memory.readFloat32(this.memory.offset(origin, 8n)),
+            },
+      channel: Number(integer(args, offset + 1)),
+      soundIndex: Number(integer(args, offset + 2)),
+      volume: float(offset + 3),
+      attenuation: float(offset + 4),
+      timeOffset: float(offset + 5),
+      audience:
+        call.name === "local_sound"
+          ? { kind: "client", clientSlot: this.sourceSlot(requiredPointer(args, 0)), dupeKey: Number(integer(args, 8)) }
+          : { kind: "world" },
     });
     return { kind: "void" };
   }

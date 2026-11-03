@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RereleaseGoalStatus } from "../../../compat/q2/rerelease/navigation.ts";
 import type { SourceBotDirectorHost } from "../../../bots/behavior/director.ts";
 import { createBotArsenalBinding, type BotArsenalBinding } from "./bot-arsenal.ts";
@@ -29,15 +30,42 @@ import type { Q3SourceBots } from "./q3/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import type { SimulationPresentationEvent } from "./types.ts";
 
-export type ApplicationBotService = Pick<ApplicationBots, "options" | "configuration" | "moveToPoint" | "followActor" | "isBot" | "actor" | "frame" | "receive" | "clients" | "consoleCommand" | "disconnect" | "close" | "checkpoint" | "beginRoundRestart" | "bindRestartedRound" | "reconnectRestartedClient" | "resumeRoundBots">;
+export type ApplicationBotService = Pick<
+  ApplicationBots,
+  | "options"
+  | "configuration"
+  | "moveToPoint"
+  | "followActor"
+  | "isBot"
+  | "actor"
+  | "frame"
+  | "receive"
+  | "clients"
+  | "consoleCommand"
+  | "disconnect"
+  | "close"
+  | "checkpoint"
+  | "beginRoundRestart"
+  | "bindRestartedRound"
+  | "reconnectRestartedClient"
+  | "resumeRoundBots"
+>;
 
 /** Stable source imports are installed before the game and bound before bot admission. */
 export class SimulationBotServices {
-  moveToPoint(actor: ActorId, point: Vec3, tolerance: number): RereleaseGoalStatus { return this.transport?.moveToPoint(actor, point, tolerance) ?? 0; }
-  followActor(actor: ActorId, target: ActorId): RereleaseGoalStatus { return this.transport?.followActor(actor, target) ?? 0; }
-  isBot(actor: ActorId): boolean { return this.transport?.isBot(actor) ?? false; }
+  moveToPoint(actor: ActorId, point: Vec3, tolerance: number): RereleaseGoalStatus {
+    return this.transport?.moveToPoint(actor, point, tolerance) ?? 0;
+  }
+  followActor(actor: ActorId, target: ActorId): RereleaseGoalStatus {
+    return this.transport?.followActor(actor, target) ?? 0;
+  }
+  isBot(actor: ActorId): boolean {
+    return this.transport?.isBot(actor) ?? false;
+  }
   /** Admits one roster bot for the running match when a director is attached. */
-  tryAddBot(): boolean { return this.director?.addMatchBot() ?? false; }
+  tryAddBot(): boolean {
+    return this.director?.addMatchBot() ?? false;
+  }
   /** Retires one bot through its transport, freeing the session client slot. */
   tryDisconnectBot(actor: ActorId): boolean {
     const transport = this.transport;
@@ -47,13 +75,22 @@ export class SimulationBotServices {
     }
     return false;
   }
-  get configuration(): CvarRegistry | null { return this.transport?.configuration ?? null; }
-  checkpoint(): ApplicationBotsCheckpoint | null { return this.transport?.checkpoint() ?? null; }
+  get configuration(): CvarRegistry | null {
+    return this.transport?.configuration ?? null;
+  }
+  checkpoint(): ApplicationBotsCheckpoint | null {
+    return this.transport?.checkpoint() ?? null;
+  }
   private director: SourceBotDirector | null = null;
   private transport: ApplicationBotService | null = null;
-  frame(time: number, elapsed: number): readonly ActorCommand[] { return this.transport?.options.automaticFrame === true ? this.transport.frame(time, elapsed) : []; }
-  navigation(actor: ActorId, start: Vec3, goal: Vec3): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] }
-    | { readonly kind: "no-navigation" | "unreachable" } {
+  frame(time: number, elapsed: number): readonly ActorCommand[] {
+    return this.transport?.options.automaticFrame === true ? this.transport.frame(time, elapsed) : [];
+  }
+  navigation(
+    actor: ActorId,
+    start: Vec3,
+    goal: Vec3,
+  ): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" } {
     const transport = this.transport;
     if (transport === null) return { kind: "no-navigation" };
     const player = transport.options.simulation.movementPlayer(actor);
@@ -72,14 +109,21 @@ export class SimulationBotServices {
     kind: "available",
     connect: (client, restart) => this.require().connect(client, restart),
     shutdownClient: (client, restart) => this.require().shutdownClient(client, restart),
-    removeQueuedBegin: client => { this.director?.removeQueuedBegin(client); },
-    testAas: origin => { this.director?.testAas(origin); },
-    interbreedEndMatch: () => { this.director?.interbreedEndMatch(); },
+    removeQueuedBegin: client => {
+      this.director?.removeQueuedBegin(client);
+    },
+    testAas: origin => {
+      this.director?.testAas(origin);
+    },
+    interbreedEndMatch: () => {
+      this.director?.interbreedEndMatch();
+    },
     consoleCommand: argv => this.require().consoleCommand(argv),
   };
   attach(director: SourceBotDirector, transport: ApplicationBots): void {
     if (this.director !== null || this.transport !== null) throw new Error("Source bot services already have a director");
-    this.director = director; this.transport = transport;
+    this.director = director;
+    this.transport = transport;
   }
   attachTransport(transport: ApplicationBotService): void {
     if (this.director !== null || this.transport !== null) throw new Error("Bot transport is already attached");
@@ -91,7 +135,8 @@ export class SimulationBotServices {
   }
   detach(director: SourceBotDirector): void {
     if (this.director !== director) throw new Error("Cannot detach a different source bot director");
-    this.director = null; this.transport = null;
+    this.director = null;
+    this.transport = null;
   }
   private require(): SourceBotDirector {
     if (this.director === null) throw new Error("Source bot transport must be attached before bot commands");
@@ -125,7 +170,9 @@ export interface ApplicationBotClient {
   readonly reliable: ServerReliableCommands;
   readonly userinfo?: string;
 }
-interface BotConnection extends ApplicationBotClient { readonly actor: OwnedActor; }
+interface BotConnection extends ApplicationBotClient {
+  readonly actor: OwnedActor;
+}
 
 /** Transport state only; the director and shared observation world are separate owners. */
 export interface ApplicationBotTransportCheckpoint {
@@ -159,21 +206,40 @@ export interface DecodedApplicationBotsCheckpoint {
 }
 export function decodeApplicationBotsCheckpoint(value: unknown): DecodedApplicationBotsCheckpoint {
   const reader = new SaveReader(value, "application.bots");
-  return { version: reader.field("version").literal(1), transport: decodeBotTransport(reader.field("transport").value),
-    director: reader.field("director").value, navigation: reader.field("navigation").value,
-    knowledge: reader.field("knowledge").value, sharedWorld: reader.field("sharedWorld").value,
-    observations: reader.field("observations").list(entry => ({ number: entry.field("number").integer(0),
-      actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) } })) };
+  return {
+    version: reader.field("version").literal(1),
+    transport: decodeBotTransport(reader.field("transport").value),
+    director: reader.field("director").value,
+    navigation: reader.field("navigation").value,
+    knowledge: reader.field("knowledge").value,
+    sharedWorld: reader.field("sharedWorld").value,
+    observations: reader.field("observations").list(entry => ({
+      number: entry.field("number").integer(0),
+      actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) },
+    })),
+  };
 }
 function decodeBotTransport(value: unknown): ApplicationBotTransportCheckpoint {
   const reader = new SaveReader(value, "application.bots.transport");
-  return { version: reader.field("version").literal(1), elapsedMilliseconds: reader.field("elapsedMilliseconds").finite(),
+  return {
+    version: reader.field("version").literal(1),
+    elapsedMilliseconds: reader.field("elapsedMilliseconds").finite(),
     connections: reader.field("connections").list(entry => ({
       client: { slot: entry.field("client").field("slot").integer(0), generation: entry.field("client").field("generation").integer(0) },
       actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) },
-      reliable: { sequence: entry.field("reliable").field("sequence").integer(0), acknowledge: entry.field("reliable").field("acknowledge").integer(),
-        slots: entry.field("reliable").field("slots").list(slot => slot.string()) } })),
-    snapshots: reader.field("snapshots").list(entry => ({ client: entry.field("client").integer(0), entities: entry.field("entities").list(entity => entity.integer(0)) })) };
+      reliable: {
+        sequence: entry.field("reliable").field("sequence").integer(0),
+        acknowledge: entry.field("reliable").field("acknowledge").integer(),
+        slots: entry
+          .field("reliable")
+          .field("slots")
+          .list(slot => slot.string()),
+      },
+    })),
+    snapshots: reader
+      .field("snapshots")
+      .list(entry => ({ client: entry.field("client").integer(0), entities: entry.field("entities").list(entity => entity.integer(0)) })),
+  };
 }
 function persistentNavigation(navigation: SelectedBotNavigation | ApplicationBotNavigation): ApplicationBotNavigation {
   if (!("checkpoint" in navigation) || !("restoreCheckpoint" in navigation)) throw new Error("Exact bot persistence requires navigation continuation support");
@@ -183,9 +249,16 @@ function persistentNavigation(navigation: SelectedBotNavigation | ApplicationBot
 export class RestoredBotReliableCommands extends ServerReliableCommands {
   constructor(image: ApplicationBotTransportCheckpoint["connections"][number]["reliable"]) {
     super();
-    if (!Number.isInteger(image.sequence) || image.sequence < 0 || image.sequence > 0x7fffffff
-      || !Number.isInteger(image.acknowledge) || image.acknowledge < -0x80000000 || image.acknowledge > 0x7fffffff
-      || image.slots.length !== MAX_RELIABLE_COMMANDS) throw new Error("Invalid saved bot reliable command ring");
+    if (
+      !Number.isInteger(image.sequence) ||
+      image.sequence < 0 ||
+      image.sequence > 0x7fffffff ||
+      !Number.isInteger(image.acknowledge) ||
+      image.acknowledge < -0x80000000 ||
+      image.acknowledge > 0x7fffffff ||
+      image.slots.length !== MAX_RELIABLE_COMMANDS
+    )
+      throw new Error("Invalid saved bot reliable command ring");
     for (const [index, text] of image.slots.entries()) {
       if (text.length > 1023 || text.includes("\0")) throw new Error("Invalid saved bot reliable command text");
       this.replace(index, text);
@@ -197,14 +270,21 @@ export class RestoredBotReliableCommands extends ServerReliableCommands {
 
 /** Local bot connections consume the same source snapshot selector and reliable command ring as clients. */
 export class ApplicationBots {
-  get configuration(): CvarRegistry { return this.game.options.cvars; }
+  get configuration(): CvarRegistry {
+    return this.game.options.cvars;
+  }
   readonly director: SourceBotDirector;
   readonly population: SharedBotPopulation;
   private sourceValue: Q3SourceRuntime | null;
   private gameValue: SourceBotGame;
-  get source(): Q3SourceRuntime | null { return this.sourceValue; }
-  get game(): SourceBotGame { return this.gameValue; }
-  private restartPhase: { readonly kind: "active" }
+  get source(): Q3SourceRuntime | null {
+    return this.sourceValue;
+  }
+  get game(): SourceBotGame {
+    return this.gameValue;
+  }
+  private restartPhase:
+    | { readonly kind: "active" }
     | { readonly kind: "detached"; readonly source: Q3SourceRuntime; readonly clients: readonly ApplicationBotClient[] }
     | { readonly kind: "bound"; readonly clients: readonly ApplicationBotClient[]; readonly pending: Set<number> } = { kind: "active" };
   private arsenal: BotArsenalBinding | null;
@@ -218,48 +298,82 @@ export class ApplicationBots {
     const error = botAdmissionError(options.simulation);
     if (error !== null) throw new Error(error);
     const source = options.simulation.q3Source();
-    if (source === null && legacyBotAdmissionError(options.simulation) !== null) throw new Error(legacyBotAdmissionError(options.simulation) ?? "Legacy bot policy is unavailable");
+    if (source === null && legacyBotAdmissionError(options.simulation) !== null)
+      throw new Error(legacyBotAdmissionError(options.simulation) ?? "Legacy bot policy is unavailable");
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
     this.sourceValue = source;
-    this.arsenal = source === null ? null : createBotArsenalBinding(options.simulation, client =>
-      options.simulation.players().find(actor => options.simulation.movementPlayer(actor)?.client.slot === client) ?? null);
+    this.arsenal =
+      source === null
+        ? null
+        : createBotArsenalBinding(
+            options.simulation,
+            client => options.simulation.players().find(actor => options.simulation.movementPlayer(actor)?.client.slot === client) ?? null,
+          );
     if (source === null && options.configuration === undefined) throw new Error("Shared bot configuration requires the application console registry");
-    this.shared = source === null && options.configuration !== undefined ? createSharedBotWorld({ simulation: options.simulation, cvars: options.configuration,
-      restoring: options.restore !== undefined,
-      actor: client => this.connections.get(client)?.actor.id ?? null,
-      connect: (client, restart) => this.director.connect(client, restart), drop: client => { this.disconnect(client); },
-      begin: client => { const actor = this.connections.get(client)?.actor.id;
-        if (actor === undefined) throw new Error("Bot begin has no actual player");
-        const player = options.simulation.movementPlayer(actor);
-        if (player === null) throw new Error("Bot begin has no actual view");
-        this.resetView(actor, player.viewAngles);
-        this.resetWeapon(actor);
-      },
-      print: options.print, console: options.insertConsoleCommand,
-      message: (client, text) => { for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text); } }) : null;
+    this.shared =
+      source === null && options.configuration !== undefined
+        ? createSharedBotWorld({
+            simulation: options.simulation,
+            cvars: options.configuration,
+            restoring: options.restore !== undefined,
+            actor: client => this.connections.get(client)?.actor.id ?? null,
+            connect: (client, restart) => this.director.connect(client, restart),
+            drop: client => {
+              this.disconnect(client);
+            },
+            begin: client => {
+              const actor = this.connections.get(client)?.actor.id;
+              if (actor === undefined) throw new Error("Bot begin has no actual player");
+              const player = options.simulation.movementPlayer(actor);
+              if (player === null) throw new Error("Bot begin has no actual view");
+              this.resetView(actor, player.viewAngles);
+              this.resetWeapon(actor);
+            },
+            print: options.print,
+            console: options.insertConsoleCommand,
+            message: (client, text) => {
+              for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text);
+            },
+          })
+        : null;
     const game = source === null ? this.shared?.game : q3BotGame(source, options.insertConsoleCommand, this.arsenal ?? undefined);
     if (game === undefined) throw new Error("Bot world projection is unavailable");
     this.gameValue = game;
-    this.director = new SourceBotDirector({ files: options.files, entities: source?.options.entities ?? options.simulation.sourceEntityText,
+    this.director = new SourceBotDirector({
+      files: options.files,
+      entities: source?.options.entities ?? options.simulation.sourceEntityText,
       restoring: options.restore !== undefined,
       host: this.directorHost(game),
-      library: { files: options.files, random: { nextInt: () => options.simulation.random.nextInteger() }, debug: false,
+      library: {
+        files: options.files,
+        random: { nextInt: () => options.simulation.random.nextInteger() },
+        debug: false,
         milliseconds: () => options.simulation.timeSeconds * 1000,
-        print: (_severity, text) => { options.print(text); return undefined; }, openLog: options.openLog,
+        print: (_severity, text) => {
+          options.print(text);
+          return undefined;
+        },
+        openLog: options.openLog,
         ...(options.resumeLog === undefined ? {} : { resumeLog: options.resumeLog }),
         clientCommand: (client, text) => {
-          const connection = this.connection(client), argv = tokenizeCommand(text, "q3").argv;
-          options.simulation.playerCommand(connection.actor.id, argv[0] ?? "", argv.slice(1)); return undefined;
-        } },
-      navigation: (library, bspEntities) => q3BotNavigation(game, library, options.navigation, bspEntities) });
+          const connection = this.connection(client),
+            argv = tokenizeCommand(text, "q3").argv;
+          options.simulation.playerCommand(connection.actor.id, argv[0] ?? "", argv.slice(1));
+          return undefined;
+        },
+      },
+      navigation: (library, bspEntities) => q3BotNavigation(game, library, options.navigation, bspEntities),
+    });
     this.population = new SharedBotPopulation(actor => options.simulation.actors.isLive(actor), this.director);
     let attached = false;
     try {
       if (options.restore !== undefined) {
         this.restoreCheckpoint(options.restore.image, options.restore.resolveClient);
-        options.simulation.botServices.attach(this.director, this); attached = true;
+        options.simulation.botServices.attach(this.director, this);
+        attached = true;
       } else {
-        options.simulation.botServices.attach(this.director, this); attached = true;
+        options.simulation.botServices.attach(this.director, this);
+        attached = true;
         this.director.load(options.restart ?? false);
         for (const client of options.clients ?? []) this.restoreClient(client);
       }
@@ -268,7 +382,9 @@ export class ApplicationBots {
       try {
         if (options.restore === undefined) this.director.close();
         else this.director.library.log.shutdown();
-      } finally { this.director.library.memory.dispose(); }
+      } finally {
+        this.director.library.memory.dispose();
+      }
       throw error;
     }
   }
@@ -289,13 +405,22 @@ export class ApplicationBots {
       }
     }
     const knowledge = this.arsenal ?? this.shared?.knowledge ?? null;
-    return { version: 1, transport: this.checkpointOrchestration(), director: this.director.captureSaveState(),
-      navigation: persistentNavigation(this.options.navigation).checkpoint(), knowledge: knowledge?.checkpoint() ?? null,
-      sharedWorld: this.shared?.checkpoint() ?? null, observations };
+    return {
+      version: 1,
+      transport: this.checkpointOrchestration(),
+      director: this.director.captureSaveState(),
+      navigation: persistentNavigation(this.options.navigation).checkpoint(),
+      knowledge: knowledge?.checkpoint() ?? null,
+      sharedWorld: this.shared?.checkpoint() ?? null,
+      observations,
+    };
   }
-  private restoreCheckpoint(image: DecodedApplicationBotsCheckpoint,
-    resolveClient: (saved: { readonly slot: number; readonly generation: number }) => SessionClient | null): void {
-    const simulation = this.options.simulation, navigation = persistentNavigation(this.options.navigation);
+  private restoreCheckpoint(
+    image: DecodedApplicationBotsCheckpoint,
+    resolveClient: (saved: { readonly slot: number; readonly generation: number }) => SessionClient | null,
+  ): void {
+    const simulation = this.options.simulation,
+      navigation = persistentNavigation(this.options.navigation);
     const actor = (saved: SavedActorId) => simulation.actors.referenceSaved(saved);
     if ((image.sharedWorld === null) !== (this.shared === null)) throw new Error("Saved bot world projection differs from selected source");
     navigation.restoreCheckpoint(image.navigation);
@@ -304,18 +429,23 @@ export class ApplicationBots {
     const observations = new Map<number, SavedActorId>();
     const nativeOwnership = this.source?.records.captureOwnership();
     for (const entry of image.observations) {
-      if (observations.has(entry.number) || this.source === null && entry.number >= 64) throw new Error("Invalid saved bot observation authority");
+      if (observations.has(entry.number) || (this.source === null && entry.number >= 64)) throw new Error("Invalid saved bot observation authority");
       const current = nativeOwnership?.[entry.number]?.actor?.id ?? this.shared?.actorForId(entry.number) ?? null;
       if (current === null || !current.equals(actor(entry.actor))) throw new Error("Saved bot observation authority differs from restored source");
       observations.set(entry.number, entry.actor);
     }
-    if (observations.size !== (nativeOwnership?.filter(record => record.actor !== null).length ?? simulation.players().length)) throw new Error("Saved bot observation authority is incomplete");
-    this.director.restoreSaveState(image.director, actor, saved => simulation.actors.resolveSaved(saved),
+    if (observations.size !== (nativeOwnership?.filter(record => record.actor !== null).length ?? simulation.players().length))
+      throw new Error("Saved bot observation authority is incomplete");
+    this.director.restoreSaveState(
+      image.director,
+      actor,
+      saved => simulation.actors.resolveSaved(saved),
       (client, edge) => navigation.forClient(client).edge(edge),
       (number, generation) => {
         const saved = observations.get(number);
         return { number, generation: saved === undefined || generation === 0 ? generation : actor({ slot: saved.slot, generation }).generation };
-      });
+      },
+    );
     const knowledge = this.arsenal ?? this.shared?.knowledge ?? null;
     if ((image.knowledge === null) !== (knowledge === null)) throw new Error("Saved bot arsenal knowledge differs from selected source");
     knowledge?.restoreCheckpoint(image.knowledge, actor, handle => {
@@ -325,26 +455,37 @@ export class ApplicationBots {
   }
 
   private directorHost(game: SourceBotGame): SourceBotDirectorHost {
-    return { game, provider: "q3:bot", allocateClient: () => this.allocateClient(),
+    return {
+      game,
+      provider: "q3:bot",
+      allocateClient: () => this.allocateClient(),
       actor: client => this.connections.get(client)?.actor ?? null,
       encodeCommand: (client, command) => this.encodeCommand(client, command),
       snapshotEntity: (client, sequence) => this.snapshotEntity(client, sequence),
-      consoleMessage: client => this.consoleMessage(client), pointContents: point => game.world.pointContents(point, -1) };
+      consoleMessage: client => this.consoleMessage(client),
+      pointContents: point => game.world.pointContents(point, -1),
+    };
   }
   beginRoundRestart(): readonly ApplicationBotClient[] {
     if (this.closed || this.restartPhase.kind !== "active" || this.source === null) throw new Error("Bot fast restart requires an active native Q3 round");
     const navigation = this.options.navigation;
     if (!("restartRound" in navigation)) throw new Error("Bot fast restart requires retained application navigation");
-    const clients = this.clients(), source = this.source;
+    const clients = this.clients(),
+      source = this.source;
     this.director.beginRoundRestart();
     this.options.simulation.botServices.detach(this.director);
-    this.connections.clear(); this.snapshots.clear(); this.elapsedMilliseconds = 0;
+    this.connections.clear();
+    this.snapshots.clear();
+    this.elapsedMilliseconds = 0;
     this.restartPhase = { kind: "detached", source, clients };
     return clients;
   }
   bindRestartedRound(): void {
-    const phase = this.restartPhase, source = this.options.simulation.q3Source(), navigation = this.options.navigation;
-    if (this.closed || phase.kind !== "detached" || source === null || source === phase.source) throw new Error("Publish a new source round before rebinding bots");
+    const phase = this.restartPhase,
+      source = this.options.simulation.q3Source(),
+      navigation = this.options.navigation;
+    if (this.closed || phase.kind !== "detached" || source === null || source === phase.source)
+      throw new Error("Publish a new source round before rebinding bots");
     if (!("restartRound" in navigation)) throw new Error("Bot fast restart lost application navigation");
     navigation.restartRound();
     this.sourceValue = source;
@@ -353,7 +494,11 @@ export class ApplicationBots {
     this.gameValue = game;
     this.director.bindRestartedRound(this.directorHost(game), (library, bspEntities) => q3BotNavigation(game, library, navigation, bspEntities));
     this.options.simulation.botServices.attach(this.director, this);
-    this.restartPhase = { kind: "bound", clients: phase.clients, pending: new Set(phase.clients.filter(client => !client.client.isClosed).map(client => client.client.id.slot)) };
+    this.restartPhase = {
+      kind: "bound",
+      clients: phase.clients,
+      pending: new Set(phase.clients.filter(client => !client.client.isClosed).map(client => client.client.id.slot)),
+    };
   }
   /** Call once for each preserved slot after the three source settle frames; humans return false. */
   reconnectRestartedClient(client: ClientId): boolean {
@@ -361,7 +506,10 @@ export class ApplicationBots {
     if (this.closed || phase.kind !== "bound") throw new Error("Bind the new bot round before reconnecting clients");
     const saved = phase.clients.find(entry => entry.client.id.equals(client));
     if (saved === undefined) return false;
-    if (saved.client.isClosed) { phase.pending.delete(client.slot); return true; }
+    if (saved.client.isClosed) {
+      phase.pending.delete(client.slot);
+      return true;
+    }
     if (!phase.pending.has(client.slot)) throw new Error("Bot restart client was already reconnected");
     if (!this.appendReliable(saved, "map_restart\n")) return true;
     this.restoreClient(saved);
@@ -394,7 +542,12 @@ export class ApplicationBots {
     for (let slot = 0; slot < this.game.maxClients; slot++) {
       if (occupied.has(slot)) continue;
       const client = this.options.session.createClient(slot);
-      try { this.prepare(client); } catch (error) { this.options.session.closeClient(client.id); throw error; }
+      try {
+        this.prepare(client);
+      } catch (error) {
+        this.options.session.closeClient(client.id);
+        throw error;
+      }
       return slot;
     }
     return -1;
@@ -407,7 +560,8 @@ export class ApplicationBots {
       this.game.options.engine.setUserinfo(client.id.slot, connection.userinfo ?? "");
       const rejection = this.game.clientConnect(client.id.slot, false, true);
       if (rejection !== null) throw new Error(rejection);
-      this.game.clientBegin(client.id.slot); return;
+      this.game.clientBegin(client.id.slot);
+      return;
     }
     this.game.options.engine.setUserinfo(client.id.slot, connection.userinfo ?? this.game.options.engine.getUserinfo(client.id.slot));
     const entity = this.source.pool.at(client.id.slot);
@@ -418,40 +572,62 @@ export class ApplicationBots {
     this.source.admission.begin(client.id.slot);
   }
   private encodeCommand(client: number, command: UserCommand): Pick<ActorCommand, "command" | "arsenal"> {
-    const connection = this.connection(client), player = this.options.simulation.movementPlayer(connection.actor.id);
+    const connection = this.connection(client),
+      player = this.options.simulation.movementPlayer(connection.actor.id);
     if (player === null) throw new Error("Admitted bot has no selected movement player");
-    if (this.shared !== null) return { command: selectedQ3Command(command, player, this.elapsedMilliseconds),
-      arsenal: { provider: player.arsenal.provider, weapon: this.shared.knowledge.resolveWeapon(client, command.weapon), useHoldable: false } };
+    if (this.shared !== null)
+      return {
+        command: selectedQ3Command(command, player, this.elapsedMilliseconds),
+        arsenal: { provider: player.arsenal.provider, weapon: this.shared.knowledge.resolveWeapon(client, command.weapon), useHoldable: false },
+      };
     if (this.source === null) throw new Error("Bot source observation is unavailable");
     const sourcePlayer = this.source.pool.at(client).client;
     if (sourcePlayer === null) throw new Error("Source bot lost its player state");
-    const angles = player.profile.kind === "q3" ? command.angles : {
-      x: (command.angles.x + sourcePlayer.ps.deltaAngles.x) & 65535,
-      y: (command.angles.y + sourcePlayer.ps.deltaAngles.y) & 65535,
-      z: (command.angles.z + sourcePlayer.ps.deltaAngles.z) & 65535 };
-    const weapon = this.arsenal === null ? Q3_WEAPON_ITEMS.find(item => item.weapon === command.weapon)?.item ?? null
-      : this.arsenal.resolveWeapon(client, command.weapon);
-    return { command: selectedQ3Command({ ...command, angles, weapon: this.arsenal === null ? command.weapon : sourcePlayer.ps.weapon }, player, this.elapsedMilliseconds),
-      arsenal: { provider: player.arsenal.provider, weapon, useHoldable: (command.buttons & 4) !== 0 } };
+    const angles =
+      player.profile.kind === "q3"
+        ? command.angles
+        : {
+            x: (command.angles.x + sourcePlayer.ps.deltaAngles.x) & 65535,
+            y: (command.angles.y + sourcePlayer.ps.deltaAngles.y) & 65535,
+            z: (command.angles.z + sourcePlayer.ps.deltaAngles.z) & 65535,
+          };
+    const weapon =
+      this.arsenal === null ? (Q3_WEAPON_ITEMS.find(item => item.weapon === command.weapon)?.item ?? null) : this.arsenal.resolveWeapon(client, command.weapon);
+    return {
+      command: selectedQ3Command(
+        { ...command, angles, weapon: this.arsenal === null ? command.weapon : sourcePlayer.ps.weapon },
+        player,
+        this.elapsedMilliseconds,
+      ),
+      arsenal: { provider: player.arsenal.provider, weapon, useHoldable: (command.buttons & 4) !== 0 },
+    };
   }
 
   private snapshotEntity(client: number, sequence: number): number {
-    if (!Number.isInteger(sequence) || sequence < -2147483648 || sequence > 2147483647) throw new RangeError("Bot snapshot sequence must be a signed source integer");
+    if (!Number.isInteger(sequence) || sequence < -2147483648 || sequence > 2147483647)
+      throw new RangeError("Bot snapshot sequence must be a signed source integer");
     if (sequence < 0) return -1;
     let snapshot = this.snapshots.get(client);
     if (snapshot === undefined && this.source === null) {
       snapshot = Array.from({ length: this.game.entityCount }, (_, number) => number).filter(number => {
-        const entity = this.game.entity(number); return entity.present && entity.linked && !entity.hidden;
+        const entity = this.game.entity(number);
+        return entity.present && entity.linked && !entity.hidden;
       });
       this.snapshots.set(client, snapshot);
     }
     if (snapshot === undefined && this.source !== null) {
       const q3 = this.source;
-      const source = q3.sourceState(), player = source.clients.find(value => value.slot === client);
+      const source = q3.sourceState(),
+        player = source.clients.find(value => value.slot === client);
       if (player === undefined) return -1;
-      snapshot = selectApplicationQ3Snapshot(player.state, source, this.options.simulation.scene,
-        number => q3.world.linkState(number)?.absbounds ?? null, this.options.leafCount, this.options.print)
-        .entities.map(entity => entity.number);
+      snapshot = selectApplicationQ3Snapshot(
+        player.state,
+        source,
+        this.options.simulation.scene,
+        number => q3.world.linkState(number)?.absbounds ?? null,
+        this.options.leafCount,
+        this.options.print,
+      ).entities.map(entity => entity.number);
       this.snapshots.set(client, snapshot);
     }
     return snapshot?.[sequence] ?? -1;
@@ -466,7 +642,8 @@ export class ApplicationBots {
     if (!this.options.simulation.actors.isLive(actor)) return;
     const entry = this.director.roster().find(entry => entry.actor.id.equals(actor));
     if (entry === undefined) return;
-    Object.assign(entry.state.viewangles, angles); Object.assign(entry.state.idealViewangles, angles);
+    Object.assign(entry.state.viewangles, angles);
+    Object.assign(entry.state.idealViewangles, angles);
   }
   private resetWeapon(actor: ActorId): void {
     if (!this.options.simulation.actors.isLive(actor)) return;
@@ -478,7 +655,11 @@ export class ApplicationBots {
   }
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const event of events) {
-      if (event.kind === "view-reset" && this.shared !== null) { this.resetView(event.actor, event.angles); if (event.reason === "spawn") this.resetWeapon(event.actor); continue; }
+      if (event.kind === "view-reset" && this.shared !== null) {
+        this.resetView(event.actor, event.angles);
+        if (event.reason === "spawn") this.resetWeapon(event.actor);
+        continue;
+      }
       if (event.kind !== "q3-source" || event.event.kind !== "server-command") continue;
       for (const client of this.clients()) {
         if (event.recipient !== undefined && this.actor(client.client.id)?.equals(event.recipient) !== true) continue;
@@ -499,56 +680,97 @@ export class ApplicationBots {
     this.elapsedMilliseconds = elapsedMilliseconds;
     this.snapshots.clear();
     this.shared?.refresh();
-    const sourceTime = this.options.automaticFrame === true && this.source !== null && this.source.host.cvars.variableValue("dedicated") !== 0
-      ? this.source.level.time : timeMilliseconds;
+    const sourceTime =
+      this.options.automaticFrame === true && this.source !== null && this.source.host.cvars.variableValue("dedicated") !== 0
+        ? this.source.level.time
+        : timeMilliseconds;
     return this.population.frame({ timeMilliseconds: sourceTime, elapsedMilliseconds });
   }
   clients(): readonly ApplicationBotClient[] {
     if (this.restartPhase.kind !== "active") return this.restartPhase.clients.filter(client => !client.client.isClosed);
-    return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable, userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot) }));
+    return Array.from(this.connections.values(), connection => ({
+      client: connection.client,
+      reliable: connection.reliable,
+      userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot),
+    }));
   }
   checkpointOrchestration(): ApplicationBotTransportCheckpoint {
     if (this.closed) throw new Error("Cannot checkpoint a closed bot transport");
-    return { version: 1, elapsedMilliseconds: this.elapsedMilliseconds,
+    return {
+      version: 1,
+      elapsedMilliseconds: this.elapsedMilliseconds,
       connections: [...this.connections.values()].map(({ client, actor, reliable }) => ({
-        client: { slot: client.id.slot, generation: client.id.generation }, actor: { slot: actor.id.slot, generation: actor.id.generation },
-        reliable: { sequence: reliable.sequence, acknowledge: reliable.acknowledge,
-          slots: Array.from({ length: MAX_RELIABLE_COMMANDS }, (_, index) => reliable.lookupMasked(index)) },
-      })), snapshots: [...this.snapshots].map(([client, entities]) => ({ client, entities: [...entities] })) };
+        client: { slot: client.id.slot, generation: client.id.generation },
+        actor: { slot: actor.id.slot, generation: actor.id.generation },
+        reliable: {
+          sequence: reliable.sequence,
+          acknowledge: reliable.acknowledge,
+          slots: Array.from({ length: MAX_RELIABLE_COMMANDS }, (_, index) => reliable.lookupMasked(index)),
+        },
+      })),
+      snapshots: [...this.snapshots].map(([client, entities]) => ({ client, entities: [...entities] })),
+    };
   }
   /** Bind existing restored players without allocating clients, spawning actors or invoking admission. */
-  restoreOrchestration(value: unknown,
-    resolveClient: (saved: ApplicationBotTransportCheckpoint["connections"][number]["client"]) => SessionClient | null): void {
+  restoreOrchestration(
+    value: unknown,
+    resolveClient: (saved: ApplicationBotTransportCheckpoint["connections"][number]["client"]) => SessionClient | null,
+  ): void {
     const image = decodeBotTransport(value);
-    if (this.closed || image.version !== 1 || !Number.isFinite(image.elapsedMilliseconds) || image.elapsedMilliseconds < 0) throw new Error("Invalid bot transport restoration");
-    const connections = new Map<number, BotConnection>(), snapshots = new Map<number, readonly number[]>(), actors = new Set<OwnedActor>();
+    if (this.closed || image.version !== 1 || !Number.isFinite(image.elapsedMilliseconds) || image.elapsedMilliseconds < 0)
+      throw new Error("Invalid bot transport restoration");
+    const connections = new Map<number, BotConnection>(),
+      snapshots = new Map<number, readonly number[]>(),
+      actors = new Set<OwnedActor>();
     for (const entry of image.connections) {
-      const client = resolveClient(entry.client), actor = this.options.simulation.actors.resolveSaved(entry.actor);
-      if (client === null || client.isClosed || client.id.session !== this.options.session.session || client.id.slot !== entry.client.slot
-        || actor === null || actors.has(actor) || connections.has(client.id.slot)) throw new Error("Invalid saved bot transport binding");
+      const client = resolveClient(entry.client),
+        actor = this.options.simulation.actors.resolveSaved(entry.actor);
+      if (
+        client === null ||
+        client.isClosed ||
+        client.id.session !== this.options.session.session ||
+        client.id.slot !== entry.client.slot ||
+        actor === null ||
+        actors.has(actor) ||
+        connections.has(client.id.slot)
+      )
+        throw new Error("Invalid saved bot transport binding");
       const player = this.options.simulation.movementPlayer(actor.id);
       if (player === null || !player.client.equals(client.id)) throw new Error("Saved bot transport does not match the restored player client");
       actors.add(actor);
       connections.set(client.id.slot, { client, actor, reliable: new RestoredBotReliableCommands(entry.reliable) });
     }
     for (const snapshot of image.snapshots) {
-      if (!connections.has(snapshot.client) || snapshots.has(snapshot.client)
-        || snapshot.entities.some(entity => !Number.isSafeInteger(entity) || entity < 0 || entity >= this.game.entityCount)) throw new Error("Invalid saved bot entity snapshot");
+      if (
+        !connections.has(snapshot.client) ||
+        snapshots.has(snapshot.client) ||
+        snapshot.entities.some(entity => !Number.isSafeInteger(entity) || entity < 0 || entity >= this.game.entityCount)
+      )
+        throw new Error("Invalid saved bot entity snapshot");
       snapshots.set(snapshot.client, [...snapshot.entities]);
     }
-    this.connections.clear(); this.snapshots.clear();
+    this.connections.clear();
+    this.snapshots.clear();
     for (const [client, connection] of connections) this.connections.set(client, connection);
     for (const [client, snapshot] of snapshots) this.snapshots.set(client, snapshot);
     this.elapsedMilliseconds = image.elapsedMilliseconds;
   }
-  moveToPoint(_actor: ActorId, _point: Vec3, _tolerance: number): RereleaseGoalStatus { return 0; }
-  followActor(_actor: ActorId, _target: ActorId): RereleaseGoalStatus { return 0; }
-  isBot(actor: ActorId): boolean { return [...this.connections.values()].some(connection => connection.actor.id.equals(actor)); }
+  moveToPoint(_actor: ActorId, _point: Vec3, _tolerance: number): RereleaseGoalStatus {
+    return 0;
+  }
+  followActor(_actor: ActorId, _target: ActorId): RereleaseGoalStatus {
+    return 0;
+  }
+  isBot(actor: ActorId): boolean {
+    return [...this.connections.values()].some(connection => connection.actor.id.equals(actor));
+  }
   actor(client: ClientId): ActorId | null {
     const connection = this.connections.get(client.slot);
     return connection?.client.id.equals(client) ? connection.actor.id : null;
   }
-  consoleCommand(argv: readonly string[]): void { this.director.consoleCommand(argv); }
+  consoleCommand(argv: readonly string[]): void {
+    this.director.consoleCommand(argv);
+  }
   disconnect(client: number): boolean {
     const connection = this.connections.get(client);
     const phase = this.restartPhase;
@@ -558,7 +780,8 @@ export class ApplicationBots {
       if (this.source === null) this.director.shutdownClient(client, false);
       this.options.simulation.disconnectPlayer(connection.actor.id);
     }
-    this.connections.delete(client); this.snapshots.delete(client);
+    this.connections.delete(client);
+    this.snapshots.delete(client);
     if (phase.kind === "bound") phase.pending.delete(client);
     this.options.session.closeClient(sessionClient.id);
     return true;
@@ -567,7 +790,9 @@ export class ApplicationBots {
     if (this.closed) return;
     this.director.close(restart);
     if (this.restartPhase.kind !== "detached") this.options.simulation.botServices.detach(this.director);
-    this.snapshots.clear(); this.connections.clear(); this.closed = true;
+    this.snapshots.clear();
+    this.connections.clear();
+    this.closed = true;
   }
 }
 
@@ -579,48 +804,75 @@ export function resumeApplicationBotLog(filename: string, position: number): Bot
 }
 function applicationBotLog(filename: string, resumePosition: number | null): BotLogOpenResult {
   const result = (operation: () => void): BotLogIoResult => {
-    try { operation(); return { kind: "ok" }; }
-    catch (error) { return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }; }
+    try {
+      operation();
+      return { kind: "ok" };
+    } catch (error) {
+      return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) };
+    }
   };
   try {
     const directory = join(homedir(), ".local", "state", "quake-typescript", "bots");
     if (resumePosition !== null && (!Number.isSafeInteger(resumePosition) || resumePosition < 0)) throw new Error("Invalid saved bot log position");
     if (resumePosition === null) mkdirSync(directory, { recursive: true });
     const descriptor = openSync(join(directory, basename(filename)), resumePosition === null ? "w" : "r+");
-    if (resumePosition !== null && fstatSync(descriptor).size < resumePosition) { closeSync(descriptor); throw new Error("Saved bot log position exceeds retained file"); }
+    if (resumePosition !== null && fstatSync(descriptor).size < resumePosition) {
+      closeSync(descriptor);
+      throw new Error("Saved bot log position exceeds retained file");
+    }
     let position = resumePosition ?? 0;
-    return { kind: "opened", stream: {
-      checkpoint: () => ({ position }),
-      write: bytes => result(() => {
-        let offset = 0;
-        while (offset < bytes.length) {
-          const written = writeSync(descriptor, bytes, offset, bytes.length - offset, position);
-          if (written === 0) throw new Error("Bot log write made no progress");
-          offset += written; position += written;
-        }
-      }),
-      // Writes above are synchronous writeSync calls, already visible to any
-      // reader; the source fflush has no durability requirement, and an
-      // fsync per botlib log line stalls frames whenever bots are active.
-      flush: () => ({ kind: "ok" }),
-      close: () => result(() => { closeSync(descriptor); }),
-    } };
-  } catch (error) { return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }; }
+    return {
+      kind: "opened",
+      stream: {
+        checkpoint: () => ({ position }),
+        write: bytes =>
+          result(() => {
+            let offset = 0;
+            while (offset < bytes.length) {
+              const written = writeSync(descriptor, bytes, offset, bytes.length - offset, position);
+              if (written === 0) throw new Error("Bot log write made no progress");
+              offset += written;
+              position += written;
+            }
+          }),
+        // Writes above are synchronous writeSync calls, already visible to any
+        // reader; the source fflush has no durability requirement, and an
+        // fsync per botlib log line stalls frames whenever bots are active.
+        flush: () => ({ kind: "ok" }),
+        close: () =>
+          result(() => {
+            closeSync(descriptor);
+          }),
+      },
+    };
+  } catch (error) {
+    return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) };
+  }
 }
 
 export function botAdmissionError(simulation: SharedSimulation): string | null {
   const q3 = simulation.q3Source();
-  if (q3 !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
-    || q3.options.product === "baseq3" && (simulation.q2WeaponSource() !== null || simulation.q1WeaponSource() !== null)
-      && (simulation.options.mode === "deathmatch" && q3.gameType === 0 || simulation.options.mode === "singleplayer" && q3.gameType === 2)
-    ? null : "Q3-map bots support native Q3 weapons or selected Q1/Q2 weapons in base Q3 deathmatch and single-player arenas";
-  const q1 = simulation.q1Source(), q2 = simulation.q2Source();
-  if (simulation.q2WeaponSource() === null && simulation.q1WeaponSource() === null && simulation.selectedQ3WeaponSource() === null) return "Shared bot arsenal observation is unavailable";
+  if (q3 !== null)
+    return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true ||
+      (q3.options.product === "baseq3" &&
+        (simulation.q2WeaponSource() !== null || simulation.q1WeaponSource() !== null) &&
+        ((simulation.options.mode === "deathmatch" && q3.gameType === 0) || (simulation.options.mode === "singleplayer" && q3.gameType === 2)))
+      ? null
+      : "Q3-map bots support native Q3 weapons or selected Q1/Q2 weapons in base Q3 deathmatch and single-player arenas";
+  const q1 = simulation.q1Source(),
+    q2 = simulation.q2Source();
+  if (simulation.q2WeaponSource() === null && simulation.q1WeaponSource() === null && simulation.selectedQ3WeaponSource() === null)
+    return "Shared bot arsenal observation is unavailable";
   return q1 !== null || q2 !== null ? null : "Bot world observation is unavailable";
 }
 function legacyBotAdmissionError(simulation: SharedSimulation): string | null {
-  const q1 = simulation.q1Source(), q2 = simulation.q2Source();
-  if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)
-    || q2 !== null && q2.product.match.selection.kind !== "standard") return "Team and campaign bots require mounted native bot definitions";
+  const q1 = simulation.q1Source(),
+    q2 = simulation.q2Source();
+  if (
+    simulation.options.mode !== "deathmatch" ||
+    (q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)) ||
+    (q2 !== null && q2.product.match.selection.kind !== "standard")
+  )
+    return "Team and campaign bots require mounted native bot definitions";
   return null;
 }

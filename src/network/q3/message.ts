@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's code/qcommon/msg.c, GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
 import { BinaryError } from "../../core/binary/index.ts";
@@ -6,7 +7,9 @@ import { createMessageHuffman } from "./huffman.ts";
 
 // writeBits runs once per scalar; a shared scratch list avoids an array and closure per call (it never re-enters).
 const scratchBits: number[] = [];
-const putScratchBit = (bit: number): void => { scratchBits.push(bit); };
+const putScratchBit = (bit: number): void => {
+  scratchBits.push(bit);
+};
 
 export type MessageMode = "bitstream" | "oob";
 export const MAX_MESSAGE_LENGTH = 16384;
@@ -19,11 +22,18 @@ export class SourceMessageState {
 
   constructor(readonly print: (text: string) => void) {}
 
-  addOldsize(bits: number): void { this.oldsize = this.add(this.oldsize, bits); }
-  addNewsize(bytes: number): void { this.newsize = this.add(this.newsize, bytes); }
+  addOldsize(bits: number): void {
+    this.oldsize = this.add(this.oldsize, bits);
+  }
+  addNewsize(bytes: number): void {
+    this.newsize = this.add(this.newsize, bytes);
+  }
   checkOverflow(value: number, bits: number): void {
     if (bits === 32) return;
-    if (bits < 0 || bits === 31) { this.overflows = null; return; }
+    if (bits < 0 || bits === 31) {
+      this.overflows = null;
+      return;
+    }
     if (value > 2 ** bits - 1 || value < 0) this.overflows = this.add(this.overflows, 1);
   }
   private add(value: number | null, increment: number): number | null {
@@ -55,20 +65,37 @@ export class MessageWriter {
   private size = 0;
   overflowed = false;
 
-  constructor(private encoding: MessageMode = "bitstream", readonly capacity = MAX_MESSAGE_LENGTH,
-    readonly sourceState: SourceMessageState | null = null) {
+  constructor(
+    private encoding: MessageMode = "bitstream",
+    readonly capacity = MAX_MESSAGE_LENGTH,
+    readonly sourceState: SourceMessageState | null = null,
+  ) {
     if (!Number.isInteger(capacity) || capacity < 0 || capacity > MAX_MESSAGE_LENGTH) throw new RangeError("Invalid message capacity");
     this.buffer = new Uint8Array(capacity);
     this.view = new DataView(this.buffer.buffer);
   }
 
-  get bitPosition(): number { return this.position; }
-  get mode(): MessageMode { return this.encoding; }
-  get byteLength(): number { return this.size; }
-  toBytes(): Uint8Array { return this.buffer.slice(0, this.size); }
+  get bitPosition(): number {
+    return this.position;
+  }
+  get mode(): MessageMode {
+    return this.encoding;
+  }
+  get byteLength(): number {
+    return this.size;
+  }
+  toBytes(): Uint8Array {
+    return this.buffer.slice(0, this.size);
+  }
   /** MSG_Clear retains storage and mode, resetting only cursor and overflow state. */
-  clear(): void { this.position = 0; this.size = 0; this.overflowed = false; }
-  bitstream(): void { this.encoding = "bitstream"; }
+  clear(): void {
+    this.position = 0;
+    this.size = 0;
+    this.overflowed = false;
+  }
+  bitstream(): void {
+    this.encoding = "bitstream";
+  }
   copy(): MessageWriter {
     const result = new MessageWriter(this.mode, this.capacity, this.sourceState);
     result.buffer.set(this.buffer.subarray(0, this.size));
@@ -124,19 +151,36 @@ export class MessageWriter {
     this.size = size;
   }
 
-  writeByte(value: number): void { this.writeBits(value, 8); }
-  writeChar(value: number): void { this.writeBits(value, 8); }
-  writeShort(value: number): void { this.writeBits(value, 16); }
-  writeLong(value: number): void { this.writeBits(value, 32); }
+  writeByte(value: number): void {
+    this.writeBits(value, 8);
+  }
+  writeChar(value: number): void {
+    this.writeBits(value, 8);
+  }
+  writeShort(value: number): void {
+    this.writeBits(value, 16);
+  }
+  writeLong(value: number): void {
+    this.writeBits(value, 32);
+  }
   writeFloat(value: number): void {
     this.writeLong(float32ToBits(value) | 0);
   }
-  writeData(data: Uint8Array): void { for (const byte of data) this.writeByte(byte); }
+  writeData(data: Uint8Array): void {
+    for (const byte of data) this.writeByte(byte);
+  }
 
-  writeString(value: string | null): void { this.writeText(value, 1024); }
-  writeBigString(value: string | null): void { this.writeText(value, 8192); }
+  writeString(value: string | null): void {
+    this.writeText(value, 1024);
+  }
+  writeBigString(value: string | null): void {
+    this.writeText(value, 8192);
+  }
   private writeText(value: string | null, limit: number): void {
-    if (value === null) { this.writeByte(0); return; }
+    if (value === null) {
+      this.writeByte(0);
+      return;
+    }
     const nul = value.indexOf("\0");
     const length = nul === -1 ? value.length : nul;
     if (length < limit) {
@@ -148,8 +192,12 @@ export class MessageWriter {
     this.writeByte(0);
   }
 
-  writeAngle(value: number): void { this.writeByte(angleInteger(value, 256) & 255); }
-  writeAngle16(value: number): void { this.writeShort(angleInteger(value, 65536) & 65535); }
+  writeAngle(value: number): void {
+    this.writeByte(angleInteger(value, 256) & 255);
+  }
+  writeAngle16(value: number): void {
+    this.writeShort(angleInteger(value, 65536) & 65535);
+  }
 
   writeDelta(previous: number, value: number, bits: number): void {
     this.writeBits(previous === value ? 0 : 1, 1);
@@ -162,13 +210,15 @@ export class MessageWriter {
   }
 
   writeDeltaFloat(previous: number, value: number): void {
-    const oldFloat = Math.fround(previous), newFloat = Math.fround(value);
+    const oldFloat = Math.fround(previous),
+      newFloat = Math.fround(value);
     this.writeBits(oldFloat === newFloat ? 0 : 1, 1);
     if (oldFloat !== newFloat) this.writeBits(float32ToBits(newFloat), 32);
   }
 
   writeDeltaKeyFloat(key: number, previous: number, value: number): void {
-    const oldFloat = Math.fround(previous), newFloat = Math.fround(value);
+    const oldFloat = Math.fround(previous),
+      newFloat = Math.fround(value);
     this.writeBits(oldFloat === newFloat ? 0 : 1, 1);
     if (oldFloat !== newFloat) this.writeBits(float32ToBits(newFloat) ^ key, 32);
   }
@@ -178,17 +228,37 @@ export class MessageReader {
   private readonly view: DataView;
   private position = 0;
   private count = 0;
-  constructor(readonly data: Uint8Array, private encoding: MessageMode = "bitstream", readonly source = "<message>") {
+  constructor(
+    readonly data: Uint8Array,
+    private encoding: MessageMode = "bitstream",
+    readonly source = "<message>",
+  ) {
     if (data.length > MAX_MESSAGE_LENGTH) throw new BinaryError(source, 0, "message exceeds maximum length");
     this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   }
 
-  get bitPosition(): number { return this.position; }
-  get readCount(): number { return this.count; }
-  get mode(): MessageMode { return this.encoding; }
-  bitstream(): void { this.encoding = "bitstream"; }
-  beginReading(): void { this.position = 0; this.count = 0; this.encoding = "bitstream"; }
-  beginReadingOob(): void { this.position = 0; this.count = 0; this.encoding = "oob"; }
+  get bitPosition(): number {
+    return this.position;
+  }
+  get readCount(): number {
+    return this.count;
+  }
+  get mode(): MessageMode {
+    return this.encoding;
+  }
+  bitstream(): void {
+    this.encoding = "bitstream";
+  }
+  beginReading(): void {
+    this.position = 0;
+    this.count = 0;
+    this.encoding = "bitstream";
+  }
+  beginReadingOob(): void {
+    this.position = 0;
+    this.count = 0;
+    this.encoding = "oob";
+  }
   copy(): MessageReader {
     const result = new MessageReader(new Uint8Array(this.data), this.mode, this.source);
     result.position = this.position;
@@ -232,10 +302,19 @@ export class MessageReader {
     const value = this.readBits(bits);
     return this.count > this.data.length ? -1 : value;
   }
-  readByte(): number { const value = this.readScalar(8); return value === -1 ? -1 : value & 255; }
-  readChar(): number { return (this.readScalar(8) << 24) >> 24; }
-  readShort(): number { return (this.readScalar(16) << 16) >> 16; }
-  readLong(): number { return this.readScalar(32); }
+  readByte(): number {
+    const value = this.readScalar(8);
+    return value === -1 ? -1 : value & 255;
+  }
+  readChar(): number {
+    return (this.readScalar(8) << 24) >> 24;
+  }
+  readShort(): number {
+    return (this.readScalar(16) << 16) >> 16;
+  }
+  readLong(): number {
+    return this.readScalar(32);
+  }
   readFloat(): number {
     const value = this.readBits(32);
     if (this.count > this.data.length) return -1;
@@ -247,9 +326,15 @@ export class MessageReader {
     for (let i = 0; i < length; i++) data[i] = this.readByte();
     return data;
   }
-  readString(): string { return this.readText(1024, false, true); }
-  readBigString(): string { return this.readText(8192, false, false); }
-  readStringLine(): string { return this.readText(1024, true, false); }
+  readString(): string {
+    return this.readText(1024, false, true);
+  }
+  readBigString(): string {
+    return this.readText(8192, false, false);
+  }
+  readStringLine(): string {
+    return this.readText(1024, true, false);
+  }
   private readText(limit: number, newline: boolean, ascii: boolean): string {
     let text = "";
     for (let i = 0; i < limit - 1; i++) {
@@ -259,7 +344,9 @@ export class MessageReader {
     }
     return text;
   }
-  readAngle16(): number { return this.readShort() * (360 / 65536); }
+  readAngle16(): number {
+    return this.readShort() * (360 / 65536);
+  }
 
   readDelta(previous: number, bits: number): number {
     return this.readBits(1) === 0 ? previous : this.readBits(bits);
@@ -308,7 +395,10 @@ export function writeDeltaUserCommand(writer: MessageWriter, from: WireUserComma
   if (key !== null) {
     const changed = previous.some((value, i) => value !== next[i]);
     writer.writeBits(changed ? 1 : 0, 1);
-    if (!changed) { writer.sourceState?.addOldsize(7); return; }
+    if (!changed) {
+      writer.sourceState?.addOldsize(7);
+      return;
+    }
   }
   for (const [i, width] of COMMAND_WIDTHS.entries()) {
     const oldValue = previous[i];

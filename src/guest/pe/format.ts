@@ -4,12 +4,18 @@ import type { NativeAbi } from "../../contracts/execution.ts";
 import type { GuestPermissions } from "../core/contracts.ts";
 
 export class PeError extends Error {
-  constructor(readonly stage: "headers" | "mapping" | "relocation" | "imports" | "exports" | "tls" | "unwind" | "load-config", detail: string) {
+  constructor(
+    readonly stage: "headers" | "mapping" | "relocation" | "imports" | "exports" | "tls" | "unwind" | "load-config",
+    detail: string,
+  ) {
     super(`PE ${stage}: ${detail}`);
     this.name = "PeError";
   }
 }
-export interface PeDirectory { readonly rva: number; readonly byteLength: number; }
+export interface PeDirectory {
+  readonly rva: number;
+  readonly byteLength: number;
+}
 export interface PeSection {
   readonly name: string;
   readonly rva: number;
@@ -41,12 +47,24 @@ export function checkedRange(offset: number, length: number, limit: number, stag
 }
 export class PeReader {
   readonly view: DataView;
-  constructor(readonly bytes: Uint8Array, readonly stage: PeError["stage"]) {
+  constructor(
+    readonly bytes: Uint8Array,
+    readonly stage: PeError["stage"],
+  ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
-  u16(offset: number): number { checkedRange(offset, 2, this.bytes.length, this.stage); return this.view.getUint16(offset, true); }
-  u32(offset: number): number { checkedRange(offset, 4, this.bytes.length, this.stage); return this.view.getUint32(offset, true); }
-  u64(offset: number): bigint { checkedRange(offset, 8, this.bytes.length, this.stage); return this.view.getBigUint64(offset, true); }
+  u16(offset: number): number {
+    checkedRange(offset, 2, this.bytes.length, this.stage);
+    return this.view.getUint16(offset, true);
+  }
+  u32(offset: number): number {
+    checkedRange(offset, 4, this.bytes.length, this.stage);
+    return this.view.getUint32(offset, true);
+  }
+  u64(offset: number): bigint {
+    checkedRange(offset, 8, this.bytes.length, this.stage);
+    return this.view.getBigUint64(offset, true);
+  }
   text(offset: number, limit: number): string {
     checkedRange(offset, limit, this.bytes.length, this.stage);
     let text = "";
@@ -59,8 +77,12 @@ export class PeReader {
     throw new PeError(this.stage, "unterminated ASCII string");
   }
 }
-function powerOfTwo(value: number): boolean { return value > 0 && Number.isInteger(Math.log2(value)); }
-function align(value: number, alignment: number): number { return Math.ceil(value / alignment) * alignment; }
+function powerOfTwo(value: number): boolean {
+  return value > 0 && Number.isInteger(Math.log2(value));
+}
+function align(value: number, alignment: number): number {
+  return Math.ceil(value / alignment) * alignment;
+}
 function permissions(flags: number): GuestPermissions {
   const read = (flags & 0x40000000) !== 0;
   const write = (flags & 0x80000000) !== 0;
@@ -99,10 +121,24 @@ export function parsePe(bytes: Uint8Array): PeFile {
   const fileAlignment = reader.u32(optional + 36);
   const imageSize = reader.u32(optional + 56);
   const headerSize = reader.u32(optional + 60);
-  if (!powerOfTwo(sectionAlignment) || !powerOfTwo(fileAlignment) || fileAlignment > 65536 || sectionAlignment < fileAlignment ||
-      (sectionAlignment < 4096 ? fileAlignment !== sectionAlignment : fileAlignment < 512)) throw new PeError("headers", "invalid section/file alignment");
-  if (preferredBase === 0n || preferredBase % 65536n !== 0n || imageSize === 0 || imageSize % sectionAlignment !== 0 ||
-      headerSize === 0 || headerSize % fileAlignment !== 0 || headerSize > imageSize || preferredBase + BigInt(imageSize) > (1n << BigInt(abi.pointerBytes * 8))) {
+  if (
+    !powerOfTwo(sectionAlignment) ||
+    !powerOfTwo(fileAlignment) ||
+    fileAlignment > 65536 ||
+    sectionAlignment < fileAlignment ||
+    (sectionAlignment < 4096 ? fileAlignment !== sectionAlignment : fileAlignment < 512)
+  )
+    throw new PeError("headers", "invalid section/file alignment");
+  if (
+    preferredBase === 0n ||
+    preferredBase % 65536n !== 0n ||
+    imageSize === 0 ||
+    imageSize % sectionAlignment !== 0 ||
+    headerSize === 0 ||
+    headerSize % fileAlignment !== 0 ||
+    headerSize > imageSize ||
+    preferredBase + BigInt(imageSize) > 1n << BigInt(abi.pointerBytes * 8)
+  ) {
     throw new PeError("headers", "invalid image base/size or header size");
   }
   checkedRange(0, headerSize, bytes.length, "headers");
@@ -130,7 +166,11 @@ export function parsePe(bytes: Uint8Array): PeFile {
     const rawOffset = reader.u32(at + 20);
     const flags = reader.u32(at + 36);
     const mappedSize = align(Math.max(virtualSize, rawSize), sectionAlignment);
-    if (rva % sectionAlignment !== 0 || rva < end || (rawSize > 0 && (rawOffset < headerSize || rawOffset % fileAlignment !== 0 || rawSize % fileAlignment !== 0))) {
+    if (
+      rva % sectionAlignment !== 0 ||
+      rva < end ||
+      (rawSize > 0 && (rawOffset < headerSize || rawOffset % fileAlignment !== 0 || rawSize % fileAlignment !== 0))
+    ) {
       throw new PeError("headers", `overlapping/misaligned section ${name}`);
     }
     checkedRange(rawOffset, rawSize, bytes.length, "headers");
@@ -138,8 +178,19 @@ export function parsePe(bytes: Uint8Array): PeFile {
     end = rva + mappedSize;
     sections.push({ name, rva, virtualSize, mappedSize, rawOffset, rawSize, characteristics: flags, permissions: permissions(flags) });
   }
-  return { abi, preferredBase, entryPointRva, imageSize, headerSize, sectionAlignment, fileAlignment, characteristics,
-    dllCharacteristics: reader.u16(optional + 70), sections, directories };
+  return {
+    abi,
+    preferredBase,
+    entryPointRva,
+    imageSize,
+    headerSize,
+    sectionAlignment,
+    fileAlignment,
+    characteristics,
+    dllCharacteristics: reader.u16(optional + 70),
+    sections,
+    directories,
+  };
 }
 
 export function directory(file: PeFile, index: number): PeDirectory {

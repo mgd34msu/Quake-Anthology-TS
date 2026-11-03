@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import manifest from "../../package.json" with { type: "json" };
 import { version } from "../../src/version.ts";

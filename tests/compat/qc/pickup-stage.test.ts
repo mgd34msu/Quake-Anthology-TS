@@ -1,130 +1,569 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
-import { openArchive } from '../../../src/content/archive/index.ts';
-import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from '../../../src/compat/qc/index.ts';
-import type { QcBuiltin, QcHostBuiltinName } from '../../../src/compat/qc/index.ts';
-import { createIdentityOwner } from '../../../src/contracts/identity.ts';
-import { ActorCallbackTable, SessionActorRegistry, SourceActorSlots, quakeEdictLifetime } from '../../../src/world/actors/index.ts';
-import { Q1_DONOR_PROFILE, createNumericOperations } from '../../../src/core/numeric.ts';
-import { GameplayAuthority } from '../../../src/world/gameplay/authority.ts';
-import { SharedInventoryTable } from '../../../src/world/gameplay/inventory.ts';
-import { SharedOriginalPickupAdmission } from '../../../src/world/gameplay/original-pickups.ts';
-import { SharedPickupAdmission } from '../../../src/world/gameplay/pickups.ts';
-import { Id1PickupBinding } from '../../../src/content/q1/quakec/id1-pickups.ts';
-import { SourceRandom } from '../../../src/app/bootstrap/simulation/random.ts';
-import { qcPickupStages } from '../../../src/content/q1/quakec/pickup-stage.ts';
+import { openArchive } from "../../../src/content/archive/index.ts";
+import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
+import type { QcBuiltin, QcHostBuiltinName } from "../../../src/compat/qc/index.ts";
+import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+import { ActorCallbackTable, SessionActorRegistry, SourceActorSlots, quakeEdictLifetime } from "../../../src/world/actors/index.ts";
+import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
+import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
+import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { Id1PickupBinding } from "../../../src/content/q1/quakec/id1-pickups.ts";
+import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
+import { qcPickupStages } from "../../../src/content/q1/quakec/pickup-stage.ts";
 const test = corpusTest("q1/id1/PAK0.PAK", "q1/qw/qwprogs.dat");
 
-for (const kind of ['netquake','quakeworld'] satisfies readonly ('netquake'|'quakeworld')[]) test(`original ${kind} weapon regions retain selected ownership, leave policy, targets and cancellation`, async () => {
- const archive=await openArchive(corpusFile("q1/id1/PAK0.PAK"));
- try {
-  const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(kind==='quakeworld'?await Bun.file(corpusFile("q1/qw/qwprogs.dat")).bytes():await archive.readEntry(entry));
-  const entities=new QcEntityMemory(classicQcEntityLayout(program),4,3), actors=new SessionActorRegistry(createIdentityOwner('original weapon pickup'));
-  try {
-   const slots=new SourceActorSlots(actors,{provider:'q1:world',capacity:4,lifetime:quakeEdictLifetime(1),storage:createQcSourceSlotStorage({program,entities},{freeOffsetBytes:0,freeTimeOffsetBytes:kind==='quakeworld'?100:92}),now:()=>({kind:'seconds',value:vm.globals.float(vm.globalOffset('time'))}),unlink:()=>undefined,exhausted:()=>{throw Error('No source slot');}});
-   slots.bindExisting(0,'q1:world');const player=slots.bindExisting(1,'q1:player'),pickup=slots.bindExisting(2,'q1:weapon');
-   const inventory=new SharedInventoryTable(actors),combat=new GameplayAuthority(actors,new ActorCallbackTable(actors),{impulse:()=>undefined,beforeReaction:()=>undefined,confirmed:()=>undefined});
-   inventory.create(player,[{item:'q3:weapon/rocketlauncher',count:0,capacity:1},{item:'q3:ammo/rocketlauncher',count:0,capacity:200},{item:'q3:ammo/grenadelauncher',count:0,capacity:200}]);
-   const stages=qcPickupStages(program),weaponStage=stages.find(stage=>program.functionAt(stage.functionIndex).name==='weapon_touch')?.descriptor,ammoStage=stages.find(stage=>program.functionAt(stage.functionIndex).name==='ammo_touch')?.descriptor;
-   const weapons=weaponStage?.kind==='string'?weaponStage.values:undefined,ammo=ammoStage?.kind==='float'?ammoStage.values:undefined;
-   if(weapons===undefined||ammo===undefined)throw Error('Missing original descriptors');
-   const supplies=new SharedPickupAdmission({inventory,profile:{id:'test:source',weaponOwnership:'all-destinations',weapons:weapons.map(value=>({source:value.item,destinations:['q3:weapon/rocketlauncher']})),ammo:ammo.map(value=>({source:value.item,destinations:kind==='quakeworld'?['q3:ammo/rocketlauncher','q3:ammo/grenadelauncher']:['q3:ammo/rocketlauncher']}))},ammoGranted:()=>undefined,weaponGranted:()=>undefined});
-   const admission=new SharedOriginalPickupAdmission(actors,combat,inventory),feedback:string[]=[];let retire=false,switchValue='';let cargoGrants=0;const selected: string[]=[];
-   const pickups=new Id1PickupBinding({program,entities,actors,slots},admission,()=>vm,()=>false,undefined,()=>({current:()=>null,select:(_actor,item)=>{selected.push(item);return supplies.selectWeapon(player,item,'better');},counter:(_actor,_item,original)=>{for(const item of ['q3:ammo/rocketlauncher','q3:ammo/grenadelauncher'] satisfies readonly import('../../../src/contracts/gameplay.ts').ItemId[]){const value=original(inventory.count(player.id,item));if(value!==null)inventory.configure(player,{item,count:value,capacity:200});}return undefined;}}));
-   const sourceSlot=(actor:import('../../../src/contracts/identity.ts').ActorId)=>{const value=actors.sourceOf(actor);if(value===null)throw Error('Missing source slot');return value.slot;};
-   const host=new Map<QcHostBuiltinName,QcBuiltin>([['infokey',vm=>{vm.returnInt(vm.strings.allocate(switchValue));return undefined;}],['bprint',()=>undefined],['spawn',vm=>{const spawned=slots.allocate('q1:backpack');vm.returnInt(entities.reference(sourceSlot(spawned.id)));return undefined;}],['remove',vm=>{const actor=slots.at(entities.slot(vm.globals.int(4)));if(actor===null)throw Error('Missing removed actor');slots.free(actor);return undefined;}],['setmodel',vm=>{entities.fromReference(vm.globals.int(4)).setInt(vm.fieldOffset('model'),vm.globals.int(7));return undefined;}],['setsize',vm=>{const words=entities.fromReference(vm.globals.int(4));words.setVector(vm.fieldOffset('mins'),vm.globals.vector(7));words.setVector(vm.fieldOffset('maxs'),vm.globals.vector(10));return undefined;}],['sprint',vm=>{feedback.push(vm.strings.get(vm.globals.int(kind==='quakeworld'?10:7)));return undefined;}],['sound',()=>undefined],['stuffcmd',()=>undefined]]);
-   const vm:QcMachine=new QcMachine({program,entities,numeric:createNumericOperations(Q1_DONOR_PROFILE),builtins:createQcBuiltins({kind,host,random:new SourceRandom(1)}),serverActive:()=>true,
-    functionBoundary:pickups.composeFunctions({functions:new Set(),run:(_call,execute)=>execute()}),inlineBoundary:pickups.composeRegions({regions:[],run:(_region,execute)=>execute()}),observeCall:()=>pickups.validate(),validateEntityAccess:()=>pickups.validate(),observeEntityStore:store=>pickups.observeStore(store)});
-   const unbind=inventory.bindPickup(player,{owner:'q3:selected',rules:[{id:'weapons',offered:weapons.map(value=>value.item),writes:[{kind:'inventory',item:'q3:weapon/rocketlauncher',fields:'count'},{kind:'inventory',item:'q3:ammo/rocketlauncher',fields:'count'},{kind:'inventory',item:'q3:ammo/grenadelauncher',fields:'count'}],take:offer=>{
-    const supply=pickups.supply(offer);if(supply.offer.kind!=='weapon')throw Error('Not weapon');if(supply.leave&&supplies.owns(player.id,supply.offer.offer.item))return 'refused';
-    const accepted=supplies.weapon(player,supply.offer.offer,pickups.selectionDeferred(offer)?'never':'better');if(retire)slots.free(pickup);return accepted?'accepted':'refused';
-   }}]});
-   const field=(name:string)=>vm.fieldOffset(name),recipient=entities.at(1),item=entities.at(2);recipient.setInt(field('classname'),vm.strings.allocate('player'));recipient.setFloat(field('flags'),8);recipient.setFloat(field('health'),100);recipient.setFloat(field('items'),127);recipient.setFloat(field('weapon'),1);
-   for(const name of ['ammo_shells','ammo_nails','ammo_rockets','ammo_cells'])recipient.setFloat(field(name),73);
-   vm.globals.setFloat(vm.globalOffset('time'),10);vm.globals.setInt(vm.globalOffset('self'),entities.reference(2));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));
-   const call=()=>vm.execute(program.functionNamed('weapon_touch').index),reset=(classname:string)=>{item.setInt(field('classname'),vm.strings.allocate(classname));item.setInt(field('netname'),vm.strings.allocate(classname));item.setInt(field('model'),vm.strings.allocate('progs/g_rock.mdl'));item.setFloat(field('solid'),1);feedback.length=0;vm.globals.setInt(vm.globalOffset('self'),entities.reference(2));inventory.configure(player,{item:'q3:weapon/rocketlauncher',count:0,capacity:1});inventory.configure(player,{item:'q3:ammo/rocketlauncher',count:0,capacity:200});};
-   for(const descriptor of weapons){if(typeof descriptor.value!=='string'||descriptor.supply?.quantity.kind!=='global')throw Error('Missing constant');reset(descriptor.value);vm.globals.setFloat(vm.globalOffset(kind==='quakeworld'?'deathmatch':'coop'),kind==='quakeworld'?2:1);call();expect(inventory.count(player.id,'q3:ammo/rocketlauncher')).toBe(vm.globals.float(descriptor.supply.quantity.word));expect(item.float(field('solid'))).toBe(1);expect(feedback.length).toBe(3);feedback.length=0;call();expect(feedback).toEqual([]);expect(recipient.float(field('items'))).toBe(127);for(const name of ['ammo_shells','ammo_nails','ammo_rockets','ammo_cells'])expect(recipient.float(field(name))).toBe(73);}
-   reset('weapon_rocketlauncher');vm.globals.setFloat(vm.globalOffset(kind==='quakeworld'?'deathmatch':'coop'),kind==='quakeworld'?1:0);call();expect(item.float(field('solid'))).toBe(0);expect(vm.profiling[program.functionNamed('SUB_UseTargets').index]).toBeGreaterThan(0);expect(vm.profiling[program.functionNamed('W_SetCurrentAmmo').index]).toBe(0);
-   const targets=vm.profiling[program.functionNamed('SUB_UseTargets').index];reset('weapon_rocketlauncher');retire=true;call();expect(feedback).toEqual([]);expect(vm.profiling[program.functionNamed('SUB_UseTargets').index]).toBe(targets);expect(actors.isLive(pickup.id)).toBe(false);expect(()=>pickups.assertIdle()).not.toThrow();
-   unbind();const closeBackpack=inventory.bindPickup(player,{owner:'q3:selected',rules:[{id:'backpack',offered:['q1:item_backpack'],writes:[{kind:'inventory',item:'q3:weapon/rocketlauncher',fields:'count'},{kind:'inventory',item:'q3:ammo/rocketlauncher',fields:'count'},{kind:'inventory',item:'q3:ammo/grenadelauncher',fields:'count'}],take:offer=>{cargoGrants++;if(offer.cargo===undefined)throw Error('Missing immutable original cargo');expect(Object.isFrozen(offer.cargo)).toBe(true);return supplies.cargo(player,offer.cargo,pickups.selectionDeferred(offer)?'never':'better')?'accepted':'refused';}}]});
+for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "quakeworld")[])
+  test(`original ${kind} weapon regions retain selected ownership, leave policy, targets and cancellation`, async () => {
+    const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
+    try {
+      const entry = archive.findEntries("progs.dat").at(-1);
+      if (entry === undefined) throw Error("Missing id1");
+      const program = loadQcProgram(kind === "quakeworld" ? await Bun.file(corpusFile("q1/qw/qwprogs.dat")).bytes() : await archive.readEntry(entry));
+      const entities = new QcEntityMemory(classicQcEntityLayout(program), 4, 3),
+        actors = new SessionActorRegistry(createIdentityOwner("original weapon pickup"));
+      try {
+        const slots = new SourceActorSlots(actors, {
+          provider: "q1:world",
+          capacity: 4,
+          lifetime: quakeEdictLifetime(1),
+          storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: kind === "quakeworld" ? 100 : 92 }),
+          now: () => ({ kind: "seconds", value: vm.globals.float(vm.globalOffset("time")) }),
+          unlink: () => undefined,
+          exhausted: () => {
+            throw Error("No source slot");
+          },
+        });
+        slots.bindExisting(0, "q1:world");
+        const player = slots.bindExisting(1, "q1:player"),
+          pickup = slots.bindExisting(2, "q1:weapon");
+        const inventory = new SharedInventoryTable(actors),
+          combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), {
+            impulse: () => undefined,
+            beforeReaction: () => undefined,
+            confirmed: () => undefined,
+          });
+        inventory.create(player, [
+          { item: "q3:weapon/rocketlauncher", count: 0, capacity: 1 },
+          { item: "q3:ammo/rocketlauncher", count: 0, capacity: 200 },
+          { item: "q3:ammo/grenadelauncher", count: 0, capacity: 200 },
+        ]);
+        const stages = qcPickupStages(program),
+          weaponStage = stages.find(stage => program.functionAt(stage.functionIndex).name === "weapon_touch")?.descriptor,
+          ammoStage = stages.find(stage => program.functionAt(stage.functionIndex).name === "ammo_touch")?.descriptor;
+        const weapons = weaponStage?.kind === "string" ? weaponStage.values : undefined,
+          ammo = ammoStage?.kind === "float" ? ammoStage.values : undefined;
+        if (weapons === undefined || ammo === undefined) throw Error("Missing original descriptors");
+        const supplies = new SharedPickupAdmission({
+          inventory,
+          profile: {
+            id: "test:source",
+            weaponOwnership: "all-destinations",
+            weapons: weapons.map(value => ({ source: value.item, destinations: ["q3:weapon/rocketlauncher"] })),
+            ammo: ammo.map(value => ({
+              source: value.item,
+              destinations: kind === "quakeworld" ? ["q3:ammo/rocketlauncher", "q3:ammo/grenadelauncher"] : ["q3:ammo/rocketlauncher"],
+            })),
+          },
+          ammoGranted: () => undefined,
+          weaponGranted: () => undefined,
+        });
+        const admission = new SharedOriginalPickupAdmission(actors, combat, inventory),
+          feedback: string[] = [];
+        let retire = false,
+          switchValue = "";
+        let cargoGrants = 0;
+        const selected: string[] = [];
+        const pickups = new Id1PickupBinding(
+          { program, entities, actors, slots },
+          admission,
+          () => vm,
+          () => false,
+          undefined,
+          () => ({
+            current: () => null,
+            select: (_actor, item) => {
+              selected.push(item);
+              return supplies.selectWeapon(player, item, "better");
+            },
+            counter: (_actor, _item, original) => {
+              for (const item of [
+                "q3:ammo/rocketlauncher",
+                "q3:ammo/grenadelauncher",
+              ] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[]) {
+                const value = original(inventory.count(player.id, item));
+                if (value !== null) inventory.configure(player, { item, count: value, capacity: 200 });
+              }
+              return undefined;
+            },
+          }),
+        );
+        const sourceSlot = (actor: import("../../../src/contracts/identity.ts").ActorId) => {
+          const value = actors.sourceOf(actor);
+          if (value === null) throw Error("Missing source slot");
+          return value.slot;
+        };
+        const host = new Map<QcHostBuiltinName, QcBuiltin>([
+          [
+            "infokey",
+            vm => {
+              vm.returnInt(vm.strings.allocate(switchValue));
+              return undefined;
+            },
+          ],
+          ["bprint", () => undefined],
+          [
+            "spawn",
+            vm => {
+              const spawned = slots.allocate("q1:backpack");
+              vm.returnInt(entities.reference(sourceSlot(spawned.id)));
+              return undefined;
+            },
+          ],
+          [
+            "remove",
+            vm => {
+              const actor = slots.at(entities.slot(vm.globals.int(4)));
+              if (actor === null) throw Error("Missing removed actor");
+              slots.free(actor);
+              return undefined;
+            },
+          ],
+          [
+            "setmodel",
+            vm => {
+              entities.fromReference(vm.globals.int(4)).setInt(vm.fieldOffset("model"), vm.globals.int(7));
+              return undefined;
+            },
+          ],
+          [
+            "setsize",
+            vm => {
+              const words = entities.fromReference(vm.globals.int(4));
+              words.setVector(vm.fieldOffset("mins"), vm.globals.vector(7));
+              words.setVector(vm.fieldOffset("maxs"), vm.globals.vector(10));
+              return undefined;
+            },
+          ],
+          [
+            "sprint",
+            vm => {
+              feedback.push(vm.strings.get(vm.globals.int(kind === "quakeworld" ? 10 : 7)));
+              return undefined;
+            },
+          ],
+          ["sound", () => undefined],
+          ["stuffcmd", () => undefined],
+        ]);
+        const vm: QcMachine = new QcMachine({
+          program,
+          entities,
+          numeric: createNumericOperations(Q1_DONOR_PROFILE),
+          builtins: createQcBuiltins({ kind, host, random: new SourceRandom(1) }),
+          serverActive: () => true,
+          functionBoundary: pickups.composeFunctions({ functions: new Set(), run: (_call, execute) => execute() }),
+          inlineBoundary: pickups.composeRegions({ regions: [], run: (_region, execute) => execute() }),
+          observeCall: () => pickups.validate(),
+          validateEntityAccess: () => pickups.validate(),
+          observeEntityStore: store => pickups.observeStore(store),
+        });
+        const unbind = inventory.bindPickup(player, {
+          owner: "q3:selected",
+          rules: [
+            {
+              id: "weapons",
+              offered: weapons.map(value => value.item),
+              writes: [
+                { kind: "inventory", item: "q3:weapon/rocketlauncher", fields: "count" },
+                { kind: "inventory", item: "q3:ammo/rocketlauncher", fields: "count" },
+                { kind: "inventory", item: "q3:ammo/grenadelauncher", fields: "count" },
+              ],
+              take: offer => {
+                const supply = pickups.supply(offer);
+                if (supply.offer.kind !== "weapon") throw Error("Not weapon");
+                if (supply.leave && supplies.owns(player.id, supply.offer.offer.item)) return "refused";
+                const accepted = supplies.weapon(player, supply.offer.offer, pickups.selectionDeferred(offer) ? "never" : "better");
+                if (retire) slots.free(pickup);
+                return accepted ? "accepted" : "refused";
+              },
+            },
+          ],
+        });
+        const field = (name: string) => vm.fieldOffset(name),
+          recipient = entities.at(1),
+          item = entities.at(2);
+        recipient.setInt(field("classname"), vm.strings.allocate("player"));
+        recipient.setFloat(field("flags"), 8);
+        recipient.setFloat(field("health"), 100);
+        recipient.setFloat(field("items"), 127);
+        recipient.setFloat(field("weapon"), 1);
+        for (const name of ["ammo_shells", "ammo_nails", "ammo_rockets", "ammo_cells"]) recipient.setFloat(field(name), 73);
+        vm.globals.setFloat(vm.globalOffset("time"), 10);
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
+        vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+        const call = () => vm.execute(program.functionNamed("weapon_touch").index),
+          reset = (classname: string) => {
+            item.setInt(field("classname"), vm.strings.allocate(classname));
+            item.setInt(field("netname"), vm.strings.allocate(classname));
+            item.setInt(field("model"), vm.strings.allocate("progs/g_rock.mdl"));
+            item.setFloat(field("solid"), 1);
+            feedback.length = 0;
+            vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
+            inventory.configure(player, { item: "q3:weapon/rocketlauncher", count: 0, capacity: 1 });
+            inventory.configure(player, { item: "q3:ammo/rocketlauncher", count: 0, capacity: 200 });
+          };
+        for (const descriptor of weapons) {
+          if (typeof descriptor.value !== "string" || descriptor.supply?.quantity.kind !== "global") throw Error("Missing constant");
+          reset(descriptor.value);
+          vm.globals.setFloat(vm.globalOffset(kind === "quakeworld" ? "deathmatch" : "coop"), kind === "quakeworld" ? 2 : 1);
+          call();
+          expect(inventory.count(player.id, "q3:ammo/rocketlauncher")).toBe(vm.globals.float(descriptor.supply.quantity.word));
+          expect(item.float(field("solid"))).toBe(1);
+          expect(feedback.length).toBe(3);
+          feedback.length = 0;
+          call();
+          expect(feedback).toEqual([]);
+          expect(recipient.float(field("items"))).toBe(127);
+          for (const name of ["ammo_shells", "ammo_nails", "ammo_rockets", "ammo_cells"]) expect(recipient.float(field(name))).toBe(73);
+        }
+        reset("weapon_rocketlauncher");
+        vm.globals.setFloat(vm.globalOffset(kind === "quakeworld" ? "deathmatch" : "coop"), kind === "quakeworld" ? 1 : 0);
+        call();
+        expect(item.float(field("solid"))).toBe(0);
+        expect(vm.profiling[program.functionNamed("SUB_UseTargets").index]).toBeGreaterThan(0);
+        expect(vm.profiling[program.functionNamed("W_SetCurrentAmmo").index]).toBe(0);
+        const targets = vm.profiling[program.functionNamed("SUB_UseTargets").index];
+        reset("weapon_rocketlauncher");
+        retire = true;
+        call();
+        expect(feedback).toEqual([]);
+        expect(vm.profiling[program.functionNamed("SUB_UseTargets").index]).toBe(targets);
+        expect(actors.isLive(pickup.id)).toBe(false);
+        expect(() => pickups.assertIdle()).not.toThrow();
+        unbind();
+        const closeBackpack = inventory.bindPickup(player, {
+          owner: "q3:selected",
+          rules: [
+            {
+              id: "backpack",
+              offered: ["q1:item_backpack"],
+              writes: [
+                { kind: "inventory", item: "q3:weapon/rocketlauncher", fields: "count" },
+                { kind: "inventory", item: "q3:ammo/rocketlauncher", fields: "count" },
+                { kind: "inventory", item: "q3:ammo/grenadelauncher", fields: "count" },
+              ],
+              take: offer => {
+                cargoGrants++;
+                if (offer.cargo === undefined) throw Error("Missing immutable original cargo");
+                expect(Object.isFrozen(offer.cargo)).toBe(true);
+                return supplies.cargo(player, offer.cargo, pickups.selectionDeferred(offer) ? "never" : "better") ? "accepted" : "refused";
+              },
+            },
+          ],
+        });
 
-   recipient.setFloat(field('weapon'),32);recipient.setFloat(field('ammo_shells'),5);recipient.setFloat(field('ammo_nails'),7);recipient.setFloat(field('ammo_rockets'),9);recipient.setFloat(field('ammo_cells'),11);vm.globals.setInt(vm.globalOffset('self'),entities.reference(1));vm.execute(program.functionNamed('DropBackpack').index);
-   const bag=actors.observations().find(actor=>actor.definition==='q1:backpack');if(bag===undefined)throw Error('Missing real dropped backpack');const bagSlot=sourceSlot(bag.id);inventory.configure(player,{item:'q3:weapon/rocketlauncher',count:0,capacity:1});inventory.configure(player,{item:'q3:ammo/rocketlauncher',count:0,capacity:200});feedback.length=0;vm.globals.setInt(vm.globalOffset('self'),entities.reference(bagSlot));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));vm.execute(program.functionNamed('BackpackTouch').index);
-   expect(inventory.count(player.id,'q3:ammo/rocketlauncher')).toBe(32);expect(inventory.count(player.id,'q3:weapon/rocketlauncher')).toBe(1);expect(actors.isLive(bag.id)).toBe(false);expect(feedback.join('')).toContain('5 shells, 7 nails, 9 rockets, 11 cells');expect(recipient.float(field('ammo_shells'))).toBe(5);expect(recipient.float(field('ammo_nails'))).toBe(7);expect(recipient.float(field('ammo_rockets'))).toBe(9);expect(recipient.float(field('ammo_cells'))).toBe(11);expect(vm.profiling[program.functionNamed('W_SetCurrentAmmo').index]).toBe(0);expect(()=>pickups.assertIdle()).not.toThrow();
-   if(kind==='quakeworld'){
-    const originalGrants=cargoGrants;switchValue='1';
-    for(const deathmatch of [3,5]){
-     vm.globals.setFloat(vm.globalOffset('deathmatch'),deathmatch);vm.globals.setFloat(vm.globalOffset('time'),10+deathmatch);
-     recipient.setFloat(field('weapon'),32);recipient.setFloat(field('ammo_shells'),1);recipient.setFloat(field('ammo_nails'),0);recipient.setFloat(field('ammo_rockets'),0);recipient.setFloat(field('ammo_cells'),0);
-     vm.globals.setInt(vm.globalOffset('self'),entities.reference(1));vm.execute(program.functionNamed('DropBackpack').index);
-     const dropped=actors.observations().find(actor=>actor.definition==='q1:backpack');if(dropped===undefined)throw Error('Missing QW mode backpack');
-     recipient.setFloat(field('ammo_rockets'),77);inventory.configure(player,{item:'q3:ammo/rocketlauncher',count:0,capacity:200});inventory.configure(player,{item:'q3:ammo/grenadelauncher',count:20,capacity:200});selected.length=0;
-     vm.globals.setInt(vm.globalOffset('self'),entities.reference(sourceSlot(dropped.id)));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));vm.execute(program.functionNamed('BackpackTouch').index);
-     expect(inventory.count(player.id,'q3:ammo/rocketlauncher')).toBe(5);expect(inventory.count(player.id,'q3:ammo/grenadelauncher')).toBe(21);expect(recipient.float(field('ammo_rockets'))).toBe(77);expect(selected).toEqual([]);expect(actors.isLive(dropped.id)).toBe(false);
+        recipient.setFloat(field("weapon"), 32);
+        recipient.setFloat(field("ammo_shells"), 5);
+        recipient.setFloat(field("ammo_nails"), 7);
+        recipient.setFloat(field("ammo_rockets"), 9);
+        recipient.setFloat(field("ammo_cells"), 11);
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+        vm.execute(program.functionNamed("DropBackpack").index);
+        const bag = actors.observations().find(actor => actor.definition === "q1:backpack");
+        if (bag === undefined) throw Error("Missing real dropped backpack");
+        const bagSlot = sourceSlot(bag.id);
+        inventory.configure(player, { item: "q3:weapon/rocketlauncher", count: 0, capacity: 1 });
+        inventory.configure(player, { item: "q3:ammo/rocketlauncher", count: 0, capacity: 200 });
+        feedback.length = 0;
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(bagSlot));
+        vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+        vm.execute(program.functionNamed("BackpackTouch").index);
+        expect(inventory.count(player.id, "q3:ammo/rocketlauncher")).toBe(32);
+        expect(inventory.count(player.id, "q3:weapon/rocketlauncher")).toBe(1);
+        expect(actors.isLive(bag.id)).toBe(false);
+        expect(feedback.join("")).toContain("5 shells, 7 nails, 9 rockets, 11 cells");
+        expect(recipient.float(field("ammo_shells"))).toBe(5);
+        expect(recipient.float(field("ammo_nails"))).toBe(7);
+        expect(recipient.float(field("ammo_rockets"))).toBe(9);
+        expect(recipient.float(field("ammo_cells"))).toBe(11);
+        expect(vm.profiling[program.functionNamed("W_SetCurrentAmmo").index]).toBe(0);
+        expect(() => pickups.assertIdle()).not.toThrow();
+        if (kind === "quakeworld") {
+          const originalGrants = cargoGrants;
+          switchValue = "1";
+          for (const deathmatch of [3, 5]) {
+            vm.globals.setFloat(vm.globalOffset("deathmatch"), deathmatch);
+            vm.globals.setFloat(vm.globalOffset("time"), 10 + deathmatch);
+            recipient.setFloat(field("weapon"), 32);
+            recipient.setFloat(field("ammo_shells"), 1);
+            recipient.setFloat(field("ammo_nails"), 0);
+            recipient.setFloat(field("ammo_rockets"), 0);
+            recipient.setFloat(field("ammo_cells"), 0);
+            vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+            vm.execute(program.functionNamed("DropBackpack").index);
+            const dropped = actors.observations().find(actor => actor.definition === "q1:backpack");
+            if (dropped === undefined) throw Error("Missing QW mode backpack");
+            recipient.setFloat(field("ammo_rockets"), 77);
+            inventory.configure(player, { item: "q3:ammo/rocketlauncher", count: 0, capacity: 200 });
+            inventory.configure(player, { item: "q3:ammo/grenadelauncher", count: 20, capacity: 200 });
+            selected.length = 0;
+            vm.globals.setInt(vm.globalOffset("self"), entities.reference(sourceSlot(dropped.id)));
+            vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+            vm.execute(program.functionNamed("BackpackTouch").index);
+            expect(inventory.count(player.id, "q3:ammo/rocketlauncher")).toBe(5);
+            expect(inventory.count(player.id, "q3:ammo/grenadelauncher")).toBe(21);
+            expect(recipient.float(field("ammo_rockets"))).toBe(77);
+            expect(selected).toEqual([]);
+            expect(actors.isLive(dropped.id)).toBe(false);
+          }
+          expect(cargoGrants).toBe(originalGrants + 2);
+          vm.globals.setFloat(vm.globalOffset("deathmatch"), 4);
+          vm.globals.setFloat(vm.globalOffset("time"), 20);
+          recipient.setFloat(field("health"), 290);
+          recipient.setFloat(field("ammo_cells"), 11);
+          vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+          vm.execute(program.functionNamed("DropBackpack").index);
+          const healthBag = actors.observations().find(actor => actor.definition === "q1:backpack");
+          if (healthBag === undefined) throw Error("Missing QW health backpack");
+          vm.globals.setInt(vm.globalOffset("self"), entities.reference(sourceSlot(healthBag.id)));
+          vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+          vm.execute(program.functionNamed("BackpackTouch").index);
+          expect(recipient.float(field("health"))).toBe(300);
+          expect(recipient.float(field("invincible_finished"))).toBe(50);
+          expect(recipient.float(field("super_damage_finished"))).toBe(50);
+          expect(cargoGrants).toBe(originalGrants + 2);
+          expect(inventory.count(player.id, "q3:ammo/rocketlauncher")).toBe(0);
+          expect(inventory.count(player.id, "q3:ammo/grenadelauncher")).toBe(0);
+          expect(actors.isLive(healthBag.id)).toBe(false);
+          expect(recipient.float(field("ammo_cells"))).toBe(11);
+          vm.globals.setFloat(vm.globalOffset("deathmatch"), 1);
+          recipient.setFloat(field("ammo_shells"), 5);
+          recipient.setFloat(field("ammo_nails"), 7);
+          recipient.setFloat(field("ammo_rockets"), 9);
+          recipient.setFloat(field("ammo_cells"), 11);
+        }
+        closeBackpack();
+        vm.globals.setFloat(vm.globalOffset("time"), 11);
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+        vm.execute(program.functionNamed("DropBackpack").index);
+        const originalBag = actors.observations().find(actor => actor.definition === "q1:backpack");
+        if (originalBag === undefined) throw Error("Missing original fallback backpack");
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(sourceSlot(originalBag.id)));
+        vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+        vm.execute(program.functionNamed("BackpackTouch").index);
+        expect(actors.isLive(originalBag.id)).toBe(false);
+        expect(recipient.float(field("ammo_shells"))).toBe(10);
+        expect(recipient.float(field("ammo_nails"))).toBe(14);
+        expect(vm.profiling[program.functionNamed("W_SetCurrentAmmo").index]).toBeGreaterThan(0);
+        expect(() => pickups.assertIdle()).not.toThrow();
+      } finally {
+        actors.close();
+      }
+    } finally {
+      archive.close();
     }
-    expect(cargoGrants).toBe(originalGrants+2);vm.globals.setFloat(vm.globalOffset('deathmatch'),4);vm.globals.setFloat(vm.globalOffset('time'),20);recipient.setFloat(field('health'),290);recipient.setFloat(field('ammo_cells'),11);
-    vm.globals.setInt(vm.globalOffset('self'),entities.reference(1));vm.execute(program.functionNamed('DropBackpack').index);const healthBag=actors.observations().find(actor=>actor.definition==='q1:backpack');if(healthBag===undefined)throw Error('Missing QW health backpack');
-    vm.globals.setInt(vm.globalOffset('self'),entities.reference(sourceSlot(healthBag.id)));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));vm.execute(program.functionNamed('BackpackTouch').index);
-    expect(recipient.float(field('health'))).toBe(300);expect(recipient.float(field('invincible_finished'))).toBe(50);expect(recipient.float(field('super_damage_finished'))).toBe(50);expect(cargoGrants).toBe(originalGrants+2);expect(inventory.count(player.id,'q3:ammo/rocketlauncher')).toBe(0);expect(inventory.count(player.id,'q3:ammo/grenadelauncher')).toBe(0);expect(actors.isLive(healthBag.id)).toBe(false);expect(recipient.float(field('ammo_cells'))).toBe(11);
-    vm.globals.setFloat(vm.globalOffset('deathmatch'),1);recipient.setFloat(field('ammo_shells'),5);recipient.setFloat(field('ammo_nails'),7);recipient.setFloat(field('ammo_rockets'),9);recipient.setFloat(field('ammo_cells'),11);
-   }
-   closeBackpack();vm.globals.setFloat(vm.globalOffset('time'),11);vm.globals.setInt(vm.globalOffset('self'),entities.reference(1));vm.execute(program.functionNamed('DropBackpack').index);
-   const originalBag=actors.observations().find(actor=>actor.definition==='q1:backpack');if(originalBag===undefined)throw Error('Missing original fallback backpack');vm.globals.setInt(vm.globalOffset('self'),entities.reference(sourceSlot(originalBag.id)));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));vm.execute(program.functionNamed('BackpackTouch').index);
-   expect(actors.isLive(originalBag.id)).toBe(false);expect(recipient.float(field('ammo_shells'))).toBe(10);expect(recipient.float(field('ammo_nails'))).toBe(14);expect(vm.profiling[program.functionNamed('W_SetCurrentAmmo').index]).toBeGreaterThan(0);expect(()=>pickups.assertIdle()).not.toThrow();
-  }finally{actors.close();}
- }finally{archive.close();}
-});
+  });
 
-test('declared original item callers retain player gates, refusal, feedback, targets and respawn', async () => {
- const archive=await openArchive(corpusFile("q1/id1/PAK0.PAK"));
- try {
-  const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(await archive.readEntry(entry));
-  const {readQuakeCCompatibility}=await import('../../../src/compat/qc/compatibility.ts');
-  const {qcDeclaredPickupStages}=await import('../../../src/content/q1/quakec/pickup-callers.ts');
-  const region=(entry:number,exit:number,operation:import('../../../src/contracts/qc-pickup-callers.ts').QcPickupCallerDeclaration['regions'][number]['operation'])=>({entry,exit,operation,statements:program.statements.slice(entry,exit+1)});
-  const bytes=new TextEncoder().encode(JSON.stringify({version:1,artifactDigest:program.digest,pickupCallers:[
-   {function:'key_touch',descriptor:{kind:'string',field:'classname',values:[{value:'item_key1',item:'mod:key',resource:{kind:'inventory',item:'mod:charges'},count:{kind:'field',name:'aflag'}}]},
-    regions:[region(2709,2712,{kind:'decision',word:2281,accepted:0}),region(2734,2739,{kind:'grant'})]},
-   {function:'powerup_touch',descriptor:{kind:'constant',item:'mod:powerup',resource:{kind:'inventory',item:'mod:charges'}},
-    regions:[region(2945,2947,{kind:'admission'}),region(2987,2992,{kind:'grant'}),region(2994,3026,{kind:'grant'})]},
-  ]}));
-  const compatibility=readQuakeCCompatibility(bytes,program.digest),declared=qcDeclaredPickupStages(program,compatibility.pickupCallers);
-  expect(compatibility.messageDialect).toBe('known-retail');expect(declared).toHaveLength(2);
-  expect(()=>readQuakeCCompatibility(bytes,'changed-source')).toThrow("quakec-compatibility.json.artifactDigest: expected changed-source");
-  const first=compatibility.pickupCallers[0];if(first===undefined)throw Error('Missing caller');
-  expect(()=>qcDeclaredPickupStages(program,[first,first])).toThrow('duplicate');
-  expect(()=>qcDeclaredPickupStages(program,[{...first,regions:first.regions.map((value,index)=>index===0?{...value,statements:[]}:value)}])).toThrow('instruction proof');
-  const entities=new QcEntityMemory(classicQcEntityLayout(program),4,3),actors=new SessionActorRegistry(createIdentityOwner('declared original pickup'));
+test("declared original item callers retain player gates, refusal, feedback, targets and respawn", async () => {
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
   try {
-   const slots=new SourceActorSlots(actors,{provider:'q1:world',capacity:4,lifetime:quakeEdictLifetime(1),storage:createQcSourceSlotStorage({program,entities},{freeOffsetBytes:0,freeTimeOffsetBytes:92}),now:()=>({kind:'seconds',value:10}),unlink:()=>undefined,exhausted:()=>{throw Error('No source slot');}});
-   slots.bindExisting(0,'q1:world');const player=slots.bindExisting(1,'q1:player'),pickup=slots.bindExisting(2,'mod:item');
-   const inventory=new SharedInventoryTable(actors),combat=new GameplayAuthority(actors,new ActorCallbackTable(actors),{impulse:()=>undefined,beforeReaction:()=>undefined,confirmed:()=>undefined});
-   inventory.create(player,[{item:'mod:charges',count:0,capacity:10}]);
-   const admission=new SharedOriginalPickupAdmission(actors,combat,inventory),feedback:string[]=[];let attempts=0,allowed=true,reenter=false;
-   const binding=new Id1PickupBinding({program,entities,actors,slots},admission,()=>vm,undefined,undefined,undefined,declared);
-   const host=new Map<QcHostBuiltinName,QcBuiltin>([['sprint',machine=>{feedback.push(machine.argString(1));if(reenter){reenter=false;machine.execute(program.functionNamed('key_touch').index);}return undefined;}],['sound',()=>undefined],['stuffcmd',()=>undefined]]);
-   const vm:QcMachine=new QcMachine({program,entities,numeric:createNumericOperations(Q1_DONOR_PROFILE),builtins:createQcBuiltins({kind:'netquake',host,random:new SourceRandom(1)}),serverActive:()=>true,
-    functionBoundary:binding.composeFunctions({functions:new Set(),run:(_call,execute)=>execute()}),inlineBoundary:binding.composeRegions({regions:[],run:(_region,execute)=>execute()}),observeCall:()=>binding.validate(),validateEntityAccess:()=>binding.validate(),observeEntityStore:store=>binding.observeStore(store)});
-   const unbind=inventory.bindPickup(player,{owner:'mod:counter',rules:[{id:'charges',offered:['mod:key','mod:powerup'],writes:[{kind:'inventory',item:'mod:charges',fields:'count'}],take:offer=>{
-    attempts++;expect(offer.pickup).toBe(pickup.id);expect(offer.count).toEqual(offer.item==='mod:key'?{kind:'override',amount:7}:{kind:'default'});
-    if(!allowed)return 'refused';inventory.configure(player,{item:'mod:charges',count:inventory.count(player.id,'mod:charges')+1,capacity:10});return 'accepted';
-   }}]});
-   const recipient=entities.at(1),item=entities.at(2),field=(name:string)=>vm.fieldOffset(name);
-   recipient.setInt(field('classname'),vm.strings.allocate('player'));recipient.setFloat(field('health'),100);recipient.setFloat(field('items'),131072);
-   item.setInt(field('classname'),vm.strings.allocate('item_key1'));item.setInt(field('netname'),vm.strings.allocate('authored item'));item.setInt(field('noise'),vm.strings.allocate('misc/medkey.wav'));item.setFloat(field('items'),131072);item.setFloat(field('aflag'),7);
-   vm.globals.setFloat(vm.globalOffset('time'),10);vm.globals.setInt(vm.globalOffset('self'),entities.reference(2));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));
-   const reset=()=>{feedback.length=0;item.setFloat(field('solid'),1);item.setInt(field('model'),vm.strings.allocate('progs/w_s_key.mdl'));};
-   const key=program.functionNamed('key_touch').index;
-   reset();recipient.setFloat(field('health'),0);vm.execute(key);expect(attempts).toBe(0);expect(feedback).toEqual([]);recipient.setFloat(field('health'),100);
-   allowed=false;vm.execute(key);expect(attempts).toBe(1);expect(feedback).toEqual([]);expect(item.float(field('solid'))).toBe(1);
-   allowed=true;reenter=true;vm.globals.setFloat(vm.globalOffset('coop'),1);vm.execute(key);expect(attempts).toBe(2);expect(inventory.count(player.id,'mod:charges')).toBe(1);expect(feedback.join('')).toBe('You got the authored item\n');expect(item.float(field('solid'))).toBe(1);
-   reset();vm.globals.setFloat(vm.globalOffset('coop'),0);vm.execute(key);expect(item.float(field('solid'))).toBe(0);expect(vm.profiling[program.functionNamed('SUB_UseTargets').index]).toBeGreaterThan(0);expect(recipient.float(field('items'))).toBe(131072);
-   reset();item.setInt(field('classname'),vm.strings.allocate('item_artifact_super_damage'));item.setFloat(field('items'),4194304);vm.globals.setFloat(vm.globalOffset('deathmatch'),1);
-   const powerup=program.functionNamed('powerup_touch').index;allowed=false;const before=attempts;vm.execute(powerup);expect(attempts).toBe(before+1);expect(feedback).toEqual([]);expect(item.float(field('nextthink'))).toBe(0);
-   allowed=true;vm.execute(powerup);expect(item.float(field('solid'))).toBe(0);expect(item.float(field('nextthink'))).toBe(70);expect(item.int(field('think'))).toBe(program.functionNamed('SUB_regen').index);expect(recipient.float(field('super_damage_finished'))).toBe(0);expect(recipient.float(field('items'))).toBe(131072);expect(inventory.count(player.id,'mod:charges')).toBe(3);expect(feedback.join('')).toBe('You got the authored item\n');
-   expect(()=>binding.assertIdle()).not.toThrow();unbind();reset();vm.execute(powerup);
-   expect(recipient.float(field('super_damage_finished'))).toBe(40);expect(inventory.count(player.id,'mod:charges')).toBe(3);
-  }finally{actors.close();}
- }finally{archive.close();}
+    const entry = archive.findEntries("progs.dat").at(-1);
+    if (entry === undefined) throw Error("Missing id1");
+    const program = loadQcProgram(await archive.readEntry(entry));
+    const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
+    const { qcDeclaredPickupStages } = await import("../../../src/content/q1/quakec/pickup-callers.ts");
+    const region = (
+      entry: number,
+      exit: number,
+      operation: import("../../../src/contracts/qc-pickup-callers.ts").QcPickupCallerDeclaration["regions"][number]["operation"],
+    ) => ({ entry, exit, operation, statements: program.statements.slice(entry, exit + 1) });
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        version: 1,
+        artifactDigest: program.digest,
+        pickupCallers: [
+          {
+            function: "key_touch",
+            descriptor: {
+              kind: "string",
+              field: "classname",
+              values: [{ value: "item_key1", item: "mod:key", resource: { kind: "inventory", item: "mod:charges" }, count: { kind: "field", name: "aflag" } }],
+            },
+            regions: [region(2709, 2712, { kind: "decision", word: 2281, accepted: 0 }), region(2734, 2739, { kind: "grant" })],
+          },
+          {
+            function: "powerup_touch",
+            descriptor: { kind: "constant", item: "mod:powerup", resource: { kind: "inventory", item: "mod:charges" } },
+            regions: [region(2945, 2947, { kind: "admission" }), region(2987, 2992, { kind: "grant" }), region(2994, 3026, { kind: "grant" })],
+          },
+        ],
+      }),
+    );
+    const compatibility = readQuakeCCompatibility(bytes, program.digest),
+      declared = qcDeclaredPickupStages(program, compatibility.pickupCallers);
+    expect(compatibility.messageDialect).toBe("known-retail");
+    expect(declared).toHaveLength(2);
+    expect(() => readQuakeCCompatibility(bytes, "changed-source")).toThrow("quakec-compatibility.json.artifactDigest: expected changed-source");
+    const first = compatibility.pickupCallers[0];
+    if (first === undefined) throw Error("Missing caller");
+    expect(() => qcDeclaredPickupStages(program, [first, first])).toThrow("duplicate");
+    expect(() =>
+      qcDeclaredPickupStages(program, [{ ...first, regions: first.regions.map((value, index) => (index === 0 ? { ...value, statements: [] } : value)) }]),
+    ).toThrow("instruction proof");
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 4, 3),
+      actors = new SessionActorRegistry(createIdentityOwner("declared original pickup"));
+    try {
+      const slots = new SourceActorSlots(actors, {
+        provider: "q1:world",
+        capacity: 4,
+        lifetime: quakeEdictLifetime(1),
+        storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }),
+        now: () => ({ kind: "seconds", value: 10 }),
+        unlink: () => undefined,
+        exhausted: () => {
+          throw Error("No source slot");
+        },
+      });
+      slots.bindExisting(0, "q1:world");
+      const player = slots.bindExisting(1, "q1:player"),
+        pickup = slots.bindExisting(2, "mod:item");
+      const inventory = new SharedInventoryTable(actors),
+        combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), {
+          impulse: () => undefined,
+          beforeReaction: () => undefined,
+          confirmed: () => undefined,
+        });
+      inventory.create(player, [{ item: "mod:charges", count: 0, capacity: 10 }]);
+      const admission = new SharedOriginalPickupAdmission(actors, combat, inventory),
+        feedback: string[] = [];
+      let attempts = 0,
+        allowed = true,
+        reenter = false;
+      const binding = new Id1PickupBinding({ program, entities, actors, slots }, admission, () => vm, undefined, undefined, undefined, declared);
+      const host = new Map<QcHostBuiltinName, QcBuiltin>([
+        [
+          "sprint",
+          machine => {
+            feedback.push(machine.argString(1));
+            if (reenter) {
+              reenter = false;
+              machine.execute(program.functionNamed("key_touch").index);
+            }
+            return undefined;
+          },
+        ],
+        ["sound", () => undefined],
+        ["stuffcmd", () => undefined],
+      ]);
+      const vm: QcMachine = new QcMachine({
+        program,
+        entities,
+        numeric: createNumericOperations(Q1_DONOR_PROFILE),
+        builtins: createQcBuiltins({ kind: "netquake", host, random: new SourceRandom(1) }),
+        serverActive: () => true,
+        functionBoundary: binding.composeFunctions({ functions: new Set(), run: (_call, execute) => execute() }),
+        inlineBoundary: binding.composeRegions({ regions: [], run: (_region, execute) => execute() }),
+        observeCall: () => binding.validate(),
+        validateEntityAccess: () => binding.validate(),
+        observeEntityStore: store => binding.observeStore(store),
+      });
+      const unbind = inventory.bindPickup(player, {
+        owner: "mod:counter",
+        rules: [
+          {
+            id: "charges",
+            offered: ["mod:key", "mod:powerup"],
+            writes: [{ kind: "inventory", item: "mod:charges", fields: "count" }],
+            take: offer => {
+              attempts++;
+              expect(offer.pickup).toBe(pickup.id);
+              expect(offer.count).toEqual(offer.item === "mod:key" ? { kind: "override", amount: 7 } : { kind: "default" });
+              if (!allowed) return "refused";
+              inventory.configure(player, { item: "mod:charges", count: inventory.count(player.id, "mod:charges") + 1, capacity: 10 });
+              return "accepted";
+            },
+          },
+        ],
+      });
+      const recipient = entities.at(1),
+        item = entities.at(2),
+        field = (name: string) => vm.fieldOffset(name);
+      recipient.setInt(field("classname"), vm.strings.allocate("player"));
+      recipient.setFloat(field("health"), 100);
+      recipient.setFloat(field("items"), 131072);
+      item.setInt(field("classname"), vm.strings.allocate("item_key1"));
+      item.setInt(field("netname"), vm.strings.allocate("authored item"));
+      item.setInt(field("noise"), vm.strings.allocate("misc/medkey.wav"));
+      item.setFloat(field("items"), 131072);
+      item.setFloat(field("aflag"), 7);
+      vm.globals.setFloat(vm.globalOffset("time"), 10);
+      vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
+      vm.globals.setInt(vm.globalOffset("other"), entities.reference(1));
+      const reset = () => {
+        feedback.length = 0;
+        item.setFloat(field("solid"), 1);
+        item.setInt(field("model"), vm.strings.allocate("progs/w_s_key.mdl"));
+      };
+      const key = program.functionNamed("key_touch").index;
+      reset();
+      recipient.setFloat(field("health"), 0);
+      vm.execute(key);
+      expect(attempts).toBe(0);
+      expect(feedback).toEqual([]);
+      recipient.setFloat(field("health"), 100);
+      allowed = false;
+      vm.execute(key);
+      expect(attempts).toBe(1);
+      expect(feedback).toEqual([]);
+      expect(item.float(field("solid"))).toBe(1);
+      allowed = true;
+      reenter = true;
+      vm.globals.setFloat(vm.globalOffset("coop"), 1);
+      vm.execute(key);
+      expect(attempts).toBe(2);
+      expect(inventory.count(player.id, "mod:charges")).toBe(1);
+      expect(feedback.join("")).toBe("You got the authored item\n");
+      expect(item.float(field("solid"))).toBe(1);
+      reset();
+      vm.globals.setFloat(vm.globalOffset("coop"), 0);
+      vm.execute(key);
+      expect(item.float(field("solid"))).toBe(0);
+      expect(vm.profiling[program.functionNamed("SUB_UseTargets").index]).toBeGreaterThan(0);
+      expect(recipient.float(field("items"))).toBe(131072);
+      reset();
+      item.setInt(field("classname"), vm.strings.allocate("item_artifact_super_damage"));
+      item.setFloat(field("items"), 4194304);
+      vm.globals.setFloat(vm.globalOffset("deathmatch"), 1);
+      const powerup = program.functionNamed("powerup_touch").index;
+      allowed = false;
+      const before = attempts;
+      vm.execute(powerup);
+      expect(attempts).toBe(before + 1);
+      expect(feedback).toEqual([]);
+      expect(item.float(field("nextthink"))).toBe(0);
+      allowed = true;
+      vm.execute(powerup);
+      expect(item.float(field("solid"))).toBe(0);
+      expect(item.float(field("nextthink"))).toBe(70);
+      expect(item.int(field("think"))).toBe(program.functionNamed("SUB_regen").index);
+      expect(recipient.float(field("super_damage_finished"))).toBe(0);
+      expect(recipient.float(field("items"))).toBe(131072);
+      expect(inventory.count(player.id, "mod:charges")).toBe(3);
+      expect(feedback.join("")).toBe("You got the authored item\n");
+      expect(() => binding.assertIdle()).not.toThrow();
+      unbind();
+      reset();
+      vm.execute(powerup);
+      expect(recipient.float(field("super_damage_finished"))).toBe(40);
+      expect(inventory.count(player.id, "mod:charges")).toBe(3);
+    } finally {
+      actors.close();
+    }
+  } finally {
+    archive.close();
+  }
 });

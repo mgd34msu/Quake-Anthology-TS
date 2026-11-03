@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Impact mark lifetime and texture mapping translated from id Software's
  * cgame/cg_marks.c:CG_InitMarkPolys through CG_AddMarks. Appended particles are separate.
@@ -43,8 +44,12 @@ function finite(value: number, name: string): number {
   if (!Number.isFinite(result)) throw new RangeError(`${name} must be finite float32`);
   return result;
 }
-function position(value: Vec3): Vec3 { return vec3(finite(value.x, "mark coordinate"), finite(value.y, "mark coordinate"), finite(value.z, "mark coordinate")); }
-function byte(value: number): number { return Math.trunc(Math.fround(value)) & 255; }
+function position(value: Vec3): Vec3 {
+  return vec3(finite(value.x, "mark coordinate"), finite(value.y, "mark coordinate"), finite(value.z, "mark coordinate"));
+}
+function byte(value: number): number {
+  return Math.trunc(Math.fround(value)) & 255;
+}
 function poly(shader: SceneShader | null, vertices: readonly RefPolyVertex[]): RefPoly {
   return { shader, vertices: vertices.map(vertex => ({ position: { ...vertex.position }, texCoord: { ...vertex.texCoord }, color: { ...vertex.color } })) };
 }
@@ -57,37 +62,59 @@ function unitColor(value: number): number {
 export class ImpactMarkSystem {
   private readonly active: StoredMark[] = [];
 
-  constructor(private readonly projector: BspMarkProjector, private readonly options: ImpactMarkOptions) {}
+  constructor(
+    private readonly projector: BspMarkProjector,
+    private readonly options: ImpactMarkOptions,
+  ) {}
 
-  reset(): void { this.active.length = 0; }
-  get activeMarkCount(): number { return this.active.length; }
+  reset(): void {
+    this.active.length = 0;
+  }
+  get activeMarkCount(): number {
+    return this.active.length;
+  }
 
   impactMark(request: ImpactMarkRequest): readonly RefPoly[] {
     if (!this.options.enabled()) return [];
     const radius = finite(request.radius, "mark radius");
     if (radius <= 0) throw new RangeError("CG_ImpactMark called with <= 0 radius");
-    const origin = position(request.origin), direction = position(request.direction);
+    const origin = position(request.origin),
+      direction = position(request.direction);
     // Q3_VM omits ProjectPointOnPlane's zero-normal assertion. Its NaN axes
     // reach the renderer with zero projection, which rejects every face/grid.
     if (dot3(direction, direction) === 0) return [];
     const normal = normalize3OrZero(direction);
     const axis2 = qvmRotatePointAroundVector(normal, perpendicularVector(normal), finite(request.orientation, "mark orientation"));
-    const axis1 = cross3(normal, axis2), scale = Math.fround(0.5 / radius);
-    const point = (first: number, second: number): Vec3 => vec3(
-      Math.fround(origin.x + Math.fround(first * Math.fround(radius * axis1.x))) + Math.fround(second * Math.fround(radius * axis2.x)),
-      Math.fround(origin.y + Math.fround(first * Math.fround(radius * axis1.y))) + Math.fround(second * Math.fround(radius * axis2.y)),
-      Math.fround(origin.z + Math.fround(first * Math.fround(radius * axis1.z))) + Math.fround(second * Math.fround(radius * axis2.z)),
-    );
-    const fragments = this.projector.markFragments({ points: [point(-1, -1), point(1, -1), point(1, 1), point(-1, 1)], projection: scale3(direction, -20), maxPoints: MAX_MARK_POINTS, maxFragments: MAX_MARK_FRAGMENTS });
+    const axis1 = cross3(normal, axis2),
+      scale = Math.fround(0.5 / radius);
+    const point = (first: number, second: number): Vec3 =>
+      vec3(
+        Math.fround(origin.x + Math.fround(first * Math.fround(radius * axis1.x))) + Math.fround(second * Math.fround(radius * axis2.x)),
+        Math.fround(origin.y + Math.fround(first * Math.fround(radius * axis1.y))) + Math.fround(second * Math.fround(radius * axis2.y)),
+        Math.fround(origin.z + Math.fround(first * Math.fround(radius * axis1.z))) + Math.fround(second * Math.fround(radius * axis2.z)),
+      );
+    const fragments = this.projector.markFragments({
+      points: [point(-1, -1), point(1, -1), point(1, 1), point(-1, 1)],
+      projection: scale3(direction, -20),
+      maxPoints: MAX_MARK_POINTS,
+      maxFragments: MAX_MARK_FRAGMENTS,
+    });
     const color = { x: unitColor(request.color.x), y: unitColor(request.color.y), z: unitColor(request.color.z), w: unitColor(request.color.w) };
     const modulate = { x: byte(color.x * 255), y: byte(color.y * 255), z: byte(color.z * 255), w: byte(color.w * 255) };
     const temporary: RefPoly[] = [];
     for (const fragment of fragments.fragments) {
       const vertices = fragments.points.slice(fragment.firstPoint, fragment.firstPoint + Math.min(fragment.pointCount, MAX_MARK_POLY_VERTICES)).map(point => {
         const delta = sub3(point, origin);
-        return { position: { ...point }, texCoord: vec2(0.5 + Math.fround(dot3(delta, axis1) * scale), 0.5 + Math.fround(dot3(delta, axis2) * scale)), color: { ...modulate } };
+        return {
+          position: { ...point },
+          texCoord: vec2(0.5 + Math.fround(dot3(delta, axis1) * scale), 0.5 + Math.fround(dot3(delta, axis2) * scale)),
+          color: { ...modulate },
+        };
       });
-      if (request.temporary) { temporary.push(poly(request.shader, vertices)); continue; }
+      if (request.temporary) {
+        temporary.push(poly(request.shader, vertices));
+        continue;
+      }
       if (this.active.length === MAX_MARK_POLYS) {
         const oldest = this.active.at(-1);
         if (oldest === undefined) throw new Error("full mark pool has no oldest polygon");
@@ -101,12 +128,16 @@ export class ImpactMarkSystem {
 
   addMarks(): readonly RefPoly[] {
     if (!this.options.enabled()) return [];
-    const output: RefPoly[] = [], now = this.now();
-    for (let index = 0; index < this.active.length;) {
+    const output: RefPoly[] = [],
+      now = this.now();
+    for (let index = 0; index < this.active.length; ) {
       const mark = this.active[index];
       if (mark === undefined) throw new Error("mark pool contains a missing polygon");
       const expires = (mark.time + MARK_TOTAL_TIME) | 0;
-      if (now > expires) { this.active.splice(index, 1); continue; }
+      if (now > expires) {
+        this.active.splice(index, 1);
+        continue;
+      }
       if (mark.shader === this.options.energyShader()) {
         // cg_marks' Q3_VM expression emits SUBI4, CVIF4, DIVF4, MULF4,
         // SUBF4, CVFI4. Native double promotion changes visible byte values.

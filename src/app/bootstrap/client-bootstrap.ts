@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { randomBytes } from "node:crypto";
 import type { Account } from "../../network/services/online.ts";
 import type { ApplicationLocalLobby } from "./local-lobby.ts";
@@ -31,7 +32,9 @@ import type { ConfigurationCommandRequest } from "./configuration.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export class ClientSourcePublicationError extends AggregateError {
-  constructor(errors: readonly unknown[]) { super(errors, "Client source failed after publication began"); }
+  constructor(errors: readonly unknown[]) {
+    super(errors, "Client source failed after publication began");
+  }
 }
 
 export interface ClientBootstrapSeat {
@@ -40,12 +43,14 @@ export interface ClientBootstrapSeat {
   readonly prepared: PreparedSeat;
 }
 
-export type ClientInputPublication = {
-  readonly kind: "menu";
-  readonly router: InputRouter;
-  readonly controllerSettings: ControllerSettings;
-  retireCommands(): void;
-} | { readonly kind: "world"; readonly input: ApplicationInput };
+export type ClientInputPublication =
+  | {
+      readonly kind: "menu";
+      readonly router: InputRouter;
+      readonly controllerSettings: ControllerSettings;
+      retireCommands(): void;
+    }
+  | { readonly kind: "world"; readonly input: ApplicationInput };
 
 export interface ClientRecordingFeed {
   readonly root: string;

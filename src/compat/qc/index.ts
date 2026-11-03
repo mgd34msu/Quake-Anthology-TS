@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { QcOpcode, QcProgram, QcProgramError, loadQcProgram, qcByteString, signedQcBranch } from "./program.ts";
 export type { QcDefinition, QcFunction, QcStatement, QcValueType } from "./program.ts";
 export { QcEntityMemory, QcStrings, QcWords } from "./memory.ts";

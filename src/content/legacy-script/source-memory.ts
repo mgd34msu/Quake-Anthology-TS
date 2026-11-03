@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../persistence/value.ts";
 import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
@@ -42,15 +43,25 @@ type IndentBacking =
 class SourceIndent {
   private cachedView: DataView | null = null;
 
-  constructor(readonly id: number, private readonly backing: IndentBacking) {}
+  constructor(
+    readonly id: number,
+    private readonly backing: IndentBacking,
+  ) {}
 
   captureSaveState(capture: ScriptMemoryCapture) {
-    return this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) }
-      : { ...this.backing };
+    return this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) } : { ...this.backing };
   }
   static restoreSaveState(id: number, value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore): SourceIndent {
-    const reader = new SaveReader(value, "script.indent"), kind = reader.field("kind").choice("heap", "managed");
-    if (kind === "managed") return new SourceIndent(id, { kind, type: reader.field("type").integer(), skip: reader.field("skip").integer(), script: reader.field("script").integer(0), next: reader.field("next").integer(0) });
+    const reader = new SaveReader(value, "script.indent"),
+      kind = reader.field("kind").choice("heap", "managed");
+    if (kind === "managed")
+      return new SourceIndent(id, {
+        kind,
+        type: reader.field("type").integer(),
+        skip: reader.field("skip").integer(),
+        script: reader.field("script").integer(0),
+        next: reader.field("next").integer(0),
+      });
     if (memory === undefined) return reader.fail("heap indent requires memory owner");
     const allocation = restore.allocation(reader.field("allocation").integer(0));
     if (allocation.bytes.length !== SOURCE_INDENT_BYTES) reader.fail("invalid indent extent");
@@ -59,31 +70,44 @@ class SourceIndent {
   get type(): SourceIndentType {
     const value = this.backing.kind === "heap" ? this.view.getInt32(0, true) : this.backing.type;
     switch (value) {
-      case SourceIndentType.If: case SourceIndentType.Else: case SourceIndentType.Elif:
-      case SourceIndentType.Ifdef: case SourceIndentType.Ifndef: return value;
-      default: throw new RangeError("source indent has an unsupported directive type");
+      case SourceIndentType.If:
+      case SourceIndentType.Else:
+      case SourceIndentType.Elif:
+      case SourceIndentType.Ifdef:
+      case SourceIndentType.Ifndef:
+        return value;
+      default:
+        throw new RangeError("source indent has an unsupported directive type");
     }
   }
   set type(value: SourceIndentType) {
     if (this.backing.kind === "heap") this.view.setInt32(0, value, true);
     else this.backing.type = value;
   }
-  get skip(): number { return this.backing.kind === "heap" ? this.view.getInt32(4, true) : this.backing.skip; }
+  get skip(): number {
+    return this.backing.kind === "heap" ? this.view.getInt32(4, true) : this.backing.skip;
+  }
   set skip(value: number) {
     if (this.backing.kind === "heap") this.view.setInt32(4, value, true);
     else this.backing.skip = value | 0;
   }
-  get script(): number { return this.backing.kind === "heap" ? this.view.getUint32(8, true) : this.backing.script; }
+  get script(): number {
+    return this.backing.kind === "heap" ? this.view.getUint32(8, true) : this.backing.script;
+  }
   set script(value: number) {
     if (this.backing.kind === "heap") this.view.setUint32(8, value, true);
     else this.backing.script = value;
   }
-  get next(): number { return this.backing.kind === "heap" ? this.view.getUint32(12, true) : this.backing.next; }
+  get next(): number {
+    return this.backing.kind === "heap" ? this.view.getUint32(12, true) : this.backing.next;
+  }
   set next(value: number) {
     if (this.backing.kind === "heap") this.view.setUint32(12, value, true);
     else this.backing.next = value;
   }
-  free(): void { if (this.backing.kind === "heap") this.backing.memory.free(this.backing.allocation); }
+  free(): void {
+    if (this.backing.kind === "heap") this.backing.memory.free(this.backing.allocation);
+  }
 
   private get view(): DataView {
     if (this.backing.kind !== "heap") throw new Error("diagnostic indent has no source allocation");
@@ -109,16 +133,36 @@ export class SourceRecord {
   private cachedHashView: DataView | null = null;
   private borrowedPunctuations: readonly ScriptPunctuation[] | null = null;
 
-  constructor(filename: string, script: number, private readonly memory: ScriptMemory | undefined, lifetime: "heap" | "stack", saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore }) {
+  constructor(
+    filename: string,
+    script: number,
+    private readonly memory: ScriptMemory | undefined,
+    lifetime: "heap" | "stack",
+    saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore },
+  ) {
     if (saved !== undefined) {
-      const reader = new SaveReader(saved.value, "script.source"), backing = reader.field("backing"), hash = reader.field("hash");
+      const reader = new SaveReader(saved.value, "script.source"),
+        backing = reader.field("backing"),
+        hash = reader.field("hash");
       if (backing.field("kind").choice("heap", "managed") === "heap") {
         const allocation = saved.restore.allocation(backing.field("allocation").integer(0));
         if (allocation.bytes.length !== SOURCE_RECORD_BYTES) reader.fail("invalid source extent");
         this.backing = { kind: "heap", allocation };
-        this.token = new PrecompToken(0, { get bytes() { return allocation.bytes.subarray(2076, SOURCE_RECORD_BYTES); } });
+        this.token = new PrecompToken(0, {
+          get bytes() {
+            return allocation.bytes.subarray(2076, SOURCE_RECORD_BYTES);
+          },
+        });
       } else {
-        this.backing = { kind: "managed", filename: backing.field("filename").string(), includePath: backing.field("includePath").string(), script: backing.field("script").integer(0), tokens: backing.field("tokens").integer(0), indent: backing.field("indent").integer(0), skip: backing.field("skip").integer() };
+        this.backing = {
+          kind: "managed",
+          filename: backing.field("filename").string(),
+          includePath: backing.field("includePath").string(),
+          script: backing.field("script").integer(0),
+          tokens: backing.field("tokens").integer(0),
+          indent: backing.field("indent").integer(0),
+          skip: backing.field("skip").integer(),
+        };
         this.token = localToken();
       }
       if (hash.field("kind").choice("heap", "managed") === "heap") {
@@ -128,20 +172,34 @@ export class SourceRecord {
         this.hash = { kind: "heap", memory, allocation };
       } else {
         const heads = new Map<number, number>();
-        for (const entry of hash.field("heads").list(cell => cell)) { const bucket = entry.field("bucket").integer(0); if (bucket >= SOURCE_DEFINE_HASH_BUCKETS || heads.has(bucket)) entry.fail("invalid hash bucket"); heads.set(bucket, entry.field("id").integer(0)); }
+        for (const entry of hash.field("heads").list(cell => cell)) {
+          const bucket = entry.field("bucket").integer(0);
+          if (bucket >= SOURCE_DEFINE_HASH_BUCKETS || heads.has(bucket)) entry.fail("invalid hash bucket");
+          heads.set(bucket, entry.field("id").integer(0));
+        }
         this.hash = { kind: "managed", heads };
       }
       this.nextIndent = reader.field("nextIndent").integer(1);
-      for (const entry of reader.field("indents").list(cell => cell)) { const id = entry.field("id").integer(1); if (id >= this.nextIndent || this.indents.has(id)) entry.fail("invalid indent identity"); this.indents.set(id, SourceIndent.restoreSaveState(id, entry.field("state").value, memory, saved.restore)); }
+      for (const entry of reader.field("indents").list(cell => cell)) {
+        const id = entry.field("id").integer(1);
+        if (id >= this.nextIndent || this.indents.has(id)) entry.fail("invalid indent identity");
+        this.indents.set(id, SourceIndent.restoreSaveState(id, entry.field("state").value, memory, saved.restore));
+      }
       this.token.restoreSaveState(reader.field("token").value, this.backing.kind === "heap");
-      this.borrowedPunctuations = reader.field("punctuations").nullable(cell => cell.list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() })));
+      this.borrowedPunctuations = reader
+        .field("punctuations")
+        .nullable(cell => cell.list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() })));
       return;
     }
     if (memory !== undefined && lifetime === "heap") {
       const allocation = memory.allocate(SOURCE_RECORD_BYTES, "heap", false);
       allocation.bytes.fill(0);
       this.backing = { kind: "heap", allocation };
-      this.token = new PrecompToken(0, { get bytes() { return allocation.bytes.subarray(2076, SOURCE_RECORD_BYTES); } });
+      this.token = new PrecompToken(0, {
+        get bytes() {
+          return allocation.bytes.subarray(2076, SOURCE_RECORD_BYTES);
+        },
+      });
       this.copyPath(SOURCE_FILENAME, filename);
       this.script = script;
     } else {
@@ -157,16 +215,25 @@ export class SourceRecord {
   }
 
   captureSaveState(capture: ScriptMemoryCapture) {
-    return { backing: this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) } : { ...this.backing },
-      hash: this.hash.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.hash.allocation) } : { kind: "managed", heads: [...this.hash.heads].map(([bucket, id]) => ({ bucket, id })) },
-      nextIndent: this.nextIndent, indents: [...this.indents.values()].map(indent => ({ id: indent.id, state: indent.captureSaveState(capture) })),
-      token: this.token.captureSaveState(), punctuations: this.borrowedPunctuations?.map(value => ({ ...value })) ?? null };
+    return {
+      backing: this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) } : { ...this.backing },
+      hash:
+        this.hash.kind === "heap"
+          ? { kind: "heap", allocation: capture.reference(this.hash.allocation) }
+          : { kind: "managed", heads: [...this.hash.heads].map(([bucket, id]) => ({ bucket, id })) },
+      nextIndent: this.nextIndent,
+      indents: [...this.indents.values()].map(indent => ({ id: indent.id, state: indent.captureSaveState(capture) })),
+      token: this.token.captureSaveState(),
+      punctuations: this.borrowedPunctuations?.map(value => ({ ...value })) ?? null,
+    };
   }
   static restoreSaveState(value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore): SourceRecord {
     return new SourceRecord("", 0, memory, "stack", { value, restore });
   }
 
-  get filename(): string { return this.backing.kind === "heap" ? this.readPath(SOURCE_FILENAME) : this.backing.filename; }
+  get filename(): string {
+    return this.backing.kind === "heap" ? this.readPath(SOURCE_FILENAME) : this.backing.filename;
+  }
   setPunctuations(punctuations: readonly ScriptPunctuation[] | null): void {
     if (this.backing.kind === "heap") this.view.setUint32(SOURCE_PUNCTUATIONS, punctuations === null ? 0 : 1, true);
     this.borrowedPunctuations = punctuations;
@@ -178,12 +245,16 @@ export class SourceRecord {
     if (pointer !== 1 || this.borrowedPunctuations === null) throw new RangeError("source punctuation pointer does not identify its borrowed table");
     return this.borrowedPunctuations;
   }
-  get tokens(): number { return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_TOKENS, true) : this.backing.tokens; }
+  get tokens(): number {
+    return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_TOKENS, true) : this.backing.tokens;
+  }
   set tokens(value: number) {
     if (this.backing.kind === "heap") this.view.setUint32(SOURCE_TOKENS, value, true);
     else this.backing.tokens = value;
   }
-  get includePath(): string { return this.backing.kind === "heap" ? this.readPath(SOURCE_INCLUDE_PATH) : this.backing.includePath; }
+  get includePath(): string {
+    return this.backing.kind === "heap" ? this.readPath(SOURCE_INCLUDE_PATH) : this.backing.includePath;
+  }
   setIncludePath(path: string): void {
     if (this.backing.kind === "managed") {
       const zero = path.indexOf("\0");
@@ -201,12 +272,16 @@ export class SourceRecord {
     }
   }
 
-  get script(): number { return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_SCRIPT_STACK, true) : this.backing.script; }
+  get script(): number {
+    return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_SCRIPT_STACK, true) : this.backing.script;
+  }
   set script(value: number) {
     if (this.backing.kind === "heap") this.view.setUint32(SOURCE_SCRIPT_STACK, value, true);
     else this.backing.script = value;
   }
-  get skip(): number { return this.backing.kind === "heap" ? this.view.getInt32(SOURCE_SKIP, true) : this.backing.skip; }
+  get skip(): number {
+    return this.backing.kind === "heap" ? this.view.getInt32(SOURCE_SKIP, true) : this.backing.skip;
+  }
   set skip(value: number) {
     if (this.backing.kind === "heap") this.view.setInt32(SOURCE_SKIP, value, true);
     else this.backing.skip = value | 0;
@@ -223,12 +298,15 @@ export class SourceRecord {
     } else this.hashView.setUint32(bucket * 4, id, true);
   }
 
-  hasCurrentIndent(): boolean { return this.topIndent?.script === this.script; }
+  hasCurrentIndent(): boolean {
+    return this.topIndent?.script === this.script;
+  }
 
   pushIndent(type: SourceIndentType, skip: boolean): void {
-    const backing: IndentBacking = this.memory === undefined
-      ? { kind: "managed", type: 0, skip: 0, script: 0, next: 0 }
-      : { kind: "heap", memory: this.memory, allocation: this.memory.allocate(SOURCE_INDENT_BYTES, "heap", false) };
+    const backing: IndentBacking =
+      this.memory === undefined
+        ? { kind: "managed", type: 0, skip: 0, script: 0, next: 0 }
+        : { kind: "heap", memory: this.memory, allocation: this.memory.allocate(SOURCE_INDENT_BYTES, "heap", false) };
     const indent = new SourceIndent(this.nextIndent++, backing);
     this.indents.set(indent.id, indent);
     indent.type = type;
@@ -273,7 +351,9 @@ export class SourceRecord {
     if (this.backing.kind === "heap" && this.memory !== undefined) this.memory.free(this.backing.allocation);
   }
 
-  private get indent(): number { return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_INDENT_STACK, true) : this.backing.indent; }
+  private get indent(): number {
+    return this.backing.kind === "heap" ? this.view.getUint32(SOURCE_INDENT_STACK, true) : this.backing.indent;
+  }
   private set indent(value: number) {
     if (this.backing.kind === "heap") this.view.setUint32(SOURCE_INDENT_STACK, value, true);
     else this.backing.indent = value;

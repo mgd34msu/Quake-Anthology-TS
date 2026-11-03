@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../persistence/value.ts";
 import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
@@ -10,16 +11,29 @@ import { SOURCE_TOKEN_BYTES, SourceTokenMemory, type SourceTokenContext } from "
 
 export const DEFAULT_SCRIPT_TOKEN_LIMIT = 1024;
 
-export enum ScriptTokenType { Primitive = 0, String = 1, Literal = 2, Number = 3, Name = 4, Punctuation = 5 }
+export enum ScriptTokenType {
+  Primitive = 0,
+  String = 1,
+  Literal = 2,
+  Number = 3,
+  Name = 4,
+  Punctuation = 5,
+}
 
 export function scriptTokenTypeName(type: number): string {
   switch (type) {
-    case ScriptTokenType.String: return "string";
-    case ScriptTokenType.Literal: return "literal";
-    case ScriptTokenType.Number: return "number";
-    case ScriptTokenType.Name: return "name";
-    case ScriptTokenType.Punctuation: return "punctuation";
-    default: return "";
+    case ScriptTokenType.String:
+      return "string";
+    case ScriptTokenType.Literal:
+      return "literal";
+    case ScriptTokenType.Number:
+      return "number";
+    case ScriptTokenType.Name:
+      return "name";
+    case ScriptTokenType.Punctuation:
+      return "punctuation";
+    default:
+      return "";
   }
 }
 
@@ -46,8 +60,12 @@ function stripQuotes(text: string, quote: string): string {
   return value;
 }
 
-export function stripDoubleQuotes(text: string): string { return stripQuotes(text, '"'); }
-export function stripSingleQuotes(text: string): string { return stripQuotes(text, "'"); }
+export function stripDoubleQuotes(text: string): string {
+  return stripQuotes(text, '"');
+}
+export function stripSingleQuotes(text: string): string {
+  return stripQuotes(text, "'");
+}
 
 export enum NumberFlag {
   Decimal = 0x0008,
@@ -134,15 +152,15 @@ export interface SourceLocation {
 
 export type ScriptDiagnostic =
   | {
-    readonly severity: "warning";
-    readonly message: string;
-    readonly location: SourceLocation;
-  }
+      readonly severity: "warning";
+      readonly message: string;
+      readonly location: SourceLocation;
+    }
   | {
-    readonly severity: "error";
-    readonly message: string;
-    readonly location: SourceLocation;
-  };
+      readonly severity: "error";
+      readonly message: string;
+      readonly location: SourceLocation;
+    };
 
 interface TokenBase {
   readonly text: string;
@@ -182,7 +200,10 @@ export interface PunctuationToken extends TokenBase {
   readonly punctuation: number;
 }
 
-export interface PrimitiveToken extends TokenBase { readonly kind: "primitive"; readonly value: string }
+export interface PrimitiveToken extends TokenBase {
+  readonly kind: "primitive";
+  readonly value: string;
+}
 
 export type ScriptToken = StringToken | LiteralToken | NumberToken | NameToken | PunctuationToken | PrimitiveToken;
 
@@ -302,7 +323,17 @@ export function allocateScriptSource(length: number, path: string, memory: Scrip
 }
 
 const SIMPLE_ESCAPES: ReadonlyMap<string, string> = new Map([
-  ["\\", "\\"], ["n", "\n"], ["r", "\r"], ["t", "\t"], ["v", "\v"], ["b", "\b"], ["f", "\f"], ["a", "\x07"], ["'", "'"], ['"', '"'], ["?", "?"],
+  ["\\", "\\"],
+  ["n", "\n"],
+  ["r", "\r"],
+  ["t", "\t"],
+  ["v", "\v"],
+  ["b", "\b"],
+  ["f", "\f"],
+  ["a", "\x07"],
+  ["'", "'"],
+  ['"', '"'],
+  ["?", "?"],
 ]);
 
 export class ScriptLanguageError extends Error {
@@ -322,10 +353,7 @@ function isDigit(character: string | undefined): boolean {
 }
 
 function isNameStart(character: string | undefined): boolean {
-  return character !== undefined
-    && ((character >= "a" && character <= "z")
-      || (character >= "A" && character <= "Z")
-      || character === "_");
+  return character !== undefined && ((character >= "a" && character <= "z") || (character >= "A" && character <= "Z") || character === "_");
 }
 
 function isNameCharacter(character: string | undefined): boolean {
@@ -333,17 +361,11 @@ function isNameCharacter(character: string | undefined): boolean {
 }
 
 function isSourceNumberHexDigit(character: string | undefined): boolean {
-  return character !== undefined
-    && (isDigit(character)
-      || (character >= "a" && character <= "f")
-      || character === "A");
+  return character !== undefined && (isDigit(character) || (character >= "a" && character <= "f") || character === "A");
 }
 
 function isSourceEscapeHexDigit(character: string | undefined): boolean {
-  return character !== undefined
-    && (isDigit(character)
-      || (character >= "a" && character <= "z")
-      || (character >= "A" && character <= "Z"));
+  return character !== undefined && (isDigit(character) || (character >= "a" && character <= "z") || (character >= "A" && character <= "Z"));
 }
 
 function hasFlag(flags: number, flag: LexerFlag | NumberFlag): boolean {
@@ -356,8 +378,11 @@ function location(path: string, line: number, column: number): SourceLocation {
 
 export function readScriptDiagnostic(reader: SaveReader): ScriptDiagnostic {
   const location = reader.field("location");
-  return { severity: reader.field("severity").choice("warning", "error"), message: reader.field("message").string(),
-    location: { path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() } };
+  return {
+    severity: reader.field("severity").choice("warning", "error"),
+    message: reader.field("message").string(),
+    location: { path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() },
+  };
 }
 
 export class ScriptLexer {
@@ -403,10 +428,14 @@ export class ScriptLexer {
     if (this.source instanceof SourceScriptStorage && options.flags !== undefined) this.source.flags = options.flags;
   }
 
-  get sourceStorage(): SourceScriptStorage | null { return this.source instanceof SourceScriptStorage ? this.source : null; }
+  get sourceStorage(): SourceScriptStorage | null {
+    return this.source instanceof SourceScriptStorage ? this.source : null;
+  }
   captureSaveState(capture: ScriptMemoryCapture) {
-    return { source: typeof this.source === "string" ? { kind: "text", text: this.source } : { kind: "storage", state: this.source.captureSaveState(capture) },
-      diagnosticPath: this.diagnosticPath, maxTokenLength: this.maxTokenLength,
+    return {
+      source: typeof this.source === "string" ? { kind: "text", text: this.source } : { kind: "storage", state: this.source.captureSaveState(capture) },
+      diagnosticPath: this.diagnosticPath,
+      maxTokenLength: this.maxTokenLength,
       diagnosticFlags: this.diagnosticFlags,
       diagnosticOffset: this.diagnosticOffset,
       diagnosticLine: this.diagnosticLine,
@@ -416,15 +445,31 @@ export class ScriptLexer {
       diagnosticWhitespaceEnd: this.diagnosticWhitespaceEnd,
       column: this.column,
       diagnosticTokenAvailable: this.diagnosticTokenAvailable,
-      diagnosticToken: this.diagnosticToken.captureSaveState(), output: this.output.captureSaveState(), tokenContext: { ...this.tokenContext },
-      punctuations: this.punctuations.map(value => ({ ...value })), reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) };
+      diagnosticToken: this.diagnosticToken.captureSaveState(),
+      output: this.output.captureSaveState(),
+      tokenContext: { ...this.tokenContext },
+      punctuations: this.punctuations.map(value => ({ ...value })),
+      reported: this.reported.map(value => ({ ...value, location: { ...value.location } })),
+    };
   }
-  static restoreSaveState(value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore, report?: (diagnostic: ScriptDiagnostic) => void): ScriptLexer {
-    const reader = new SaveReader(value, "script.lexer"), savedSource = reader.field("source");
+  static restoreSaveState(
+    value: unknown,
+    memory: ScriptMemory | undefined,
+    restore: ScriptMemoryRestore,
+    report?: (diagnostic: ScriptDiagnostic) => void,
+  ): ScriptLexer {
+    const reader = new SaveReader(value, "script.lexer"),
+      savedSource = reader.field("source");
     let source: string | SourceScriptStorage;
     if (savedSource.field("kind").choice("text", "storage") === "text") source = savedSource.field("text").string();
-    else { if (memory === undefined) return reader.fail("stored lexer requires memory owner"); source = SourceScriptStorage.restoreSaveState(savedSource.field("state").value, memory, restore); }
-    const lexer = new ScriptLexer(source, reader.field("diagnosticPath").string(), { maxTokenLength: reader.field("maxTokenLength").integer(4), ...(report === undefined ? {} : { report }) });
+    else {
+      if (memory === undefined) return reader.fail("stored lexer requires memory owner");
+      source = SourceScriptStorage.restoreSaveState(savedSource.field("state").value, memory, restore);
+    }
+    const lexer = new ScriptLexer(source, reader.field("diagnosticPath").string(), {
+      maxTokenLength: reader.field("maxTokenLength").integer(4),
+      ...(report === undefined ? {} : { report }),
+    });
     lexer.diagnosticFlags = reader.field("diagnosticFlags").integer();
     lexer.diagnosticOffset = reader.field("diagnosticOffset").integer();
     lexer.diagnosticLine = reader.field("diagnosticLine").integer();
@@ -434,9 +479,17 @@ export class ScriptLexer {
     lexer.diagnosticWhitespaceEnd = reader.field("diagnosticWhitespaceEnd").integer();
     lexer.column = reader.field("column").integer();
     lexer.diagnosticTokenAvailable = reader.field("diagnosticTokenAvailable").boolean();
-    lexer.diagnosticToken.restoreSaveState(reader.field("diagnosticToken").value); lexer.output.restoreSaveState(reader.field("output").value);
-    const context = reader.field("tokenContext"); lexer.tokenContext = { path: context.field("path").string(), column: context.field("column").integer(), leadingWhitespace: context.field("leadingWhitespace").string() };
-    lexer.punctuations = reader.field("punctuations").list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() }));
+    lexer.diagnosticToken.restoreSaveState(reader.field("diagnosticToken").value);
+    lexer.output.restoreSaveState(reader.field("output").value);
+    const context = reader.field("tokenContext");
+    lexer.tokenContext = {
+      path: context.field("path").string(),
+      column: context.field("column").integer(),
+      leadingWhitespace: context.field("leadingWhitespace").string(),
+    };
+    lexer.punctuations = reader
+      .field("punctuations")
+      .list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() }));
     lexer.punctuationLookup = punctuationTable(lexer.punctuations);
     lexer.reported.push(...reader.field("reported").list(readScriptDiagnostic));
     return lexer;
@@ -446,19 +499,25 @@ export class ScriptLexer {
     return Object.freeze([...this.reported]);
   }
 
-  isSourceFailure(error: unknown): boolean { return error instanceof ScriptLanguageError && this.sourceFailures.has(error); }
+  isSourceFailure(error: unknown): boolean {
+    return error instanceof ScriptLanguageError && this.sourceFailures.has(error);
+  }
 
   get currentLocation(): SourceLocation {
     return location(this.path, this.line, this.column);
   }
 
-  get endOfScript(): boolean { return this.offset >= this.sourceLength; }
+  get endOfScript(): boolean {
+    return this.offset >= this.sourceLength;
+  }
 
   next(): ScriptToken | undefined {
     return this.nextInto(this.output)?.token;
   }
 
-  getScriptFlags(): number { return this.flags; }
+  getScriptFlags(): number {
+    return this.flags;
+  }
   setScriptFlags(flags: number): void {
     if (this.source instanceof SourceScriptStorage) this.source.flags = flags;
     else this.diagnosticFlags = flags | 0;
@@ -498,8 +557,14 @@ export class ScriptLexer {
   }
 
   expectTokenString(text: string): boolean {
-    if (!this.readExpectedInto(this.output)) { this.error(`couldn't find expected ${text}`); return false; }
-    if (this.output.string !== text) { this.error(`expected ${text}, found ${this.output.string}`); return false; }
+    if (!this.readExpectedInto(this.output)) {
+      this.error(`couldn't find expected ${text}`);
+      return false;
+    }
+    if (this.output.string !== text) {
+      this.error(`expected ${text}, found ${this.output.string}`);
+      return false;
+    }
     return true;
   }
 
@@ -522,7 +587,10 @@ export class ScriptLexer {
       return false;
     }
     if (type === ScriptTokenType.Punctuation) {
-      if (subtype < 0) { this.error("BUG: wrong punctuation subtype"); return false; }
+      if (subtype < 0) {
+        this.error("BUG: wrong punctuation subtype");
+        return false;
+      }
       if (output.subtype !== subtype) {
         throw new RangeError("PS_ExpectTokenType passes a punctuation struct to source %s");
       }
@@ -564,16 +632,20 @@ export class ScriptLexer {
   readSignedFloat(): number {
     this.expectAnyToken(this.output);
     let sign = 1;
-    if (this.output.string === "-") { sign = -1; this.expectTokenType(ScriptTokenType.Number, 0, this.output); }
-    else if (this.output.type !== ScriptTokenType.Number) this.error(`expected float value, found ${this.output.string}\n`);
+    if (this.output.string === "-") {
+      sign = -1;
+      this.expectTokenType(ScriptTokenType.Number, 0, this.output);
+    } else if (this.output.type !== ScriptTokenType.Number) this.error(`expected float value, found ${this.output.string}\n`);
     return sign * this.output.floatValue;
   }
 
   readSignedInt(): number {
     this.expectAnyToken(this.output);
     let sign = 1;
-    if (this.output.string === "-") { sign = -1; this.expectTokenType(ScriptTokenType.Number, NumberFlag.Integer, this.output); }
-    else if (this.output.type !== ScriptTokenType.Number || this.output.subtype === NumberFlag.Float) {
+    if (this.output.string === "-") {
+      sign = -1;
+      this.expectTokenType(ScriptTokenType.Number, NumberFlag.Integer, this.output);
+    } else if (this.output.type !== ScriptTokenType.Number || this.output.subtype === NumberFlag.Float) {
       this.error(`expected integer value, found ${this.output.string}\n`);
     }
     return Math.imul(sign, this.output.integerValue);
@@ -587,11 +659,19 @@ export class ScriptLexer {
       if (character === undefined) throw new RangeError("PS_ReadLiteral reads outside its source allocation");
       return character.charCodeAt(0);
     };
-    const take = (): number => { const value = byte(); this.offset++; this.column++; return value; };
+    const take = (): number => {
+      const value = byte();
+      this.offset++;
+      this.column++;
+      return value;
+    };
     try {
       output.type = ScriptTokenType.Literal;
       output.setStringByte(0, take());
-      if (byte() === 0) { this.error("end of file before trailing '"); return false; }
+      if (byte() === 0) {
+        this.error("end of file before trailing '");
+        return false;
+      }
       const value = byte() === 92 ? this.readEscape(this.currentLocation).charCodeAt(0) : take();
       output.setStringByte(1, value);
       if (byte() !== 39) {
@@ -610,8 +690,9 @@ export class ScriptLexer {
   }
 
   private readExpectedInto(output: SourceTokenMemory): boolean {
-    try { return this.nextInto(output) !== undefined; }
-    catch (error) {
+    try {
+      return this.nextInto(output) !== undefined;
+    } catch (error) {
       if (error instanceof ScriptLanguageError && this.sourceFailures.has(error)) return false;
       throw error;
     }
@@ -734,7 +815,7 @@ export class ScriptLexer {
     if (character === undefined) return undefined;
     const head = typeof this.source === "string" ? this.punctuationLookup.heads[character.charCodeAt(0)] : this.source.punctuationHead(character.charCodeAt(0));
     if (head === undefined) return undefined;
-    for (let pointer = head; pointer !== 0;) {
+    for (let pointer = head; pointer !== 0; ) {
       const link = this.punctuationLookup.links[pointer - 1];
       if (link === undefined) throw new RangeError("script punctuation head does not identify a default record");
       if (this.sourceStartsWith(link.spec.text)) return link.spec;
@@ -922,12 +1003,7 @@ export class ScriptLexer {
     return value;
   }
 
-  private readName(
-    tokenLocation: SourceLocation,
-    leadingWhitespace: string,
-    linesCrossed: number,
-    output: SourceTokenMemory,
-  ): NameToken {
+  private readName(tokenLocation: SourceLocation, leadingWhitespace: string, linesCrossed: number, output: SourceTokenMemory): NameToken {
     const start = this.offset;
     output.type = 4;
     while (isNameCharacter(this.peek())) {
@@ -953,12 +1029,7 @@ export class ScriptLexer {
     } satisfies NameToken);
   }
 
-  private readNumber(
-    tokenLocation: SourceLocation,
-    leadingWhitespace: string,
-    linesCrossed: number,
-    output: SourceTokenMemory,
-  ): NumberToken {
+  private readNumber(tokenLocation: SourceLocation, leadingWhitespace: string, linesCrossed: number, output: SourceTokenMemory): NumberToken {
     const start = this.offset;
     let flags = 0;
     output.type = 3;
@@ -978,11 +1049,7 @@ export class ScriptLexer {
       }
       flags |= NumberFlag.Hex;
       output.subtype = flags;
-    } else if (
-      this.peek() === "0"
-      && (this.peek(1) === "b" || this.peek(1) === "B")
-      && !hasFlag(this.flags, LexerFlag.NoBinaryNumbers)
-    ) {
+    } else if (this.peek() === "0" && (this.peek(1) === "b" || this.peek(1) === "B") && !hasFlag(this.flags, LexerFlag.NoBinaryNumbers)) {
       append();
       append();
       while (this.peek() === "0" || this.peek() === "1") {
@@ -1020,11 +1087,7 @@ export class ScriptLexer {
         flags |= NumberFlag.Long;
         this.advance();
         output.subtype = flags;
-      } else if (
-        (character === "u" || character === "U")
-        && !hasFlag(flags, NumberFlag.Unsigned)
-        && !hasFlag(flags, NumberFlag.Float)
-      ) {
+      } else if ((character === "u" || character === "U") && !hasFlag(flags, NumberFlag.Unsigned) && !hasFlag(flags, NumberFlag.Float)) {
         flags |= NumberFlag.Unsigned;
         this.advance();
         output.subtype = flags;

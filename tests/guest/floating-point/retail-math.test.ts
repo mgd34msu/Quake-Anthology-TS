@@ -17,11 +17,16 @@ function address(memory: SparseGuestMemory, value: bigint): GuestAddress {
   return result;
 }
 
-test.skipIf(!await Bun.file(path).exists())("actual LMCTF VectorLength retains extended accumulation and square root", async () => {
+test.skipIf(!(await Bun.file(path).exists()))("actual LMCTF VectorLength retains extended accumulation and square root", async () => {
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
   const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
   expect(digest).toBe("31cbb29f90429706986dbd855d0a3a2529b7fbd4340694901af5c5052cbdcbe6");
-  const identity: ModuleIdentity = { id: "test:lmctf-math", artifactPath: path.pathname, revision: "source-vector-length", digest: createContentDigest(digest) };
+  const identity: ModuleIdentity = {
+    id: "test:lmctf-math",
+    artifactPath: path.pathname,
+    revision: "source-vector-length",
+    digest: createContentDigest(digest),
+  };
   for (const [x, y, z, expected] of [
     [3n, 4n, 12n, 0x4002d000000000000000n],
     [1n << 30n, 1n, 1n, 0x401d8000000000000008n],
@@ -31,13 +36,22 @@ test.skipIf(!await Bun.file(path).exists())("actual LMCTF VectorLength retains e
     mapPeImage({ bytes, memory });
     memory.map({ base: 0x10000n, byteLength: 0x2000, permissions: "read-write" });
     const vector = address(memory, 0x11000n);
-    memory.writeFloat32(vector, Number(x)); memory.writeFloat32(memory.offset(vector, 4n), Number(y)); memory.writeFloat32(memory.offset(vector, 8n), Number(z));
+    memory.writeFloat32(vector, Number(x));
+    memory.writeFloat32(memory.offset(vector, 4n), Number(y));
+    memory.writeFloat32(memory.offset(vector, 8n), Number(z));
     const returned = address(memory, 0x7000n);
     memory.writeUint32(address(memory, 0x10800n), Number(returned.byteOffset));
     memory.writeUint32(address(memory, 0x10804n), Number(vector.byteOffset));
     expect(memory.readUint32(address(memory, 0x2005b070n))).toBe(0);
-    const state = createGuestProcessorState({ architecture: "i386", instructionPointer: 0x2004a160n, stackPointer: 0x10800n,
-      flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+    const state = createGuestProcessorState({
+      architecture: "i386",
+      instructionPointer: 0x2004a160n,
+      stackPointer: 0x10800n,
+      flags: 2n,
+      x87ControlWord: 0x37f,
+      mxcsr: 0x1f80,
+      mxcsrMask: 0xffff,
+    });
     const stop = new I386Cpu({ state, memory }).run({ instructionBudget: 100, returnAddress: returned });
     expect(stop.kind).toBe("return");
     expect(encodeBinary(readX87Register(state.x87), 80)).toBe(expected);

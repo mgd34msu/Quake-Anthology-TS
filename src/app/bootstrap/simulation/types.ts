@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import type { ApplicationBotNavigation } from "./navigation.ts";
@@ -52,11 +53,14 @@ interface NativeQ2GuestCallbacks {
   addCommand(text: string): undefined;
   debugGraph(value: number, color: number): undefined;
 }
-export type NativeQ2GuestOptions = NativeQ2GuestCallbacks & (
-  | { readonly edition: "classic"; readonly prepared: PreparedClassicGuest }
-  | { readonly edition: "rerelease"; readonly prepared: PreparedRereleaseGuest } & Pick<RereleaseGuestServicesOptions,
-    "localize" | "clipboard" | "semanticBindings">
-);
+export type NativeQ2GuestOptions = NativeQ2GuestCallbacks &
+  (
+    | { readonly edition: "classic"; readonly prepared: PreparedClassicGuest }
+    | ({ readonly edition: "rerelease"; readonly prepared: PreparedRereleaseGuest } & Pick<
+        RereleaseGuestServicesOptions,
+        "localize" | "clipboard" | "semanticBindings"
+      >)
+  );
 
 export interface SimulationOptions {
   readonly preparedQvmGrapple?: import("../qvm-grapple-selection.ts").PreparedQvmGrapple;
@@ -113,27 +117,67 @@ export interface QuakeCSourceTravel {
   readonly kind: "netquake" | "quakeworld";
   readonly serverFlags: number;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
-  readonly clients: readonly { readonly client: ClientId; readonly parameters: readonly number[]; readonly userInfo: ReadonlyMap<string, string>; readonly role?: "player" | "spectator" }[];
+  readonly clients: readonly {
+    readonly client: ClientId;
+    readonly parameters: readonly number[];
+    readonly userInfo: ReadonlyMap<string, string>;
+    readonly role?: "player" | "spectator";
+  }[];
 }
 
 export interface SimulationTravel {
   readonly spawnPoint: string;
-  readonly source: { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
+  readonly source:
+    | { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
     | QuakeCSourceTravel
-    | { readonly kind: "q2"; readonly serverFlags: number; readonly lmctf?: LmctfTravel; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
-      readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null }
+    | {
+        readonly kind: "q2";
+        readonly serverFlags: number;
+        readonly lmctf?: LmctfTravel;
+        readonly rerelease?: Q2RereleaseCampaignState;
+        readonly landmark: {
+          readonly clientSlot: number;
+          readonly name: string;
+          readonly relativeOrigin: Vec3;
+          readonly relativeVelocity: Vec3;
+          readonly relativeViewAngles: Vec3;
+        } | null;
+      }
     // Worlds with no campaign program of their own (Q3, QVM guests) carry
     // their players through shared health, armor and inventory alone.
     | { readonly kind: "shared" };
-  readonly players: readonly { readonly client: ClientId; readonly weaponSlot?: WeaponReference; readonly handGrenades?: HandGrenadeTravel; readonly selectedArsenal?: { readonly kind: "q1"; readonly state: Q1SelectedArsenalTravel }
-    | { readonly kind: "q2"; readonly weapon: ItemId | null; readonly inventory: readonly InventoryEntry[] }
-    | { readonly kind: "q3"; readonly state: Q3SelectedArsenalCheckpoint; readonly milliseconds: number }; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } | { readonly kind: "quakec" }
-    | { readonly kind: "shared"; readonly health: number; readonly armor: ArmorState; readonly inventory: readonly InventoryEntry[] } }[];
+  readonly players: readonly {
+    readonly client: ClientId;
+    readonly weaponSlot?: WeaponReference;
+    readonly handGrenades?: HandGrenadeTravel;
+    readonly selectedArsenal?:
+      | { readonly kind: "q1"; readonly state: Q1SelectedArsenalTravel }
+      | { readonly kind: "q2"; readonly weapon: ItemId | null; readonly inventory: readonly InventoryEntry[] }
+      | { readonly kind: "q3"; readonly state: Q3SelectedArsenalCheckpoint; readonly milliseconds: number };
+    readonly state:
+      | { readonly kind: "q1"; readonly carry: Q1TravelState }
+      | { readonly kind: "q2"; readonly carry: Q2PlayerCarry }
+      | { readonly kind: "quakec" }
+      | { readonly kind: "shared"; readonly health: number; readonly armor: ArmorState; readonly inventory: readonly InventoryEntry[] };
+  }[];
 }
 
-export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly clientViewOffsetDelta?: Vec3; readonly blend?: Vec4; readonly damageBlend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
-  readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean }; }
+export interface PlayerAdmission {
+  readonly actor: ActorId;
+  readonly viewHeight: number;
+}
+export interface PlayerView {
+  readonly clientViewOffsetDelta?: Vec3;
+  readonly blend?: Vec4;
+  readonly damageBlend?: Vec4;
+  readonly origin: Vec3;
+  readonly angles: Vec3;
+  readonly viewHeight: number;
+  readonly kickAngles?: Vec3;
+  readonly fieldOfView?: number;
+  readonly foreignCharacterDeath?: true;
+  readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean };
+}
 export interface PlayerUiItem {
   readonly id: ItemId;
   readonly label: string;
@@ -188,28 +232,50 @@ export interface SimulationPresentation {
   readonly shaderBeam?: { readonly path: string; readonly end: Vec3; readonly width: number };
   readonly modelAttachments?: readonly { readonly path: string; readonly tag: string }[];
   readonly modelAnchor?: import("../../../contracts/qvm-grapple.ts").QvmGrappleDefinition["presentation"]["viewAnchor"];
-  readonly q3GrappleCable?: { readonly owner: ActorId; readonly ownerOrigin: Vec3; readonly ownerAngles: Vec3; readonly viewHeight: number;
-    readonly offhand: boolean; readonly attached: boolean; readonly flight: string; readonly pull: string; readonly hold: string; readonly segmentLength: number };
+  readonly q3GrappleCable?: {
+    readonly owner: ActorId;
+    readonly ownerOrigin: Vec3;
+    readonly ownerAngles: Vec3;
+    readonly viewHeight: number;
+    readonly offhand: boolean;
+    readonly attached: boolean;
+    readonly flight: string;
+    readonly pull: string;
+    readonly hold: string;
+    readonly segmentLength: number;
+  };
   readonly angles: Vec3;
   readonly scale: number;
   readonly alpha?: number;
   readonly visible: boolean;
   readonly viewWeapon: boolean;
-  readonly q3Weapon?: { readonly timeMilliseconds: number; readonly torsoAnimation: number; readonly lastFireMilliseconds: number | null;
-    readonly firing: boolean; readonly horizontalSpeed: number; readonly bobCycle: number; readonly weapon: number };
+  readonly q3Weapon?: {
+    readonly timeMilliseconds: number;
+    readonly torsoAnimation: number;
+    readonly lastFireMilliseconds: number | null;
+    readonly firing: boolean;
+    readonly horizontalSpeed: number;
+    readonly bobCycle: number;
+    readonly weapon: number;
+  };
 }
 
 export type Q3CharacterPresentationEvent = Omit<Q3CharacterEvent, "actor"> & { readonly actor: ActorId };
 
-export type Q1ClientMetadataEvent = { readonly kind: "name" | "social" | "player-info"; readonly slot: number; readonly value: string }
+export type Q1ClientMetadataEvent =
+  | { readonly kind: "name" | "social" | "player-info"; readonly slot: number; readonly value: string }
   | { readonly kind: "colors" | "frags" | "ping"; readonly slot: number; readonly value: number };
-export type SourcePresentationEvent = { readonly kind: "presentation-owner"; readonly event: { readonly kind: "retired" | "refreshed"; readonly owner: PresentationOwner } }
+export type SourcePresentationEvent =
+  | { readonly kind: "presentation-owner"; readonly event: { readonly kind: "retired" | "refreshed"; readonly owner: PresentationOwner } }
   | { readonly kind: "debug-graph"; readonly event: { readonly kind: "sample"; readonly value: number; readonly color: number } }
   | { readonly kind: "q1"; readonly event: Q1Event }
   | { readonly kind: "q1-sky"; readonly event: { readonly kind: "skybox"; readonly name: string } }
   | { readonly kind: "q1-client"; readonly event: Q1ClientMetadataEvent }
   | { readonly kind: "q1-session"; readonly event: { readonly kind: "level-completed" | "back-to-lobby" } }
-  | { readonly kind: "q1-fog"; readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number } }
+  | {
+      readonly kind: "q1-fog";
+      readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number };
+    }
   | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } | { readonly kind: "pause"; readonly paused: boolean } }
   | { readonly kind: "q1-composition"; readonly event: Q1CompositionEvent }
   | { readonly kind: "q1-level"; readonly event: Q1IntermissionResult }
@@ -221,7 +287,14 @@ export type SourcePresentationEvent = { readonly kind: "presentation-owner"; rea
   | { readonly kind: "q2-player"; readonly event: Q2PlayerEvent }
   | { readonly kind: "q3-character"; readonly event: Q3CharacterPresentationEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
-export type SimulationPresentationEvent = SourcePresentationEvent & { readonly owner?: PresentationOwner; readonly recipient?: ActorId; readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
+export type SimulationPresentationEvent = SourcePresentationEvent & {
+  readonly owner?: PresentationOwner;
+  readonly recipient?: ActorId;
+  readonly sequence: number;
+  readonly content: ContentId;
+  readonly seconds: number;
+  readonly sourceEntity?: number | null;
+};
 
 export interface DebugShapePresentationAccess {
   lines(): readonly DebugLine[];

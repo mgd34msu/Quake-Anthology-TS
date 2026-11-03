@@ -6,8 +6,12 @@
 export function driveTravel<Step, Result>(stages: Generator<Step, Result>, execute: (step: Step) => void): Result {
   let next = stages.next();
   while (next.done !== true) {
-    try { execute(next.value); }
-    catch (error) { stages.throw(error); throw error; }
+    try {
+      execute(next.value);
+    } catch (error) {
+      stages.throw(error);
+      throw error;
+    }
     next = stages.next();
   }
   return next.value;
@@ -17,8 +21,12 @@ export function driveTravel<Step, Result>(stages: Generator<Step, Result>, execu
 export async function driveTravelLoading<Step, Result>(stages: Generator<Step, Result>, execute: (step: Step) => Promise<void>): Promise<Result> {
   let next = stages.next();
   while (next.done !== true) {
-    try { await execute(next.value); }
-    catch (error) { stages.throw(error); throw error; }
+    try {
+      await execute(next.value);
+    } catch (error) {
+      stages.throw(error);
+      throw error;
+    }
     next = stages.next();
   }
   return next.value;

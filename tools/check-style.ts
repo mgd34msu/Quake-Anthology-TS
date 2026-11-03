@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /**
  * Size budget for new code. 13,686 existing src lines exceed 160 characters, so the budget applies only to
  * lines a change adds: `bun tools/check-style.ts <base-ref>` fails when the diff against the base adds a longer line.
@@ -12,11 +13,18 @@ export interface LongLine {
 
 export function addedLongLines(diff: string, limit = maxLineLength): LongLine[] {
   const found: LongLine[] = [];
-  let file = "", line = 0;
+  let file = "",
+    line = 0;
   for (const text of diff.split("\n")) {
-    if (text.startsWith("+++ ")) { file = text.startsWith("+++ b/") ? text.slice("+++ b/".length) : ""; continue; }
+    if (text.startsWith("+++ ")) {
+      file = text.startsWith("+++ b/") ? text.slice("+++ b/".length) : "";
+      continue;
+    }
     const hunk = /^@@ -\S+ \+(\d+)(?:,\d+)? @@/.exec(text);
-    if (hunk !== null) { line = Number(hunk[1]); continue; }
+    if (hunk !== null) {
+      line = Number(hunk[1]);
+      continue;
+    }
     if (text.startsWith("+")) {
       if (file.endsWith(".ts") && text.length - 1 > limit) found.push({ file, line, length: text.length - 1 });
       line += 1;
@@ -35,6 +43,7 @@ if (import.meta.main) {
   const [code, diff] = await Promise.all([child.exited, new Response(child.stdout).text()]);
   if (code !== 0) process.exit(code);
   const long = addedLongLines(diff);
-  for (const item of long) process.stderr.write(`${item.file}:${item.line} line is ${item.length} characters; the limit for added lines is ${maxLineLength}.\n`);
+  for (const item of long)
+    process.stderr.write(`${item.file}:${item.line} line is ${item.length} characters; the limit for added lines is ${maxLineLength}.\n`);
   process.exitCode = long.length === 0 ? 0 : 1;
 }

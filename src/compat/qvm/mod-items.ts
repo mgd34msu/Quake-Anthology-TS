@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { validateQvmItemStorage, readQvmItemStorage, writeQvmItemStorage, type QvmItemStorageAccess } from "./item-storage.ts";
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { resolveItemIcon } from "../../content/item-icon.ts";
@@ -26,7 +27,12 @@ interface Operations {
   ground(actor: ActorId): number;
   pickup(): OriginalPickupExecution | undefined;
 }
-interface Request { readonly id: number; readonly item: ItemId | null; status: "pending" | "accepted" | "refused"; attempted: boolean; }
+interface Request {
+  readonly id: number;
+  readonly item: ItemId | null;
+  status: "pending" | "accepted" | "refused";
+  attempted: boolean;
+}
 interface Entry {
   readonly actor: OwnedActor;
   readonly addresses: ReadonlyMap<string, number>;
@@ -35,11 +41,15 @@ interface Entry {
   removeWeapon: () => undefined;
   request: Request | null;
 }
-function key(field: QvmItemField): string { return `${field.record}:${field.offset}`; }
+function key(field: QvmItemField): string {
+  return `${field.record}:${field.offset}`;
+}
 function fields(storage: QvmItemStorage): readonly QvmItemField[] {
   return storage.kind === "counter" && storage.capacity.kind === "field" ? [storage.field, storage.capacity.field] : [storage.field];
 }
-function integer(value: number): boolean { return Number.isInteger(value) && value >= -2147483648 && value <= 2147483647; }
+function integer(value: number): boolean {
+  return Number.isInteger(value) && value >= -2147483648 && value <= 2147483647;
+}
 export function validateQvmModItems(items: Declaration, declaration: QvmModCallbackDeclaration, image: QvmImage): void {
   if (declaration.clients === undefined || items.definitions.length === 0) throw new Error("QVM items require source client admission");
   const definitions = new Map(items.definitions.map(value => [value.item, value]));
@@ -48,12 +58,24 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
   const field = (source: QvmItemField, usage: "storage" | "capacity" | "view" = "storage"): void => {
     const record = declaration.actorRecords.find(value => value.id === source.record);
     const previous = occupied.get(key(source));
-    if (record === undefined || !declaration.clients?.records.includes(record.id) || !Number.isSafeInteger(source.offset)
-      || source.offset < 0 || source.offset % 4 !== 0 || source.offset + 4 > record.stride
-      || usage !== "view" && previous !== undefined && !(usage === "capacity" && previous === "capacity")) throw new Error("Invalid QVM item source field");
+    if (
+      record === undefined ||
+      !declaration.clients?.records.includes(record.id) ||
+      !Number.isSafeInteger(source.offset) ||
+      source.offset < 0 ||
+      source.offset % 4 !== 0 ||
+      source.offset + 4 > record.stride ||
+      (usage !== "view" && previous !== undefined && !(usage === "capacity" && previous === "capacity"))
+    )
+      throw new Error("Invalid QVM item source field");
     if (usage !== "view") occupied.set(key(source), usage);
     for (const value of record.fields) {
-      const length = value.binding === "private" ? value.byteLength : ["origin", "velocity", "angles", "bounds-min", "bounds-max", "constant-vector"].includes(value.binding) ? 12 : 4;
+      const length =
+        value.binding === "private"
+          ? value.byteLength
+          : ["origin", "velocity", "angles", "bounds-min", "bounds-max", "constant-vector"].includes(value.binding)
+            ? 12
+            : 4;
       if (value.offset < source.offset + 4 && source.offset < value.offset + length && value.binding !== "private" && value.binding !== "constant")
         throw new Error("QVM item field overlaps another canonical source projection");
     }
@@ -62,38 +84,53 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
   const weapons = items.definitions.filter(value => value.kind === "weapon");
   if (weapons.length === 0 ? items.weapons !== undefined : items.weapons === undefined) throw new Error("QVM weapon items require an original source consumer");
   if (items.weapons !== undefined) {
-    const stage = items.weapons.stage; validateQvmWeaponStage(stage, image);
+    const stage = items.weapons.stage;
+    validateQvmWeaponStage(stage, image);
     const pointer = (source: QvmModInputPointer): void => {
-      if (source.kind === "argument" ? !Number.isInteger(source.index) || source.index < 0 || source.index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS
-        : !Number.isInteger(source.address) || source.address < 0 || source.address % 4 !== 0 || source.address + 4 > image.initializedData.length + image.bssLength)
+      if (
+        source.kind === "argument"
+          ? !Number.isInteger(source.index) || source.index < 0 || source.index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS
+          : !Number.isInteger(source.address) ||
+            source.address < 0 ||
+            source.address % 4 !== 0 ||
+            source.address + 4 > image.initializedData.length + image.bssLength
+      )
         throw new Error("QVM weapon pointer exceeds its original call ABI");
-      for (const value of [...source.indirections, source.offset]) if (!Number.isSafeInteger(value) || value < 0 || value % 4 !== 0)
-        throw new Error("QVM weapon pointer is not aligned source storage");
+      for (const value of [...source.indirections, source.offset])
+        if (!Number.isSafeInteger(value) || value < 0 || value % 4 !== 0) throw new Error("QVM weapon pointer is not aligned source storage");
     };
     for (const source of [stage.dispatcher.actor, stage.continuation.actor]) {
       if (!declaration.clients.records.includes(source.record)) throw new Error("QVM weapon pointer is not an admitted client record");
       pointer(source.pointer);
     }
-    const projection = stage.continuation.projection; pointer(projection.movement);
+    const projection = stage.continuation.projection;
+    pointer(projection.movement);
     if (!Number.isSafeInteger(projection.byteLength) || projection.byteLength < 12 || projection.byteLength % 4 !== 0)
       throw new Error("QVM weapon movement projection lacks its caller layout");
-    for (const offset of [projection.minimum, projection.maximum]) if (!Number.isSafeInteger(offset) || offset < 0 || offset % 4 !== 0 || offset + 12 > projection.byteLength)
-      throw new Error("QVM weapon bounds exceed their original caller storage");
+    for (const offset of [projection.minimum, projection.maximum])
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset % 4 !== 0 || offset + 12 > projection.byteLength)
+        throw new Error("QVM weapon bounds exceed their original caller storage");
     if (Math.abs(projection.minimum - projection.maximum) < 12) throw new Error("QVM weapon caller bounds overlap");
     const entry = items.weapons.input.entry;
     const inputs = declaration.clients.input?.flatMap(value => value.calls.filter(call => call.entry === entry).map(() => value)) ?? [];
-    if (image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER
-      || inputs.length !== 1 || inputs[0]?.scope !== "movement-slice" || inputs[0].phase !== "after")
+    if (image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER || inputs.length !== 1 || inputs[0]?.scope !== "movement-slice" || inputs[0].phase !== "after")
       throw new Error("QVM weapon input requires one declared original callback after authoritative movement");
-    field(stage.selection.field, "view"); field(items.weapons.input.clock, "view");
-    field(stage.continuation.projection.viewHeight, "view"); field(stage.continuation.projection.ground, "view");
+    field(stage.selection.field, "view");
+    field(items.weapons.input.clock, "view");
+    field(stage.continuation.projection.viewHeight, "view");
+    field(stage.continuation.projection.ground, "view");
     for (const value of [...stage.settled, ...stage.request.accepted, ...stage.continuation.when]) {
       field(value.field, "view");
-      if (!integer(value.value) || value.mask !== null && (!Number.isInteger(value.mask) || value.mask < 0 || value.mask > 0x7fffffff)) throw new Error("Invalid QVM weapon source state predicate");
+      if (!integer(value.value) || (value.mask !== null && (!Number.isInteger(value.mask) || value.mask < 0 || value.mask > 0x7fffffff)))
+        throw new Error("Invalid QVM weapon source state predicate");
     }
-    if (stage.selection.values.length !== weapons.length || new Set(stage.selection.values.map(value => value.item)).size !== weapons.length
-      || new Set(stage.selection.values.map(value => value.value)).size !== weapons.length
-      || stage.selection.values.some(value => !integer(value.value) || value.value < 1 || !weapons.some(weapon => weapon.item === value.item))) throw new Error("QVM weapon selection differs from its admitted definitions");
+    if (
+      stage.selection.values.length !== weapons.length ||
+      new Set(stage.selection.values.map(value => value.item)).size !== weapons.length ||
+      new Set(stage.selection.values.map(value => value.value)).size !== weapons.length ||
+      stage.selection.values.some(value => !integer(value.value) || value.value < 1 || !weapons.some(weapon => weapon.item === value.item))
+    )
+      throw new Error("QVM weapon selection differs from its admitted definitions");
     for (const weapon of weapons) if (weapon.ammo !== null && !definitions.has(weapon.ammo)) throw new Error("QVM weapon ammo lacks its source storage");
   }
 }
@@ -106,53 +143,104 @@ export class QvmModItems {
   private readonly byItem: ReadonlyMap<ItemId, QvmItemStorage>;
   private nextRequest = 0;
   private readonly applied = new WeakSet<ModClientApplication>();
-  constructor(private readonly definition: Declaration, private readonly module: QvmModule, private readonly image: QvmImage,
-    private readonly services: ModHostServices, private readonly provider: ProviderId, private readonly content: ContentId, private readonly operations: Operations) {
-    this.admissions = definition.definitions.map(({ admission, actions, icon, ...item }) => ({ admission, definition: { ...item, source: { provider, content }, ...(icon === undefined ? {} : { icon: icon === null ? null : resolveItemIcon(icon, content) }), ...(actions === undefined ? {} : { actions: sourceItemActionNames(actions) }) } }));
-    this.byItem = new Map(definition.storage.flatMap(storage => (storage.kind === "counter" ? [storage.item] : storage.items.map(value => value.item))
-      .map(item => [item, storage] satisfies readonly [ItemId, QvmItemStorage])));
-    this.weapons = definition.weapons === undefined ? null : new QvmModWeaponStage(definition.weapons.stage, definition.weapons.input.entry, { module, ...operations,
-      live: actor => { const entry = this.entries.get(actor); return entry !== undefined && this.current(entry); },
-      posture: actor => {
-        const body = services.bodies.read(actor), client = services.clients?.forActor(actor), view = client == null ? undefined : services.clients?.playerView?.(client);
-        if (body === null || view === undefined) throw new Error("QVM weapon input requires the actual authoritative posture");
-        return { bounds: body.bounds, viewHeight: view.viewOffset.z, ground: operations.ground(actor) };
+  constructor(
+    private readonly definition: Declaration,
+    private readonly module: QvmModule,
+    private readonly image: QvmImage,
+    private readonly services: ModHostServices,
+    private readonly provider: ProviderId,
+    private readonly content: ContentId,
+    private readonly operations: Operations,
+  ) {
+    this.admissions = definition.definitions.map(({ admission, actions, icon, ...item }) => ({
+      admission,
+      definition: {
+        ...item,
+        source: { provider, content },
+        ...(icon === undefined ? {} : { icon: icon === null ? null : resolveItemIcon(icon, content) }),
+        ...(actions === undefined ? {} : { actions: sourceItemActionNames(actions) }),
       },
-      selected: actor => services.weapons?.selected(actor, provider) === true,
-      attempted: (actor, value) => { const request = this.entries.get(actor)?.request; if (request?.status === "pending" && this.value(request.item) === value) request.attempted = true; },
-      accepted: (actor, value) => { const request = this.entries.get(actor)?.request; if (request?.status === "pending" && this.value(request.item) === value) request.status = "accepted"; },
-      completed: actor => { const request = this.entries.get(actor)?.request;
-        if (request?.status === "pending") {
-          if (this.weapons?.active(actor) === request.item) request.status = "accepted";
-          else if (request.attempted) request.status = "refused";
-        }
-      },
-    });
+    }));
+    this.byItem = new Map(
+      definition.storage.flatMap(storage =>
+        (storage.kind === "counter" ? [storage.item] : storage.items.map(value => value.item)).map(
+          item => [item, storage] satisfies readonly [ItemId, QvmItemStorage],
+        ),
+      ),
+    );
+    this.weapons =
+      definition.weapons === undefined
+        ? null
+        : new QvmModWeaponStage(definition.weapons.stage, definition.weapons.input.entry, {
+            module,
+            ...operations,
+            live: actor => {
+              const entry = this.entries.get(actor);
+              return entry !== undefined && this.current(entry);
+            },
+            posture: actor => {
+              const body = services.bodies.read(actor),
+                client = services.clients?.forActor(actor),
+                view = client == null ? undefined : services.clients?.playerView?.(client);
+              if (body === null || view === undefined) throw new Error("QVM weapon input requires the actual authoritative posture");
+              return { bounds: body.bounds, viewHeight: view.viewOffset.z, ground: operations.ground(actor) };
+            },
+            selected: actor => services.weapons?.selected(actor, provider) === true,
+            attempted: (actor, value) => {
+              const request = this.entries.get(actor)?.request;
+              if (request?.status === "pending" && this.value(request.item) === value) request.attempted = true;
+            },
+            accepted: (actor, value) => {
+              const request = this.entries.get(actor)?.request;
+              if (request?.status === "pending" && this.value(request.item) === value) request.status = "accepted";
+            },
+            completed: actor => {
+              const request = this.entries.get(actor)?.request;
+              if (request?.status === "pending") {
+                if (this.weapons?.active(actor) === request.item) request.status = "accepted";
+                else if (request.attempted) request.status = "refused";
+              }
+            },
+          });
   }
-  private address(actor: ActorId, field: QvmItemField): number { return this.operations.pointer(actor, field.record) + field.offset; }
+  private address(actor: ActorId, field: QvmItemField): number {
+    return this.operations.pointer(actor, field.record) + field.offset;
+  }
   private scalar(address: number, previous?: QvmCommittedWrite): number {
     if (previous === undefined) return this.module.memory.dataView(address, 4).getInt32(0, true);
     const bytes = this.module.memory.bytes.slice(address, address + 4);
-    for (const range of previous.ranges) for (let index = 0; index < range.before.length; index++) {
-      const target = range.byteOffset + index - address, value = range.before[index];
-      if (target >= 0 && target < 4 && value !== undefined) bytes[target] = value;
-    }
+    for (const range of previous.ranges)
+      for (let index = 0; index < range.before.length; index++) {
+        const target = range.byteOffset + index - address,
+          value = range.before[index];
+        if (target >= 0 && target < 4 && value !== undefined) bytes[target] = value;
+      }
     return new DataView(bytes.buffer, bytes.byteOffset, 4).getInt32(0, true);
   }
   private access(actor: ActorId, previous?: QvmCommittedWrite): QvmItemStorageAccess {
-    return { read: field => this.scalar(this.address(actor, field), previous), global: address => this.scalar(address, previous),
-      write: (field, value) => this.module.memory.dataView(this.address(actor, field), 4).setInt32(0, value, true) };
+    return {
+      read: field => this.scalar(this.address(actor, field), previous),
+      global: address => this.scalar(address, previous),
+      write: (field, value) => this.module.memory.dataView(this.address(actor, field), 4).setInt32(0, value, true),
+    };
   }
   private read(actor: ActorId, storage: QvmItemStorage, previous?: QvmCommittedWrite): readonly InventoryEntry[] {
     return readQvmItemStorage(this.image, storage, this.access(actor, previous));
   }
   private write(actor: ActorId, entry: InventoryEntry): undefined {
-    const current = this.entries.get(actor), storage = this.byItem.get(entry.item);
+    const current = this.entries.get(actor),
+      storage = this.byItem.get(entry.item);
     if (current === undefined || !this.current(current) || storage === undefined) throw new Error("QVM item storage is no longer admitted");
     return writeQvmItemStorage(this.image, storage, entry, this.access(actor));
   }
   private current(entry: Entry): boolean {
-    if (this.entries.get(entry.actor.id) !== entry || this.services.actors.resolveOwned(entry.actor.id) !== entry.actor || !this.operations.live(entry.actor.id) || !entry.lease.current()) return false;
+    if (
+      this.entries.get(entry.actor.id) !== entry ||
+      this.services.actors.resolveOwned(entry.actor.id) !== entry.actor ||
+      !this.operations.live(entry.actor.id) ||
+      !entry.lease.current()
+    )
+      return false;
     for (const [record, address] of entry.addresses) if (this.operations.pointer(entry.actor.id, record) !== address) return false;
     return true;
   }
@@ -160,92 +248,177 @@ export class QvmModItems {
     if (this.entries.has(actor)) return;
     const owner = this.services.actors.resolveOwned(actor);
     if (owner === null || !this.operations.live(actor)) throw new Error("QVM source items require the current admitted client");
-    const addresses = new Map(this.definition.storage.flatMap(storage => fields(storage)).map(field => [field.record, this.operations.pointer(actor, field.record)]));
-    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, invoke: (item, action) => {
-      const current = this.entries.get(actor), call = this.definition.definitions.find(value => value.item === item)?.actions?.[action];
-      if (current === undefined || !this.current(current) || call === undefined) throw new Error("Source item action is no longer admitted");
-      this.operations.invoke(actor, call);
-    }, state: {
-      read: () => this.definition.storage.flatMap(storage => this.read(actor, storage)),
-      entry: item => { const storage = this.byItem.get(item); return storage === undefined ? undefined : this.read(actor, storage).find(value => value.item === item); },
-      write: value => this.write(actor, value), mutableCapacity: item => { const storage = this.byItem.get(item); return storage?.kind === "counter" && storage.capacity.kind === "field"; },
-    } });
-    const watches = this.definition.storage.map(storage => ({ storage, addresses: [...fields(storage).map(field => this.address(actor, field)),
-      ...(storage.kind === "counter" && storage.capacity.kind === "source" ? storage.capacity.overrides.map(value => value.address) : [])] }));
-    const pending = new WeakMap<QvmCommittedWrite, readonly SourceItemStore[]>();
-    const unobserve = this.module.memory.observeWrites(watches.flatMap(watch => watch.addresses.map(byteOffset => ({ byteOffset, byteLength: 4 }))), event => {
-      const changes: SourceItemStore[] = [];
-      for (const watch of watches) if (watch.addresses.some(address => event.ranges.some(range => address < range.byteOffset + range.after.length && range.byteOffset < address + 4))) {
-        const before = this.read(actor, watch.storage, event), after = this.read(actor, watch.storage);
-        for (const value of after) { const previous = before.find(entry => entry.item === value.item);
-          if (previous !== undefined && (previous.count !== value.count || previous.capacity !== value.capacity)) {
-            const pickup = this.operations.pickup();
-            if (pickup !== undefined && !pickup.writes.some(write => write.kind === "inventory" && write.item === value.item
-              && (previous.count === value.count || write.fields !== "capacity") && (previous.capacity === value.capacity || write.fields !== "count")))
-              throw new Error("Original pickup changed an undeclared QVM source item");
-            changes.push({ before: previous, after: value });
-          }
-        }
-      }
-      pending.set(event, changes); return undefined;
-    }, event => { const changes = pending.get(event); pending.delete(event);
-      const entry = this.entries.get(actor);
-      if (changes !== undefined && changes.length !== 0 && entry !== undefined && this.current(entry)) {
-        try { entry.lease.stored(changes); }
-        catch (error) {
-          if (error instanceof SourceItemRetired && error.lease === entry.lease && error.actor === entry.actor && error.owner === this.provider)
-            this.weapons?.cancelRetired(actor);
-          throw error;
-        }
-        if (!this.current(entry)) this.weapons?.cancelRetired(actor);
-      }
-      return undefined;
+    const addresses = new Map(
+      this.definition.storage.flatMap(storage => fields(storage)).map(field => [field.record, this.operations.pointer(actor, field.record)]),
+    );
+    const lease = this.services.inventory.bindItems(owner, {
+      owner: this.provider,
+      items: this.admissions,
+      invoke: (item, action) => {
+        const current = this.entries.get(actor),
+          call = this.definition.definitions.find(value => value.item === item)?.actions?.[action];
+        if (current === undefined || !this.current(current) || call === undefined) throw new Error("Source item action is no longer admitted");
+        this.operations.invoke(actor, call);
+      },
+      state: {
+        read: () => this.definition.storage.flatMap(storage => this.read(actor, storage)),
+        entry: item => {
+          const storage = this.byItem.get(item);
+          return storage === undefined ? undefined : this.read(actor, storage).find(value => value.item === item);
+        },
+        write: value => this.write(actor, value),
+        mutableCapacity: item => {
+          const storage = this.byItem.get(item);
+          return storage?.kind === "counter" && storage.capacity.kind === "field";
+        },
+      },
     });
-    const entry: Entry = { actor: owner, addresses, lease, unobserve, request: null, removeWeapon: () => undefined }; this.entries.set(actor, entry);
-    try { if (this.weapons !== null) {
-      const remove = this.services.weapons?.bind(owner, this.binding(entry));
-      if (remove === undefined) throw new Error("QVM source weapon service is unavailable"); entry.removeWeapon = remove;
-    } } catch (error) { this.release(actor); throw error; }
+    const watches = this.definition.storage.map(storage => ({
+      storage,
+      addresses: [
+        ...fields(storage).map(field => this.address(actor, field)),
+        ...(storage.kind === "counter" && storage.capacity.kind === "source" ? storage.capacity.overrides.map(value => value.address) : []),
+      ],
+    }));
+    const pending = new WeakMap<QvmCommittedWrite, readonly SourceItemStore[]>();
+    const unobserve = this.module.memory.observeWrites(
+      watches.flatMap(watch => watch.addresses.map(byteOffset => ({ byteOffset, byteLength: 4 }))),
+      event => {
+        const changes: SourceItemStore[] = [];
+        for (const watch of watches)
+          if (watch.addresses.some(address => event.ranges.some(range => address < range.byteOffset + range.after.length && range.byteOffset < address + 4))) {
+            const before = this.read(actor, watch.storage, event),
+              after = this.read(actor, watch.storage);
+            for (const value of after) {
+              const previous = before.find(entry => entry.item === value.item);
+              if (previous !== undefined && (previous.count !== value.count || previous.capacity !== value.capacity)) {
+                const pickup = this.operations.pickup();
+                if (
+                  pickup !== undefined &&
+                  !pickup.writes.some(
+                    write =>
+                      write.kind === "inventory" &&
+                      write.item === value.item &&
+                      (previous.count === value.count || write.fields !== "capacity") &&
+                      (previous.capacity === value.capacity || write.fields !== "count"),
+                  )
+                )
+                  throw new Error("Original pickup changed an undeclared QVM source item");
+                changes.push({ before: previous, after: value });
+              }
+            }
+          }
+        pending.set(event, changes);
+        return undefined;
+      },
+      event => {
+        const changes = pending.get(event);
+        pending.delete(event);
+        const entry = this.entries.get(actor);
+        if (changes !== undefined && changes.length !== 0 && entry !== undefined && this.current(entry)) {
+          try {
+            entry.lease.stored(changes);
+          } catch (error) {
+            if (error instanceof SourceItemRetired && error.lease === entry.lease && error.actor === entry.actor && error.owner === this.provider)
+              this.weapons?.cancelRetired(actor);
+            throw error;
+          }
+          if (!this.current(entry)) this.weapons?.cancelRetired(actor);
+        }
+        return undefined;
+      },
+    );
+    const entry: Entry = { actor: owner, addresses, lease, unobserve, request: null, removeWeapon: () => undefined };
+    this.entries.set(actor, entry);
+    try {
+      if (this.weapons !== null) {
+        const remove = this.services.weapons?.bind(owner, this.binding(entry));
+        if (remove === undefined) throw new Error("QVM source weapon service is unavailable");
+        entry.removeWeapon = remove;
+      }
+    } catch (error) {
+      this.release(actor);
+      throw error;
+    }
   }
   private value(item: ItemId | null): number | null {
-    return item === null ? null : this.definition.weapons?.stage.selection.values.find(value => value.item === item)?.value ?? null;
+    return item === null ? null : (this.definition.weapons?.stage.selection.values.find(value => value.item === item)?.value ?? null);
   }
   requested(actor: ActorId): number | null {
-    const entry = this.entries.get(actor), request = entry?.request;
-    return entry !== undefined && this.current(entry) && request !== null && request !== undefined && request.status !== "refused" ? this.value(request.item) : null;
+    const entry = this.entries.get(actor),
+      request = entry?.request;
+    return entry !== undefined && this.current(entry) && request !== null && request !== undefined && request.status !== "refused"
+      ? this.value(request.item)
+      : null;
   }
   private capability(entry: Entry, request: Request): SourceWeaponRequest {
-    return { id: request.id, status: () => this.current(entry) && entry.request === request ? request.status : "refused",
-      cancel: () => { if (this.current(entry) && entry.request === request && request.status === "pending") { request.status = "refused"; entry.request = null; } } };
+    return {
+      id: request.id,
+      status: () => (this.current(entry) && entry.request === request ? request.status : "refused"),
+      cancel: () => {
+        if (this.current(entry) && entry.request === request && request.status === "pending") {
+          request.status = "refused";
+          entry.request = null;
+        }
+      },
+    };
   }
   private binding(entry: Entry): SourceWeaponBinding {
-    const stage = this.weapons; if (stage === null) throw new Error("QVM weapon stage is absent");
-    const actor = entry.actor.id, accepts = (item: ItemId): boolean => this.current(entry) && this.value(item) !== null && this.services.inventory.count(actor, item) > 0;
+    const stage = this.weapons;
+    if (stage === null) throw new Error("QVM weapon stage is absent");
+    const actor = entry.actor.id,
+      accepts = (item: ItemId): boolean => this.current(entry) && this.value(item) !== null && this.services.inventory.count(actor, item) > 0;
     const request = (item: ItemId | null): SourceWeaponRequest => {
       if (!this.current(entry)) throw new Error("QVM source weapon request lost its actor");
       const accepted = item === null ? stage.active(actor) !== null && stage.settled(actor) : accepts(item);
-      const value: Request = { id: ++this.nextRequest, item, status: accepted ? item === null ? "accepted" : "pending" : "refused", attempted: false };
-      entry.request = value; return this.capability(entry, value);
+      const value: Request = { id: ++this.nextRequest, item, status: accepted ? (item === null ? "accepted" : "pending") : "refused", attempted: false };
+      entry.request = value;
+      return this.capability(entry, value);
     };
-    return { current: () => this.current(entry), read: () => {
-      if (!this.current(entry)) throw new Error("QVM weapon presentation lost its original actor");
-      const active = stage.active(actor), pending = entry.request?.status === "refused" || entry.request?.item === active ? null : entry.request?.item ?? null;
-      return { source: { provider: this.provider, content: this.content }, active, pending, model: null, items: this.admissions.map(value => value.definition) };
-    }, handoff: { kind: "source-input", provider: this.provider, accepts,
-      select: item => accepts(item) && request(item).status() !== "refused",
-      holster: () => { if (!this.current(entry)) throw new Error("QVM source weapon retired while holstering"); }, isHolstered: () => this.current(entry) && stage.settled(actor), resume: request,
-      restoreRequest: (id, item) => { const request = entry.request;
-        if (!this.current(entry) || request === null || request.id !== id || request.item !== item) throw new Error("Saved QVM weapon request differs from its original source owner");
-        return this.capability(entry, request);
+    return {
+      current: () => this.current(entry),
+      read: () => {
+        if (!this.current(entry)) throw new Error("QVM weapon presentation lost its original actor");
+        const active = stage.active(actor),
+          pending = entry.request?.status === "refused" || entry.request?.item === active ? null : (entry.request?.item ?? null);
+        return {
+          source: { provider: this.provider, content: this.content },
+          active,
+          pending,
+          model: null,
+          items: this.admissions.map(value => value.definition),
+        };
       },
-    } };
+      handoff: {
+        kind: "source-input",
+        provider: this.provider,
+        accepts,
+        select: item => accepts(item) && request(item).status() !== "refused",
+        holster: () => {
+          if (!this.current(entry)) throw new Error("QVM source weapon retired while holstering");
+        },
+        isHolstered: () => this.current(entry) && stage.settled(actor),
+        resume: request,
+        restoreRequest: (id, item) => {
+          const request = entry.request;
+          if (!this.current(entry) || request === null || request.id !== id || request.item !== item)
+            throw new Error("Saved QVM weapon request differs from its original source owner");
+          return this.capability(entry, request);
+        },
+      },
+    };
   }
-  open(application: ModClientApplication): () => void { return this.weapons?.open(application) ?? (() => {}); }
-  applies(call: QvmModSourceCall): boolean { return this.definition.weapons?.input.entry === call.entry; }
+  open(application: ModClientApplication): () => void {
+    return this.weapons?.open(application) ?? (() => {});
+  }
+  applies(call: QvmModSourceCall): boolean {
+    return this.definition.weapons?.input.entry === call.entry;
+  }
   apply(application: ModClientApplication, run: () => number): number {
     const input = this.definition.weapons?.input;
     if (input === undefined) return run();
-    if (application.scope !== "movement-slice" || this.applied.has(application)) throw new Error("QVM weapon input must consume each actual movement slice exactly once");
+    if (application.scope !== "movement-slice" || this.applied.has(application))
+      throw new Error("QVM weapon input must consume each actual movement slice exactly once");
     const entry = this.entries.get(application.identity.actor);
     if (entry === undefined || !this.current(entry)) throw new Error("QVM weapon application lost its admitted actor");
     this.applied.add(application);
@@ -256,29 +429,65 @@ export class QvmModItems {
     return this.weapons?.apply(entry.actor.id, run) ?? run();
   }
   checkpoint() {
-    return { version: 1, nextRequest: this.nextRequest, requests: [...this.entries.values()].flatMap(entry => entry.request === null ? []
-      : [{ actor: savedActorId(entry.actor.id), id: entry.request.id, item: entry.request.item, status: entry.request.status }]) };
+    return {
+      version: 1,
+      nextRequest: this.nextRequest,
+      requests: [...this.entries.values()].flatMap(entry =>
+        entry.request === null ? [] : [{ actor: savedActorId(entry.actor.id), id: entry.request.id, item: entry.request.item, status: entry.request.status }],
+      ),
+    };
   }
   restore(value: unknown): void {
-    const reader = new SaveReader(value, "qvm.items"), ids = new Set<number>(), actors = new Set<ActorId>();
-    reader.field("version").literal(1); this.nextRequest = reader.field("nextRequest").integer(0);
+    const reader = new SaveReader(value, "qvm.items"),
+      ids = new Set<number>(),
+      actors = new Set<ActorId>();
+    reader.field("version").literal(1);
+    this.nextRequest = reader.field("nextRequest").integer(0);
     for (const row of reader.field("requests").list(value => value)) {
-      const saved = readSavedActor(row.field("actor")), actor = this.services.referenceSaved?.(saved) ?? this.services.actors.referenceSaved(saved, "current");
-      const id = row.field("id").integer(1), item = row.field("item").nullable(namespaced), status = row.field("status").choice("pending", "accepted", "refused");
+      const saved = readSavedActor(row.field("actor")),
+        actor = this.services.referenceSaved?.(saved) ?? this.services.actors.referenceSaved(saved, "current");
+      const id = row.field("id").integer(1),
+        item = row.field("item").nullable(namespaced),
+        status = row.field("status").choice("pending", "accepted", "refused");
       const entry = this.entries.get(actor);
-      if (entry === undefined || !this.current(entry) || id > this.nextRequest || ids.has(id) || actors.has(actor) || item !== null && this.value(item) === null) throw new Error("Saved QVM weapon request is not its current admitted owner");
-      ids.add(id); actors.add(actor); entry.request = { id, item, status, attempted: false };
+      if (
+        entry === undefined ||
+        !this.current(entry) ||
+        id > this.nextRequest ||
+        ids.has(id) ||
+        actors.has(actor) ||
+        (item !== null && this.value(item) === null)
+      )
+        throw new Error("Saved QVM weapon request is not its current admitted owner");
+      ids.add(id);
+      actors.add(actor);
+      entry.request = { id, item, status, attempted: false };
     }
   }
-  clear(): void { for (const actor of this.entries.keys()) this.release(actor); }
+  clear(): void {
+    for (const actor of this.entries.keys()) this.release(actor);
+  }
   release(actor: ActorId): void {
-    const entry = this.entries.get(actor); if (entry === undefined) return;
-    this.entries.delete(actor); entry.request = null; entry.unobserve();
-    try { entry.removeWeapon(); } finally { entry.lease.close(); }
+    const entry = this.entries.get(actor);
+    if (entry === undefined) return;
+    this.entries.delete(actor);
+    entry.request = null;
+    entry.unobserve();
+    try {
+      entry.removeWeapon();
+    } finally {
+      entry.lease.close();
+    }
   }
   close(): void {
-    this.weapons?.close(); const errors: unknown[] = [];
-    for (const actor of this.entries.keys()) try { this.release(actor); } catch (error) { errors.push(error); }
+    this.weapons?.close();
+    const errors: unknown[] = [];
+    for (const actor of this.entries.keys())
+      try {
+        this.release(actor);
+      } catch (error) {
+        errors.push(error);
+      }
     if (errors.length !== 0) throw new AggregateError(errors, "QVM source item release failed");
   }
 }

@@ -1,9 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { testCorpusRoot } from "../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
-import { decompressQ1Pvs, findQ1Leaf, parseQ1Entities, q1EntityValue, q1FaceVertices, q1LeafPvs, q1TextureRgba, readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
+import {
+  decompressQ1Pvs,
+  findQ1Leaf,
+  parseQ1Entities,
+  q1EntityValue,
+  q1FaceVertices,
+  q1LeafPvs,
+  q1TextureRgba,
+  readQ1Bsp,
+} from "../../../src/formats/q1-map/index.ts";
 import type { Q1WorldGeometry } from "../../../src/contracts/scene.ts";
 import type { Q1BspFormat } from "../../../src/formats/q1-map/index.ts";
 
@@ -69,9 +79,10 @@ for (const fixture of cases) {
       expect(q1LeafPvs(map, leaf).length).toBe(Math.ceil((map.models[0]?.visibleLeaves ?? 0) / 8));
       const visibleLeaf = map.leaves.findIndex((item, i) => i > 0 && item.visibilityOffset !== null);
       if (visibleLeaf > 0) expect(q1LeafPvs(map, visibleLeaf).length).toBe(Math.ceil((map.models[0]?.visibleLeaves ?? 0) / 8));
-      if (fixture.map === "maps/boss2.bsp") expect(map.bspxMetadata.faceNormals?.indices.length).toBe(map.faces.reduce((sum, face) => sum + face.edges.count, 0));
+      if (fixture.map === "maps/boss2.bsp")
+        expect(map.bspxMetadata.faceNormals?.indices.length).toBe(map.faces.reduce((sum, face) => sum + face.edges.count, 0));
       const paletteEntry = archive.findEntries("gfx/palette.lmp")[0];
-      const texture = map.textures.find((item) => item?.kind === "embedded");
+      const texture = map.textures.find(item => item?.kind === "embedded");
       if (paletteEntry !== undefined && texture?.kind === "embedded") {
         const palette = await archive.readEntry(paletteEntry);
         expect(q1TextureRgba(texture.levels[0], palette).length).toBe(texture.width * texture.height * 4);
@@ -92,7 +103,9 @@ test.skipIf(!existsSync(`${qfiles}/q1/id1/PAK0.PAK`))("rejects a drawing node wh
     const nodes = view.getInt32(4 + 5 * 8, true);
     view.setInt16(nodes + 4, 0, true);
     expect(() => readQ1Bsp(bytes, { source: "cycle" })).toThrow("cycle in BSP nodes");
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 const startPak = `${qfiles}/q1/id1/PAK0.PAK`;
@@ -109,14 +122,36 @@ test.skipIf(!existsSync(startPak))("rejects a clipnode tree that cycles back to 
     expect(() => readQ1Bsp(bytes)).not.toThrow();
     view.setInt16(lump(9) + headnode * 8 + 4, headnode, true);
     expect(() => readQ1Bsp(bytes)).toThrow("cycle");
-  } finally { archive.close(); }
+  } finally {
+    archive.close();
+  }
 });
 
 test("a corrupt PVS row degrades to all-visible instead of throwing", () => {
-  const zero = { x: 0, y: 0, z: 0 }, bounds = { min: zero, max: zero };
+  const zero = { x: 0, y: 0, z: 0 },
+    bounds = { min: zero, max: zero };
   const leaf: Q1WorldGeometry["leaves"][number] = { contents: -1, bounds, faces: { first: 0, count: 0 }, visibilityOffset: 0, ambientSound: [0, 0, 0, 0] };
-  const map: Q1WorldGeometry = { kind: "q1-bsp", format: "bsp29", entities: "", planes: [], vertices: [], edges: [], surfaceEdges: [], nodes: [], leaves: [leaf, leaf],
-    leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: zero, headnodes: [0, 0, 0, 0], visibleLeaves: 16, faces: { first: 0, count: 0 } }],
-    clipnodes: [], visibility: new Uint8Array([0, 0]), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] };
+  const map: Q1WorldGeometry = {
+    kind: "q1-bsp",
+    format: "bsp29",
+    entities: "",
+    planes: [],
+    vertices: [],
+    edges: [],
+    surfaceEdges: [],
+    nodes: [],
+    leaves: [leaf, leaf],
+    leafFaces: [],
+    textures: [],
+    textureInfo: [],
+    faces: [],
+    models: [{ bounds, origin: zero, headnodes: [0, 0, 0, 0], visibleLeaves: 16, faces: { first: 0, count: 0 } }],
+    clipnodes: [],
+    visibility: new Uint8Array([0, 0]),
+    lighting: { kind: "luminance8", samples: new Uint8Array() },
+    decoupledLightmaps: null,
+    brushList: null,
+    extensions: [],
+  };
   expect(q1LeafPvs(map, 1)).toEqual(new Uint8Array([255, 255]));
 });

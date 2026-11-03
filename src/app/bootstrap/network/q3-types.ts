@@ -1,19 +1,26 @@
-import type { Q3ServerAdmissionBindings } from '../../../network/q3/admission.ts';
-import type { ActorId, ClientId } from '../../../contracts/identity.ts';
-import type { ActorCommand } from '../../../contracts/session.ts';
-import type { WireAdmission } from '../../../network/common/session.ts';
-import type { Q3AcceptedConnect } from '../../../network/q3/admission.ts';
-import type { WireUserCommand } from '../../../network/q3/message.ts';
-import type { Q3PureServer } from '../../../network/q3/pure.ts';
-import type { Q3DownloadReadFile } from '../../../network/q3/download.ts';
-import type { Q3ServerRate } from '../../../network/q3/server.ts';
-import type { Gamestate } from '../../../network/q3/server-message.ts';
-import type { Product } from '../../../network/q3/state/product.ts';
-import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
-import type { PlayerStateFields } from '../../../network/q3/state/player.ts';
-import type { SimulationPresentationEvent } from '../simulation/types.ts';
-export interface Q3ApplicationPlayer { readonly client: ClientId; readonly actor: ActorId; readonly sourceEntity: number; }
-export type Q3ApplicationAdmission = { readonly kind: 'accepted'; readonly player: Q3ApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
+// SPDX-License-Identifier: GPL-2.0-or-later
+import type { Q3ServerAdmissionBindings } from "../../../network/q3/admission.ts";
+import type { ActorId, ClientId } from "../../../contracts/identity.ts";
+import type { ActorCommand } from "../../../contracts/session.ts";
+import type { WireAdmission } from "../../../network/common/session.ts";
+import type { Q3AcceptedConnect } from "../../../network/q3/admission.ts";
+import type { WireUserCommand } from "../../../network/q3/message.ts";
+import type { Q3PureServer } from "../../../network/q3/pure.ts";
+import type { Q3DownloadReadFile } from "../../../network/q3/download.ts";
+import type { Q3ServerRate } from "../../../network/q3/server.ts";
+import type { Gamestate } from "../../../network/q3/server-message.ts";
+import type { Product } from "../../../network/q3/state/product.ts";
+import type { EntityStateFields } from "../../../network/q3/state/entity.ts";
+import type { PlayerStateFields } from "../../../network/q3/state/player.ts";
+import type { SimulationPresentationEvent } from "../simulation/types.ts";
+export interface Q3ApplicationPlayer {
+  readonly client: ClientId;
+  readonly actor: ActorId;
+  readonly sourceEntity: number;
+}
+export type Q3ApplicationAdmission =
+  | { readonly kind: "accepted"; readonly player: Q3ApplicationPlayer }
+  | { readonly kind: "rejected"; readonly reason: string };
 export interface Q3SourceRoundBinding {
   preflight(): void;
   rebind(): void;
@@ -27,8 +34,14 @@ export interface Q3NetworkRoundRestart {
   reconnectClient(client: ClientId): Promise<boolean>;
 }
 export interface Q3ApplicationServerHost {
-  readonly admission?: Pick<Q3ServerAdmissionBindings, 'privateClients' | 'privatePassword' | 'reconnectLimitSeconds' | 'minimumPing' | 'maximumPing' | 'demoRestricted'> & {
-    enabled(): boolean; gameDirectory(): string; strictAuth(): string; floodProtect(): boolean;
+  readonly admission?: Pick<
+    Q3ServerAdmissionBindings,
+    "privateClients" | "privatePassword" | "reconnectLimitSeconds" | "minimumPing" | "maximumPing" | "demoRestricted"
+  > & {
+    enabled(): boolean;
+    gameDirectory(): string;
+    strictAuth(): string;
+    floodProtect(): boolean;
   };
   readonly administration?: import("../../../network/services/admin.ts").ServerAdministration;
   readonly sourceRound?: Q3SourceRoundBinding;
@@ -58,10 +71,13 @@ export interface Q3ApplicationServerHost {
 export class Q3GameCallbackError extends Error {
   constructor(cause: unknown) {
     super(`Q3 game callback failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
-    this.name = 'Q3GameCallbackError';
+    this.name = "Q3GameCallbackError";
   }
 }
 export async function q3GameCallback<T>(callback: () => T | Promise<T>): Promise<T> {
-  try { return await callback(); }
-  catch (error) { throw error instanceof Q3GameCallbackError ? error : new Q3GameCallbackError(error); }
+  try {
+    return await callback();
+  } catch (error) {
+    throw error instanceof Q3GameCallbackError ? error : new Q3GameCallbackError(error);
+  }
 }

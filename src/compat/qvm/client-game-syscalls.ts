@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q3 server/sv_game.c client imports. GPL-2.0-or-later. */
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -16,14 +17,17 @@ export interface QvmClientGameServices {
 }
 
 function client(slot: number, services: QvmClientGameServices, operation: string): void {
-  if (slot < 0 || slot >= services.maxClients) throw new CommonError("drop", operation === "SV_GetUsercmd"
-    ? `${operation}: bad clientNum:${slot}` : `${operation}: bad index ${slot}\n`);
+  if (slot < 0 || slot >= services.maxClients)
+    throw new CommonError("drop", operation === "SV_GetUsercmd" ? `${operation}: bad clientNum:${slot}` : `${operation}: bad index ${slot}\n`);
 }
-function complete(result: void | Promise<void>): QvmHostResult { return result === undefined ? 0 : result.then(() => 0); }
+function complete(result: void | Promise<void>): QvmHostResult {
+  return result === undefined ? 0 : result.then(() => 0);
+}
 
 export function qvmClientGameSyscall(call: SharedHostCall, services: QvmClientGameServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
-  const { guest, words } = call, word = (index: number): number => words.getInt32(index * 4, true);
+  const { guest, words } = call,
+    word = (index: number): number => words.getInt32(index * 4, true);
   switch (call.code) {
     case QvmGameImport.G_DROP_CLIENT: {
       const number = word(1);
@@ -35,12 +39,18 @@ export function qvmClientGameSyscall(call: SharedHostCall, services: QvmClientGa
     }
     case QvmGameImport.G_GET_USERINFO:
       if (word(3) < 1) throw new CommonError("drop", `SV_GetUserinfo: bufferSize == ${word(3)}`);
-      client(word(1), services, "SV_GetUserinfo"); guest.writeString(word(2), services.getUserinfo(word(1)), word(3)); return 0;
+      client(word(1), services, "SV_GetUserinfo");
+      guest.writeString(word(2), services.getUserinfo(word(1)), word(3));
+      return 0;
     case QvmGameImport.G_SET_USERINFO:
-      client(word(1), services, "SV_SetUserinfo"); services.setUserinfo(word(1), word(2) === 0 ? "" : guest.readString(word(2))); return 0;
+      client(word(1), services, "SV_SetUserinfo");
+      services.setUserinfo(word(1), word(2) === 0 ? "" : guest.readString(word(2)));
+      return 0;
     case QvmGameImport.G_GET_USERCMD:
       client(word(1), services, "SV_GetUsercmd");
-      writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1)), services.abiProfile); return 0;
-    default: return null;
+      writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1)), services.abiProfile);
+      return 0;
+    default:
+      return null;
   }
 }

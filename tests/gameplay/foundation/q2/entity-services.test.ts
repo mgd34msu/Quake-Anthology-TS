@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
@@ -13,31 +14,77 @@ import { literal } from "../../../support/literal.ts";
 import { inertAuthority } from "../../../support/authority.ts";
 
 const zero = { x: 0, y: 0, z: 0 };
-const options: Q2GameOptions = { edition: "classic", mapName: "foreign-map", skill: 1, mode: "singleplayer", deathmatchFlags: 0,
-  maxClients: 1, provider: "q2:official", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" };
+const options: Q2GameOptions = {
+  edition: "classic",
+  mapName: "foreign-map",
+  skill: 1,
+  mode: "singleplayer",
+  deathmatchFlags: 0,
+  maxClients: 1,
+  provider: "q2:official",
+  campaign: "q2:base",
+  combatProvider: "q2:combat",
+  inventoryProvider: "q2:inventory",
+  movementProvider: "q1:movement",
+};
 
 function sharedHost(actors = new SessionActorRegistry(createIdentityOwner("q2-entity-services"))) {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const callbacks = new ActorCallbackTable(actors), inventory = new SharedInventoryTable(actors);
+  const callbacks = new ActorCallbackTable(actors),
+    inventory = new SharedInventoryTable(actors);
   const combat = inertAuthority(actors, callbacks);
   let now = 0;
-  const { host, scheduled } = q2TestHost({ actors, bodies, callbacks, combat, inventory, players: () => [], entity: () => undefined, world: () => { throw new Error("No map was loaded"); } }, {
-    now: () => now, trace: () => { throw new Error("Entity service check does not trace geometry"); },
-    inlineModelBounds: () => { throw new Error("No map was loaded"); }, emit: () => undefined, diagnostic: () => undefined,
-  });
+  const { host, scheduled } = q2TestHost(
+    {
+      actors,
+      bodies,
+      callbacks,
+      combat,
+      inventory,
+      players: () => [],
+      entity: () => undefined,
+      world: () => {
+        throw new Error("No map was loaded");
+      },
+    },
+    {
+      now: () => now,
+      trace: () => {
+        throw new Error("Entity service check does not trace geometry");
+      },
+      inlineModelBounds: () => {
+        throw new Error("No map was loaded");
+      },
+      emit: () => undefined,
+      diagnostic: () => undefined,
+    },
+  );
 
-  return { host, advance(time: number) {
-    now = time;
-    for (const [actor, due] of [...scheduled]) if (due <= now) {
-      scheduled.delete(actor);
-      if (actors.isLive(actor.id)) callbacks.think(actor, { frame: Math.round(now * 10), time: { kind: "seconds", value: now }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
-    }
-  } };
+  return {
+    host,
+    advance(time: number) {
+      now = time;
+      for (const [actor, due] of [...scheduled])
+        if (due <= now) {
+          scheduled.delete(actor);
+          if (actors.isLive(actor.id))
+            callbacks.think(actor, {
+              frame: Math.round(now * 10),
+              time: { kind: "seconds", value: now },
+              elapsed: { kind: "seconds", value: 0.1 },
+              phase: "entity-think",
+            });
+        }
+    },
+  };
 }
 
 describe("Q2 reusable entity services", () => {
   test("classic coop spawn fixups use named think callbacks that survive a checkpoint after firing", () => {
-    for (const [mapName, classname] of literal([["jail2", "info_player_coop"], ["security", "info_player_start"]])) {
+    for (const [mapName, classname] of literal([
+      ["jail2", "info_player_coop"],
+      ["security", "info_player_start"],
+    ])) {
       const { host, advance } = sharedHost();
       const services = new Q2EntityServices(host, { ...options, mapName, mode: "coop" }, [q2PlayerSpawns]);
       const actor = host.actors.allocateAtSource("q2:map", 3, "q2:authored");
@@ -51,36 +98,78 @@ describe("Q2 reusable entity services", () => {
   });
 
   test("attachment preserves shared identity, body and combat without running spawn", () => {
-    const { host } = sharedHost(), module = createQ2TargetModule();
+    const { host } = sharedHost(),
+      module = createQ2TargetModule();
     const services = new Q2EntityServices(host, options, [module]);
     const actor = host.actors.allocateAtSource("q1:map", 17, "q1:authored");
-    host.bodies.create(actor, { origin: { x: 7, y: 8, z: 9 }, angles: zero, velocity: { x: 3, y: 0, z: 0 }, bounds: { min: zero, max: { x: 2, y: 3, z: 4 } }, ground: null });
-    host.combat.create(actor, { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 90, canTakeDamage: true, invulnerable: false, team: null });
-    const body = host.bodies.read(actor.id), combat = host.combat.read(actor.id), source = host.actors.sourceOf(actor.id);
-    const fields = { classname: "target_secret", ordinal: -1, values: new Map([["health", "900"], ["origin", "100 200 300"], ["delay", "0.4"]]) };
+    host.bodies.create(actor, {
+      origin: { x: 7, y: 8, z: 9 },
+      angles: zero,
+      velocity: { x: 3, y: 0, z: 0 },
+      bounds: { min: zero, max: { x: 2, y: 3, z: 4 } },
+      ground: null,
+    });
+    host.combat.create(actor, {
+      health: 73,
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+      mass: 90,
+      canTakeDamage: true,
+      invulnerable: false,
+      team: null,
+    });
+    const body = host.bodies.read(actor.id),
+      combat = host.combat.read(actor.id),
+      source = host.actors.sourceOf(actor.id);
+    const fields = {
+      classname: "target_secret",
+      ordinal: -1,
+      values: new Map([
+        ["health", "900"],
+        ["origin", "100 200 300"],
+        ["delay", "0.4"],
+      ]),
+    };
     const entity = services.attach(actor, fields);
-    expect(entity.actor).toBe(actor); expect(entity.maxHealth).toBe(900); expect(entity.delay).toBe(0.4);
-    expect(entity.use).toBeNull(); expect(services.counters.totalSecrets).toBe(0);
-    expect(host.actors.observations()).toHaveLength(1); expect(host.bodies.read(actor.id)).toEqual(body);
-    expect(host.combat.read(actor.id)).toEqual(combat); expect(host.actors.sourceOf(actor.id)).toEqual(source);
+    expect(entity.actor).toBe(actor);
+    expect(entity.maxHealth).toBe(900);
+    expect(entity.delay).toBe(0.4);
+    expect(entity.use).toBeNull();
+    expect(services.counters.totalSecrets).toBe(0);
+    expect(host.actors.observations()).toHaveLength(1);
+    expect(host.bodies.read(actor.id)).toEqual(body);
+    expect(host.combat.read(actor.id)).toEqual(combat);
+    expect(host.actors.sourceOf(actor.id)).toEqual(source);
     expect(() => services.attach(actor, fields)).toThrow("already has an entity continuation");
     expect(services.entity(actor.id)).toBe(entity);
   });
 
   test("foreign-owned continuation restores named callbacks and allocates delayed-use actors without a Foundation", () => {
-    const first = sharedHost(), module = createQ2TargetModule();
+    const first = sharedHost(),
+      module = createQ2TargetModule();
     const services = new Q2EntityServices(first.host, options, [module]);
     const actor = first.host.actors.allocateAtSource("q1:map", 17, "q1:authored");
     first.host.bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-    const relay = services.attach(actor, { classname: "trigger_relay", ordinal: -1, values: new Map([["target", "secret"], ["delay", "0.5"]]) });
+    const relay = services.attach(actor, {
+      classname: "trigger_relay",
+      ordinal: -1,
+      values: new Map([
+        ["target", "secret"],
+        ["delay", "0.5"],
+      ]),
+    });
     expect(module.spawn(relay, services)).toBe(true);
     const secret = services.spawn({ classname: "target_secret", ordinal: -1, values: new Map([["targetname", "secret"]]) });
     const saved = decodeQ2FoundationCheckpoint(encodeQ2FoundationCheckpoint(services.capture()));
     expect(saved.entities.find(entity => entity.actor.slot === actor.id.slot)?.sourceSlot).toBeNull();
-    const restoredActors = SessionActorRegistry.restore(createIdentityOwner("q2-services-restored"), first.host.actors.checkpoint(), first.host.actors.sourceCheckpoint());
+    const restoredActors = SessionActorRegistry.restore(
+      createIdentityOwner("q2-services-restored"),
+      first.host.actors.checkpoint(),
+      first.host.actors.sourceCheckpoint(),
+    );
     const restored = sharedHost(restoredActors);
     for (const original of first.host.actors.observations()) {
-      const owner = restoredActors.resolveSaved(original.id), body = first.host.bodies.read(original.id);
+      const owner = restoredActors.resolveSaved(original.id),
+        body = first.host.bodies.read(original.id);
       if (owner === null || body === null) throw new Error("Missing saved shared body");
       restored.host.bodies.create(owner, body);
     }
@@ -92,7 +181,8 @@ describe("Q2 reusable entity services", () => {
     restored.host.callbacks.use(restoredRelay.actor, null, null);
     const delayed = [...resumed.entities.values()].find(entity => entity.classname === "DelayedUse");
     if (delayed === undefined) throw new Error("No delayed-use continuation allocated");
-    expect(delayed.nextThink).toBe(0.5); expect(delayed.actor.owner).toBe(options.provider);
+    expect(delayed.nextThink).toBe(0.5);
+    expect(delayed.actor.owner).toBe(options.provider);
     restored.advance(0.5);
     expect(resumed.counters.foundSecrets).toBe(1);
     expect(restoredActors.isLive(restoredActors.referenceSaved(secret.actor.id))).toBe(false);
@@ -104,7 +194,8 @@ describe("Q2 reusable entity services", () => {
     const { host } = sharedHost();
     const foundation = new Q2Foundation(host, options, [createQ2TargetModule()]);
     const report = foundation.load('{ "classname" "trigger_relay" "team" "linked" } { "classname" "trigger_relay" "team" "linked" }');
-    const master = report.spawned[0], member = report.spawned[1];
+    const master = report.spawned[0],
+      member = report.spawned[1];
     if (master === undefined || member === undefined) throw new Error("Missing native map team");
     expect(foundation instanceof Q2EntityServices).toBe(true);
     expect(foundation.pushTeam(master.actor.id)).toEqual([master.actor, member.actor]);

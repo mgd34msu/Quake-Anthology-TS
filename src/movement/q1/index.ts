@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { createQ1MovementProvider, moveNetQuake } from "./netquake.ts";
 export { createQwMovementProvider, moveQuakeWorld } from "./quakeworld.ts";
 export { moveQ1Pusher, stepQ1Pusher } from "./pusher.ts";

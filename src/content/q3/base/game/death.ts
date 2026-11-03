@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_combat.c: scoring, item tossing,
 // death, gibbing, almost-score rewards and kamikaze death timers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -5,7 +6,20 @@ import { length3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/ma
 import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import type { ServerWorld } from "../world.ts";
-import { EntityEvent, EntityType, GameType, GIB_HEALTH, MissionpackStatIndex, MoveType, PersistentIndex, Powerup, Team, Weapon, WeaponState, statSchema } from "../shared/definitions.ts";
+import {
+  EntityEvent,
+  EntityType,
+  GameType,
+  GIB_HEALTH,
+  MissionpackStatIndex,
+  MoveType,
+  PersistentIndex,
+  Powerup,
+  Team,
+  Weapon,
+  WeaponState,
+  statSchema,
+} from "../shared/definitions.ts";
 import { ServerEntityFlags } from "../shared/entity-shared.ts";
 import { findItem, findItemForPowerup, findItemForWeapon } from "../shared/items.ts";
 import { ENTITYNUM_WORLD } from "../shared/player-state.ts";
@@ -20,15 +34,40 @@ import { ConnectionState, GameFlags, GameEntity, MAX_CLIENTS, MAX_GENTITIES } fr
 import type { DamageInflictor, DamageParticipant, EntityDie, GameClient } from "./state.ts";
 import { findEntity } from "./utilities.ts";
 
-const CONTENTS_CORPSE = 0x4000000, CONTENTS_TRIGGER = 0x40000000, CONTENTS_NODROP = 0x80000000;
-const EF_KAMIKAZE = 0x200, EF_TICKING = 0x2, EF_NODRAW = 0x80;
+const CONTENTS_CORPSE = 0x4000000,
+  CONTENTS_TRIGGER = 0x40000000,
+  CONTENTS_NODROP = 0x80000000;
+const EF_KAMIKAZE = 0x200,
+  EF_TICKING = 0x2,
+  EF_NODRAW = 0x80;
 const AWARD_MASK = 0x8 | 0x40 | 0x800 | 0x8000 | 0x10000 | 0x20000;
-const MOD_GAUNTLET = 2, MOD_SUICIDE = 20;
-const COMMON_MOD_NAMES = ["MOD_UNKNOWN", "MOD_SHOTGUN", "MOD_GAUNTLET", "MOD_MACHINEGUN",
-  "MOD_GRENADE", "MOD_GRENADE_SPLASH", "MOD_ROCKET", "MOD_ROCKET_SPLASH", "MOD_PLASMA",
-  "MOD_PLASMA_SPLASH", "MOD_RAILGUN", "MOD_LIGHTNING", "MOD_BFG", "MOD_BFG_SPLASH",
-  "MOD_WATER", "MOD_SLIME", "MOD_LAVA", "MOD_CRUSH", "MOD_TELEFRAG", "MOD_FALLING",
-  "MOD_SUICIDE", "MOD_TARGET_LASER", "MOD_TRIGGER_HURT"];
+const MOD_GAUNTLET = 2,
+  MOD_SUICIDE = 20;
+const COMMON_MOD_NAMES = [
+  "MOD_UNKNOWN",
+  "MOD_SHOTGUN",
+  "MOD_GAUNTLET",
+  "MOD_MACHINEGUN",
+  "MOD_GRENADE",
+  "MOD_GRENADE_SPLASH",
+  "MOD_ROCKET",
+  "MOD_ROCKET_SPLASH",
+  "MOD_PLASMA",
+  "MOD_PLASMA_SPLASH",
+  "MOD_RAILGUN",
+  "MOD_LIGHTNING",
+  "MOD_BFG",
+  "MOD_BFG_SPLASH",
+  "MOD_WATER",
+  "MOD_SLIME",
+  "MOD_LAVA",
+  "MOD_CRUSH",
+  "MOD_TELEFRAG",
+  "MOD_FALLING",
+  "MOD_SUICIDE",
+  "MOD_TARGET_LASER",
+  "MOD_TRIGGER_HURT",
+];
 
 export function returnQ3PersistentPowerup(powerup: GameEntity, world: Pick<ServerWorld, "link">): void {
   powerup.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
@@ -73,14 +112,11 @@ interface DeathServices {
   returnFlag(team: Team): void;
 }
 
-export type DeathHost = DeathServices & (
-  | { readonly product: "baseq3" }
-  | { readonly product: "missionpack";
-    neutralObelisk(): GameEntity | null;
-    cubeTimeoutSeconds(): number;
-    startKamikaze(timer: GameEntity): void;
-  }
-);
+export type DeathHost = DeathServices &
+  (
+    | { readonly product: "baseq3" }
+    | { readonly product: "missionpack"; neutralObelisk(): GameEntity | null; cubeTimeoutSeconds(): number; startKamikaze(timer: GameEntity): void }
+  );
 
 function clientOf(entity: GameEntity): GameClient {
   if (entity.client === null) throw new Error("Death operation requires a client entity");
@@ -94,18 +130,27 @@ export class DeathRuntime {
   constructor(readonly host: DeathHost) {
     if (host.teamScores.length !== 4) throw new RangeError("Death scoring requires four shared team-score slots");
     if (host.pool.options.product !== host.product) throw new Error("Death product does not match its entity pool");
-    this.#modNames = [...COMMON_MOD_NAMES,
+    this.#modNames = [
+      ...COMMON_MOD_NAMES,
       ...(host.product === "missionpack" ? ["MOD_NAIL", "MOD_CHAINGUN", "MOD_PROXIMITY_MINE", "MOD_KAMIKAZE", "MOD_JUICED"] : []),
-      "MOD_GRAPPLE"];
+      "MOD_GRAPPLE",
+    ];
 
     this.bindSaveCallbacks();
   }
 
   private dropContext(): DropItemContext {
     const frame = this.host.frame();
-    return { entities: this.host.pool, product: this.host.product, time: frame.time, gameType: frame.gameType,
-      touchItem: this.host.items.touchItem, droppedFlagThink: this.host.items.droppedFlagThink,
-      checkDroppedTeamItem: this.host.items.checkDroppedTeamItem, random: () => this.host.random.random() };
+    return {
+      entities: this.host.pool,
+      product: this.host.product,
+      time: frame.time,
+      gameType: frame.gameType,
+      touchItem: this.host.items.touchItem,
+      droppedFlagThink: this.host.items.droppedFlagThink,
+      checkDroppedTeamItem: this.host.items.checkDroppedTeamItem,
+      random: () => this.host.random.random(),
+    };
   }
 
   scorePlum(entity: GameEntity, origin: Vec3, score: number): void {
@@ -117,7 +162,8 @@ export class DeathRuntime {
   }
 
   addScore(entity: GameEntity, origin: Vec3, score: number): void {
-    const client = entity.client, frame = this.host.frame();
+    const client = entity.client,
+      frame = this.host.frame();
     if (client === null || frame.warmupTime !== 0) return;
     this.scorePlum(entity, origin, score);
     const persistent = client.ps.persistant;
@@ -130,7 +176,8 @@ export class DeathRuntime {
   }
 
   tossClientItems(entity: GameEntity): void {
-    const client = clientOf(entity), context = this.dropContext();
+    const client = clientOf(entity),
+      context = this.dropContext();
     let weapon = entity.s.weapon;
     if (weapon === Weapon.WP_MACHINEGUN || weapon === Weapon.WP_GRAPPLING_HOOK) {
       if (client.ps.weaponState === WeaponState.WEAPON_DROPPING) weapon = client.pers.cmd.weapon;
@@ -155,7 +202,8 @@ export class DeathRuntime {
   tossClientCubes(entity: GameEntity): void {
     const host = this.host;
     if (host.product !== "missionpack") throw new Error("TossClientCubes requires missionpack");
-    const client = clientOf(entity), time = host.frame().time;
+    const client = clientOf(entity),
+      time = host.frame().time;
     client.ps.generic1 = 0;
     if (!host.pool.entitiesFree()) return;
     const item = findItem(host.product, client.sess.sessionTeam === Team.TEAM_RED ? "Red Cube" : "Blue Cube");
@@ -178,7 +226,7 @@ export class DeathRuntime {
   lookAtKiller(self: GameEntity, inflictor: DamageInflictor | null, attacker: DamageParticipant | null): void {
     const target = attacker !== null && attacker !== self ? attacker : inflictor !== null && inflictor !== self ? inflictor : null;
     const origin = target === null ? null : "kind" in target ? target.origin() : target.s.pos.base;
-    const fallback = origin === null && inflictor !== null && inflictor !== self ? "kind" in inflictor ? inflictor.origin() : inflictor.s.pos.base : origin;
+    const fallback = origin === null && inflictor !== null && inflictor !== self ? ("kind" in inflictor ? inflictor.origin() : inflictor.s.pos.base) : origin;
     const yaw = fallback === null ? self.s.angles.y : vectorToAngles(sub3(fallback, self.s.pos.base)).y;
     // STAT_DEAD_YAW is an int, with the QVM CVFI conversion before storage.
     const integer = yaw >= -2147483648 && yaw < 2147483648 ? Math.trunc(yaw) : -2147483648;
@@ -190,7 +238,8 @@ export class DeathRuntime {
       for (let index = 0; index < MAX_GENTITIES; index++) {
         const timer = this.host.pool.at(index);
         if (!timer.inuse || timer.activator !== self || timer.classname !== "kamikaze timer") continue;
-        this.host.pool.free(timer); break;
+        this.host.pool.free(timer);
+        break;
       }
     }
     this.host.pool.addEvent(self, EntityEvent.EV_GIB_PLAYER, killer);
@@ -201,7 +250,10 @@ export class DeathRuntime {
 
   readonly bodyDie: EntityDie = self => {
     if (self.health > GIB_HEALTH) return;
-    if (!this.host.frame().blood) { self.health = GIB_HEALTH + 1; return; }
+    if (!this.host.frame().blood) {
+      self.health = GIB_HEALTH + 1;
+      return;
+    }
     this.gibEntity(self, 0);
   };
 
@@ -230,11 +282,13 @@ export class DeathRuntime {
   private checkAlmostCapture(self: GameEntity, attacker: DamageParticipant | null): void {
     const client = clientOf(self);
     if (!(client.ps.powerups.get(Powerup.PW_REDFLAG) || client.ps.powerups.get(Powerup.PW_BLUEFLAG) || client.ps.powerups.get(Powerup.PW_NEUTRALFLAG))) return;
-    const blue = client.sess.sessionTeam === Team.TEAM_BLUE, ctf = this.host.frame().gameType === GameType.GT_CTF;
+    const blue = client.sess.sessionTeam === Team.TEAM_BLUE,
+      ctf = this.host.frame().gameType === GameType.GT_CTF;
     const classname = (ctf ? blue : !blue) ? "team_CTF_blueflag" : "team_CTF_redflag";
     let goal: GameEntity | null = null;
-    do { goal = findEntity(this.host.pool, goal, "classname", classname); }
-    while (goal !== null && (goal.flags & GameFlags.DROPPED_ITEM));
+    do {
+      goal = findEntity(this.host.pool, goal, "classname", classname);
+    } while (goal !== null && goal.flags & GameFlags.DROPPED_ITEM);
     if (goal !== null && !(goal.r.svFlags & ServerEntityFlags.NOCLIENT) && length3(sub3(client.ps.origin, goal.s.origin)) < 200) {
       this.almostReward(self, attacker);
     }
@@ -256,14 +310,20 @@ export class DeathRuntime {
     return null;
   }
 
-  readonly playerDie = (self: GameEntity, inflictor: DamageInflictor | null, attacker: DamageParticipant | null,
-    _damage: number, meansOfDeath: number): void => {
-    const client = clientOf(self), frame = this.host.frame();
+  readonly playerDie = (
+    self: GameEntity,
+    inflictor: DamageInflictor | null,
+    attacker: DamageParticipant | null,
+    _damage: number,
+    meansOfDeath: number,
+  ): void => {
+    const client = clientOf(self),
+      frame = this.host.frame();
     if (client.ps.pmType === MoveType.PM_DEAD || frame.intermissionTime !== 0) return;
     this.checkAlmostCapture(self, attacker);
     this.checkAlmostScored(self, attacker);
     if (client.hook !== null) this.host.missiles.hookFree(client.hook);
-    if (this.host.product === "missionpack" && (client.ps.eFlags & EF_TICKING) && self.activator !== null) {
+    if (this.host.product === "missionpack" && client.ps.eFlags & EF_TICKING && self.activator !== null) {
       client.ps.eFlags &= ~EF_TICKING;
       self.activator.think = this.host.pool.callbacks.think.resolve("q3.base.game.death.playerDie.think");
       self.activator.nextthink = frame.time;
@@ -272,9 +332,15 @@ export class DeathRuntime {
     self.enemy = attacker instanceof GameEntity ? attacker : null;
     let killer = attacker instanceof GameEntity ? attacker.s.number : ENTITYNUM_WORLD;
     let killerName = attacker === null ? "<world>" : attacker instanceof GameEntity && attacker.client !== null ? attacker.client.pers.netname : "<non-client>";
-    if (killer < 0 || killer >= MAX_CLIENTS) { killer = ENTITYNUM_WORLD; killerName = "<world>"; }
-    this.host.pool.rankings.playerDie(self.slot, killer,
-      this.host.product === "missionpack" && meansOfDeath >= 23 ? (meansOfDeath === 28 ? 23 : 0) : meansOfDeath);
+    if (killer < 0 || killer >= MAX_CLIENTS) {
+      killer = ENTITYNUM_WORLD;
+      killerName = "<world>";
+    }
+    this.host.pool.rankings.playerDie(
+      self.slot,
+      killer,
+      this.host.product === "missionpack" && meansOfDeath >= 23 ? (meansOfDeath === 28 ? 23 : 0) : meansOfDeath,
+    );
     const obituary = this.#modNames[meansOfDeath] ?? "<bad obituary>";
     this.host.log(gameFormat("Kill: %i %i %i: %s killed %s by %s\n", [killer, self.s.number, meansOfDeath, killerName, client.pers.netname, obituary]));
     const obituaryEvent = this.host.pool.tempEntity(self.r.currentOrigin, EntityEvent.EV_OBITUARY);
@@ -291,7 +357,10 @@ export class DeathRuntime {
       else {
         this.addScore(attacker, self.r.currentOrigin, 1);
         if (meansOfDeath === MOD_GAUNTLET) {
-          killerClient.ps.persistant.set(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT, killerClient.ps.persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT) + 1);
+          killerClient.ps.persistant.set(
+            PersistentIndex.PERS_GAUNTLET_FRAG_COUNT,
+            killerClient.ps.persistant.get(PersistentIndex.PERS_GAUNTLET_FRAG_COUNT) + 1,
+          );
           killerClient.ps.eFlags = (killerClient.ps.eFlags & ~AWARD_MASK) | 0x40;
           killerClient.rewardTime = (frame.time + 2000) | 0;
           client.ps.persistant.set(PersistentIndex.PERS_PLAYEREVENTS, client.ps.persistant.get(PersistentIndex.PERS_PLAYEREVENTS) ^ 2);
@@ -308,7 +377,10 @@ export class DeathRuntime {
     if (attacker === null || attacker instanceof GameEntity) this.host.teamFragBonuses(self, attacker);
     if (meansOfDeath === MOD_SUICIDE) {
       const flag = this.carriedFlag(self);
-      if (flag !== null) { this.host.returnFlag(flag.team); client.ps.powerups.set(flag.powerup, 0); }
+      if (flag !== null) {
+        this.host.returnFlag(flag.team);
+        client.ps.powerups.set(flag.powerup, 0);
+      }
     }
     const contents = this.host.world.pointContents(self.r.currentOrigin, -1);
     if (!(contents & CONTENTS_NODROP)) this.tossClientItems(self);
@@ -323,8 +395,12 @@ export class DeathRuntime {
     this.host.sendScoreboard(self);
     for (let index = 0; index < this.host.pool.maxClients; index++) {
       const follower = this.host.pool.clientAt(index);
-      if (follower.pers.connected === ConnectionState.CONNECTED && follower.sess.sessionTeam === Team.TEAM_SPECTATOR &&
-        follower.sess.spectatorClient === self.s.number) this.host.sendScoreboard(this.host.pool.at(index));
+      if (
+        follower.pers.connected === ConnectionState.CONNECTED &&
+        follower.sess.sessionTeam === Team.TEAM_SPECTATOR &&
+        follower.sess.spectatorClient === self.s.number
+      )
+        this.host.sendScoreboard(this.host.pool.at(index));
     }
     if (this.host.characterDeath === "selected") {
       self.takedamage = true;
@@ -366,15 +442,23 @@ export class DeathRuntime {
       client.ps.torsoAnim = ((client.ps.torsoAnim & 128) ^ 128) | animation;
       this.host.pool.addEvent(self, event, killer);
       self.die = this.host.pool.callbacks.die.resolve("q3.death.body");
-      if (this.host.product === "missionpack" && (self.s.eFlags & EF_KAMIKAZE)) this.kamikazeDeathTimer(self);
+      if (this.host.product === "missionpack" && self.s.eFlags & EF_KAMIKAZE) this.kamikazeDeathTimer(self);
     }
     this.host.world.link(self);
   };
 
   bindSaveCallbacks(): void {
-    this.host.pool.callbacks.think.intern("q3.base.game.death.tossClientCubes.think", self => { this.host.pool.free(self); });
-    this.host.pool.callbacks.think.intern("q3.base.game.death.kamikazeDeathTimer.think", entity => { if (this.host.product !== "missionpack") throw new Error("Kamikaze callback requires missionpack"); this.host.startKamikaze(entity); this.host.pool.free(entity); });
-    this.host.pool.callbacks.think.intern("q3.base.game.death.playerDie.think", entity => { this.host.pool.free(entity); });
+    this.host.pool.callbacks.think.intern("q3.base.game.death.tossClientCubes.think", self => {
+      this.host.pool.free(self);
+    });
+    this.host.pool.callbacks.think.intern("q3.base.game.death.kamikazeDeathTimer.think", entity => {
+      if (this.host.product !== "missionpack") throw new Error("Kamikaze callback requires missionpack");
+      this.host.startKamikaze(entity);
+      this.host.pool.free(entity);
+    });
+    this.host.pool.callbacks.think.intern("q3.base.game.death.playerDie.think", entity => {
+      this.host.pool.free(entity);
+    });
     this.host.pool.callbacks.die.register("q3.death.body", this.bodyDie);
     this.host.pool.callbacks.die.register("q3.death.player", this.playerDie);
   }

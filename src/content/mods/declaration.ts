@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ResolvedGameplayMod } from "../../contracts/mods.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import { readQuakeCModDeclaration } from "./callbacks.ts";
@@ -6,9 +7,12 @@ import { readNativeModDeclaration } from "./native-callbacks.ts";
 
 export function readGameplayModDeclaration(reader: SaveReader): ResolvedGameplayMod["declaration"] {
   switch (reader.field("runtime").choice("quakec", "qvm", "native")) {
-    case "quakec": return readQuakeCModDeclaration(reader);
-    case "qvm": return readQvmModDeclaration(reader);
-    case "native": return readNativeModDeclaration(reader);
+    case "quakec":
+      return readQuakeCModDeclaration(reader);
+    case "qvm":
+      return readQvmModDeclaration(reader);
+    case "native":
+      return readNativeModDeclaration(reader);
   }
 }
 

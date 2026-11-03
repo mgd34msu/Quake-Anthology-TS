@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Shader parsing and texture evaluation translated from renderer/tr_shader.c,
  * tr_shade_calc.c and tr_init.c in Quake III Arena.
@@ -127,9 +128,7 @@ export interface RegisteredShaderVideo {
   readonly image: RegisteredImage;
 }
 
-export type RegisteredShaderStage =
-  | { readonly kind: "loaded"; readonly tmu: 0 | 1; readonly binding: FinishedStageBinding }
-  | { readonly kind: "missing" };
+export type RegisteredShaderStage = { readonly kind: "loaded"; readonly tmu: 0 | 1; readonly binding: FinishedStageBinding } | { readonly kind: "missing" };
 
 export interface RegisteredSun {
   readonly light: Vec3;
@@ -159,9 +158,7 @@ export type AlphaGenerator =
   | { readonly kind: "wave"; readonly wave: Waveform }
   | { readonly kind: "portal"; readonly range: number };
 
-export type TexCoordGenerator =
-  | { readonly kind: "texture" | "lightmap" | "environment" }
-  | { readonly kind: "vector"; readonly s: Vec3; readonly t: Vec3 };
+export type TexCoordGenerator = { readonly kind: "texture" | "lightmap" | "environment" } | { readonly kind: "vector"; readonly s: Vec3; readonly t: Vec3 };
 
 export type TexCoordModifier =
   | { readonly kind: "scale" | "scroll"; readonly amount: Vec2 }
@@ -233,7 +230,13 @@ export interface ShaderDiagnostic {
 }
 
 export class ShaderParseError extends Error {
-  constructor(readonly source: string, readonly line: number, readonly column: number, message: string, readonly reason: "source-rejection" | "validation" = "source-rejection") {
+  constructor(
+    readonly source: string,
+    readonly line: number,
+    readonly column: number,
+    message: string,
+    readonly reason: "source-rejection" | "validation" = "source-rejection",
+  ) {
     super(`${source}:${line}:${column}: ${message}`);
     this.name = "ShaderParseError";
   }
@@ -260,10 +263,8 @@ interface RegisteredExplicitShaderFields {
   readonly sky: RegisteredSky | null;
 }
 
-export type RegisteredExplicitShader = RegisteredExplicitShaderFields & (
-  | { readonly kind: "defined" }
-  | { readonly kind: "defaulted"; readonly failure: ShaderRegistrationFailure }
-);
+export type RegisteredExplicitShader = RegisteredExplicitShaderFields &
+  ({ readonly kind: "defined" } | { readonly kind: "defaulted"; readonly failure: ShaderRegistrationFailure });
 
 export abstract class ShaderRegistrationProgram {
   protected constructor() {}
@@ -327,57 +328,98 @@ function normalizeImageName(name: string): string {
 function sourceWave(wave: Waveform): SourceWaveStorage {
   let func: SourceWaveFunction;
   switch (wave.kind) {
-    case "none": func = SourceWaveFunction.None; break;
-    case "sin": func = SourceWaveFunction.Sin; break;
-    case "square": func = SourceWaveFunction.Square; break;
-    case "triangle": func = SourceWaveFunction.Triangle; break;
-    case "sawtooth": func = SourceWaveFunction.Sawtooth; break;
-    case "inversesawtooth": func = SourceWaveFunction.InverseSawtooth; break;
-    case "noise": func = SourceWaveFunction.Noise; break;
+    case "none":
+      func = SourceWaveFunction.None;
+      break;
+    case "sin":
+      func = SourceWaveFunction.Sin;
+      break;
+    case "square":
+      func = SourceWaveFunction.Square;
+      break;
+    case "triangle":
+      func = SourceWaveFunction.Triangle;
+      break;
+    case "sawtooth":
+      func = SourceWaveFunction.Sawtooth;
+      break;
+    case "inversesawtooth":
+      func = SourceWaveFunction.InverseSawtooth;
+      break;
+    case "noise":
+      func = SourceWaveFunction.Noise;
+      break;
   }
   return { func, base: wave.base, amplitude: wave.amplitude, phase: wave.phase, frequency: wave.frequency };
 }
 
 function sourceColorGenerator(generator: ColorGenerator): SourceColorGenerator {
   switch (generator.kind) {
-    case "identitylighting": return SourceColorGenerator.IdentityLighting;
-    case "identity": return SourceColorGenerator.Identity;
-    case "entity": return SourceColorGenerator.Entity;
-    case "oneminusentity": return SourceColorGenerator.OneMinusEntity;
-    case "exactvertex": return SourceColorGenerator.ExactVertex;
-    case "vertex": return SourceColorGenerator.Vertex;
-    case "oneminusvertex": return SourceColorGenerator.OneMinusVertex;
-    case "wave": return SourceColorGenerator.Waveform;
-    case "lightingdiffuse": return SourceColorGenerator.LightingDiffuse;
-    case "const": return SourceColorGenerator.Const;
+    case "identitylighting":
+      return SourceColorGenerator.IdentityLighting;
+    case "identity":
+      return SourceColorGenerator.Identity;
+    case "entity":
+      return SourceColorGenerator.Entity;
+    case "oneminusentity":
+      return SourceColorGenerator.OneMinusEntity;
+    case "exactvertex":
+      return SourceColorGenerator.ExactVertex;
+    case "vertex":
+      return SourceColorGenerator.Vertex;
+    case "oneminusvertex":
+      return SourceColorGenerator.OneMinusVertex;
+    case "wave":
+      return SourceColorGenerator.Waveform;
+    case "lightingdiffuse":
+      return SourceColorGenerator.LightingDiffuse;
+    case "const":
+      return SourceColorGenerator.Const;
   }
 }
 
 function sourceAlphaGenerator(generator: AlphaGenerator): SourceAlphaGenerator {
   switch (generator.kind) {
-    case "identity": return SourceAlphaGenerator.Identity;
-    case "entity": return SourceAlphaGenerator.Entity;
-    case "oneminusentity": return SourceAlphaGenerator.OneMinusEntity;
-    case "vertex": return SourceAlphaGenerator.Vertex;
-    case "oneminusvertex": return SourceAlphaGenerator.OneMinusVertex;
-    case "lightingspecular": return SourceAlphaGenerator.LightingSpecular;
-    case "wave": return SourceAlphaGenerator.Waveform;
-    case "portal": return SourceAlphaGenerator.Portal;
-    case "const": return SourceAlphaGenerator.Const;
+    case "identity":
+      return SourceAlphaGenerator.Identity;
+    case "entity":
+      return SourceAlphaGenerator.Entity;
+    case "oneminusentity":
+      return SourceAlphaGenerator.OneMinusEntity;
+    case "vertex":
+      return SourceAlphaGenerator.Vertex;
+    case "oneminusvertex":
+      return SourceAlphaGenerator.OneMinusVertex;
+    case "lightingspecular":
+      return SourceAlphaGenerator.LightingSpecular;
+    case "wave":
+      return SourceAlphaGenerator.Waveform;
+    case "portal":
+      return SourceAlphaGenerator.Portal;
+    case "const":
+      return SourceAlphaGenerator.Const;
   }
 }
 
 function sourceTexCoordGenerator(generator: TexCoordGenerator): SourceTexCoordGenerator {
   switch (generator.kind) {
-    case "texture": return SourceTexCoordGenerator.Texture;
-    case "lightmap": return SourceTexCoordGenerator.Lightmap;
-    case "environment": return SourceTexCoordGenerator.EnvironmentMapped;
-    case "vector": return SourceTexCoordGenerator.Vector;
+    case "texture":
+      return SourceTexCoordGenerator.Texture;
+    case "lightmap":
+      return SourceTexCoordGenerator.Lightmap;
+    case "environment":
+      return SourceTexCoordGenerator.EnvironmentMapped;
+    case "vector":
+      return SourceTexCoordGenerator.Vector;
   }
 }
 
-interface ShaderStageSlot { readonly index: number }
-interface ShaderAnimationSlot { readonly index: number }
+interface ShaderStageSlot {
+  readonly index: number;
+}
+interface ShaderAnimationSlot {
+  readonly index: number;
+}
 
 type StageImageTarget =
   | { readonly kind: "primary"; readonly stage: ShaderStageSlot }
@@ -433,8 +475,7 @@ function checkedAnimationSlot(index: number): ShaderAnimationSlot {
 }
 
 function emptyRegisteredBundle(): WorkingRegisteredBundle {
-  return { images: Array.from({ length: 8 }, () => null), animationCount: 0, animationFrequency: 0,
-    videoEnabled: false, video: null };
+  return { images: Array.from({ length: 8 }, () => null), animationCount: 0, animationFrequency: 0, videoEnabled: false, video: null };
 }
 
 function emptyRegisteredSkyBox(): WorkingRegisteredSkyBox {
@@ -449,12 +490,24 @@ function registeredBundleAt(bundles: readonly WorkingRegisteredBundle[], stage: 
 
 function setSkyImage(box: WorkingRegisteredSkyBox, face: SourceSkyFaceName, image: FinishedStageImage): void {
   switch (face) {
-    case "rt": box.rt = image; break;
-    case "bk": box.bk = image; break;
-    case "lf": box.lf = image; break;
-    case "ft": box.ft = image; break;
-    case "up": box.up = image; break;
-    case "dn": box.dn = image; break;
+    case "rt":
+      box.rt = image;
+      break;
+    case "bk":
+      box.bk = image;
+      break;
+    case "lf":
+      box.lf = image;
+      break;
+    case "ft":
+      box.ft = image;
+      break;
+    case "up":
+      box.up = image;
+      break;
+    case "dn":
+      box.dn = image;
+      break;
   }
 }
 
@@ -467,22 +520,28 @@ function registeredSkyBox(box: WorkingRegisteredSkyBox): RegisteredSkyBox | null
   return {
     image(face: SourceSkyFaceName): FinishedStageImage {
       switch (face) {
-        case "rt": return rt;
-        case "bk": return bk;
-        case "lf": return lf;
-        case "ft": return ft;
-        case "up": return up;
-        case "dn": return dn;
+        case "rt":
+          return rt;
+        case "bk":
+          return bk;
+        case "lf":
+          return lf;
+        case "ft":
+          return ft;
+        case "up":
+          return up;
+        case "dn":
+          return dn;
       }
     },
   };
 }
 
 function registeredSky(sky: WorkingRegisteredSky): RegisteredSky | null {
-  const hasOuter = sky.outer.rt !== null || sky.outer.bk !== null || sky.outer.lf !== null
-    || sky.outer.ft !== null || sky.outer.up !== null || sky.outer.dn !== null;
-  const hasInner = sky.inner.rt !== null || sky.inner.bk !== null || sky.inner.lf !== null
-    || sky.inner.ft !== null || sky.inner.up !== null || sky.inner.dn !== null;
+  const hasOuter =
+    sky.outer.rt !== null || sky.outer.bk !== null || sky.outer.lf !== null || sky.outer.ft !== null || sky.outer.up !== null || sky.outer.dn !== null;
+  const hasInner =
+    sky.inner.rt !== null || sky.inner.bk !== null || sky.inner.lf !== null || sky.inner.ft !== null || sky.inner.up !== null || sky.inner.dn !== null;
   if (!hasOuter && !hasInner && sky.cloudHeight === 0) return null;
   return { outer: registeredSkyBox(sky.outer), inner: registeredSkyBox(sky.inner), cloudHeight: sky.cloudHeight };
 }
@@ -492,8 +551,7 @@ function registeredStage(bundle: WorkingRegisteredBundle): RegisteredShaderStage
   if (primary === undefined || primary === null) return { kind: "missing" };
   if (bundle.videoEnabled) {
     if (bundle.video === null) return { kind: "loaded", tmu: primary.tmu, binding: { kind: "retain-current-texture" } };
-    return { kind: "loaded", tmu: primary.tmu,
-      binding: { kind: "video", source: bundle.video.source } };
+    return { kind: "loaded", tmu: primary.tmu, binding: { kind: "video", source: bundle.video.source } };
   }
   if (bundle.animationCount > 0) {
     const first = bundle.images[0];
@@ -504,8 +562,11 @@ function registeredStage(bundle: WorkingRegisteredBundle): RegisteredShaderStage
       if (frame === undefined || frame === null) throw new Error("source animation count includes an unregistered frame");
       rest.push(frame.frame);
     }
-    return { kind: "loaded", tmu: primary.tmu,
-      binding: { kind: "images", playback: { kind: "animation", frequency: bundle.animationFrequency, frames: [first.frame, ...rest] } } };
+    return {
+      kind: "loaded",
+      tmu: primary.tmu,
+      binding: { kind: "images", playback: { kind: "animation", frequency: bundle.animationFrequency, frames: [first.frame, ...rest] } },
+    };
   }
   return { kind: "loaded", tmu: primary.tmu, binding: { kind: "images", playback: { kind: "single", image: primary.frame } } };
 }
@@ -521,7 +582,12 @@ function registeredStages(definition: ShaderDefinition, bundles: readonly Workin
 }
 
 class CompiledShaderRegistrationProgram extends ShaderRegistrationProgram {
-  constructor(private readonly instructions: readonly RegistrationInstruction[], private readonly terminal: RegistrationTerminal) { super(); }
+  constructor(
+    private readonly instructions: readonly RegistrationInstruction[],
+    private readonly terminal: RegistrationTerminal,
+  ) {
+    super();
+  }
 
   private *parse(): Generator<RegistrationInstruction, RegistrationTerminal, void> {
     yield* this.instructions;
@@ -536,32 +602,51 @@ class CompiledShaderRegistrationProgram extends ShaderRegistrationProgram {
 /** FindShaderInShaderText returns the cursor after the matched name. The body is
  * consumed only when R_FindShader reaches ParseShader. */
 export class SourceShaderRegistrationProgram extends ShaderRegistrationProgram {
-  constructor(private readonly cursor: CommonParseCursor, private readonly offset: number | null,
-    private readonly source: string, private readonly name: string) { super(); }
+  constructor(
+    private readonly cursor: CommonParseCursor,
+    private readonly offset: number | null,
+    private readonly source: string,
+    private readonly name: string,
+  ) {
+    super();
+  }
 
   register(host: ShaderRegistrationHost): Promise<RegisteredExplicitShader> {
-    return registerShader(new ShaderParser(this.cursor.source, this.source, this.name,
-      { cursor: this.cursor, offset: this.offset }, message => host.printWarning(message)).definition(this.name), host);
+    return registerShader(
+      new ShaderParser(this.cursor.source, this.source, this.name, { cursor: this.cursor, offset: this.offset }, message =>
+        host.printWarning(message),
+      ).definition(this.name),
+      host,
+    );
   }
 }
 
-async function registerShader(parser: Generator<RegistrationInstruction, RegistrationTerminal, void>,
-  host: ShaderRegistrationHost): Promise<RegisteredExplicitShader> {
+async function registerShader(
+  parser: Generator<RegistrationInstruction, RegistrationTerminal, void>,
+  host: ShaderRegistrationHost,
+): Promise<RegisteredExplicitShader> {
   const bundles = Array.from({ length: 8 }, emptyRegisteredBundle);
   const sky: WorkingRegisteredSky = { outer: emptyRegisteredSkyBox(), inner: emptyRegisteredSkyBox(), cloudHeight: 0 };
   let step = parser.next();
   while (!step.done) {
     const instruction = step.value;
     switch (instruction.kind) {
-      case "warning": host.printWarning(instruction.message); break;
+      case "warning":
+        host.printWarning(instruction.message);
+        break;
       case "find-stage-image": {
         const image = await host.findImage(instruction.request);
         const bundle = registeredBundleAt(bundles, instruction.target.stage);
         bundle.images[instruction.target.kind === "primary" ? 0 : instruction.target.frame.index] = image;
         if (image === null) {
           host.printWarning(`WARNING: R_FindImageFile could not find '${instruction.request.name}' in shader '${instruction.missing.name}'\n`);
-          return { kind: "defaulted", failure: { kind: "missing-image", request: instruction.request }, definition: instruction.missing,
-            stages: registeredStages(instruction.missing, bundles), sky: registeredSky(sky) };
+          return {
+            kind: "defaulted",
+            failure: { kind: "missing-image", request: instruction.request },
+            definition: instruction.missing,
+            stages: registeredStages(instruction.missing, bundles),
+            sky: registeredSky(sky),
+          };
         }
         if (instruction.target.kind === "animation") bundle.animationCount = instruction.target.countAfterSuccess;
         break;
@@ -579,7 +664,10 @@ async function registerShader(parser: Generator<RegistrationInstruction, Registr
         const video = await host.playShaderCinematic(instruction.name);
         const bundle = registeredBundleAt(bundles, instruction.stage);
         bundle.video = video;
-        if (video !== null) { bundle.videoEnabled = true; bundle.images[0] = video.image; }
+        if (video !== null) {
+          bundle.videoEnabled = true;
+          bundle.images[0] = video.image;
+        }
         break;
       }
       case "find-sky-image": {
@@ -591,18 +679,25 @@ async function registerShader(parser: Generator<RegistrationInstruction, Registr
         sky.cloudHeight = instruction.height;
         host.initializeSkyTexCoords(instruction.height);
         break;
-      case "apply-sun": host.applySun(instruction.value); break;
-      case "drop": throw new CommonError("drop", instruction.message);
+      case "apply-sun":
+        host.applySun(instruction.value);
+        break;
+      case "drop":
+        throw new CommonError("drop", instruction.message);
     }
     step = parser.next();
   }
   const terminal = step.value;
   if (terminal.kind === "rejected") {
-    return { kind: "defaulted", failure: { kind: "source-text", error: terminal.error }, definition: terminal.partial,
-      stages: registeredStages(terminal.partial, bundles), sky: registeredSky(sky) };
+    return {
+      kind: "defaulted",
+      failure: { kind: "source-text", error: terminal.error },
+      definition: terminal.partial,
+      stages: registeredStages(terminal.partial, bundles),
+      sky: registeredSky(sky),
+    };
   }
-  return { kind: "defined", definition: terminal.definition, stages: registeredStages(terminal.definition, bundles),
-    sky: registeredSky(sky) };
+  return { kind: "defined", definition: terminal.definition, stages: registeredStages(terminal.definition, bundles), sky: registeredSky(sky) };
 }
 
 class ShaderParser {
@@ -616,9 +711,13 @@ class ShaderParser {
   private warningInstructions: RegistrationInstruction[] | null = null;
   private location: Token = { value: "", line: 1, column: 1, quoted: false };
 
-  constructor(text: string, private readonly source: string, private readonly registrationName: string | null = null,
+  constructor(
+    text: string,
+    private readonly source: string,
+    private readonly registrationName: string | null = null,
     private readonly input: { readonly cursor: CommonParseCursor; offset: number | null } | null = null,
-    private readonly printWarning: (message: string) => void = () => {}) {
+    private readonly printWarning: (message: string) => void = () => {},
+  ) {
     this.tokens = new Tokenizer(text, source);
   }
 
@@ -655,7 +754,10 @@ class ShaderParser {
     this.printWarning(message);
   }
 
-  private reject(message: string): never { this.warn(message); this.fail(message); }
+  private reject(message: string): never {
+    this.warn(message);
+    this.fail(message);
+  }
 
   private stageParameter(keyword: string): string {
     const token = this.next(false);
@@ -748,7 +850,7 @@ class ShaderParser {
       this.warn(`WARNING: 'skyParms' missing parameter in shader '${this.shaderName}'\n`);
       return previous;
     }
-    const outerName = outerToken.value === "-" ? previous?.outerBox ?? null : normalizeImageName(outerToken.value);
+    const outerName = outerToken.value === "-" ? (previous?.outerBox ?? null) : normalizeImageName(outerToken.value);
     if (outerToken.value !== "-") yield* this.skyImages("outer", outerToken.value, "clamp");
 
     const heightToken = this.next(false);
@@ -765,17 +867,15 @@ class ShaderParser {
       this.warn(`WARNING: 'skyParms' missing parameter in shader '${this.shaderName}'\n`);
       return previous === null ? null : { ...previous, outerBox: outerName, cloudHeight };
     }
-    const innerName = innerToken.value === "-" ? previous?.innerBox ?? null : normalizeImageName(innerToken.value);
+    const innerName = innerToken.value === "-" ? (previous?.innerBox ?? null) : normalizeImageName(innerToken.value);
     if (innerToken.value !== "-") yield* this.skyImages("inner", innerToken.value, "repeat");
     return { outerBox: outerName, cloudHeight, innerBox: innerName };
   }
 
-  private *skyImages(box: "outer" | "inner", base: string,
-    wrap: SourceImageRequest["wrap"]): Generator<RegistrationInstruction, void, void> {
+  private *skyImages(box: "outer" | "inner", base: string, wrap: SourceImageRequest["wrap"]): Generator<RegistrationInstruction, void, void> {
     const faces: readonly SourceSkyFaceName[] = ["rt", "bk", "lf", "ft", "up", "dn"];
     for (const face of faces) {
-      yield { kind: "find-sky-image", box, face,
-        request: { name: `${base}_${face}.tga`, mipmap: true, allowPicmip: true, wrap } };
+      yield { kind: "find-sky-image", box, face, request: { name: `${base}_${face}.tga`, mipmap: true, allowPicmip: true, wrap } };
     }
   }
 
@@ -789,12 +889,20 @@ class ShaderParser {
     const name = token.value.toLowerCase();
     let kind: Waveform["kind"];
     switch (name) {
-      case "sin": case "square": case "triangle": case "sawtooth": case "inversesawtooth": case "noise": kind = name; break;
-      default: this.warn(`WARNING: invalid genfunc name '${token.value}' in shader '${this.shaderName}'\n`); kind = "sin"; break;
+      case "sin":
+      case "square":
+      case "triangle":
+      case "sawtooth":
+      case "inversesawtooth":
+      case "noise":
+        kind = name;
+        break;
+      default:
+        this.warn(`WARNING: invalid genfunc name '${token.value}' in shader '${this.shaderName}'\n`);
+        kind = "sin";
+        break;
     }
-    let result: Waveform = previous === null
-      ? { kind, base: 0, amplitude: 0, phase: 0, frequency: 0 }
-      : { ...previous, kind };
+    let result: Waveform = previous === null ? { kind, base: 0, amplitude: 0, phase: 0, frequency: 0 } : { ...previous, kind };
     const fields: readonly ("base" | "amplitude" | "phase" | "frequency")[] = ["base", "amplitude", "phase", "frequency"];
     for (const field of fields) {
       const value = this.next(false);
@@ -817,11 +925,22 @@ class ShaderParser {
     }
     const kind = token.value.toLowerCase();
     switch (kind) {
-      case "identity": case "identitylighting": case "entity": case "oneminusentity": case "vertex":
-      case "exactvertex": case "lightingdiffuse": case "oneminusvertex": return { kind };
-      case "const": return { kind, color: this.sourceVector({ x: 0, y: 0, z: 0 }).value };
-      case "wave": return { kind, wave: this.wave(previousWave) };
-      default: this.warn(`WARNING: unknown rgbGen parameter '${token.value}' in shader '${this.shaderName}'\n`); return null;
+      case "identity":
+      case "identitylighting":
+      case "entity":
+      case "oneminusentity":
+      case "vertex":
+      case "exactvertex":
+      case "lightingdiffuse":
+      case "oneminusvertex":
+        return { kind };
+      case "const":
+        return { kind, color: this.sourceVector({ x: 0, y: 0, z: 0 }).value };
+      case "wave":
+        return { kind, wave: this.wave(previousWave) };
+      default:
+        this.warn(`WARNING: unknown rgbGen parameter '${token.value}' in shader '${this.shaderName}'\n`);
+        return null;
     }
   }
 
@@ -833,14 +952,28 @@ class ShaderParser {
     }
     const kind = token.value.toLowerCase();
     switch (kind) {
-      case "identity": case "entity": case "oneminusentity": case "vertex": case "lightingspecular": case "oneminusvertex": return { kind };
+      case "identity":
+      case "entity":
+      case "oneminusentity":
+      case "vertex":
+      case "lightingspecular":
+      case "oneminusvertex":
+        return { kind };
       case "const": {
-        const alpha = nativeAtof(this.sourceLineValue() ?? ""), integer = Math.trunc(255 * alpha);
+        const alpha = nativeAtof(this.sourceLineValue() ?? ""),
+          integer = Math.trunc(255 * alpha);
         if (!Number.isFinite(integer) || integer < -2147483648 || integer > 2147483647)
-          throw new ShaderParseError(this.source, this.location.line, this.location.column, "alphaGen const reaches undefined source byte conversion", "validation");
+          throw new ShaderParseError(
+            this.source,
+            this.location.line,
+            this.location.column,
+            "alphaGen const reaches undefined source byte conversion",
+            "validation",
+          );
         return { kind, alpha };
       }
-      case "wave": return { kind, wave: this.wave(previousWave) };
+      case "wave":
+        return { kind, wave: this.wave(previousWave) };
       case "portal": {
         const token = this.next(false);
         if (token === undefined) {
@@ -853,7 +986,9 @@ class ShaderParser {
         this.portalRange = range;
         return { kind, range };
       }
-      default: this.warn(`WARNING: unknown alphaGen parameter '${token.value}' in shader '${this.shaderName}'\n`); return null;
+      default:
+        this.warn(`WARNING: unknown alphaGen parameter '${token.value}' in shader '${this.shaderName}'\n`);
+        return null;
     }
   }
 
@@ -865,31 +1000,60 @@ class ShaderParser {
     }
     const kind = token.value.toLowerCase();
     switch (kind) {
-      case "environment": case "lightmap": case "texture": return { kind };
-      case "base": return { kind: "texture" };
-      case "vector": return { kind, s: this.sourceVector(vectors.s).value, t: this.sourceVector(vectors.t).value };
-      default: this.warn(`WARNING: unknown texgen parm in shader '${this.shaderName}'\n`); return null;
+      case "environment":
+      case "lightmap":
+      case "texture":
+        return { kind };
+      case "base":
+        return { kind: "texture" };
+      case "vector":
+        return { kind, s: this.sourceVector(vectors.s).value, t: this.sourceVector(vectors.t).value };
+      default:
+        this.warn(`WARNING: unknown texgen parm in shader '${this.shaderName}'\n`);
+        return null;
     }
   }
 
   private tcMod(): TexCoordModifier {
-    const token = this.next(false)?.value ?? "", kind = token.toLowerCase();
+    const token = this.next(false)?.value ?? "",
+      kind = token.toLowerCase();
     let count = 0;
     const number = (): number => {
       const token = this.next(false);
-      if (token !== undefined) { count++; return this.sourceAtof(token.value); }
-      const label = kind === "scale" ? "scale parms" : kind === "scroll" ? "scale scroll parms"
-        : kind === "transform" ? "transform parms" : kind === "turb" ? count === 0 ? "tcMod turb parms" : "tcMod turb" : "tcMod rotate parms";
+      if (token !== undefined) {
+        count++;
+        return this.sourceAtof(token.value);
+      }
+      const label =
+        kind === "scale"
+          ? "scale parms"
+          : kind === "scroll"
+            ? "scale scroll parms"
+            : kind === "transform"
+              ? "transform parms"
+              : kind === "turb"
+                ? count === 0
+                  ? "tcMod turb parms"
+                  : "tcMod turb"
+                : "tcMod rotate parms";
       const message = `WARNING: missing ${label} in shader '${this.shaderName}'\n`;
-      this.warn(message); this.fail(message);
+      this.warn(message);
+      this.fail(message);
     };
     switch (kind) {
-      case "scale": case "scroll": return { kind, amount: { x: number(), y: number() } };
-      case "stretch": return { kind, wave: this.wave(null, `WARNING: missing stretch parms in shader '${this.shaderName}'\n`) };
-      case "turb": return { kind, wave: { kind: "sin", base: number(), amplitude: number(), phase: number(), frequency: number() } };
-      case "rotate": return { kind, degreesPerSecond: number() };
-      case "transform": return { kind, m00: number(), m01: number(), m10: number(), m11: number(), translation: { x: number(), y: number() } };
-      case "entitytranslate": return { kind };
+      case "scale":
+      case "scroll":
+        return { kind, amount: { x: number(), y: number() } };
+      case "stretch":
+        return { kind, wave: this.wave(null, `WARNING: missing stretch parms in shader '${this.shaderName}'\n`) };
+      case "turb":
+        return { kind, wave: { kind: "sin", base: number(), amplitude: number(), phase: number(), frequency: number() } };
+      case "rotate":
+        return { kind, degreesPerSecond: number() };
+      case "transform":
+        return { kind, m00: number(), m01: number(), m10: number(), m11: number(), translation: { x: number(), y: number() } };
+      case "entitytranslate":
+        return { kind };
       default:
         this.warn(`WARNING: unknown tcMod '${token}' in shader '${this.shaderName}'\n`);
         return { kind: "none" };
@@ -899,23 +1063,42 @@ class ShaderParser {
   private blendFactor(value: string, destination: boolean): { readonly value: BlendFactor; readonly bits: number } {
     const name = value.toLowerCase();
     switch (name) {
-      case "gl_zero": return { value: "zero", bits: destination ? SourceStateBit.DSTBLEND_ZERO : SourceStateBit.SRCBLEND_ZERO };
-      case "gl_one": return { value: "one", bits: destination ? SourceStateBit.DSTBLEND_ONE : SourceStateBit.SRCBLEND_ONE };
-      case "gl_src_alpha": return { value: "src-alpha", bits: destination ? SourceStateBit.DSTBLEND_SRC_ALPHA : SourceStateBit.SRCBLEND_SRC_ALPHA };
-      case "gl_one_minus_src_alpha": return { value: "one-minus-src-alpha", bits: destination ? SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA : SourceStateBit.SRCBLEND_ONE_MINUS_SRC_ALPHA };
-      case "gl_dst_alpha": return { value: "dst-alpha", bits: destination ? SourceStateBit.DSTBLEND_DST_ALPHA : SourceStateBit.SRCBLEND_DST_ALPHA };
-      case "gl_one_minus_dst_alpha": return { value: "one-minus-dst-alpha", bits: destination ? SourceStateBit.DSTBLEND_ONE_MINUS_DST_ALPHA : SourceStateBit.SRCBLEND_ONE_MINUS_DST_ALPHA };
-      case "gl_dst_color": if (!destination) return { value: "dst-color", bits: SourceStateBit.SRCBLEND_DST_COLOR }; break;
-      case "gl_one_minus_dst_color": if (!destination) return { value: "one-minus-dst-color", bits: SourceStateBit.SRCBLEND_ONE_MINUS_DST_COLOR }; break;
-      case "gl_src_alpha_saturate": if (!destination) return { value: "src-alpha-saturate", bits: SourceStateBit.SRCBLEND_ALPHA_SATURATE }; break;
-      case "gl_src_color": if (destination) return { value: "src-color", bits: SourceStateBit.DSTBLEND_SRC_COLOR }; break;
-      case "gl_one_minus_src_color": if (destination) return { value: "one-minus-src-color", bits: SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR }; break;
+      case "gl_zero":
+        return { value: "zero", bits: destination ? SourceStateBit.DSTBLEND_ZERO : SourceStateBit.SRCBLEND_ZERO };
+      case "gl_one":
+        return { value: "one", bits: destination ? SourceStateBit.DSTBLEND_ONE : SourceStateBit.SRCBLEND_ONE };
+      case "gl_src_alpha":
+        return { value: "src-alpha", bits: destination ? SourceStateBit.DSTBLEND_SRC_ALPHA : SourceStateBit.SRCBLEND_SRC_ALPHA };
+      case "gl_one_minus_src_alpha":
+        return { value: "one-minus-src-alpha", bits: destination ? SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA : SourceStateBit.SRCBLEND_ONE_MINUS_SRC_ALPHA };
+      case "gl_dst_alpha":
+        return { value: "dst-alpha", bits: destination ? SourceStateBit.DSTBLEND_DST_ALPHA : SourceStateBit.SRCBLEND_DST_ALPHA };
+      case "gl_one_minus_dst_alpha":
+        return { value: "one-minus-dst-alpha", bits: destination ? SourceStateBit.DSTBLEND_ONE_MINUS_DST_ALPHA : SourceStateBit.SRCBLEND_ONE_MINUS_DST_ALPHA };
+      case "gl_dst_color":
+        if (!destination) return { value: "dst-color", bits: SourceStateBit.SRCBLEND_DST_COLOR };
+        break;
+      case "gl_one_minus_dst_color":
+        if (!destination) return { value: "one-minus-dst-color", bits: SourceStateBit.SRCBLEND_ONE_MINUS_DST_COLOR };
+        break;
+      case "gl_src_alpha_saturate":
+        if (!destination) return { value: "src-alpha-saturate", bits: SourceStateBit.SRCBLEND_ALPHA_SATURATE };
+        break;
+      case "gl_src_color":
+        if (destination) return { value: "src-color", bits: SourceStateBit.DSTBLEND_SRC_COLOR };
+        break;
+      case "gl_one_minus_src_color":
+        if (destination) return { value: "one-minus-src-color", bits: SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR };
+        break;
     }
     this.warn(`WARNING: unknown blend mode '${value}' in shader '${this.shaderName}', substituting GL_ONE\n`);
     return { value: "one", bits: destination ? SourceStateBit.DSTBLEND_ONE : SourceStateBit.SRCBLEND_ONE };
   }
 
-  private blend(previous: RenderState["blend"], previousDestinationBits: number): {
+  private blend(
+    previous: RenderState["blend"],
+    previousDestinationBits: number,
+  ): {
     readonly blend: RenderState["blend"];
     readonly sourceBits: number;
     readonly destinationBits: number;
@@ -923,20 +1106,41 @@ class ShaderParser {
   } {
     const value = this.required();
     switch (value.toLowerCase()) {
-      case "add": return { blend: { source: "one", destination: "one" }, sourceBits: SourceStateBit.SRCBLEND_ONE, destinationBits: SourceStateBit.DSTBLEND_ONE, complete: true };
-      case "filter": return { blend: { source: "dst-color", destination: "zero" }, sourceBits: SourceStateBit.SRCBLEND_DST_COLOR, destinationBits: SourceStateBit.DSTBLEND_ZERO, complete: true };
-      case "blend": return { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, sourceBits: SourceStateBit.SRCBLEND_SRC_ALPHA, destinationBits: SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA, complete: true };
+      case "add":
+        return {
+          blend: { source: "one", destination: "one" },
+          sourceBits: SourceStateBit.SRCBLEND_ONE,
+          destinationBits: SourceStateBit.DSTBLEND_ONE,
+          complete: true,
+        };
+      case "filter":
+        return {
+          blend: { source: "dst-color", destination: "zero" },
+          sourceBits: SourceStateBit.SRCBLEND_DST_COLOR,
+          destinationBits: SourceStateBit.DSTBLEND_ZERO,
+          complete: true,
+        };
+      case "blend":
+        return {
+          blend: { source: "src-alpha", destination: "one-minus-src-alpha" },
+          sourceBits: SourceStateBit.SRCBLEND_SRC_ALPHA,
+          destinationBits: SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA,
+          complete: true,
+        };
       default: {
         const source = this.blendFactor(value, false);
         const token = this.next(false);
         if (token === undefined) {
           this.warn(`WARNING: missing parm for blendFunc in shader '${this.shaderName}'\n`);
-          return { blend: { source: source.value, destination: previous.destination }, sourceBits: source.bits,
-            destinationBits: previousDestinationBits, complete: false };
+          return {
+            blend: { source: source.value, destination: previous.destination },
+            sourceBits: source.bits,
+            destinationBits: previousDestinationBits,
+            complete: false,
+          };
         }
         const destination = this.blendFactor(token.value, true);
-        return { blend: { source: source.value, destination: destination.value }, sourceBits: source.bits,
-          destinationBits: destination.bits, complete: true };
+        return { blend: { source: source.value, destination: destination.value }, sourceBits: source.bits, destinationBits: destination.bits, complete: true };
       }
     }
   }
@@ -968,10 +1172,10 @@ class ShaderParser {
     let animationCount = 0;
     const tcMods: TexCoordModifier[] = [];
     const value = (completed: boolean): ParsedShaderStage => {
-      let stageRgbGen = rgbGen ?? { kind: "identitylighting" } satisfies ColorGenerator;
+      let stageRgbGen = rgbGen ?? ({ kind: "identitylighting" } satisfies ColorGenerator);
       let stageRawRgbGen = rawRgbGen;
       let stageRawAlphaGen = rawAlphaGen;
-      let stageTcGen = tcGen ?? { kind: isLightmap ? "lightmap" : "texture" } satisfies TexCoordGenerator;
+      let stageTcGen = tcGen ?? ({ kind: isLightmap ? "lightmap" : "texture" } satisfies TexCoordGenerator);
       let stageBlend = blend;
       let stageDepthFunc = depthFunc;
       let stageDepthWrite = depthWrite;
@@ -979,8 +1183,12 @@ class ShaderParser {
       let stateBits = 0;
       if (completed) {
         if (rgbGen === null) {
-          stageRgbGen = { kind: sourceBlendBits === 0 || sourceBlendBits === SourceStateBit.SRCBLEND_ONE
-            || sourceBlendBits === SourceStateBit.SRCBLEND_SRC_ALPHA ? "identitylighting" : "identity" };
+          stageRgbGen = {
+            kind:
+              sourceBlendBits === 0 || sourceBlendBits === SourceStateBit.SRCBLEND_ONE || sourceBlendBits === SourceStateBit.SRCBLEND_SRC_ALPHA
+                ? "identitylighting"
+                : "identity",
+          };
           stageRawRgbGen = sourceColorGenerator(stageRgbGen);
         }
         let blendBits = sourceBlendBits | destinationBlendBits;
@@ -990,8 +1198,10 @@ class ShaderParser {
         }
         stateBits = blendBits | sourceStateBits({ blend: null, depthTest: depthFunc, depthWrite: stageDepthWrite, alphaTest: stageAlphaFunc });
         // ParseStage accidentally compares alphaGen_t to CGEN_IDENTITY (numeric 2).
-        if (stageRawAlphaGen === SourceAlphaGenerator.Entity
-          && (stageRawRgbGen === SourceColorGenerator.Identity || stageRawRgbGen === SourceColorGenerator.LightingDiffuse)) {
+        if (
+          stageRawAlphaGen === SourceAlphaGenerator.Entity &&
+          (stageRawRgbGen === SourceColorGenerator.Identity || stageRawRgbGen === SourceColorGenerator.LightingDiffuse)
+        ) {
           stageRawAlphaGen = SourceAlphaGenerator.Skip;
         }
       } else {
@@ -1002,8 +1212,16 @@ class ShaderParser {
         stageAlphaFunc = "none";
       }
       return {
-        map, blend: stageBlend, depthFunc: stageDepthFunc, depthWrite: stageDepthWrite, alphaFunc: stageAlphaFunc,
-        detail, rgbGen: stageRgbGen, alphaGen, tcGen: stageTcGen, tcMods: [...tcMods],
+        map,
+        blend: stageBlend,
+        depthFunc: stageDepthFunc,
+        depthWrite: stageDepthWrite,
+        alphaFunc: stageAlphaFunc,
+        detail,
+        rgbGen: stageRgbGen,
+        alphaGen,
+        tcGen: stageTcGen,
+        tcMods: [...tcMods],
         sourceState: {
           active: true,
           stateBits,
@@ -1028,11 +1246,13 @@ class ShaderParser {
         return result;
       }
       switch (keyword) {
-        case "map": case "clampmap": {
+        case "map":
+        case "clampmap": {
           const sourceName = this.stageParameter(keyword);
           const name = normalizeImageName(sourceName);
           if (keyword === "map" && name === "$lightmap") {
-            map = { kind: "lightmap" }; isLightmap = true;
+            map = { kind: "lightmap" };
+            isLightmap = true;
             partial(value(false));
             yield { kind: "bind-lightmap", stage: slot };
           } else if (keyword === "map" && name === "$whiteimage") {
@@ -1042,8 +1262,12 @@ class ShaderParser {
           } else {
             map = { kind: "image", name, clamp: keyword === "clampmap" };
             const snapshot = partial(value(false));
-            yield { kind: "find-stage-image", request: imageRequest(sourceName, keyword === "clampmap" ? "clamp" : "repeat"),
-              target: { kind: "primary", stage: slot }, missing: snapshot };
+            yield {
+              kind: "find-stage-image",
+              request: imageRequest(sourceName, keyword === "clampmap" ? "clamp" : "repeat"),
+              target: { kind: "primary", stage: slot },
+              missing: snapshot,
+            };
           }
           break;
         }
@@ -1055,7 +1279,10 @@ class ShaderParser {
           for (;;) {
             const token = this.next(false);
             if (token === undefined) break;
-            if (this.input === null && (token.value === "}" || token.value === "{")) { this.pending = token; break; }
+            if (this.input === null && (token.value === "}" || token.value === "{")) {
+              this.pending = token;
+              break;
+            }
             const sourceName = token.value;
             if (frames.length < 8) frames.push(normalizeImageName(sourceName));
             map = { kind: "animation", frequency, frames: [...frames] };
@@ -1063,8 +1290,12 @@ class ShaderParser {
             const snapshot = partial(value(false));
             const frame = checkedAnimationSlot(animationCount);
             animationCount++;
-            yield { kind: "find-stage-image", request: imageRequest(sourceName, "repeat"),
-              target: { kind: "animation", stage: slot, frame, countAfterSuccess: animationCount }, missing: snapshot };
+            yield {
+              kind: "find-stage-image",
+              request: imageRequest(sourceName, "repeat"),
+              target: { kind: "animation", stage: slot, frame, countAfterSuccess: animationCount },
+              missing: snapshot,
+            };
           }
           break;
         }
@@ -1089,7 +1320,10 @@ class ShaderParser {
           if (parsed.complete && !explicitDepthWrite) depthWrite = false;
           break;
         }
-        case "depthwrite": depthWrite = true; explicitDepthWrite = true; break;
+        case "depthwrite":
+          depthWrite = true;
+          explicitDepthWrite = true;
+          break;
         case "depthfunc": {
           const value = this.stageParameter("depthfunc").toLowerCase();
           if (value === "equal") depthFunc = "equal";
@@ -1100,10 +1334,15 @@ class ShaderParser {
         case "alphafunc": {
           const value = this.stageParameter("alphaFunc").toLowerCase();
           if (value === "gt0" || value === "lt128" || value === "ge128") alphaFunc = value;
-          else { this.warn(`WARNING: invalid alphaFunc name '${this.location.value}' in shader '${this.shaderName}'\n`); alphaFunc = "none"; }
+          else {
+            this.warn(`WARNING: invalid alphaFunc name '${this.location.value}' in shader '${this.shaderName}'\n`);
+            alphaFunc = "none";
+          }
           break;
         }
-        case "detail": detail = true; break;
+        case "detail":
+          detail = true;
+          break;
         case "rgbgen": {
           const parsed = this.rgb(rgbWave);
           if (parsed !== null) {
@@ -1126,7 +1365,8 @@ class ShaderParser {
           }
           break;
         }
-        case "tcgen": case "texgen": {
+        case "tcgen":
+        case "texgen": {
           const parsed = this.tcGen(tcVectors);
           if (parsed !== null) {
             tcGen = parsed;
@@ -1150,8 +1390,7 @@ class ShaderParser {
               arguments_.push(token.value);
             }
             const text = arguments_.join(" ") + " ";
-            parser = new ShaderParser(text, this.source, this.shaderName,
-              { cursor: new CommonParseCursor(text), offset: 0 }, message => this.warn(message));
+            parser = new ShaderParser(text, this.source, this.shaderName, { cursor: new CommonParseCursor(text), offset: 0 }, message => this.warn(message));
             parser.shaderName = this.shaderName;
           }
           if (tcMods.length === 4) {
@@ -1171,7 +1410,8 @@ class ShaderParser {
           }
           break;
         }
-        default: this.reject(`WARNING: unknown parameter '${token.value}' in shader '${this.shaderName}'\n`);
+        default:
+          this.reject(`WARNING: unknown parameter '${token.value}' in shader '${this.shaderName}'\n`);
       }
       partial(value(false));
     }
@@ -1187,10 +1427,14 @@ class ShaderParser {
   }
 
   private deform(): VertexDeformation {
-    const token = this.required(), kind = token.toLowerCase();
+    const token = this.required(),
+      kind = token.toLowerCase();
     const zeroWave: Waveform = { kind: "none", base: 0, amplitude: 0, phase: 0, frequency: 0 };
     switch (kind) {
-      case "projectionshadow": case "autosprite": case "autosprite2": return { kind };
+      case "projectionshadow":
+      case "autosprite":
+      case "autosprite2":
+        return { kind };
       case "bulge": {
         const width = this.deformNumber(true);
         if (width === null) return { kind: "none" };
@@ -1238,16 +1482,26 @@ class ShaderParser {
     }
     const value = token.value.toLowerCase();
     switch (value) {
-      case "portal": return 1;
-      case "sky": return 2;
-      case "opaque": return 3;
-      case "decal": return 4;
-      case "seethrough": return 5;
-      case "banner": return 6;
-      case "underwater": return 8;
-      case "additive": return 10;
-      case "nearest": return 16;
-      default: return this.sourceAtof(value);
+      case "portal":
+        return 1;
+      case "sky":
+        return 2;
+      case "opaque":
+        return 3;
+      case "decal":
+        return 4;
+      case "seethrough":
+        return 5;
+      case "banner":
+        return 6;
+      case "underwater":
+        return 8;
+      case "additive":
+        return 10;
+      case "nearest":
+        return 16;
+      default:
+        return this.sourceAtof(value);
     }
   }
 
@@ -1264,10 +1518,14 @@ class ShaderParser {
         continue;
       }
       const name = nameToken.value;
-      const instructions: RegistrationInstruction[] = [], parser = this.definition(name);
+      const instructions: RegistrationInstruction[] = [],
+        parser = this.definition(name);
       this.warningInstructions = instructions;
       let step = parser.next();
-      while (!step.done) { instructions.push(step.value); step = parser.next(); }
+      while (!step.done) {
+        instructions.push(step.value);
+        step = parser.next();
+      }
       this.warningInstructions = null;
       const terminal = step.value;
       if (terminal.kind === "rejected" && !recover) throw terminal.error;
@@ -1329,11 +1587,17 @@ class ShaderParser {
         const keyword = token.startsWith("{") ? "{" : token;
         switch (keyword) {
           case "{": {
-            if (stages.length === 8) throw new ShaderParseError(this.source, this.location.line, this.location.column, "A shader cannot exceed eight stages", "validation");
+            if (stages.length === 8)
+              throw new ShaderParseError(this.source, this.location.line, this.location.column, "A shader cannot exceed eight stages", "validation");
             const slot = checkedStageSlot(stages.length);
-            const parsed = yield* this.stage(slot,
+            const parsed = yield* this.stage(
+              slot,
               (imageName, wrap) => ({ name: imageName, mipmap: !noMipMaps, allowPicmip: !noPicMip, wrap }),
-              stage => { currentStage = stage; return definition(stage); });
+              stage => {
+                currentStage = stage;
+                return definition(stage);
+              },
+            );
             stages.push(parsed);
             currentStage = null;
             break;
@@ -1345,17 +1609,30 @@ class ShaderParser {
             surfaceParms.push(value);
             break;
           }
-          case "nomipmaps": noMipMaps = true; noPicMip = true; break;
-          case "nopicmip": noPicMip = true; break;
-          case "polygonoffset": polygonOffset = true; break;
-          case "entitymergable": entityMergable = true; break;
+          case "nomipmaps":
+            noMipMaps = true;
+            noPicMip = true;
+            break;
+          case "nopicmip":
+            noPicMip = true;
+            break;
+          case "polygonoffset":
+            polygonOffset = true;
+            break;
+          case "entitymergable":
+            entityMergable = true;
+            break;
           case "clamptime": {
             const token = this.next(false);
             if (token !== undefined) clampTime = this.sourceAtof(token.value);
             break;
           }
-          case "portal": sort = 1; break;
-          case "sort": sort = this.sort() ?? sort; break;
+          case "portal":
+            sort = 1;
+            break;
+          case "sort":
+            sort = this.sort() ?? sort;
+            break;
           case "cull": {
             const token = this.next(false);
             if (token === undefined) {
@@ -1382,7 +1659,9 @@ class ShaderParser {
             deforms.push(this.deform());
             break;
           }
-          case "skyparms": sky = yield* this.skyDirective(sky); break;
+          case "skyparms":
+            sky = yield* this.skyDirective(sky);
+            break;
           case "fogparms": {
             const color = this.sourceVector(fog === null ? { x: 0, y: 0, z: 0 } : fog.color);
             fog = { color: color.value, depthForOpaque: fog === null ? 0 : fog.depthForOpaque };
@@ -1408,18 +1687,19 @@ class ShaderParser {
             break;
           }
           default:
-            if (keyword.startsWith("qer") || keyword.startsWith("q3map") || keyword === "tesssize") compilerDirectives.push({ name: keyword, arguments: this.lineArguments() });
+            if (keyword.startsWith("qer") || keyword.startsWith("q3map") || keyword === "tesssize")
+              compilerDirectives.push({ name: keyword, arguments: this.lineArguments() });
             else this.reject(`WARNING: unknown general shader parameter '${next.value}' in '${this.shaderName}'\n`);
         }
       }
-      if (stages.length === 0 && sky === null && !surfaceParms.includes("fog")) this.fail("Shader has no stages and is neither sky nor fog; source uses an implicit material");
+      if (stages.length === 0 && sky === null && !surfaceParms.includes("fog"))
+        this.fail("Shader has no stages and is neither sky nor fog; source uses an implicit material");
       return { kind: "accepted", definition: definition(null) };
     } catch (error: unknown) {
       if (!(error instanceof ShaderParseError)) throw error;
       return { kind: "rejected", partial: definition(currentStage), error };
     }
   }
-
 }
 
 export function parseShaderScript(text: string, source = "<shader>"): readonly ShaderDefinition[] {
@@ -1454,13 +1734,25 @@ export function evaluateWaveform(wave: Waveform, time: number): number {
   const index = shaderTableIndex(Math.fround(Math.fround(wave.phase + Math.fround(time * wave.frequency)) * 1024));
   let value: number;
   switch (wave.kind) {
-    case "none": throw new Error("EvalWaveForm does not support GF_NONE");
-    case "sin": value = rendererSine(index); break;
-    case "square": value = index < 512 ? 1 : -1; break;
-    case "sawtooth": value = index / 1024; break;
-    case "inversesawtooth": value = 1 - index / 1024; break;
-    case "triangle": value = index < 256 ? index / 256 : index < 768 ? 2 - index / 256 : index / 256 - 4; break;
-    case "noise": throw new Error("Noise waveforms require the renderer's seeded R_NoiseGet4f context; EvalWaveForm does not support GF_NOISE");
+    case "none":
+      throw new Error("EvalWaveForm does not support GF_NONE");
+    case "sin":
+      value = rendererSine(index);
+      break;
+    case "square":
+      value = index < 512 ? 1 : -1;
+      break;
+    case "sawtooth":
+      value = index / 1024;
+      break;
+    case "inversesawtooth":
+      value = 1 - index / 1024;
+      break;
+    case "triangle":
+      value = index < 256 ? index / 256 : index < 768 ? 2 - index / 256 : index / 256 - 4;
+      break;
+    case "noise":
+      throw new Error("Noise waveforms require the renderer's seeded R_NoiseGet4f context; EvalWaveForm does not support GF_NOISE");
   }
   return Math.fround(wave.base + Math.fround(value * wave.amplitude));
 }
@@ -1475,12 +1767,16 @@ export function evaluateTexCoords(stage: ShaderStage, uv: Vec2, position: Vec3, 
   const f = Math.fround;
   let result: Vec2;
   switch (stage.tcGen.kind) {
-    case "texture": result = uv; break;
+    case "texture":
+      result = uv;
+      break;
     case "lightmap":
       if (context.lightmap === undefined) throw new Error("Lightmap tcGen requires lightmap coordinates");
       result = context.lightmap;
       break;
-    case "vector": result = { x: dot3(position, stage.tcGen.s), y: dot3(position, stage.tcGen.t) }; break;
+    case "vector":
+      result = { x: dot3(position, stage.tcGen.s), y: dot3(position, stage.tcGen.t) };
+      break;
     case "environment": {
       if (context.viewOrigin === undefined) throw new Error("Environment tcGen requires the view origin in model coordinates");
       const delta = sub3(context.viewOrigin, position);
@@ -1496,8 +1792,11 @@ export function evaluateTexCoords(stage: ShaderStage, uv: Vec2, position: Vec3, 
   for (const mod of stage.tcMods) {
     const { x: s, y: t } = result;
     switch (mod.kind) {
-      case "none": return { x: Math.fround(result.x), y: Math.fround(result.y) };
-      case "scale": result = { x: s * mod.amount.x, y: t * mod.amount.y }; break;
+      case "none":
+        return { x: Math.fround(result.x), y: Math.fround(result.y) };
+      case "scale":
+        result = { x: s * mod.amount.x, y: t * mod.amount.y };
+        break;
       case "scroll": {
         const x = Math.fround(mod.amount.x * time);
         const y = Math.fround(mod.amount.y * time);
@@ -1511,10 +1810,12 @@ export function evaluateTexCoords(stage: ShaderStage, uv: Vec2, position: Vec3, 
         result = { x: s + f(x - Math.floor(x)), y: t + f(y - Math.floor(y)) };
         break;
       }
-      case "transform": result = {
-        x: f(f(s * mod.m00) + f(t * mod.m10)) + mod.translation.x,
-        y: f(f(s * mod.m01) + f(t * mod.m11)) + mod.translation.y,
-      }; break;
+      case "transform":
+        result = {
+          x: f(f(s * mod.m00) + f(t * mod.m10)) + mod.translation.x,
+          y: f(f(s * mod.m01) + f(t * mod.m11)) + mod.translation.y,
+        };
+        break;
       case "rotate": {
         const index = shaderTableIndex(f(f(-mod.degreesPerSecond * time) * f(1024 / 360)));
         const sin = rendererSine(index);

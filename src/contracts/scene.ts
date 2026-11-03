@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Decoded scene and collision shapes derived from id Software's Q1 model.h,
  * Q2 qfiles.h/q_shared.h, Q3 qfiles.h, and q2repro MD5/BSPX extensions.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -6,29 +7,44 @@ import type { ResolvedResourceReference } from "./content.ts";
 import type { Axis, Bounds, Plane, Vec2, Vec3, Vec4 } from "./math.ts";
 import type { SourceTime } from "./time.ts";
 
-export interface IndexRange { readonly first: number; readonly count: number; }
+export interface IndexRange {
+  readonly first: number;
+  readonly count: number;
+}
 export interface IndexedModelSkin {
   readonly name: string;
   readonly width: number;
   readonly height: number;
   readonly pixels: Uint8Array;
 }
-export interface BspPlane extends Plane { readonly type: number; readonly signbits: number; }
-export type BspChild = { readonly kind: "node"; readonly index: number }
-  | { readonly kind: "leaf"; readonly index: number };
+export interface BspPlane extends Plane {
+  readonly type: number;
+  readonly signbits: number;
+}
+export type BspChild = { readonly kind: "node"; readonly index: number } | { readonly kind: "leaf"; readonly index: number };
 export interface BspNode {
   readonly plane: number;
   readonly children: readonly [BspChild, BspChild];
   readonly bounds: Bounds;
   readonly faces: IndexRange;
 }
-export interface BspEdge { readonly vertices: readonly [number, number]; }
-export interface TextureProjection { readonly s: Vec4; readonly t: Vec4; }
-export interface BspExtension { readonly name: string; readonly bytes: Uint8Array; }
+export interface BspEdge {
+  readonly vertices: readonly [number, number];
+}
+export interface TextureProjection {
+  readonly s: Vec4;
+  readonly t: Vec4;
+}
+export interface BspExtension {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
 
-export type Q1ClipChild = { readonly kind: "clipnode"; readonly index: number }
-  | { readonly kind: "contents"; readonly value: number };
-export interface Q1ClipNode { readonly plane: number; readonly children: readonly [Q1ClipChild, Q1ClipChild]; }
+export type Q1ClipChild = { readonly kind: "clipnode"; readonly index: number } | { readonly kind: "contents"; readonly value: number };
+export interface Q1ClipNode {
+  readonly plane: number;
+  readonly children: readonly [Q1ClipChild, Q1ClipChild];
+}
 export interface Q1Hull {
   readonly clipnodes: readonly Q1ClipNode[];
   readonly planes: readonly BspPlane[];
@@ -49,9 +65,13 @@ interface Q1MipTextureHeader {
   readonly height: number;
   readonly quake64Shift?: number;
 }
-export type Q1MipTexture = Q1MipTextureHeader & ({ readonly kind: "external" }
-  | { readonly kind: "embedded"; readonly levels: readonly [Uint8Array, Uint8Array, Uint8Array, Uint8Array] });
-export interface Q1TextureInfo { readonly projection: TextureProjection; readonly texture: number; readonly flags: number; }
+export type Q1MipTexture = Q1MipTextureHeader &
+  ({ readonly kind: "external" } | { readonly kind: "embedded"; readonly levels: readonly [Uint8Array, Uint8Array, Uint8Array, Uint8Array] });
+export interface Q1TextureInfo {
+  readonly projection: TextureProjection;
+  readonly texture: number;
+  readonly flags: number;
+}
 export interface BspFace {
   readonly plane: number;
   readonly back: boolean;
@@ -60,7 +80,8 @@ export interface BspFace {
   readonly styles: readonly number[];
   readonly lightingOffset: number | null;
 }
-export type BspLighting = { readonly kind: "luminance8"; readonly samples: Uint8Array }
+export type BspLighting =
+  | { readonly kind: "luminance8"; readonly samples: Uint8Array }
   | { readonly kind: "rgb8"; readonly samples: Uint8Array; readonly source: "bsp" | "lit" | "bspx" };
 export interface DecoupledLightmap {
   readonly width: number;
@@ -114,8 +135,14 @@ export interface Q2TextureInfo extends Q2SurfaceInfo {
   readonly projection: TextureProjection;
   readonly next: number | null;
 }
-export interface Q2BrushSide { readonly plane: number; readonly textureInfo: number; }
-export interface Q2Brush { readonly sides: IndexRange; readonly contents: number; }
+export interface Q2BrushSide {
+  readonly plane: number;
+  readonly textureInfo: number;
+}
+export interface Q2Brush {
+  readonly sides: IndexRange;
+  readonly contents: number;
+}
 export interface Q2Leaf {
   readonly contents: number;
   readonly mergedContents: number;
@@ -125,27 +152,51 @@ export interface Q2Leaf {
   readonly faces: IndexRange;
   readonly brushes: IndexRange;
 }
-export interface Q2Area { readonly portals: IndexRange; }
-export interface Q2AreaPortal { readonly portal: number; readonly otherArea: number; }
+export interface Q2Area {
+  readonly portals: IndexRange;
+}
+export interface Q2AreaPortal {
+  readonly portal: number;
+  readonly otherArea: number;
+}
 export interface Q2Visibility {
   readonly clusters: readonly { readonly pvsOffset: number; readonly phsOffset: number }[];
   readonly compressed: Uint8Array;
 }
-export type Q2LightgridChild = { readonly kind: "occluded" }
+export type Q2LightgridChild =
+  | { readonly kind: "occluded" }
   | { readonly kind: "leaf"; readonly index: number }
   | { readonly kind: "node"; readonly index: number };
 export interface Q2LightgridNode {
   readonly point: Vec3;
-  readonly children: readonly [Q2LightgridChild, Q2LightgridChild, Q2LightgridChild, Q2LightgridChild,
-    Q2LightgridChild, Q2LightgridChild, Q2LightgridChild, Q2LightgridChild];
+  readonly children: readonly [
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+    Q2LightgridChild,
+  ];
 }
-export interface Q2LightgridSample { readonly style: number; readonly rgb: Vec3; }
+export interface Q2LightgridSample {
+  readonly style: number;
+  readonly rgb: Vec3;
+}
 export interface Q2LightgridLeaf {
-  readonly min: Vec3; readonly size: Vec3; readonly firstSample: number; readonly pointCount: number;
+  readonly min: Vec3;
+  readonly size: Vec3;
+  readonly firstSample: number;
+  readonly pointCount: number;
 }
 export interface Q2Lightgrid {
-  readonly spacing: Vec3; readonly scale: Vec3; readonly min: Vec3; readonly size: Vec3;
-  readonly styleCount: number; readonly root: Q2LightgridChild;
+  readonly spacing: Vec3;
+  readonly scale: Vec3;
+  readonly min: Vec3;
+  readonly size: Vec3;
+  readonly styleCount: number;
+  readonly root: Q2LightgridChild;
   readonly nodes: readonly Q2LightgridNode[];
   readonly leaves: readonly Q2LightgridLeaf[];
   /** Every grid point has styleCount entries; style 255 means no sample. */
@@ -183,7 +234,11 @@ export interface Q2WorldGeometry {
   readonly extensions: readonly BspExtension[];
 }
 
-export interface Q3BspShader { readonly name: string; readonly surfaceFlags: number; readonly contentFlags: number; }
+export interface Q3BspShader {
+  readonly name: string;
+  readonly surfaceFlags: number;
+  readonly contentFlags: number;
+}
 export interface Q3BspVertex {
   readonly position: Vec3;
   readonly texCoord: Vec2;
@@ -192,25 +247,50 @@ export interface Q3BspVertex {
   readonly color: Vec4;
 }
 export interface Q3BspLeaf {
-  readonly cluster: number; readonly area: number; readonly bounds: Bounds;
-  readonly surfaces: IndexRange; readonly brushes: IndexRange;
+  readonly cluster: number;
+  readonly area: number;
+  readonly bounds: Bounds;
+  readonly surfaces: IndexRange;
+  readonly brushes: IndexRange;
 }
-export interface Q3BspModel { readonly bounds: Bounds; readonly surfaces: IndexRange; readonly brushes: IndexRange; }
+export interface Q3BspModel {
+  readonly bounds: Bounds;
+  readonly surfaces: IndexRange;
+  readonly brushes: IndexRange;
+}
 export interface Q3BspLightmap {
   readonly image: number;
-  readonly x: number; readonly y: number; readonly width: number; readonly height: number;
-  readonly origin: Vec3; readonly vectors: readonly [Vec3, Vec3, Vec3];
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly origin: Vec3;
+  readonly vectors: readonly [Vec3, Vec3, Vec3];
 }
 interface Q3SurfaceFields {
-  readonly shader: number; readonly fog: number; readonly vertices: IndexRange;
-  readonly indices: IndexRange; readonly lightmap: Q3BspLightmap;
+  readonly shader: number;
+  readonly fog: number;
+  readonly vertices: IndexRange;
+  readonly indices: IndexRange;
+  readonly lightmap: Q3BspLightmap;
 }
-export type Q3BspSurface = Q3SurfaceFields & (
-  { readonly kind: "planar" } | { readonly kind: "triangles" } | { readonly kind: "flare" }
-  | { readonly kind: "patch"; readonly width: number; readonly height: number }
-);
-export interface Q3BspFog { readonly shader: string; readonly brush: number; readonly visibleSide: number; }
-export interface Q3LightGridPoint { readonly ambient: Vec3; readonly directed: Vec3; readonly latLong: Vec2; }
+export type Q3BspSurface = Q3SurfaceFields &
+  (
+    | { readonly kind: "planar" }
+    | { readonly kind: "triangles" }
+    | { readonly kind: "flare" }
+    | { readonly kind: "patch"; readonly width: number; readonly height: number }
+  );
+export interface Q3BspFog {
+  readonly shader: string;
+  readonly brush: number;
+  readonly visibleSide: number;
+}
+export interface Q3LightGridPoint {
+  readonly ambient: Vec3;
+  readonly directed: Vec3;
+  readonly latLong: Vec2;
+}
 export interface Q3WorldGeometry {
   readonly kind: "q3-bsp";
   readonly format: "ibsp46";
@@ -234,22 +314,36 @@ export interface Q3WorldGeometry {
 }
 export type DecodedWorld = Q1WorldGeometry | Q2WorldGeometry | Q3WorldGeometry;
 
-export interface ModelVertex { readonly position: Vec3; readonly normal: Vec3; }
+export interface ModelVertex {
+  readonly position: Vec3;
+  readonly normal: Vec3;
+}
 export interface ModelFrame {
-  readonly name: string; readonly bounds: Bounds; readonly origin: Vec3;
+  readonly name: string;
+  readonly bounds: Bounds;
+  readonly origin: Vec3;
   readonly vertices: readonly ModelVertex[];
 }
-export type TimedFrames<T> = { readonly kind: "single"; readonly frame: T }
+export type TimedFrames<T> =
+  | { readonly kind: "single"; readonly frame: T }
   /** intervalSeconds is the cumulative endpoint stored by the source format. */
   | { readonly kind: "group"; readonly frames: readonly { readonly intervalSeconds: number; readonly frame: T }[] };
-export interface PackedAliasVertex { readonly position: readonly [number, number, number]; readonly normalIndex: number; }
+export interface PackedAliasVertex {
+  readonly position: readonly [number, number, number];
+  readonly normalIndex: number;
+}
 export interface Q1AliasFrame extends ModelFrame {
   readonly compressedBounds: readonly [PackedAliasVertex, PackedAliasVertex];
   readonly compressedVertices: readonly PackedAliasVertex[];
 }
-export type Q1AliasFrameSet = { readonly kind: "single"; readonly frame: Q1AliasFrame }
-  | { readonly kind: "group"; readonly bounds: Bounds; readonly compressedBounds: readonly [PackedAliasVertex, PackedAliasVertex];
-      readonly frames: readonly { readonly intervalSeconds: number; readonly frame: Q1AliasFrame }[] };
+export type Q1AliasFrameSet =
+  | { readonly kind: "single"; readonly frame: Q1AliasFrame }
+  | {
+      readonly kind: "group";
+      readonly bounds: Bounds;
+      readonly compressedBounds: readonly [PackedAliasVertex, PackedAliasVertex];
+      readonly frames: readonly { readonly intervalSeconds: number; readonly frame: Q1AliasFrame }[];
+    };
 export interface Q1AliasModel {
   readonly kind: "q1-mdl";
   readonly bounds: Bounds;
@@ -260,27 +354,35 @@ export interface Q1AliasModel {
   readonly scaleOrigin: Vec3;
   readonly boundingRadius: number;
   readonly size: number;
-  readonly skinWidth: number; readonly skinHeight: number;
+  readonly skinWidth: number;
+  readonly skinHeight: number;
   readonly skins: readonly TimedFrames<Uint8Array>[];
   readonly textureCoordinates: readonly { readonly onSeam: boolean; readonly s: number; readonly t: number }[];
   readonly triangles: readonly { readonly front: boolean; readonly vertices: readonly [number, number, number] }[];
   readonly frames: readonly Q1AliasFrameSet[];
 }
 export interface SpriteFrame {
-  readonly width: number; readonly height: number;
-  readonly originX: number; readonly originY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly originX: number;
+  readonly originY: number;
   readonly pixels: Uint8Array;
 }
 export interface Q1SpriteModel {
-  readonly kind: "q1-spr"; readonly bounds: Bounds; readonly orientation: 0 | 1 | 2 | 3 | 4;
-  readonly maxWidth: number; readonly maxHeight: number; readonly boundingRadius: number;
-  readonly sync: "synchronized" | "random"; readonly beamLength: number;
+  readonly kind: "q1-spr";
+  readonly bounds: Bounds;
+  readonly orientation: 0 | 1 | 2 | 3 | 4;
+  readonly maxWidth: number;
+  readonly maxHeight: number;
+  readonly boundingRadius: number;
+  readonly sync: "synchronized" | "random";
+  readonly beamLength: number;
   readonly frames: readonly TimedFrames<SpriteFrame>[];
 }
 export interface Q2SpriteModel {
   readonly bounds: Bounds;
-  readonly kind: "q2-sp2"; readonly frames: readonly { readonly image: string; readonly width: number;
-    readonly height: number; readonly originX: number; readonly originY: number }[];
+  readonly kind: "q2-sp2";
+  readonly frames: readonly { readonly image: string; readonly width: number; readonly height: number; readonly originX: number; readonly originY: number }[];
 }
 export type SpriteModel = Q1SpriteModel | Q2SpriteModel;
 export interface Q2AliasFrame extends ModelFrame {
@@ -291,71 +393,126 @@ export interface Q2AliasFrame extends ModelFrame {
 export interface Q2AliasModel {
   readonly kind: "q2-md2";
   readonly bounds: Bounds;
-  readonly skinWidth: number; readonly skinHeight: number;
+  readonly skinWidth: number;
+  readonly skinHeight: number;
   readonly skins: readonly string[];
   readonly textureCoordinates: readonly Vec2[];
   readonly triangles: readonly { readonly vertices: readonly [number, number, number]; readonly texCoords: readonly [number, number, number] }[];
   readonly frames: readonly Q2AliasFrame[];
   readonly glCommands: Int32Array;
 }
-export interface ModelTag { readonly name: string; readonly origin: Vec3; readonly axis: Axis; }
+export interface ModelTag {
+  readonly name: string;
+  readonly origin: Vec3;
+  readonly axis: Axis;
+}
 export interface Q3MeshModel {
   readonly kind: "q3-md3";
   readonly name: string;
   readonly frames: readonly { readonly name: string; readonly bounds: Bounds; readonly localOrigin: Vec3; readonly radius: number }[];
   readonly tags: readonly (readonly ModelTag[])[];
-  readonly surfaces: readonly { readonly name: string; readonly shaders: readonly string[];
-    readonly textureCoordinates: readonly Vec2[]; readonly indices: readonly number[];
-    readonly frames: readonly (readonly ModelVertex[])[] }[];
+  readonly surfaces: readonly {
+    readonly name: string;
+    readonly shaders: readonly string[];
+    readonly textureCoordinates: readonly Vec2[];
+    readonly indices: readonly number[];
+    readonly frames: readonly (readonly ModelVertex[])[];
+  }[];
 }
 export interface Md5Joint {
-  readonly name: string; readonly parent: number; readonly scalePositions: boolean;
+  readonly name: string;
+  readonly parent: number;
+  readonly scalePositions: boolean;
 }
-export interface Md4Bone { readonly matrix: readonly [Vec4, Vec4, Vec4]; }
-export interface Md4Frame { readonly bounds: Bounds; readonly localOrigin: Vec3; readonly radius: number; readonly bones: readonly Md4Bone[]; }
-export interface Md4Weight { readonly boneIndex: number; readonly boneWeight: number; readonly offset: Vec3; }
-export interface Md4Vertex { readonly normal: Vec3; readonly texCoords: Vec2; readonly weights: readonly Md4Weight[]; }
+export interface Md4Bone {
+  readonly matrix: readonly [Vec4, Vec4, Vec4];
+}
+export interface Md4Frame {
+  readonly bounds: Bounds;
+  readonly localOrigin: Vec3;
+  readonly radius: number;
+  readonly bones: readonly Md4Bone[];
+}
+export interface Md4Weight {
+  readonly boneIndex: number;
+  readonly boneWeight: number;
+  readonly offset: Vec3;
+}
+export interface Md4Vertex {
+  readonly normal: Vec3;
+  readonly texCoords: Vec2;
+  readonly weights: readonly Md4Weight[];
+}
 export interface Md4Surface {
-  readonly name: string; readonly shader: string;
+  readonly name: string;
+  readonly shader: string;
   readonly vertices: readonly Md4Vertex[];
   readonly triangles: readonly { readonly indices: readonly [number, number, number] }[];
   readonly boneReferences: readonly number[];
 }
 export interface Md4Model {
   readonly kind: "q3-md4";
-  readonly version: number; readonly name: string; readonly numBones: number; readonly byteLength: number;
+  readonly version: number;
+  readonly name: string;
+  readonly numBones: number;
+  readonly byteLength: number;
   readonly frames: readonly Md4Frame[];
   readonly lods: readonly { readonly surfaces: readonly Md4Surface[] }[];
 }
-export interface SkeletonJointPose { readonly position: Vec3; readonly orientation: Vec4; readonly scale: number; }
+export interface SkeletonJointPose {
+  readonly position: Vec3;
+  readonly orientation: Vec4;
+  readonly scale: number;
+}
 export interface Md5Model {
   readonly kind: "md5";
   readonly joints: readonly Md5Joint[];
   readonly frameRate: number;
   readonly frames: readonly { readonly bounds: Bounds; readonly joints: readonly SkeletonJointPose[] }[];
-  readonly meshes: readonly { readonly shader: string; readonly vertices: readonly { readonly texCoord: Vec2;
-    readonly normal: Vec3; readonly weights: IndexRange }[]; readonly indices: readonly number[];
-    readonly weights: readonly { readonly joint: number; readonly bias: number; readonly position: Vec3 }[] }[];
+  readonly meshes: readonly {
+    readonly shader: string;
+    readonly vertices: readonly { readonly texCoord: Vec2; readonly normal: Vec3; readonly weights: IndexRange }[];
+    readonly indices: readonly number[];
+    readonly weights: readonly { readonly joint: number; readonly bias: number; readonly position: Vec3 }[];
+  }[];
   /** Q2 replacement skins come from the MD2 skin list, independently of mesh.shader. */
-  readonly skinSelection: { readonly kind: "mesh-shaders" }
-    | { readonly kind: "q1-mdl-replacement"; readonly meshSkinGroups: readonly (readonly TimedFrames<string>[])[];
-        readonly flags: number; readonly timing: { readonly kind: "entity-frame" }
-          | { readonly kind: "elapsed-time"; readonly frameRate: number } }
-    | { readonly kind: "q2-md2-replacement"; readonly skins: readonly string[]; readonly sourceFrameCount: number;
-        readonly scaleSource: string | null; readonly diagnostics: readonly string[] };
+  readonly skinSelection:
+    | { readonly kind: "mesh-shaders" }
+    | {
+        readonly kind: "q1-mdl-replacement";
+        readonly meshSkinGroups: readonly (readonly TimedFrames<string>[])[];
+        readonly flags: number;
+        readonly timing: { readonly kind: "entity-frame" } | { readonly kind: "elapsed-time"; readonly frameRate: number };
+      }
+    | {
+        readonly kind: "q2-md2-replacement";
+        readonly skins: readonly string[];
+        readonly sourceFrameCount: number;
+        readonly scaleSource: string | null;
+        readonly diagnostics: readonly string[];
+      };
 }
 export interface ModelReplacement {
   readonly resource: ResolvedResourceReference;
   readonly model: Md5Model;
 }
-export type DecodedModel = ((Q1AliasModel | Q2AliasModel) & { readonly replacement?: ModelReplacement | null })
-  | SpriteModel | Q3MeshModel | Md4Model | Md5Model
+export type DecodedModel =
+  | ((Q1AliasModel | Q2AliasModel) & { readonly replacement?: ModelReplacement | null })
+  | SpriteModel
+  | Q3MeshModel
+  | Md4Model
+  | Md5Model
   | { readonly kind: "brush-model"; readonly world: DecodedWorld; readonly model: number };
 
 export type * from "./scene-trace.ts";
 
-export interface ModelTransform { readonly origin: Vec3; readonly axis: Axis; readonly scale: Vec3; }
-export type ModelPose = { readonly kind: "frame"; readonly frame: number; readonly previousFrame: number; readonly backLerp: number }
+export interface ModelTransform {
+  readonly origin: Vec3;
+  readonly axis: Axis;
+  readonly scale: Vec3;
+}
+export type ModelPose =
+  | { readonly kind: "frame"; readonly frame: number; readonly previousFrame: number; readonly backLerp: number }
   | { readonly kind: "skeleton"; readonly joints: readonly SkeletonJointPose[] };
 export interface SceneEntity {
   readonly opacity?: number;
@@ -373,17 +530,26 @@ export interface SceneEntity {
   readonly shadowPlane: number;
   readonly attachments: readonly { readonly tag: string; readonly entity: SceneEntity }[];
 }
-export type SceneLightProfile = { readonly kind: "q1" | "q3" }
-  | { readonly kind: "q2"; readonly scale: number;
+export type SceneLightProfile =
+  | { readonly kind: "q1" | "q3" }
+  | {
+      readonly kind: "q2";
+      readonly scale: number;
       readonly cone: { readonly direction: Vec3; readonly cosHalfAngle: number } | null;
-      readonly shadow: { readonly kind: "none" } | { readonly kind: "cast"; readonly resolution: number } };
+      readonly shadow: { readonly kind: "none" } | { readonly kind: "cast"; readonly resolution: number };
+    };
 export interface SceneLight {
-  readonly origin: Vec3; readonly color: Vec3; readonly radius: number; readonly additive: boolean;
+  readonly origin: Vec3;
+  readonly color: Vec3;
+  readonly radius: number;
+  readonly additive: boolean;
   readonly profile: SceneLightProfile;
 }
-export type SceneParticle = { readonly kind: "indexed"; readonly origin: Vec3; readonly paletteIndex: number; readonly alpha: number; readonly size: number }
+export type SceneParticle =
+  | { readonly kind: "indexed"; readonly origin: Vec3; readonly paletteIndex: number; readonly alpha: number; readonly size: number }
   | { readonly kind: "rgba"; readonly origin: Vec3; readonly color: Vec4; readonly size: number; readonly rotation: number };
-export type SceneLightStyle = { readonly kind: "q1"; readonly style: number; readonly value: number }
+export type SceneLightStyle =
+  | { readonly kind: "q1"; readonly style: number; readonly value: number }
   | { readonly kind: "q2"; readonly style: number; readonly rgb: Vec3; readonly white: number };
 /** A retained presentation sample. Simulation and guest state remain with their owners. */
 export interface SceneSnapshot {

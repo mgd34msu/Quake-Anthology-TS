@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // CG_Draw3DModel/DrawHead/DrawFlagModel/DrawTeamBackground from code/cgame/cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, vec3 } from "../../../core/math.ts";
@@ -14,7 +15,10 @@ import { findItemForPowerup, itemList } from "../base/shared/items.ts";
 import type { ClientDrawTools } from "./draw-tools.ts";
 import type { ClientGameState } from "./state.ts";
 
-export interface ClientDrawIconSettings { readonly drawIcons: boolean; readonly draw3dIcons: boolean }
+export interface ClientDrawIconSettings {
+  readonly drawIcons: boolean;
+  readonly draw3dIcons: boolean;
+}
 const f = Math.fround;
 
 function iconOrigin(bounds: Bounds, fraction: number): Vec3 {
@@ -23,8 +27,12 @@ function iconOrigin(bounds: Bounds, fraction: number): Vec3 {
 }
 
 export class ClientDrawIcons {
-  constructor(readonly state: ClientGameState, readonly tools: ClientDrawTools,
-    private readonly settings: () => ClientDrawIconSettings, readonly commands: RenderCommandBuffer) {
+  constructor(
+    readonly state: ClientGameState,
+    readonly tools: ClientDrawTools,
+    private readonly settings: () => ClientDrawIconSettings,
+    readonly commands: RenderCommandBuffer,
+  ) {
     if (tools.draw.commands !== commands) throw new Error("Draw icons and command buffer must share the engine drawing queue");
     if (state.product !== tools.media.product) throw new Error("Draw icons and media products differ");
   }
@@ -32,11 +40,22 @@ export class ClientDrawIcons {
   draw3DModel(rect: Rect2D, model: SceneModel, skin: SceneSkin | null, origin: Vec3, angles: Vec3): void {
     const settings = this.settings();
     if (!settings.draw3dIcons || !settings.drawIcons) return;
-    const viewport = this.tools.adjustFrom640(rect), refdef = createRefdef(), entity = createModelEntity(model);
-    entity.axis = qvmAnglesToAxis(angles); entity.origin = vec3(origin.x, origin.y, origin.z); entity.customSkin = skin; entity.renderFlags = RF_NOSHADOW;
-    refdef.renderFlags = RDF_NOWORLDMODEL; refdef.viewAxis = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
-    refdef.fovX = 30; refdef.fovY = 30; refdef.time = this.state.time;
-    refdef.x = Math.trunc(viewport.x); refdef.y = Math.trunc(viewport.y); refdef.width = Math.trunc(viewport.width); refdef.height = Math.trunc(viewport.height);
+    const viewport = this.tools.adjustFrom640(rect),
+      refdef = createRefdef(),
+      entity = createModelEntity(model);
+    entity.axis = qvmAnglesToAxis(angles);
+    entity.origin = vec3(origin.x, origin.y, origin.z);
+    entity.customSkin = skin;
+    entity.renderFlags = RF_NOSHADOW;
+    refdef.renderFlags = RDF_NOWORLDMODEL;
+    refdef.viewAxis = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
+    refdef.fovX = 30;
+    refdef.fovY = 30;
+    refdef.time = this.state.time;
+    refdef.x = Math.trunc(viewport.x);
+    refdef.y = Math.trunc(viewport.y);
+    refdef.width = Math.trunc(viewport.width);
+    refdef.height = Math.trunc(viewport.height);
     // ClearScene starts an empty scene without discarding previously queued draw commands.
     const scene = this.tools.media.resources;
     scene.clearScene();
@@ -57,7 +76,8 @@ export class ClientDrawIcons {
   }
 
   drawFlagModel(rect: Rect2D, team: number, force2D: boolean): void {
-    const settings = this.settings(), media = this.tools.media;
+    const settings = this.settings(),
+      media = this.tools.media;
     if (!force2D && settings.draw3dIcons) {
       const origin = iconOrigin(modelBounds(media.graphics.redFlagModel), 0.5);
       const angles = vec3(0, f(60 * f(Math.sin(f(f(this.state.time) / 2000)))), 0);
@@ -75,7 +95,8 @@ export class ClientDrawIcons {
       else return;
       const item = findItemForPowerup(media.product, powerup);
       if (item !== null) {
-        const index = itemList(media.product).indexOf(item), visual = media.weaponRegistry.items[index];
+        const index = itemList(media.product).indexOf(item),
+          visual = media.weaponRegistry.items[index];
         if (visual === undefined) throw new Error("Flag item has no cgame visual slot");
         this.tools.drawPic(rect, visual.icon);
       }
@@ -85,7 +106,10 @@ export class ClientDrawIcons {
   drawTeamBackground(rect: Rect2D, alpha: number, team: number): void {
     if (team !== Team.TEAM_RED && team !== Team.TEAM_BLUE) return;
     this.tools.draw.setColor({ x: team === Team.TEAM_RED ? 1 : 0, y: 0, z: team === Team.TEAM_BLUE ? 1 : 0, w: f(alpha) });
-    this.tools.drawPic({ x: Math.trunc(rect.x), y: Math.trunc(rect.y), width: Math.trunc(rect.width), height: Math.trunc(rect.height) }, this.tools.media.graphics.teamStatusBar);
+    this.tools.drawPic(
+      { x: Math.trunc(rect.x), y: Math.trunc(rect.y), width: Math.trunc(rect.width), height: Math.trunc(rect.height) },
+      this.tools.media.graphics.teamStatusBar,
+    );
     this.tools.draw.setColor(null);
   }
 }

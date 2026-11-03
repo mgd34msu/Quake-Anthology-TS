@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { FixedMovementPose } from "../../contracts/movement.ts";
 import type { Bounds } from "../../contracts/math.ts";
 import type { Q3Postures } from "./types.ts";
@@ -13,5 +14,10 @@ export const Q3_SOURCE_POSTURES: Q3Postures = {
 
 /** PM_CheckDuck uses the expanded sphere only after the original client overlap test admits it. */
 export function q3InvulnerabilityPose(expanded: boolean, postures: Q3Postures): FixedMovementPose {
-  return { kind: "fixed", crouched: true, bounds: expanded ? postures.invulnerabilityExpanded : postures.crouched.bounds, viewHeight: postures.crouched.viewHeight };
+  return {
+    kind: "fixed",
+    crouched: true,
+    bounds: expanded ? postures.invulnerabilityExpanded : postures.crouched.bounds,
+    viewHeight: postures.crouched.viewHeight,
+  };
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { Q1Base, Q1CampaignState, Q1_BASE_CLASSNAMES, registerQ1Base } from "./provider.ts";
 export type { Q1BaseOptions, Q1CampaignBinding } from "./provider.ts";
 export { BaseMonster, registerMonsterCallbacks } from "./monsters.ts";

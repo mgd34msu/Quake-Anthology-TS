@@ -13,28 +13,53 @@ export const CLASSIC_Q2_PMOVE_BYTES = 240;
 export const CLASSIC_Q2_EXPORT_BYTES = 80;
 export const CLASSIC_Q2_IMPORT_BYTES = 176;
 export const CLASSIC_Q2_USERCMD_LAYOUT: GuestLayout = {
-  id: "q2-classic:usercmd", byteLength: 16, alignment: 2, pointerBytes: 4, byteOrder: "little-endian", fields: [
-    { name: "msec", byteOffset: 0, storage: "uint8", count: 1 }, { name: "buttons", byteOffset: 1, storage: "uint8", count: 1 },
-    { name: "angles", byteOffset: 2, storage: "int16", count: 3 }, { name: "move", byteOffset: 8, storage: "int16", count: 3 },
-    { name: "impulse", byteOffset: 14, storage: "uint8", count: 1 }, { name: "lightlevel", byteOffset: 15, storage: "uint8", count: 1 },
+  id: "q2-classic:usercmd",
+  byteLength: 16,
+  alignment: 2,
+  pointerBytes: 4,
+  byteOrder: "little-endian",
+  fields: [
+    { name: "msec", byteOffset: 0, storage: "uint8", count: 1 },
+    { name: "buttons", byteOffset: 1, storage: "uint8", count: 1 },
+    { name: "angles", byteOffset: 2, storage: "int16", count: 3 },
+    { name: "move", byteOffset: 8, storage: "int16", count: 3 },
+    { name: "impulse", byteOffset: 14, storage: "uint8", count: 1 },
+    { name: "lightlevel", byteOffset: 15, storage: "uint8", count: 1 },
   ],
 };
 export const CLASSIC_Q2_PLAYER_STATE_LAYOUT: GuestLayout = {
-  id: "q2-classic:player-state", byteLength: 184, alignment: 4, pointerBytes: 4, byteOrder: "little-endian", fields: [
+  id: "q2-classic:player-state",
+  byteLength: 184,
+  alignment: 4,
+  pointerBytes: 4,
+  byteOrder: "little-endian",
+  fields: [
     { name: "pmove.pm_type", byteOffset: 0, storage: "int32", count: 1 },
-    { name: "pmove.origin", byteOffset: 4, storage: "int16", count: 3 }, { name: "pmove.velocity", byteOffset: 10, storage: "int16", count: 3 },
-    { name: "pmove.pm_flags", byteOffset: 16, storage: "uint8", count: 1 }, { name: "pmove.pm_time", byteOffset: 17, storage: "uint8", count: 1 },
-    { name: "pmove.gravity", byteOffset: 18, storage: "int16", count: 1 }, { name: "pmove.delta_angles", byteOffset: 20, storage: "int16", count: 3 },
-    { name: "viewangles", byteOffset: 28, storage: "float32", count: 3 }, { name: "viewoffset", byteOffset: 40, storage: "float32", count: 3 },
-    { name: "kick_angles", byteOffset: 52, storage: "float32", count: 3 }, { name: "gunangles", byteOffset: 64, storage: "float32", count: 3 },
-    { name: "gunoffset", byteOffset: 76, storage: "float32", count: 3 }, { name: "gunindex", byteOffset: 88, storage: "int32", count: 1 },
-    { name: "gunframe", byteOffset: 92, storage: "int32", count: 1 }, { name: "blend", byteOffset: 96, storage: "float32", count: 4 },
-    { name: "fov", byteOffset: 112, storage: "float32", count: 1 }, { name: "rdflags", byteOffset: 116, storage: "int32", count: 1 },
+    { name: "pmove.origin", byteOffset: 4, storage: "int16", count: 3 },
+    { name: "pmove.velocity", byteOffset: 10, storage: "int16", count: 3 },
+    { name: "pmove.pm_flags", byteOffset: 16, storage: "uint8", count: 1 },
+    { name: "pmove.pm_time", byteOffset: 17, storage: "uint8", count: 1 },
+    { name: "pmove.gravity", byteOffset: 18, storage: "int16", count: 1 },
+    { name: "pmove.delta_angles", byteOffset: 20, storage: "int16", count: 3 },
+    { name: "viewangles", byteOffset: 28, storage: "float32", count: 3 },
+    { name: "viewoffset", byteOffset: 40, storage: "float32", count: 3 },
+    { name: "kick_angles", byteOffset: 52, storage: "float32", count: 3 },
+    { name: "gunangles", byteOffset: 64, storage: "float32", count: 3 },
+    { name: "gunoffset", byteOffset: 76, storage: "float32", count: 3 },
+    { name: "gunindex", byteOffset: 88, storage: "int32", count: 1 },
+    { name: "gunframe", byteOffset: 92, storage: "int32", count: 1 },
+    { name: "blend", byteOffset: 96, storage: "float32", count: 4 },
+    { name: "fov", byteOffset: 112, storage: "float32", count: 1 },
+    { name: "rdflags", byteOffset: 116, storage: "int32", count: 1 },
     { name: "stats", byteOffset: 120, storage: "int16", count: 32 },
   ],
 };
 export const CLASSIC_Q2_EDICT_LAYOUT: GuestLayout = {
-  id: "q2-classic:edict-prefix", byteLength: 260, alignment: 4, pointerBytes: 4, byteOrder: "little-endian",
+  id: "q2-classic:edict-prefix",
+  byteLength: 260,
+  alignment: 4,
+  pointerBytes: 4,
+  byteOrder: "little-endian",
   fields: [
     { name: "s.number", byteOffset: 0, storage: "int32", count: 1 },
     { name: "s.origin", byteOffset: 4, storage: "float32", count: 3 },
@@ -68,7 +93,11 @@ export const CLASSIC_Q2_EDICT_LAYOUT: GuestLayout = {
   ],
 };
 export const CLASSIC_Q2_TRACE_LAYOUT: GuestLayout = {
-  id: "q2-classic:trace", byteLength: 56, alignment: 4, pointerBytes: 4, byteOrder: "little-endian",
+  id: "q2-classic:trace",
+  byteLength: 56,
+  alignment: 4,
+  pointerBytes: 4,
+  byteOrder: "little-endian",
   fields: [
     { name: "allsolid", byteOffset: 0, storage: "int32", count: 1 },
     { name: "startsolid", byteOffset: 4, storage: "int32", count: 1 },
@@ -92,7 +121,10 @@ export const q2Trace: GuestValueLayout = { kind: "aggregate", layout: CLASSIC_Q2
 export function classicSignature(parameters: readonly GuestValueLayout[], result: GuestValueLayout | "void" = "void", variadic = false): GuestCallSignature {
   return { abi: CLASSIC_Q2_ABI, parameters, result, variadic };
 }
-export interface ClassicQ2Import { readonly name: string; readonly signature: GuestCallSignature }
+export interface ClassicQ2Import {
+  readonly name: string;
+  readonly signature: GuestCallSignature;
+}
 export const CLASSIC_Q2_IMPORTS: readonly ClassicQ2Import[] = [
   { name: "bprintf", signature: classicSignature([q2Int, q2Pointer], "void", true) },
   { name: "dprintf", signature: classicSignature([q2Pointer], "void", true) },
@@ -135,12 +167,19 @@ export const CLASSIC_Q2_IMPORTS: readonly ClassicQ2Import[] = [
   { name: "DebugGraph", signature: classicSignature([q2Float, q2Int]) },
 ];
 export const CLASSIC_Q2_EXPORTS: Readonly<Record<string, { readonly offset: number; readonly signature: GuestCallSignature }>> = {
-  Init: { offset: 4, signature: classicSignature([]) }, Shutdown: { offset: 8, signature: classicSignature([]) },
+  Init: { offset: 4, signature: classicSignature([]) },
+  Shutdown: { offset: 8, signature: classicSignature([]) },
   SpawnEntities: { offset: 12, signature: classicSignature([q2Pointer, q2Pointer, q2Pointer]) },
-  WriteGame: { offset: 16, signature: classicSignature([q2Pointer, q2Int]) }, ReadGame: { offset: 20, signature: classicSignature([q2Pointer]) },
-  WriteLevel: { offset: 24, signature: classicSignature([q2Pointer]) }, ReadLevel: { offset: 28, signature: classicSignature([q2Pointer]) },
-  ClientConnect: { offset: 32, signature: classicSignature([q2Pointer, q2Pointer], q2Int) }, ClientBegin: { offset: 36, signature: classicSignature([q2Pointer]) },
-  ClientUserinfoChanged: { offset: 40, signature: classicSignature([q2Pointer, q2Pointer]) }, ClientDisconnect: { offset: 44, signature: classicSignature([q2Pointer]) },
-  ClientCommand: { offset: 48, signature: classicSignature([q2Pointer]) }, ClientThink: { offset: 52, signature: classicSignature([q2Pointer, q2Pointer]) },
-  RunFrame: { offset: 56, signature: classicSignature([]) }, ServerCommand: { offset: 60, signature: classicSignature([]) },
+  WriteGame: { offset: 16, signature: classicSignature([q2Pointer, q2Int]) },
+  ReadGame: { offset: 20, signature: classicSignature([q2Pointer]) },
+  WriteLevel: { offset: 24, signature: classicSignature([q2Pointer]) },
+  ReadLevel: { offset: 28, signature: classicSignature([q2Pointer]) },
+  ClientConnect: { offset: 32, signature: classicSignature([q2Pointer, q2Pointer], q2Int) },
+  ClientBegin: { offset: 36, signature: classicSignature([q2Pointer]) },
+  ClientUserinfoChanged: { offset: 40, signature: classicSignature([q2Pointer, q2Pointer]) },
+  ClientDisconnect: { offset: 44, signature: classicSignature([q2Pointer]) },
+  ClientCommand: { offset: 48, signature: classicSignature([q2Pointer]) },
+  ClientThink: { offset: 52, signature: classicSignature([q2Pointer, q2Pointer]) },
+  RunFrame: { offset: 56, signature: classicSignature([]) },
+  ServerCommand: { offset: 60, signature: classicSignature([]) },
 };

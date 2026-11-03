@@ -1,4 +1,5 @@
-import { decodeLegacyQvmGameImport } from './legacy-bot-abi.ts';
+// SPDX-License-Identifier: GPL-2.0-or-later
+import { decodeLegacyQvmGameImport } from "./legacy-bot-abi.ts";
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import { decodeQvmGameImport, decodeQvmCgameImport, decodeQvmUiImport } from "./abi.ts";
 import type { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
@@ -11,21 +12,31 @@ import { qvmVectorSyscall } from "./vector-syscalls.ts";
 import { qvmSnapVectorSyscall } from "./snap-vector-syscalls.ts";
 
 export type QvmRole = "qagame" | "cgame" | "ui";
-export type QvmHostCall = QvmSyscall & { readonly guest: QvmMemory; readonly abiProfile?: QvmAbiProfile; readonly commandArguments: readonly string[] | null } & (
-  | { readonly kind: "engine"; readonly role: "qagame"; readonly code: QvmGameImport }
-  | { readonly kind: "engine"; readonly role: "cgame"; readonly code: QvmCgameImport }
-  | { readonly kind: "engine"; readonly role: "ui"; readonly code: QvmUiImport }
-  | { readonly kind: "extension"; readonly role: QvmRole; readonly code: number }
-);
+export type QvmHostCall = QvmSyscall & {
+  readonly guest: QvmMemory;
+  readonly abiProfile?: QvmAbiProfile;
+  readonly commandArguments: readonly string[] | null;
+} & (
+    | { readonly kind: "engine"; readonly role: "qagame"; readonly code: QvmGameImport }
+    | { readonly kind: "engine"; readonly role: "cgame"; readonly code: QvmCgameImport }
+    | { readonly kind: "engine"; readonly role: "ui"; readonly code: QvmUiImport }
+    | { readonly kind: "extension"; readonly role: QvmRole; readonly code: number }
+  );
 export type QvmHostResult = QvmSystemCallResult;
-type SharedCall<T> = T extends unknown ? Omit<T, keyof QvmSyscall | "guest"> & { readonly words: DataView; readonly guest: Q3GameMemory }
-  & Partial<Pick<QvmSyscall, "memory" | "invoke" | "invokeAsync" | "cancelFunction">> : never;
+type SharedCall<T> = T extends unknown
+  ? Omit<T, keyof QvmSyscall | "guest"> & { readonly words: DataView; readonly guest: Q3GameMemory } & Partial<
+        Pick<QvmSyscall, "memory" | "invoke" | "invokeAsync" | "cancelFunction">
+      >
+  : never;
 /** A trap as the shared server-game handlers see it: pointer arguments resolve through {@link Q3GameMemory}, so interpreted and native modules reach one implementation. */
 export type SharedHostCall = SharedCall<QvmHostCall>;
 export type QvmHost = (call: QvmHostCall) => QvmHostResult;
 
 export class QvmUnboundSyscallError extends Error {
-  constructor(readonly role: QvmRole, readonly code: number) {
+  constructor(
+    readonly role: QvmRole,
+    readonly code: number,
+  ) {
     super(`Unbound ${role} QVM syscall ${code}`);
     this.name = "QvmUnboundSyscallError";
   }
@@ -49,7 +60,8 @@ function classify(role: QvmRole, call: QvmSyscall, guest: QvmMemory, commandArgu
       break;
     }
     case "ui": {
-      const code = abiProfile === "q3-modern" ? decodeQvmUiImport(word) : word >= 46 && word <= 49 ? null : decodeQvmUiImport(word >= 50 && word <= 58 ? word - 4 : word);
+      const code =
+        abiProfile === "q3-modern" ? decodeQvmUiImport(word) : word >= 46 && word <= 49 ? null : decodeQvmUiImport(word >= 50 && word <= 58 ? word - 4 : word);
       if (code !== null) return { ...call, kind: "engine", role, code, guest, abiProfile, commandArguments };
       break;
     }
@@ -60,25 +72,34 @@ function classify(role: QvmRole, call: QvmSyscall, guest: QvmMemory, commandArgu
 /** The libc and math traps the engine executes itself (memset, memcpy, strncpy, sin, vector helpers, SnapVector); null for every other trap. */
 export function qvmIntrinsicSyscall(role: QvmRole, abiProfile: QvmAbiProfile, words: DataView, memory: Q3GameMemory): number | null {
   const sourceRole = role === "qagame" ? "game" : role;
-  return qvmMemorySyscall(sourceRole, words, memory)
-    ?? qvmMathSyscall(abiProfile !== "q3-modern" && role === "ui" ? "game" : sourceRole, words)
-    ?? qvmVectorSyscall(sourceRole, words, memory)
-    ?? qvmSnapVectorSyscall(sourceRole, words, memory);
+  return (
+    qvmMemorySyscall(sourceRole, words, memory) ??
+    qvmMathSyscall(abiProfile !== "q3-modern" && role === "ui" ? "game" : sourceRole, words) ??
+    qvmVectorSyscall(sourceRole, words, memory) ??
+    qvmSnapVectorSyscall(sourceRole, words, memory)
+  );
 }
 
 /** Intrinsics execute here; every engine-owned operation reaches the explicit host. */
-export function createQvmSystemCall(role: QvmRole, host: QvmHost = rejectQvmSyscall,
+export function createQvmSystemCall(
+  role: QvmRole,
+  host: QvmHost = rejectQvmSyscall,
   commandArguments: () => readonly string[] | null = () => null,
   abiProfile: QvmAbiProfile = "q3-modern",
 ): QvmSystemCall {
   return call => {
     if (abiProfile !== "q3-modern") {
       const trap = call.words.getInt32(0, true);
-      const supported = role === "qagame"
-        ? trap >= 0 && trap <= 40 || trap >= 100 && trap <= 106 || trap === 110 || trap === 111 || decodeLegacyQvmGameImport(trap) !== null || trap >= 402 && trap <= 405
-        : trap >= 0 && trap <= 58 || trap >= 100 && trap <= 106 || (role === "cgame" ? trap === 107 || trap === 108 : trap === 110 || trap === 111);
-      if (!supported)
-        throw new Error(`Legacy QVM ABI service ${role}/${trap} is not implemented`);
+      const supported =
+        role === "qagame"
+          ? (trap >= 0 && trap <= 40) ||
+            (trap >= 100 && trap <= 106) ||
+            trap === 110 ||
+            trap === 111 ||
+            decodeLegacyQvmGameImport(trap) !== null ||
+            (trap >= 402 && trap <= 405)
+          : (trap >= 0 && trap <= 58) || (trap >= 100 && trap <= 106) || (role === "cgame" ? trap === 107 || trap === 108 : trap === 110 || trap === 111);
+      if (!supported) throw new Error(`Legacy QVM ABI service ${role}/${trap} is not implemented`);
     }
     const current = call.guest;
     if (current.bytes !== call.memory) throw new Error("QVM syscall memory belongs to another allocation");

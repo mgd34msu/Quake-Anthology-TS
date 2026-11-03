@@ -1,6 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../contracts/math.ts";
 
-export interface AudioGeometryHit { readonly fraction: number; readonly startSolid: boolean; readonly allSolid: boolean; }
+export interface AudioGeometryHit {
+  readonly fraction: number;
+  readonly startSolid: boolean;
+  readonly allSolid: boolean;
+}
 export type AudioGeometryTrace = (start: Vec3, end: Vec3) => AudioGeometryHit;
 
 /** Shared replacement for geometry obstruction: clear paths retain source gain.
@@ -12,7 +17,9 @@ export function geometryTransmission(start: Vec3, end: Vec3, trace: AudioGeometr
   const forward = trace(start, end);
   if (forward.fraction === 1 && !forward.startSolid && !forward.allSolid) return 1;
   const reverse = trace(end, start);
-  const thickness = forward.allSolid || reverse.allSolid ? distance
-    : Math.max(0, distance * (1 - (forward.startSolid ? 0 : forward.fraction) - (reverse.startSolid ? 0 : reverse.fraction)));
+  const thickness =
+    forward.allSolid || reverse.allSolid
+      ? distance
+      : Math.max(0, distance * (1 - (forward.startSolid ? 0 : forward.fraction) - (reverse.startSolid ? 0 : reverse.fraction)));
   return Math.pow(0.5, 1 + thickness / 64);
 }

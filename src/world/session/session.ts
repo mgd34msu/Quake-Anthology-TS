@@ -1,14 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Session ownership separates Q3 connection/active state and Q1/Q2 disconnect/resource teardown.
 import type { ClientId, IdentityOwner, SeatId, SessionId } from "../../contracts/identity.ts";
 import type { RendererBackend, RenderFrame } from "../../contracts/render.ts";
-import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../contracts/session.ts";
+import type {
+  InputBatch,
+  SeatPresentation,
+  Simulation,
+  SimulationEvent,
+  SimulationOutput,
+  SimulationProgress,
+  WorldSnapshot,
+} from "../../contracts/session.ts";
 import { ResourceScope } from "./resources.ts";
 import type { SessionResource } from "./resources.ts";
 
 function closeAll(resources: readonly SessionResource[], message: string): undefined {
   const errors: unknown[] = [];
   for (const resource of resources) {
-    try { resource.close(); } catch (error) { errors.push(error); }
+    try {
+      resource.close();
+    } catch (error) {
+      errors.push(error);
+    }
   }
   if (errors.length > 0) throw new AggregateError(errors, message);
   return undefined;
@@ -20,7 +33,9 @@ export class WorldLifetime implements SessionResource {
 
   constructor(readonly simulation: Simulation) {}
 
-  get isClosed(): boolean { return this.closed; }
+  get isClosed(): boolean {
+    return this.closed;
+  }
 
   close(): undefined {
     if (this.closed) return undefined;
@@ -31,7 +46,10 @@ export class WorldLifetime implements SessionResource {
 
 /** A connection's reliable channel/download handles survive replacement of its active world. */
 export class SessionConnection extends ResourceScope {
-  constructor(readonly client: ClientId, readonly kind: "loopback" | "remote" | "demo") {
+  constructor(
+    readonly client: ClientId,
+    readonly kind: "loopback" | "remote" | "demo",
+  ) {
     super(`Client ${client.slot} ${kind} connection`);
   }
 }
@@ -47,9 +65,16 @@ export class SessionClient implements SessionResource {
     this.resources.defer(() => this.disconnect());
   }
 
-  get isClosed(): boolean { return this.resources.isClosed; }
-  get worldResources(): ResourceScope { this.resources.assertOpen(); return this.activeResources; }
-  get connection(): SessionConnection | null { return this.activeConnection; }
+  get isClosed(): boolean {
+    return this.resources.isClosed;
+  }
+  get worldResources(): ResourceScope {
+    this.resources.assertOpen();
+    return this.activeResources;
+  }
+  get connection(): SessionConnection | null {
+    return this.activeConnection;
+  }
 
   validateSeatBinding(seat: SessionSeat): void {
     this.resources.assertOpen();
@@ -61,7 +86,10 @@ export class SessionClient implements SessionResource {
   bindSeat(seat: SessionSeat): undefined {
     this.validateSeatBinding(seat);
     this.seats.add(seat);
-    seat.resources.defer(() => { this.seats.delete(seat); return undefined; });
+    seat.resources.defer(() => {
+      this.seats.delete(seat);
+      return undefined;
+    });
     this.resources.own(seat);
     return undefined;
   }
@@ -101,26 +129,41 @@ export class SessionClient implements SessionResource {
     return previous;
   }
 
-  close(): undefined { return this.resources.close(); }
+  close(): undefined {
+    return this.resources.close();
+  }
 
   private clearSeatPresentations(): undefined {
-    return closeAll(Array.from(this.seats, seat => ({ close: () => seat.clearPresentation() })), "Seat presentation shutdown failed");
+    return closeAll(
+      Array.from(this.seats, seat => ({ close: () => seat.clearPresentation() })),
+      "Seat presentation shutdown failed",
+    );
   }
 }
 
-interface PresentationLifetime { readonly presentation: SeatPresentation; readonly resources: ResourceScope; }
+interface PresentationLifetime {
+  readonly presentation: SeatPresentation;
+  readonly resources: ResourceScope;
+}
 
 /** A seat may replace its renderer and UI without closing the server or another seat. */
 export class SessionSeat implements SessionResource {
   readonly resources = new ResourceScope("Seat resources");
   private presentationLifetime: PresentationLifetime | null = null;
 
-  constructor(readonly id: SeatId, readonly client: SessionClient) {
+  constructor(
+    readonly id: SeatId,
+    readonly client: SessionClient,
+  ) {
     this.resources.defer(() => this.clearPresentation());
   }
 
-  get isClosed(): boolean { return this.resources.isClosed; }
-  get presentation(): SeatPresentation | null { return this.presentationLifetime?.presentation ?? null; }
+  get isClosed(): boolean {
+    return this.resources.isClosed;
+  }
+  get presentation(): SeatPresentation | null {
+    return this.presentationLifetime?.presentation ?? null;
+  }
 
   attachPresentation(presentation: SeatPresentation, cleanup: () => undefined): ResourceScope {
     this.validatePresentation(presentation);
@@ -166,15 +209,23 @@ export class SessionSeat implements SessionResource {
     return frame;
   }
 
-  close(): undefined { return this.resources.close(); }
+  close(): undefined {
+    return this.resources.close();
+  }
 }
 
 export function eventTargetsSeat(event: SimulationEvent, seat: SeatId, client: ClientId): boolean {
   switch (event.audience.kind) {
-    case "world": return true;
-    case "seat": return event.audience.seat.equals(seat);
-    case "client": return event.audience.client.equals(client);
-    default: { const exhaustive: never = event.audience; return exhaustive; }
+    case "world":
+      return true;
+    case "seat":
+      return event.audience.seat.equals(seat);
+    case "client":
+      return event.audience.client.equals(client);
+    default: {
+      const exhaustive: never = event.audience;
+      return exhaustive;
+    }
   }
 }
 
@@ -193,7 +244,10 @@ export class EngineSession implements SessionResource {
   private published: WorldSnapshot | null = null;
   private stepping = false;
 
-  constructor(private readonly identity: IdentityOwner, readonly mode: SessionMode) {
+  constructor(
+    private readonly identity: IdentityOwner,
+    readonly mode: SessionMode,
+  ) {
     this.session = identity.session;
     this.resources.defer(() => closeAll([...this.clients.values()].reverse(), "Client shutdown failed"));
     this.resources.defer(() => closeAll([...this.preparedClients.keys()].reverse(), "Prepared client shutdown failed"));
@@ -202,9 +256,15 @@ export class EngineSession implements SessionResource {
     this.resources.defer(() => this.closeWorld());
   }
 
-  get isClosed(): boolean { return this.resources.isClosed; }
-  get world(): WorldLifetime | null { return this.currentWorld; }
-  get snapshot(): WorldSnapshot | null { return this.published; }
+  get isClosed(): boolean {
+    return this.resources.isClosed;
+  }
+  get world(): WorldLifetime | null {
+    return this.currentWorld;
+  }
+  get snapshot(): WorldSnapshot | null {
+    return this.published;
+  }
 
   clientAt(slot: number): SessionClient | null {
     const client = this.clients.get(slot);
@@ -217,9 +277,12 @@ export class EngineSession implements SessionResource {
     return replacement.world;
   }
 
-  validateWorldReplacement(simulation: Simulation, presentations: Parameters<EngineSession["replaceWorld"]>[1] = [],
+  validateWorldReplacement(
+    simulation: Simulation,
+    presentations: Parameters<EngineSession["replaceWorld"]>[1] = [],
     clients: Parameters<EngineSession["replaceWorld"]>[2] = { added: [], removed: [] },
-    seats: Parameters<EngineSession["replaceWorld"]>[3] = { added: [], removed: [] }): void {
+    seats: Parameters<EngineSession["replaceWorld"]>[3] = { added: [], removed: [] },
+  ): void {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
@@ -227,8 +290,11 @@ export class EngineSession implements SessionResource {
     this.validateOwnershipChange(presentations, clients, seats);
   }
 
-  private validateOwnershipChange(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
-    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): void {
+  private validateOwnershipChange(
+    presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>,
+    seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>,
+  ): void {
     const additions = new Map<number, SessionClient>();
     const removals = new Set<SessionClient>();
     const seatAdditions = new Map<number, SessionSeat>();
@@ -241,7 +307,8 @@ export class EngineSession implements SessionResource {
     for (const client of clients.removed) {
       if (removals.has(client)) throw new Error("Duplicate retired client");
       if (client.isClosed || this.clients.get(client.id.slot) !== client) throw new Error("Retired client is not owned by this session");
-      if ([...this.seats.values()].some(seat => seat.client === client && !seat.isClosed && !seatRemovals.has(seat))) throw new Error("Cannot retire a client with a local seat during world replacement");
+      if ([...this.seats.values()].some(seat => seat.client === client && !seat.isClosed && !seatRemovals.has(seat)))
+        throw new Error("Cannot retire a client with a local seat during world replacement");
       removals.add(client);
     }
     for (const client of clients.added) {
@@ -257,8 +324,12 @@ export class EngineSession implements SessionResource {
       const incumbent = this.preparedSeats.get(seat);
       if (seat.isClosed || incumbent === undefined) throw new Error("Replacement seat was not prepared by this session");
       if (seatAdditions.has(seat.id.index)) throw new Error("Duplicate prepared seat slot");
-      if (seat.client.isClosed || removals.has(seat.client)
-        || (this.clients.get(seat.client.id.slot) !== seat.client && additions.get(seat.client.id.slot) !== seat.client)) throw new Error("Replacement seat client is not published by this transition");
+      if (
+        seat.client.isClosed ||
+        removals.has(seat.client) ||
+        (this.clients.get(seat.client.id.slot) !== seat.client && additions.get(seat.client.id.slot) !== seat.client)
+      )
+        throw new Error("Replacement seat client is not published by this transition");
       seat.client.validateSeatBinding(seat);
       const existing = this.seats.get(seat.id.index);
       if (incumbent !== null && (existing !== incumbent || !seatRemovals.has(incumbent))) throw new Error("Prepared seat incumbent changed or is not retired");
@@ -267,20 +338,26 @@ export class EngineSession implements SessionResource {
     }
     const presented = new Set<SessionSeat>();
     for (const entry of presentations) {
-      if (seatRemovals.has(entry.seat) || (this.seats.get(entry.seat.id.index) !== entry.seat && seatAdditions.get(entry.seat.id.index) !== entry.seat)) throw new Error("Presentation seat is not owned by this session");
+      if (seatRemovals.has(entry.seat) || (this.seats.get(entry.seat.id.index) !== entry.seat && seatAdditions.get(entry.seat.id.index) !== entry.seat))
+        throw new Error("Presentation seat is not owned by this session");
       if (presented.has(entry.seat)) throw new Error("Duplicate replacement presentation");
       entry.seat.validatePresentation(entry.presentation);
       presented.add(entry.seat);
     }
   }
 
-  replaceWorld(simulation: Simulation, presentations: readonly {
-    readonly seat: SessionSeat;
-    readonly presentation: SeatPresentation;
-    readonly cleanup: () => undefined;
-  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] },
-    seats: { readonly added: readonly SessionSeat[]; readonly removed: readonly SessionSeat[] } = { added: [], removed: [] }): {
-    readonly world: WorldLifetime; readonly retired: SessionResource;
+  replaceWorld(
+    simulation: Simulation,
+    presentations: readonly {
+      readonly seat: SessionSeat;
+      readonly presentation: SeatPresentation;
+      readonly cleanup: () => undefined;
+    }[] = [],
+    clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] },
+    seats: { readonly added: readonly SessionSeat[]; readonly removed: readonly SessionSeat[] } = { added: [], removed: [] },
+  ): {
+    readonly world: WorldLifetime;
+    readonly retired: SessionResource;
   } {
     this.validateWorldReplacement(simulation, presentations, clients, seats);
     const additions = new Map(clients.added.map(client => [client.id.slot, client]));
@@ -294,8 +371,15 @@ export class EngineSession implements SessionResource {
     const world = new WorldLifetime(simulation);
     const retired: SessionResource[] = [];
     if (this.currentWorld !== null) retired.push(this.currentWorld);
-    for (const seat of seats.removed) { this.seats.delete(seat.id.index); retired.push(seat); }
-    for (const seat of seats.added) { seat.client.bindSeat(seat); this.seats.set(seat.id.index, seat); this.preparedSeats.delete(seat); }
+    for (const seat of seats.removed) {
+      this.seats.delete(seat.id.index);
+      retired.push(seat);
+    }
+    for (const seat of seats.added) {
+      seat.client.bindSeat(seat);
+      this.seats.set(seat.id.index, seat);
+      this.preparedSeats.delete(seat);
+    }
     for (const seat of this.seats.values()) {
       const previous = seat.replacePresentation(nextPresentations.get(seat) ?? null);
       if (previous !== null) retired.push(previous);
@@ -303,15 +387,24 @@ export class EngineSession implements SessionResource {
     for (const client of this.clients.values()) {
       if (!client.isClosed && !removals.has(client)) retired.push(client.replaceWorldResources());
     }
-    for (const client of removals) { this.clients.delete(client.id.slot); retired.push(client); }
-    for (const [slot, client] of additions) { this.clients.set(slot, client); this.preparedClients.delete(client); }
+    for (const client of removals) {
+      this.clients.delete(client.id.slot);
+      retired.push(client);
+    }
+    for (const [slot, client] of additions) {
+      this.clients.set(slot, client);
+      this.preparedClients.delete(client);
+    }
     this.currentWorld = world;
     this.published = null;
     return { world, retired: { close: () => closeAll(retired, "Retired world shutdown failed") } };
   }
 
-  validateLocalSeats(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
-    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): void {
+  validateLocalSeats(
+    presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>,
+    seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>,
+  ): void {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot change local seats during simulation.step");
     if (this.currentWorld?.isClosed) throw new Error("Local seat publication cannot use a retired world");
@@ -319,21 +412,44 @@ export class EngineSession implements SessionResource {
   }
 
   /** Publish only changed seats; the current simulation, snapshot and retained client scopes survive. */
-  publishLocalSeats(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
-    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): SessionResource {
+  publishLocalSeats(
+    presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>,
+    seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>,
+  ): SessionResource {
     this.validateLocalSeats(presentations, clients, seats);
     const retired: SessionResource[] = [];
-    for (const seat of seats.removed) { this.seats.delete(seat.id.index); retired.push(seat); }
-    for (const client of clients.removed) { this.clients.delete(client.id.slot); retired.push(client); }
-    for (const client of clients.added) { this.clients.set(client.id.slot, client); this.preparedClients.delete(client); }
-    for (const seat of seats.added) { seat.client.bindSeat(seat); this.seats.set(seat.id.index, seat); this.preparedSeats.delete(seat); }
+    for (const seat of seats.removed) {
+      this.seats.delete(seat.id.index);
+      retired.push(seat);
+    }
+    for (const client of clients.removed) {
+      this.clients.delete(client.id.slot);
+      retired.push(client);
+    }
+    for (const client of clients.added) {
+      this.clients.set(client.id.slot, client);
+      this.preparedClients.delete(client);
+    }
+    for (const seat of seats.added) {
+      seat.client.bindSeat(seat);
+      this.seats.set(seat.id.index, seat);
+      this.preparedSeats.delete(seat);
+    }
     for (const entry of presentations) {
-      const resources = new ResourceScope(`Seat ${entry.seat.id.index} presentation`); resources.defer(entry.cleanup);
+      const resources = new ResourceScope(`Seat ${entry.seat.id.index} presentation`);
+      resources.defer(entry.cleanup);
       const previous = entry.seat.replacePresentation({ presentation: entry.presentation, resources });
       if (previous !== null) retired.push(previous);
     }
     let closed = false;
-    return { close: () => { if (closed) return undefined; closed = true; return closeAll(retired, "Retired local seats shutdown failed"); } };
+    return {
+      close: () => {
+        if (closed) return undefined;
+        closed = true;
+        return closeAll(retired, "Retired local seats shutdown failed");
+      },
+    };
   }
 
   detachWorld(): SessionResource {
@@ -367,7 +483,10 @@ export class EngineSession implements SessionResource {
     this.preparedClients.set(client, retiring ?? null);
     client.resources.defer(() => {
       this.preparedClients.delete(client);
-      return closeAll([...this.preparedSeats.keys()].filter(seat => seat.client === client), "Prepared client seats shutdown failed");
+      return closeAll(
+        [...this.preparedSeats.keys()].filter(seat => seat.client === client),
+        "Prepared client seats shutdown failed",
+      );
     });
     return client;
   }
@@ -384,7 +503,10 @@ export class EngineSession implements SessionResource {
     if (client === undefined || !client.id.equals(id)) return undefined;
     const bound: SessionResource[] = [];
     for (const [index, seat] of this.seats) {
-      if (seat.client === client) { this.seats.delete(index); bound.push(seat); }
+      if (seat.client === client) {
+        this.seats.delete(index);
+        bound.push(seat);
+      }
     }
     this.clients.delete(id.slot);
     return closeAll([...bound.reverse(), client], "Client shutdown failed");
@@ -402,13 +524,17 @@ export class EngineSession implements SessionResource {
   prepareSeat(index: number, client: SessionClient, retiring?: SessionSeat): SessionSeat {
     this.resources.assertOpen();
     if (this.mode.kind === "headless") throw new Error("Headless sessions do not have local seats");
-    if ((this.clients.get(client.id.slot) !== client && !this.preparedClients.has(client)) || client.isClosed) throw new RangeError("Client is not owned by this session");
+    if ((this.clients.get(client.id.slot) !== client && !this.preparedClients.has(client)) || client.isClosed)
+      throw new RangeError("Client is not owned by this session");
     const previous = this.seats.get(index);
     if (retiring !== undefined && (previous !== retiring || retiring.isClosed)) throw new Error("Retiring seat is not the current index owner");
     if (retiring === undefined && previous !== undefined && !previous.isClosed) throw new Error(`Seat ${index} is occupied`);
     const seat = new SessionSeat(this.identity.seat(index), client);
     this.preparedSeats.set(seat, retiring ?? null);
-    seat.resources.defer(() => { this.preparedSeats.delete(seat); return undefined; });
+    seat.resources.defer(() => {
+      this.preparedSeats.delete(seat);
+      return undefined;
+    });
     return seat;
   }
 
@@ -421,8 +547,11 @@ export class EngineSession implements SessionResource {
 
   step(input: InputBatch): SimulationOutput {
     const world = this.beginStep();
-    try { return this.completeStep(world, world.simulation.step(input)); }
-    finally { this.stepping = false; }
+    try {
+      return this.completeStep(world, world.simulation.step(input));
+    } finally {
+      this.stepping = false;
+    }
   }
 
   /** Seats receive each completed output once; the caller receives the complete batch for transport and recording. */
@@ -430,16 +559,21 @@ export class EngineSession implements SessionResource {
     const world = this.beginStep();
     try {
       const progressedEvents: SimulationEvent[] = [];
-      const completed = progress === undefined ? undefined : async (frame: SimulationProgress): Promise<void> => {
-        this.completeStep(world, frame.output);
-        progressedEvents.push(...frame.output.events);
-        await progress(frame);
-        if (this.isClosed || this.currentWorld !== world || world.isClosed) throw new Error("Simulation closed during its step");
-      };
+      const completed =
+        progress === undefined
+          ? undefined
+          : async (frame: SimulationProgress): Promise<void> => {
+              this.completeStep(world, frame.output);
+              progressedEvents.push(...frame.output.events);
+              await progress(frame);
+              if (this.isClosed || this.currentWorld !== world || world.isClosed) throw new Error("Simulation closed during its step");
+            };
       const output = await (world.simulation.stepAsync?.(input, completed) ?? world.simulation.step(input));
       this.completeStep(world, output);
       return progressedEvents.length === 0 ? output : { snapshot: output.snapshot, events: [...progressedEvents, ...output.events] };
-    } finally { this.stepping = false; }
+    } finally {
+      this.stepping = false;
+    }
   }
 
   private beginStep(): WorldLifetime {
@@ -471,7 +605,14 @@ export class EngineSession implements SessionResource {
 
   close(): undefined {
     if (this.isClosed) return undefined;
-    try { return this.resources.close(); }
-    finally { this.clients.clear(); this.preparedClients.clear(); this.preparedSeats.clear(); this.seats.clear(); this.published = null; }
+    try {
+      return this.resources.close();
+    } finally {
+      this.clients.clear();
+      this.preparedClients.clear();
+      this.preparedSeats.clear();
+      this.seats.clear();
+      this.published = null;
+    }
   }
 }

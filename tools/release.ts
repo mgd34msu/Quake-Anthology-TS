@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { copyFile, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { buildWorkspace, type BuildEvidence } from "./build.ts";
@@ -29,9 +30,15 @@ async function run(directory: string, command: readonly string[]): Promise<void>
   if (code !== 0) throw new Error(`${command.join(" ")} failed with exit ${code}.`);
 }
 
-export interface Semver { readonly major: number; readonly minor: number; readonly patch: number; readonly prerelease: string | null }
+export interface Semver {
+  readonly major: number;
+  readonly minor: number;
+  readonly patch: number;
+  readonly prerelease: string | null;
+}
 
-const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$/;
+const semverPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$/;
 
 /** Parses a SemVer 2.0.0 version without build metadata; development builds carry a pre-release such as 1.2.7-dev. */
 export function parseSemver(version: string): Semver | null {
@@ -59,12 +66,17 @@ export async function releaseWorkspace(directory: string, options: ReleaseOption
   if (before.dirty !== false) throw new Error("Release refused: the working tree has uncommitted or untracked changes. Commit or remove them first.");
   const version = await manifestVersion(workspace);
   const parsedVersion = parseSemver(version);
-  if (parsedVersion === null) throw new Error(`Release refused: package.json version "${version}" is not SemVer (MAJOR.MINOR.PATCH with an optional -prerelease).`);
-  if (parsedVersion.prerelease !== null) throw new Error(`Release refused: package.json version "${version}" is a pre-release; set the final MAJOR.MINOR.PATCH in package.json and src/version.ts first (bun run build accepts pre-release versions).`);
+  if (parsedVersion === null)
+    throw new Error(`Release refused: package.json version "${version}" is not SemVer (MAJOR.MINOR.PATCH with an optional -prerelease).`);
+  if (parsedVersion.prerelease !== null)
+    throw new Error(
+      `Release refused: package.json version "${version}" is a pre-release; set the final MAJOR.MINOR.PATCH in package.json and src/version.ts first (bun run build accepts pre-release versions).`,
+    );
   const reported = /export const version = "([^"]+)"/.exec(await Bun.file(join(workspace, "src/version.ts")).text())?.[1];
-  if (reported !== version) throw new Error(`Release refused: src/version.ts reports "${reported ?? "nothing"}" but package.json is ${version}; --version would be wrong.`);
+  if (reported !== version)
+    throw new Error(`Release refused: src/version.ts reports "${reported ?? "nothing"}" but package.json is ${version}; --version would be wrong.`);
   for (const file of archiveFiles) {
-    if (!await Bun.file(join(workspace, file.from)).exists()) throw new Error(`Release refused: ${file.from} is missing.`);
+    if (!(await Bun.file(join(workspace, file.from)).exists())) throw new Error(`Release refused: ${file.from} is missing.`);
   }
   for (const gate of options.gates ?? ["typecheck", "test:unit"]) await run(workspace, [process.execPath, "run", gate]);
   const evidence = await buildWorkspace(workspace, "runtime");
@@ -83,11 +95,22 @@ export async function releaseWorkspace(directory: string, options: ReleaseOption
     await mkdir(join(root, "licenses"), { recursive: true });
     await copyFile(join(workspace, evidence.directory, executable.executable), join(root, executable.executable));
     for (const file of archiveFiles) await copyFile(join(workspace, file.from), join(root, file.to));
-    await Bun.write(join(root, "RELEASE.json"), `${JSON.stringify({
-      version, commit: before.commit, builtAt: evidence.builtAt, sourceSha256: evidence.sourceSha256,
-      executable: executable.executable, executableSha256: executable.sha256,
-      source: "https://github.com/mgd34msu/quake-anthology-ts",
-    }, null, 2)}\n`);
+    await Bun.write(
+      join(root, "RELEASE.json"),
+      `${JSON.stringify(
+        {
+          version,
+          commit: before.commit,
+          builtAt: evidence.builtAt,
+          sourceSha256: evidence.sourceSha256,
+          executable: executable.executable,
+          executableSha256: executable.sha256,
+          source: "https://github.com/mgd34msu/quake-anthology-ts",
+        },
+        null,
+        2,
+      )}\n`,
+    );
     // Fixed order, owner and mtime so the same commit and executable pack to the same bytes.
     const tarball = join(stage, `${name}.tar`);
     await run(stage, ["tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0", "-cf", tarball, name]);

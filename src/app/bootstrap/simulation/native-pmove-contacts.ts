@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 
@@ -9,7 +10,10 @@ export interface NativeSliceContact {
 }
 
 /** A pmove_t touch entry: the guest edict slot and the plane it was hit on. */
-export interface NativePmoveTouch { readonly slot: number; readonly plane: Plane; }
+export interface NativePmoveTouch {
+  readonly slot: number;
+  readonly plane: Plane;
+}
 
 /** Quake's walkable-slope threshold (cos of the steepest standable plane). */
 export const WALKABLE_NORMAL_Z = 0.7;
@@ -53,13 +57,18 @@ export function overlapPlane(origin: Vec3, bounds: Bounds, other: Bounds): Plane
  * sweep did not name follow with overlap-derived planes. Actors without a
  * guest slot cannot be named in the struct and are dropped.
  */
-export function pmoveTouchList(reported: readonly NativeSliceContact[], overlapped: readonly { readonly actor: ActorId; readonly plane: Plane }[],
-  slotOf: (actor: ActorId) => number | undefined): readonly NativePmoveTouch[] {
-  const seen = new Set<number>(), touches: NativePmoveTouch[] = [];
+export function pmoveTouchList(
+  reported: readonly NativeSliceContact[],
+  overlapped: readonly { readonly actor: ActorId; readonly plane: Plane }[],
+  slotOf: (actor: ActorId) => number | undefined,
+): readonly NativePmoveTouch[] {
+  const seen = new Set<number>(),
+    touches: NativePmoveTouch[] = [];
   const add = (actor: ActorId, plane: Plane): void => {
     const slot = slotOf(actor);
     if (slot === undefined || seen.has(slot)) return;
-    seen.add(slot); touches.push({ slot, plane });
+    seen.add(slot);
+    touches.push({ slot, plane });
   };
   for (const contact of reported) if (contact.actor !== null && contact.plane !== null) add(contact.actor, contact.plane);
   for (const contact of overlapped) add(contact.actor, contact.plane);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_active.c: SpectatorThink,
 // SpectatorClientEndFrame, ClientInactivityTimer and ClientIntermissionThink.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -49,7 +50,10 @@ export function spectatorThink(context: ClientPolicyContext, entity: GameEntity,
     const movementCommand: UserCommand = { ...command, angles: { ...command.angles } };
     context.moveClient(entity, movementCommand, {
       debugLevel: 0,
-      traceMask: MASK_SPECTATOR, fixedMsec: null, noFootsteps: false, gauntletHit: false,
+      traceMask: MASK_SPECTATOR,
+      fixedMsec: null,
+      noFootsteps: false,
+      gauntletHit: false,
     });
     entity.s.origin = { ...client.ps.origin };
     context.touchTriggers(entity);
@@ -98,8 +102,7 @@ export function clientInactivityTimer(context: ClientPolicyContext, client: Game
   if (context.inactivitySeconds === 0) {
     client.inactivityTime = (context.time + 60000) | 0;
     client.inactivityWarning = false;
-  } else if (command.forwardmove !== 0 || command.rightmove !== 0 || command.upmove !== 0 ||
-    (command.buttons & CommandButtons.ATTACK) !== 0) {
+  } else if (command.forwardmove !== 0 || command.rightmove !== 0 || command.upmove !== 0 || (command.buttons & CommandButtons.ATTACK) !== 0) {
     client.inactivityTime = (context.time + Math.imul(context.inactivitySeconds, 1000)) | 0;
     client.inactivityWarning = false;
   } else if (!client.pers.localClient) {
@@ -109,7 +112,7 @@ export function clientInactivityTimer(context: ClientPolicyContext, client: Game
     }
     if (context.time > ((client.inactivityTime - 10000) | 0) && !client.inactivityWarning) {
       client.inactivityWarning = true;
-      context.sendServerCommand(clientNumber(context, client), "cp \"Ten seconds until inactivity drop!\n\"");
+      context.sendServerCommand(clientNumber(context, client), 'cp "Ten seconds until inactivity drop!\n"');
     }
   }
   return true;

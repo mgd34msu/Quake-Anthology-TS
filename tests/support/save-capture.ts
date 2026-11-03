@@ -14,8 +14,17 @@ export interface SharedActorWorld {
 export function captureSharedActors(world: SharedActorWorld) {
   const { actors, bodies, combat, inventory } = world;
   return {
-    slots: actors.checkpoint(), sources: actors.sourceCheckpoint(), bodies: captureSharedBodies(actors, bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    slots: actors.checkpoint(),
+    sources: actors.sourceCheckpoint(),
+    bodies: captureSharedBodies(actors, bodies),
+    combat: actors.observations().flatMap(actor => {
+      const state = combat.read(actor.id);
+      return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }];
+    }),
+    inventories: actors
+      .observations()
+      .flatMap(actor =>
+        inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : [],
+      ),
   };
 }

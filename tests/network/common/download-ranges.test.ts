@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -11,15 +12,22 @@ const bounded = { kind: "protocol-completion", maximumBytes: 1024 * 1024 } satis
 
 test("ranged staging assembles interleaved spans and hashes the file in byte order", async () => {
   const root = mkdtempSync(join(tmpdir(), "download-ranges-"));
-  const bytes = Uint8Array.from({ length: 200_003 }, (_, index) => index * 37 % 251);
+  const bytes = Uint8Array.from({ length: 200_003 }, (_, index) => (index * 37) % 251);
   const digest = createContentDigest(createHash("sha256").update(bytes).digest("hex"));
-  const sink = DownloadSink.createRanged(root, "archive.pk3", { digest, byteLength: bytes.length }, bytes.length,
-    [{ start: 120_000, end: bytes.length - 1 }, { start: 0, end: 49_999 }, { start: 50_000, end: 119_999 }]);
+  const sink = DownloadSink.createRanged(root, "archive.pk3", { digest, byteLength: bytes.length }, bytes.length, [
+    { start: 120_000, end: bytes.length - 1 },
+    { start: 0, end: 49_999 },
+    { start: 50_000, end: 119_999 },
+  ]);
   try {
     sink.appendRange(120_000, bytes.subarray(120_000));
     sink.appendRange(50_000, bytes.subarray(50_000, 70_000));
     expect(sink.byteLength).toBe(100_003);
-    await expect(sink.inspectStaged(async () => { throw new Error("Must not inspect incomplete ranges"); })).rejects.toThrow("incomplete");
+    await expect(
+      sink.inspectStaged(async () => {
+        throw new Error("Must not inspect incomplete ranges");
+      }),
+    ).rejects.toThrow("incomplete");
     sink.appendRange(0, bytes.subarray(0, 49_999));
     sink.appendRange(50_000, bytes.subarray(70_000, 120_000));
     sink.appendRange(0, bytes.subarray(49_999, 50_000));
@@ -32,32 +40,62 @@ test("ranged staging assembles interleaved spans and hashes the file in byte ord
     expect(sink.finish()).toBe(digest);
     expect(readFileSync(join(root, "archive.pk3"))).toEqual(Buffer.from(bytes));
     expect(readdirSync(root)).toEqual(["archive.pk3"]);
-  } finally { sink.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    sink.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("range partitions and declared limits reject missing overlapping duplicate or unsafe spans before staging", () => {
   const root = mkdtempSync(join(tmpdir(), "download-range-invalid-"));
   const partitions: readonly (readonly DownloadSpan[])[] = [
-    [], [{ start: 1, end: 3 }], [{ start: 0, end: 1 }, { start: 3, end: 3 }],
-    [{ start: 0, end: 2 }, { start: 2, end: 3 }], [{ start: 0, end: 3 }, { start: 0, end: 3 }],
-    [{ start: 0, end: 4 }], [{ start: 0, end: -1 }], [{ start: 0, end: Number.MAX_SAFE_INTEGER }],
-    [{ start: 0, end: 1.5 }, { start: 2.5, end: 3 }],
+    [],
+    [{ start: 1, end: 3 }],
+    [
+      { start: 0, end: 1 },
+      { start: 3, end: 3 },
+    ],
+    [
+      { start: 0, end: 2 },
+      { start: 2, end: 3 },
+    ],
+    [
+      { start: 0, end: 3 },
+      { start: 0, end: 3 },
+    ],
+    [{ start: 0, end: 4 }],
+    [{ start: 0, end: -1 }],
+    [{ start: 0, end: Number.MAX_SAFE_INTEGER }],
+    [
+      { start: 0, end: 1.5 },
+      { start: 2.5, end: 3 },
+    ],
   ];
   try {
-    for (const spans of partitions) expect(() => DownloadSink.createRanged(root, "bad", bounded, 4, spans)).toThrow("Download spans must partition the complete file");
+    for (const spans of partitions)
+      expect(() => DownloadSink.createRanged(root, "bad", bounded, 4, spans)).toThrow("Download spans must partition the complete file");
     for (const total of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN, Number.POSITIVE_INFINITY])
       expect(() => DownloadSink.createRanged(root, "bad", bounded, total, [])).toThrow("Invalid ranged download size");
-    expect(() => DownloadSink.createRanged(root, "bad", { kind: "protocol-completion", maximumBytes: 3 }, 4, [{ start: 0, end: 3 }])).toThrow("Invalid ranged download size");
-    expect(() => DownloadSink.createRanged(root, "bad", { kind: "protocol-completion", maximumBytes: Number.NaN }, 0, [])).toThrow("Invalid ranged download size");
+    expect(() => DownloadSink.createRanged(root, "bad", { kind: "protocol-completion", maximumBytes: 3 }, 4, [{ start: 0, end: 3 }])).toThrow(
+      "Invalid ranged download size",
+    );
+    expect(() => DownloadSink.createRanged(root, "bad", { kind: "protocol-completion", maximumBytes: Number.NaN }, 0, [])).toThrow(
+      "Invalid ranged download size",
+    );
     const digest = createContentDigest("0".repeat(64));
     expect(() => DownloadSink.createRanged(root, "bad", { digest, byteLength: 5 }, 4, [{ start: 0, end: 3 }])).toThrow("Invalid ranged download size");
     expect(readdirSync(root)).toEqual([]);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("ranged writes reject oversize unknown and sequential calls without changing byte count", () => {
   const root = mkdtempSync(join(tmpdir(), "download-range-bounds-"));
-  const sink = DownloadSink.createRanged(root, "ranged", bounded, 4, [{ start: 0, end: 1 }, { start: 2, end: 3 }]);
+  const sink = DownloadSink.createRanged(root, "ranged", bounded, 4, [
+    { start: 0, end: 1 },
+    { start: 2, end: 3 },
+  ]);
   const ordinary = DownloadSink.create(root, "ordinary", bounded);
   try {
     expect(() => sink.append(new Uint8Array([1]))).toThrow("appendRange");
@@ -71,7 +109,11 @@ test("ranged writes reject oversize unknown and sequential calls without changin
     expect(() => sink.finish()).toThrow("incomplete");
     ordinary.close();
     expect(readdirSync(root)).toEqual([]);
-  } finally { sink.close(); ordinary.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    sink.close();
+    ordinary.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("ranged publication retains installed destinations and cleans cancelled or mismatched staging", () => {
@@ -82,28 +124,41 @@ test("ranged publication retains installed destinations and cleans cancelled or 
     conflict.appendRange(0, new Uint8Array([1, 2]));
     expect(() => conflict.finish()).toThrow("EEXIST: file already exists, link");
     expect(readFileSync(join(root, "installed"), "utf8")).toBe("keep");
-    const cancelled = DownloadSink.createRanged(root, "cancelled", bounded, 4, [{ start: 0, end: 1 }, { start: 2, end: 3 }]);
-    cancelled.appendRange(2, new Uint8Array([3])); cancelled.close(); cancelled.close();
+    const cancelled = DownloadSink.createRanged(root, "cancelled", bounded, 4, [
+      { start: 0, end: 1 },
+      { start: 2, end: 3 },
+    ]);
+    cancelled.appendRange(2, new Uint8Array([3]));
+    cancelled.close();
+    cancelled.close();
     expect(() => cancelled.appendRange(0, new Uint8Array([1]))).toThrow("closed");
     const mismatch = DownloadSink.createRanged(root, "mismatch", { digest: createContentDigest("0".repeat(64)), byteLength: 1 }, 1, [{ start: 0, end: 0 }]);
-    mismatch.appendRange(0, new Uint8Array([1])); expect(() => mismatch.finish()).toThrow("checksum");
+    mismatch.appendRange(0, new Uint8Array([1]));
+    expect(() => mismatch.finish()).toThrow("checksum");
     expect(readdirSync(root)).toEqual(["installed"]);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("empty ranged files complete with the standard empty digest", async () => {
   const root = mkdtempSync(join(tmpdir(), "download-range-empty-"));
   const sink = DownloadSink.createRanged(root, "empty", bounded, 0, []);
   try {
-    await sink.inspectStaged(async path => { expect(readFileSync(path).length).toBe(0); });
+    await sink.inspectStaged(async path => {
+      expect(readFileSync(path).length).toBe(0);
+    });
     expect(sink.finish()).toBe(createContentDigest(createHash("sha256").digest("hex")));
     expect(readFileSync(join(root, "empty")).length).toBe(0);
-  } finally { sink.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    sink.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("an interrupted resumable download continues only from a hash-verified partial file", () => {
   const root = mkdtempSync(join(tmpdir(), "download-resume-"));
-  const bytes = Uint8Array.from({ length: 150_000 }, (_, index) => index * 31 % 253);
+  const bytes = Uint8Array.from({ length: 150_000 }, (_, index) => (index * 31) % 253);
   try {
     const first = DownloadSink.resumable(root, "maps/long.bsp", bounded);
     expect(first.resumedFrom).toBe(0);
@@ -117,18 +172,33 @@ test("an interrupted resumable download continues only from a hash-verified part
     expect(second.finish()).toBe(createContentDigest(createHash("sha256").update(bytes).digest("hex")));
     expect(readFileSync(join(root, "maps/long.bsp"))).toEqual(Buffer.from(bytes));
     expect(readdirSync(join(root, "maps"))).toEqual(["long.bsp"]);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a corrupted, truncated or unrecorded partial download is discarded and restarted", () => {
   const root = mkdtempSync(join(tmpdir(), "download-resume-bad-"));
   const bytes = Uint8Array.from({ length: 5000 }, (_, index) => index % 251);
-  const stage = (): void => { const sink = DownloadSink.resumable(root, "a.pk3", bounded); sink.append(bytes); sink.suspend(); };
+  const stage = (): void => {
+    const sink = DownloadSink.resumable(root, "a.pk3", bounded);
+    sink.append(bytes);
+    sink.suspend();
+  };
   const part = join(root, "a.pk3.part");
   try {
-    for (const damage of [() => { const copy = readFileSync(part); copy[100] = (copy[100] ?? 0) ^ 1; writeFileSync(part, copy); }, () => writeFileSync(part, bytes.subarray(0, 10)),
-      () => rmSync(`${part}.sha256`), () => writeFileSync(`${part}.sha256`, "garbage")]) {
-      stage(); damage();
+    for (const damage of [
+      () => {
+        const copy = readFileSync(part);
+        copy[100] = (copy[100] ?? 0) ^ 1;
+        writeFileSync(part, copy);
+      },
+      () => writeFileSync(part, bytes.subarray(0, 10)),
+      () => rmSync(`${part}.sha256`),
+      () => writeFileSync(`${part}.sha256`, "garbage"),
+    ]) {
+      stage();
+      damage();
       const sink = DownloadSink.resumable(root, "a.pk3", bounded);
       expect(sink.resumedFrom).toBe(0);
       expect(readFileSync(part).length).toBe(0);
@@ -136,7 +206,10 @@ test("a corrupted, truncated or unrecorded partial download is discarded and res
       expect(readdirSync(root)).toEqual([]);
     }
     const plain = DownloadSink.resumable(root, "a.pk3", bounded);
-    plain.append(bytes); plain.close();
+    plain.append(bytes);
+    plain.close();
     expect(readdirSync(root)).toEqual([]);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

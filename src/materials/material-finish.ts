@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // FinishShader/VertexLightingCollapse, id Software renderer/tr_shader.c.
 // SPDX-License-Identifier: GPL-2.0-or-later
-import {
-  SourceAlphaGenerator,
-  SourceColorGenerator,
-  SourceTexCoordGenerator,
-  SourceWaveFunction,
-} from "./material.ts";
+import { SourceAlphaGenerator, SourceColorGenerator, SourceTexCoordGenerator, SourceWaveFunction } from "./material.ts";
 import type {
   AlphaGenerator,
   ColorGenerator,
@@ -18,11 +14,7 @@ import type {
   SourceWaveStorage,
 } from "./material.ts";
 import { sourceMaterialIterator } from "./material-iterator.ts";
-import type {
-  FinishedIteratorStage,
-  MaterialIterator,
-  MaterialIteratorProfile,
-} from "./material-iterator.ts";
+import type { FinishedIteratorStage, MaterialIterator, MaterialIteratorProfile } from "./material-iterator.ts";
 import type { FogAdjustment } from "./fog.ts";
 import { SourceStateBit, sourceStateBits } from "./source-state.ts";
 import type { SourceStateInput } from "./source-state.ts";
@@ -86,11 +78,12 @@ interface FinishImplicitShaderFields {
   readonly profile: FinishShaderProfile;
 }
 
-export type FinishImplicitShaderInput = FinishImplicitShaderFields & (
-  | { readonly kind: "default" | "stencil-shadow" | "dynamic" | "vertex" | "picture" }
-  | { readonly kind: "white"; readonly whiteImage: FinishLoadedImageMetadata }
-  | { readonly kind: "lightmap"; readonly lightmapIndex: number; readonly lightmapImage: FinishLoadedImageMetadata }
-);
+export type FinishImplicitShaderInput = FinishImplicitShaderFields &
+  (
+    | { readonly kind: "default" | "stencil-shadow" | "dynamic" | "vertex" | "picture" }
+    | { readonly kind: "white"; readonly whiteImage: FinishLoadedImageMetadata }
+    | { readonly kind: "lightmap"; readonly lightmapIndex: number; readonly lightmapImage: FinishLoadedImageMetadata }
+  );
 
 type FinishedAlphaGenerator = FinishedIteratorStage["alphaGen"];
 
@@ -131,16 +124,26 @@ function copyStage(stage: ShaderStage): ShaderStage {
 
 function alphaKind(source: SourceAlphaGenerator, semantic: AlphaGenerator): FinishedAlphaGenerator {
   switch (source) {
-    case SourceAlphaGenerator.Identity: return "identity";
-    case SourceAlphaGenerator.Skip: return "skip";
-    case SourceAlphaGenerator.Entity: return "entity";
-    case SourceAlphaGenerator.OneMinusEntity: return "oneminusentity";
-    case SourceAlphaGenerator.Vertex: return "vertex";
-    case SourceAlphaGenerator.OneMinusVertex: return "oneminusvertex";
-    case SourceAlphaGenerator.LightingSpecular: return "lightingspecular";
-    case SourceAlphaGenerator.Waveform: return semantic.kind === "wave" ? semantic.kind : "wave";
-    case SourceAlphaGenerator.Portal: return semantic.kind === "portal" ? semantic.kind : "portal";
-    case SourceAlphaGenerator.Const: return semantic.kind === "const" ? semantic.kind : "const";
+    case SourceAlphaGenerator.Identity:
+      return "identity";
+    case SourceAlphaGenerator.Skip:
+      return "skip";
+    case SourceAlphaGenerator.Entity:
+      return "entity";
+    case SourceAlphaGenerator.OneMinusEntity:
+      return "oneminusentity";
+    case SourceAlphaGenerator.Vertex:
+      return "vertex";
+    case SourceAlphaGenerator.OneMinusVertex:
+      return "oneminusvertex";
+    case SourceAlphaGenerator.LightingSpecular:
+      return "lightingspecular";
+    case SourceAlphaGenerator.Waveform:
+      return semantic.kind === "wave" ? semantic.kind : "wave";
+    case SourceAlphaGenerator.Portal:
+      return semantic.kind === "portal" ? semantic.kind : "portal";
+    case SourceAlphaGenerator.Const:
+      return semantic.kind === "const" ? semantic.kind : "const";
   }
 }
 
@@ -176,8 +179,11 @@ function isBlended(stage: WorkingStage): boolean {
 
 function fogAdjustment(stage: WorkingStage): FogColorAdjustment {
   const blend = stage.stateBits & blendMask;
-  if (blend === (SourceStateBit.SRCBLEND_ONE | SourceStateBit.DSTBLEND_ONE)
-    || blend === (SourceStateBit.SRCBLEND_ZERO | SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR)) return "rgb";
+  if (
+    blend === (SourceStateBit.SRCBLEND_ONE | SourceStateBit.DSTBLEND_ONE) ||
+    blend === (SourceStateBit.SRCBLEND_ZERO | SourceStateBit.DSTBLEND_ONE_MINUS_SRC_COLOR)
+  )
+    return "rgb";
   if (blend === (SourceStateBit.SRCBLEND_SRC_ALPHA | SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA)) return "alpha";
   if (blend === (SourceStateBit.SRCBLEND_ONE | SourceStateBit.DSTBLEND_ONE_MINUS_SRC_ALPHA)) return "rgba";
   return "none";
@@ -219,7 +225,10 @@ function vertexLightingCollapse(stages: (WorkingStage | null)[], sort: number, l
       if (candidate.tcGen !== SourceTexCoordGenerator.Texture) rank -= 5;
       if (candidate.stage.tcMods.length !== 0) rank -= 5;
       if (candidate.rgbGen !== SourceColorGenerator.Identity && candidate.rgbGen !== SourceColorGenerator.IdentityLighting) rank -= 3;
-      if (rank > bestRank) { bestRank = rank; best = candidate; }
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = candidate;
+      }
     }
     first.stage = withBundle(first.stage, best.stage);
     first.imageTMU = best.imageTMU;
@@ -249,8 +258,10 @@ function vertexLightingCollapse(stages: (WorkingStage | null)[], sort: number, l
     if (collapsed.rgbGen === SourceColorGenerator.Waveform && second.rgbGen === SourceColorGenerator.Waveform) {
       const a = collapsed.rgbWave.func;
       const b = second.rgbWave.func;
-      if ((a === SourceWaveFunction.Sawtooth && b === SourceWaveFunction.InverseSawtooth)
-        || (a === SourceWaveFunction.InverseSawtooth && b === SourceWaveFunction.Sawtooth)) {
+      if (
+        (a === SourceWaveFunction.Sawtooth && b === SourceWaveFunction.InverseSawtooth) ||
+        (a === SourceWaveFunction.InverseSawtooth && b === SourceWaveFunction.Sawtooth)
+      ) {
         collapsed.stage = { ...collapsed.stage, rgbGen: { kind: "identitylighting" } };
         collapsed.rgbGen = SourceColorGenerator.IdentityLighting;
       }
@@ -353,12 +364,15 @@ export function finishShader(input: FinishShaderInput): FinishedShader {
     if (stage === undefined || stage === null) break;
     sourceStages.push(finishedStage(stage));
   }
-  const iterator = sourceMaterialIterator({
-    stages: sourceStages,
-    sky: definition.sky !== null,
-    polygonOffset: definition.polygonOffset,
-    deformCount: definition.deforms.length,
-  }, profile.iterator);
+  const iterator = sourceMaterialIterator(
+    {
+      stages: sourceStages,
+      sky: definition.sky !== null,
+      polygonOffset: definition.polygonOffset,
+      deformCount: definition.deforms.length,
+    },
+    profile.iterator,
+  );
   const numUnfoggedPasses = iterator.passes.length;
   if (numUnfoggedPasses === 0) sort = 7;
   const fogPass = sort <= 3 ? "equal" : definition.surfaceParms.includes("fog") ? "less-equal" : "none";
@@ -393,9 +407,16 @@ function implicitStage(fields: {
     tcMods: [],
     sourceState: {
       active: true,
-      stateBits: sourceStateBits({ blend: fields.blend.source === "one" && fields.blend.destination === "zero" ? null : fields.blend,
-        depthTest: fields.depthFunc === "always" ? "less-equal" : fields.depthFunc, depthWrite: fields.depthWrite, alphaTest: "none" },
-      "fill", fields.depthFunc !== "always"),
+      stateBits: sourceStateBits(
+        {
+          blend: fields.blend.source === "one" && fields.blend.destination === "zero" ? null : fields.blend,
+          depthTest: fields.depthFunc === "always" ? "less-equal" : fields.depthFunc,
+          depthWrite: fields.depthWrite,
+          alphaTest: "none",
+        },
+        "fill",
+        fields.depthFunc !== "always",
+      ),
       rgbGen: fields.sourceRgbGen,
       alphaGen: fields.sourceAlphaGen,
       tcGen: SourceTexCoordGenerator.Bad,
@@ -440,38 +461,100 @@ export function implicitShaderInput(input: FinishImplicitShaderInput): FinishSha
   let images: readonly FinishImageMetadata[];
   let sort: number | null = null;
   switch (input.kind) {
-    case "default": case "stencil-shadow":
+    case "default":
+    case "stencil-shadow":
       lightmapIndex = -1;
-      stages = [implicitStage({ map: baseMap, rgbGen: { kind: "identitylighting" }, sourceRgbGen: SourceColorGenerator.Bad,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: opaqueBlend, depthFunc: "less-equal", depthWrite: true, isLightmap: false })];
+      stages = [
+        implicitStage({
+          map: baseMap,
+          rgbGen: { kind: "identitylighting" },
+          sourceRgbGen: SourceColorGenerator.Bad,
+          alphaGen: { kind: "identity" },
+          sourceAlphaGen: SourceAlphaGenerator.Identity,
+          blend: opaqueBlend,
+          depthFunc: "less-equal",
+          depthWrite: true,
+          isLightmap: false,
+        }),
+      ];
       images = [input.baseImage];
       if (input.kind === "stencil-shadow") sort = 14;
       break;
     case "dynamic":
       lightmapIndex = -1;
-      stages = [implicitStage({ map: baseMap, rgbGen: { kind: "lightingdiffuse" }, sourceRgbGen: SourceColorGenerator.LightingDiffuse,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: opaqueBlend, depthFunc: "less-equal", depthWrite: true, isLightmap: false })];
+      stages = [
+        implicitStage({
+          map: baseMap,
+          rgbGen: { kind: "lightingdiffuse" },
+          sourceRgbGen: SourceColorGenerator.LightingDiffuse,
+          alphaGen: { kind: "identity" },
+          sourceAlphaGen: SourceAlphaGenerator.Identity,
+          blend: opaqueBlend,
+          depthFunc: "less-equal",
+          depthWrite: true,
+          isLightmap: false,
+        }),
+      ];
       images = [input.baseImage];
       break;
     case "vertex":
       lightmapIndex = -3;
-      stages = [implicitStage({ map: baseMap, rgbGen: { kind: "exactvertex" }, sourceRgbGen: SourceColorGenerator.ExactVertex,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Skip, blend: opaqueBlend, depthFunc: "less-equal", depthWrite: true, isLightmap: false })];
+      stages = [
+        implicitStage({
+          map: baseMap,
+          rgbGen: { kind: "exactvertex" },
+          sourceRgbGen: SourceColorGenerator.ExactVertex,
+          alphaGen: { kind: "identity" },
+          sourceAlphaGen: SourceAlphaGenerator.Skip,
+          blend: opaqueBlend,
+          depthFunc: "less-equal",
+          depthWrite: true,
+          isLightmap: false,
+        }),
+      ];
       images = [input.baseImage];
       break;
     case "picture":
       lightmapIndex = -4;
-      stages = [implicitStage({ map: baseMap, rgbGen: { kind: "vertex" }, sourceRgbGen: SourceColorGenerator.Vertex,
-        alphaGen: { kind: "vertex" }, sourceAlphaGen: SourceAlphaGenerator.Vertex,
-        blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthFunc: "always", depthWrite: false, isLightmap: false })];
+      stages = [
+        implicitStage({
+          map: baseMap,
+          rgbGen: { kind: "vertex" },
+          sourceRgbGen: SourceColorGenerator.Vertex,
+          alphaGen: { kind: "vertex" },
+          sourceAlphaGen: SourceAlphaGenerator.Vertex,
+          blend: { source: "src-alpha", destination: "one-minus-src-alpha" },
+          depthFunc: "always",
+          depthWrite: false,
+          isLightmap: false,
+        }),
+      ];
       images = [input.baseImage];
       break;
     case "white": {
       lightmapIndex = -2;
-      const white = implicitStage({ map: { kind: "whiteimage" }, rgbGen: { kind: "identitylighting" }, sourceRgbGen: SourceColorGenerator.IdentityLighting,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: opaqueBlend, depthFunc: "less-equal", depthWrite: true, isLightmap: false });
-      const base = implicitStage({ map: baseMap, rgbGen: { kind: "identity" }, sourceRgbGen: SourceColorGenerator.Identity,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: filterBlend, depthFunc: "less-equal", depthWrite: false, isLightmap: false });
+      const white = implicitStage({
+        map: { kind: "whiteimage" },
+        rgbGen: { kind: "identitylighting" },
+        sourceRgbGen: SourceColorGenerator.IdentityLighting,
+        alphaGen: { kind: "identity" },
+        sourceAlphaGen: SourceAlphaGenerator.Identity,
+        blend: opaqueBlend,
+        depthFunc: "less-equal",
+        depthWrite: true,
+        isLightmap: false,
+      });
+      const base = implicitStage({
+        map: baseMap,
+        rgbGen: { kind: "identity" },
+        sourceRgbGen: SourceColorGenerator.Identity,
+        alphaGen: { kind: "identity" },
+        sourceAlphaGen: SourceAlphaGenerator.Identity,
+        blend: filterBlend,
+        depthFunc: "less-equal",
+        depthWrite: false,
+        isLightmap: false,
+      });
       stages = [white, base];
       images = [input.whiteImage, input.baseImage];
       break;
@@ -481,10 +564,28 @@ export function implicitShaderInput(input: FinishImplicitShaderInput): FinishSha
         throw new RangeError("Implicit lightmap index must be a non-negative int32");
       }
       lightmapIndex = input.lightmapIndex;
-      const lightmap = implicitStage({ map: { kind: "lightmap" }, rgbGen: { kind: "identity" }, sourceRgbGen: SourceColorGenerator.Identity,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: opaqueBlend, depthFunc: "less-equal", depthWrite: true, isLightmap: true });
-      const base = implicitStage({ map: baseMap, rgbGen: { kind: "identity" }, sourceRgbGen: SourceColorGenerator.Identity,
-        alphaGen: { kind: "identity" }, sourceAlphaGen: SourceAlphaGenerator.Identity, blend: filterBlend, depthFunc: "less-equal", depthWrite: false, isLightmap: false });
+      const lightmap = implicitStage({
+        map: { kind: "lightmap" },
+        rgbGen: { kind: "identity" },
+        sourceRgbGen: SourceColorGenerator.Identity,
+        alphaGen: { kind: "identity" },
+        sourceAlphaGen: SourceAlphaGenerator.Identity,
+        blend: opaqueBlend,
+        depthFunc: "less-equal",
+        depthWrite: true,
+        isLightmap: true,
+      });
+      const base = implicitStage({
+        map: baseMap,
+        rgbGen: { kind: "identity" },
+        sourceRgbGen: SourceColorGenerator.Identity,
+        alphaGen: { kind: "identity" },
+        sourceAlphaGen: SourceAlphaGenerator.Identity,
+        blend: filterBlend,
+        depthFunc: "less-equal",
+        depthWrite: false,
+        isLightmap: false,
+      });
       stages = [lightmap, base];
       images = [input.lightmapImage, input.baseImage];
       break;

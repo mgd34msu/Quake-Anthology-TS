@@ -22,7 +22,8 @@ export function readImports(image: ImageReader): GuestImport[] {
     const name = reader.u32(at + 12);
     const iat = reader.u32(at + 16);
     if (lookup === 0 && timestamp === 0 && forward === 0 && name === 0 && iat === 0) return imports;
-    if (name === 0 || iat === 0 || iat % width !== 0 || lookup % width !== 0 || (lookup === 0 && timestamp !== 0)) throw new PeError("imports", "invalid descriptor/alignment or bound IAT without original lookup table");
+    if (name === 0 || iat === 0 || iat % width !== 0 || lookup % width !== 0 || (lookup === 0 && timestamp !== 0))
+      throw new PeError("imports", "invalid descriptor/alignment or bound IAT without original lookup table");
     const library = reader.text(name);
     if (library.length === 0) throw new PeError("imports", "empty import library");
     for (let index = 0; ; index++) {
@@ -85,8 +86,10 @@ export function readExports(image: ImageReader): GuestExport[] {
   for (let index = 0; index < count; index++) {
     const rva = reader.u32(addresses + index * 4);
     if (rva === 0) continue;
-    const target: GuestExport["target"] = rva >= table.rva && rva < table.rva + table.byteLength
-      ? forwarded(reader.text(rva, table.rva + table.byteLength)) : { kind: "address", address: reader.address(rva) };
+    const target: GuestExport["target"] =
+      rva >= table.rva && rva < table.rva + table.byteLength
+        ? forwarded(reader.text(rva, table.rva + table.byteLength))
+        : { kind: "address", address: reader.address(rva) };
     targets.set(index, target);
     exports.push({ symbol: { kind: "ordinal", ordinal: ordinalBase + index }, target });
   }
@@ -114,7 +117,8 @@ export function readTls(image: ImageReader): { readonly tls: GuestTlsTemplate | 
   const zeroFillBytes = reader.u32(table.rva + width * 4);
   const flags = reader.u32(table.rva + width * 4 + 4);
   const alignmentCode = (flags >>> 20) & 15;
-  if (end < start || end - start > BigInt(reader.pe.imageSize) || alignmentCode === 15 || index === 0n) throw new PeError("tls", "invalid TLS range, alignment or index address");
+  if (end < start || end - start > BigInt(reader.pe.imageSize) || alignmentCode === 15 || index === 0n)
+    throw new PeError("tls", "invalid TLS range, alignment or index address");
   const size = Number(end - start);
   const initialized = start === 0n && end === 0n ? new Uint8Array() : reader.copy(reader.rva(start, size), size);
   const callbacks: GuestAddress[] = [];
@@ -126,8 +130,10 @@ export function readTls(image: ImageReader): { readonly tls: GuestTlsTemplate | 
       callbacks.push(reader.executable(reader.rva(callback)));
     }
   }
-  return { tls: { image: reader.module, initialized, zeroFillBytes, alignment: alignmentCode === 0 ? 1n : 1n << BigInt(alignmentCode - 1), callbacks },
-    index: reader.address(reader.rva(index, 4), 4) };
+  return {
+    tls: { image: reader.module, initialized, zeroFillBytes, alignment: alignmentCode === 0 ? 1n : 1n << BigInt(alignmentCode - 1), callbacks },
+    index: reader.address(reader.rva(index, 4), 4),
+  };
 }
 
 export function readUnwind(image: ImageReader): PeUnwindRecord[] {
@@ -145,14 +151,16 @@ export function readUnwind(image: ImageReader): PeUnwindRecord[] {
     const version = header & 7;
     const flags = (header >>> 3) & 31;
     const count = (header >>> 16) & 255;
-    if ((version !== 1 && version !== 2) || (flags & ~7) !== 0 || ((flags & 4) !== 0 && (flags & 3) !== 0)) throw new PeError("unwind", `unsupported version/flags ${version}/${flags}`);
+    if ((version !== 1 && version !== 2) || (flags & ~7) !== 0 || ((flags & 4) !== 0 && (flags & 3) !== 0))
+      throw new PeError("unwind", `unsupported version/flags ${version}/${flags}`);
     const tail = unwindInfoRva + 4 + Math.ceil(count / 2) * 4;
     let chained: PeUnwindRecord | null = null;
     let handlerRva: number | null = null;
     let handlerDataRva: number | null = null;
     let size = tail - unwindInfoRva;
     if ((flags & 4) !== 0) {
-      const next = new Set(ancestors); next.add(unwindInfoRva);
+      const next = new Set(ancestors);
+      next.add(unwindInfoRva);
       chained = entry(reader.u32(tail), reader.u32(tail + 4), reader.u32(tail + 8), next);
       size += 12;
     } else if ((flags & 3) !== 0) {
@@ -189,7 +197,12 @@ export function readLoadConfiguration(image: ImageReader): PeLoadConfiguration |
     return value === 0n ? null : reader.address(reader.rva(value, width), width);
   }
   const guardOffset = width === 4 ? 88 : 144;
-  return { address: reader.address(table.rva, size), bytes: reader.copy(table.rva, size),
-    securityCookieAddress: addressField(width === 4 ? 60 : 88), guardCheckSlot: addressField(width === 4 ? 72 : 112),
-    guardDispatchSlot: addressField(width === 4 ? 76 : 120), guardFlags: guardOffset + 4 <= size ? reader.u32(table.rva + guardOffset) : 0 };
+  return {
+    address: reader.address(table.rva, size),
+    bytes: reader.copy(table.rva, size),
+    securityCookieAddress: addressField(width === 4 ? 60 : 88),
+    guardCheckSlot: addressField(width === 4 ? 72 : 112),
+    guardDispatchSlot: addressField(width === 4 ? 76 : 120),
+    guardFlags: guardOffset + 4 <= size ? reader.u32(table.rva + guardOffset) : 0,
+  };
 }

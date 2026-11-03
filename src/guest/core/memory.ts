@@ -2,12 +2,27 @@
 import type { GuestAddress, GuestAllocatorImage, ModuleIdentity } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type {
-  GuestAccess, GuestAllocationOptions, GuestMapOptions, GuestMapping, GuestMemorySnapshot,
-  GuestPermissions, GuestPointerBytes, GuestWrittenRange, MappedGuestMemory,
+  GuestAccess,
+  GuestAllocationOptions,
+  GuestMapOptions,
+  GuestMapping,
+  GuestMemorySnapshot,
+  GuestPermissions,
+  GuestPointerBytes,
+  GuestWrittenRange,
+  MappedGuestMemory,
 } from "./contracts.ts";
 
-export type GuestMemoryFaultReason = "foreign-address-space" | "address-overflow" | "null-address"
-  | "invalid-length" | "unmapped" | "permission" | "overlap" | "noncontiguous-borrow" | "quota";
+export type GuestMemoryFaultReason =
+  | "foreign-address-space"
+  | "address-overflow"
+  | "null-address"
+  | "invalid-length"
+  | "unmapped"
+  | "permission"
+  | "overlap"
+  | "noncontiguous-borrow"
+  | "quota";
 export class GuestMemoryFault extends Error {
   constructor(
     readonly reason: GuestMemoryFaultReason,
@@ -33,13 +48,23 @@ export function addGuestPointer(value: bigint, displacement: bigint, pointerByte
 }
 function allows(permissions: GuestPermissions, access: GuestAccess): boolean {
   switch (access) {
-    case "read": return permissions === "read" || permissions === "read-write" || permissions === "read-execute" || permissions === "read-write-execute";
-    case "write": return permissions === "read-write" || permissions === "read-write-execute";
-    case "execute": return permissions === "execute" || permissions === "read-execute" || permissions === "read-write-execute";
+    case "read":
+      return permissions === "read" || permissions === "read-write" || permissions === "read-execute" || permissions === "read-write-execute";
+    case "write":
+      return permissions === "read-write" || permissions === "read-write-execute";
+    case "execute":
+      return permissions === "execute" || permissions === "read-execute" || permissions === "read-write-execute";
   }
 }
-interface CodePage { revision: symbol; }
-interface BackingChanges { exposed: boolean; firstPage: number; lastPage: number; readonly pages: Map<number, CodePage>; }
+interface CodePage {
+  revision: symbol;
+}
+interface BackingChanges {
+  exposed: boolean;
+  firstPage: number;
+  lastPage: number;
+  readonly pages: Map<number, CodePage>;
+}
 interface Mapping extends GuestMapping {
   readonly bytes: Uint8Array;
   readonly changes: BackingChanges;
@@ -50,10 +75,19 @@ interface Mapping extends GuestMapping {
 }
 function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase">): Mapping {
   const end = mapping.base + BigInt(mapping.byteLength);
-  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), end,
-    numericBase: mapping.base >= 0n && end <= 0x1fffffffffffffn ? Number(mapping.base) : null, active: true };
+  return {
+    ...mapping,
+    view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength),
+    end,
+    numericBase: mapping.base >= 0n && end <= 0x1fffffffffffffn ? Number(mapping.base) : null,
+    active: true,
+  };
 }
-interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
+interface Chunk {
+  readonly mapping: Mapping;
+  readonly offset: number;
+  readonly byteLength: number;
+}
 interface WriteObserver {
   readonly chunks: readonly Chunk[];
   readonly notify: (ranges: readonly GuestWrittenRange[]) => void;
@@ -66,14 +100,24 @@ interface WatchedRange {
   readonly end: number;
   readonly displacement: number;
 }
-interface ObserverHit { readonly chunk: number; readonly written: number; readonly range: GuestWrittenRange; }
+interface ObserverHit {
+  readonly chunk: number;
+  readonly written: number;
+  readonly range: GuestWrittenRange;
+}
 const observerPageBytes = 4096;
-const pageBytes = 4096, pagesPerSlab = 64;
+const pageBytes = 4096,
+  pagesPerSlab = 64;
 function invalidateCode(mapping: Mapping, offset: number, byteLength: number): void {
   if (byteLength === 0) return;
-  const changes = mapping.changes, start = mapping.bytes.byteOffset + offset;
-  const first = Math.max(changes.firstPage, Math.floor(start / 4096)), last = Math.min(changes.lastPage, Math.floor((start + byteLength - 1) / 4096));
-  for (let index = first; index <= last; index++) { const page = changes.pages.get(index); if (page !== undefined) page.revision = Symbol(); }
+  const changes = mapping.changes,
+    start = mapping.bytes.byteOffset + offset;
+  const first = Math.max(changes.firstPage, Math.floor(start / 4096)),
+    last = Math.min(changes.lastPage, Math.floor((start + byteLength - 1) / 4096));
+  for (let index = first; index <= last; index++) {
+    const page = changes.pages.get(index);
+    if (page !== undefined) page.revision = Symbol();
+  }
 }
 export interface SparseGuestMemoryOptions {
   readonly module: ModuleIdentity;
@@ -178,10 +222,16 @@ export class SparseGuestMemory implements MappedGuestMemory {
     SparseGuestMemory.#managed.add(memory);
     return memory;
   }
-  static managed(memory: MappedGuestMemory): memory is SparseGuestMemory { return SparseGuestMemory.#managed.has(memory); }
-  get hasWriteObservers(): boolean { return this.#writeObservers.size !== 0; }
+  static managed(memory: MappedGuestMemory): memory is SparseGuestMemory {
+    return SparseGuestMemory.#managed.has(memory);
+  }
+  get hasWriteObservers(): boolean {
+    return this.#writeObservers.size !== 0;
+  }
   /** Counts stores that reached at least one observer, so a block can tell a watched store from an unrelated one. */
-  get writeDeliveries(): number { return this.#writeDeliveries; }
+  get writeDeliveries(): number {
+    return this.#writeDeliveries;
+  }
 
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;
@@ -220,7 +270,12 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   allocate(options: GuestAllocationOptions): GuestAddress {
-    if (options.pooled === true && options.byteLength === pageBytes && (options.alignment ?? 16n) <= BigInt(pageBytes) && (options.permissions ?? "read-write") === "read-write")
+    if (
+      options.pooled === true &&
+      options.byteLength === pageBytes &&
+      (options.alignment ?? 16n) <= BigInt(pageBytes) &&
+      (options.permissions ?? "read-write") === "read-write"
+    )
       return this.#allocatePooledPage(options.label ?? "allocation");
     const alignment = options.alignment ?? 16n;
     if (alignment <= 0n || (alignment & (alignment - 1n)) !== 0n) throw new RangeError("Guest allocation alignment must be a positive power of two");
@@ -278,8 +333,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (slab === undefined || raw < slab.base || raw >= slab.base + BigInt(pageBytes * pagesPerSlab)) continue;
       if (raw === slab.base && byteLength === pageBytes * pagesPerSlab) {
         // Guest disposal unmaps the slab's own mapping: retire the slab so none of its pages is handed out again.
-        slab.used.fill(1); slab.next = pagesPerSlab;
-        const first = slabIndex * pagesPerSlab, last = first + pagesPerSlab;
+        slab.used.fill(1);
+        slab.next = pagesPerSlab;
+        const first = slabIndex * pagesPerSlab,
+          last = first + pagesPerSlab;
         for (let free = this.#freePages.length - 1; free >= 0; free--) {
           const page = this.#freePages[free];
           if (page !== undefined && page >= first && page < last) this.#freePages.splice(free, 1);
@@ -342,8 +399,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   copyInto(address: GuestAddress, destination: Uint8Array, destinationOffset = 0, byteLength = destination.byteLength - destinationOffset): undefined {
-    if (!Number.isSafeInteger(destinationOffset) || destinationOffset < 0 || !Number.isSafeInteger(byteLength)
-      || byteLength < 0 || destinationOffset + byteLength > destination.byteLength) throw new RangeError("Guest copy exceeds destination storage");
+    if (
+      !Number.isSafeInteger(destinationOffset) ||
+      destinationOffset < 0 ||
+      !Number.isSafeInteger(byteLength) ||
+      byteLength < 0 ||
+      destinationOffset + byteLength > destination.byteLength
+    )
+      throw new RangeError("Guest copy exceeds destination storage");
     const mapping = this.#singleMapping(address, byteLength, "read");
     if (mapping !== null) {
       const offset = this.#lookupOffset;
@@ -366,11 +429,13 @@ export class SparseGuestMemory implements MappedGuestMemory {
   /** Stop at the terminator without probing an unreadable following mapping. */
   findZero(address: GuestAddress, maximum: number): number {
     if (!Number.isSafeInteger(maximum) || maximum < 0) throw new RangeError("Invalid guest string limit");
-    let consumed = 0, cursor = address;
+    let consumed = 0,
+      cursor = address;
     while (consumed < maximum) {
       const mapping = this.#singleMapping(cursor, 1, "read");
       if (mapping === null) this.#fault("unmapped", cursor.byteOffset, 1, "read", "range includes unmapped bytes");
-      const offset = this.#lookupOffset, length = Math.min(maximum - consumed, mapping.byteLength - offset);
+      const offset = this.#lookupOffset,
+        length = Math.min(maximum - consumed, mapping.byteLength - offset);
       const terminator = mapping.bytes.subarray(offset, offset + length).indexOf(0);
       if (terminator >= 0) return consumed + terminator;
       consumed += length;
@@ -390,8 +455,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     else {
       this.#range(byteOffset, 1, "execute");
       mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
-      if (mapping === undefined || byteOffset < mapping.base)
-        this.#fault("unmapped", byteOffset, 1, "execute", "range includes unmapped bytes");
+      if (mapping === undefined || byteOffset < mapping.base) this.#fault("unmapped", byteOffset, 1, "execute", "range includes unmapped bytes");
       this.#remember("execute", mapping);
     }
     if (!allows(mapping.permissions, "execute"))
@@ -400,7 +464,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (byte === undefined) throw new Error("Guest mapping backing is inconsistent");
     return byte;
   }
-
 
   fetchSequence(byteOffset: bigint): () => number {
     let consumed = 0;
@@ -440,11 +503,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (offset + bytes.length > mapping.byteLength) return null;
     const expected = bytes.slice();
     const changes = mapping.changes;
-    const first = Math.floor((mapping.bytes.byteOffset + offset) / 4096), last = Math.floor((mapping.bytes.byteOffset + offset + bytes.length - 1) / 4096);
+    const first = Math.floor((mapping.bytes.byteOffset + offset) / 4096),
+      last = Math.floor((mapping.bytes.byteOffset + offset + bytes.length - 1) / 4096);
     let page: CodePage | null = null;
     if (!changes.exposed && first === last) {
       page = changes.pages.get(first) ?? { revision: Symbol() };
-      changes.pages.set(first, page); changes.firstPage = Math.min(changes.firstPage, first); changes.lastPage = Math.max(changes.lastPage, first);
+      changes.pages.set(first, page);
+      changes.firstPage = Math.min(changes.firstPage, first);
+      changes.lastPage = Math.max(changes.lastPage, first);
     }
     let checked: symbol | null = null;
     const unchanged = (): boolean => {
@@ -464,7 +530,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
     if (mapping === undefined) return null;
     const start = mapping.bytes.byteOffset + Number(byteOffset - mapping.base);
-    const first = Math.floor(start / 4096), last = Math.floor((start + bytes.length - 1) / 4096);
+    const first = Math.floor(start / 4096),
+      last = Math.floor((start + bytes.length - 1) / 4096);
     const changes = mapping.changes;
     const pages: { readonly page: CodePage; checked: symbol }[] = [];
     for (let index = first; index <= last; index++) {
@@ -483,7 +550,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
       afterStore: () => mapping.active && pages.every(tracked => tracked.checked === tracked.page.revision),
     };
   }
-
 
   write(address: GuestAddress, bytes: Uint8Array): undefined {
     const mapping = this.#singleMapping(address, bytes.byteLength, "write");
@@ -512,7 +578,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   fill(address: GuestAddress, byteLength: number, value: number): undefined {
-    const byte = value & 255, mapping = this.#singleMapping(address, byteLength, "write");
+    const byte = value & 255,
+      mapping = this.#singleMapping(address, byteLength, "write");
     if (mapping !== null) {
       const offset = this.#lookupOffset;
       mapping.bytes.fill(byte, offset, offset + byteLength);
@@ -547,17 +614,24 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const written = chunks[writtenIndex];
       if (written === undefined) continue;
       if (written.byteLength === 0) continue;
-      const bytes = written.mapping.bytes, pages = this.#watchedPages.get(bytes.buffer);
+      const bytes = written.mapping.bytes,
+        pages = this.#watchedPages.get(bytes.buffer);
       if (pages === undefined) continue;
-      const other = bytes.byteOffset + written.offset, otherEnd = other + written.byteLength;
-      const firstPage = Math.floor(other / observerPageBytes), lastPage = Math.floor((otherEnd - 1) / observerPageBytes);
+      const other = bytes.byteOffset + written.offset,
+        otherEnd = other + written.byteLength;
+      const firstPage = Math.floor(other / observerPageBytes),
+        lastPage = Math.floor((otherEnd - 1) / observerPageBytes);
       const seen = firstPage === lastPage ? null : new Set<WatchedRange>();
       for (let page = firstPage; page <= lastPage; page++) {
         const ranges = pages.get(page);
         if (ranges === undefined) continue;
         for (const watched of ranges) {
-          if (seen !== null) { if (seen.has(watched)) continue; seen.add(watched); }
-          const first = Math.max(watched.start, other), last = Math.min(watched.end, otherEnd);
+          if (seen !== null) {
+            if (seen.has(watched)) continue;
+            seen.add(watched);
+          }
+          const first = Math.max(watched.start, other),
+            last = Math.min(watched.end, otherEnd);
           if (first >= last) continue;
           const range = { byteOffset: watched.displacement + first - watched.start, byteLength: last - first };
           pending ??= new Map<WriteObserver, ObserverHit[]>();
@@ -573,7 +647,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
     for (const [observer, hits] of [...pending].sort((a, b) => a[0].sequence - b[0].sequence)) {
       if (!this.#writeObservers.has(observer)) continue;
       hits.sort((a, b) => a.chunk - b.chunk || a.written - b.written);
-      try { observer.notify(hits.map(hit => hit.range)); } catch (error) { errors.push(error); }
+      try {
+        observer.notify(hits.map(hit => hit.range));
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Guest write observers failed");
@@ -586,16 +664,20 @@ export class SparseGuestMemory implements MappedGuestMemory {
     let displacement = 0;
     for (const [chunk, part] of observer.chunks.entries()) {
       const start = part.mapping.bytes.byteOffset + part.offset;
-      if (part.byteLength > 0) watched.push({ buffer: part.mapping.bytes.buffer,
-        range: { observer, chunk, start, end: start + part.byteLength, displacement } });
+      if (part.byteLength > 0)
+        watched.push({ buffer: part.mapping.bytes.buffer, range: { observer, chunk, start, end: start + part.byteLength, displacement } });
       displacement += part.byteLength;
     }
     for (const { buffer, range } of watched) {
       let pages = this.#watchedPages.get(buffer);
-      if (pages === undefined) { pages = new Map<number, Set<WatchedRange>>(); this.#watchedPages.set(buffer, pages); }
+      if (pages === undefined) {
+        pages = new Map<number, Set<WatchedRange>>();
+        this.#watchedPages.set(buffer, pages);
+      }
       for (let page = Math.floor(range.start / observerPageBytes); page <= Math.floor((range.end - 1) / observerPageBytes); page++) {
         const ranges = pages.get(page);
-        if (ranges === undefined) pages.set(page, new Set([range])); else ranges.add(range);
+        if (ranges === undefined) pages.set(page, new Set([range]));
+        else ranges.add(range);
       }
     }
     this.#writeObservers.add(observer);
@@ -639,7 +721,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const recent = this.#recentMappings[access];
     if (recent?.active === true && recent.numericBase !== null) {
       const offset = address - recent.numericBase;
-      if (offset >= 0 && offset + byteLength <= recent.byteLength && allows(recent.permissions, access)) { this.#lookupOffset = offset; return recent; }
+      if (offset >= 0 && offset + byteLength <= recent.byteLength && allows(recent.permissions, access)) {
+        this.#lookupOffset = offset;
+        return recent;
+      }
     }
     for (const candidate of this.#workingSet) {
       if (candidate === recent || !candidate.active || candidate.numericBase === null) continue;
@@ -651,44 +736,110 @@ export class SparseGuestMemory implements MappedGuestMemory {
     }
     return null;
   }
-  readUint8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getUint8(offset); }
-  readInt8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getInt8(offset); }
-  readUint16(address: GuestAddress): number { const view = this.#readView(address, 2), offset = this.#lookupOffset; return view.getUint16(offset, true); }
-  readInt16(address: GuestAddress): number { const view = this.#readView(address, 2), offset = this.#lookupOffset; return view.getInt16(offset, true); }
-  readUint32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getUint32(offset, true); }
-  readInt32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getInt32(offset, true); }
-  readUint64(address: GuestAddress): bigint { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getBigUint64(offset, true); }
-  readUint64Words(address: GuestAddress, target: { low: number; high: number }): void {
-    const view = this.#readView(address, 8), offset = this.#lookupOffset;
-    const low = view.getUint32(offset, true), high = view.getUint32(offset + 4, true);
-    target.low = low; target.high = high;
+  readUint8(address: GuestAddress): number {
+    const view = this.#readView(address, 1),
+      offset = this.#lookupOffset;
+    return view.getUint8(offset);
   }
-  readInt64(address: GuestAddress): bigint { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getBigInt64(offset, true); }
-  readFloat32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getFloat32(offset, true); }
+  readInt8(address: GuestAddress): number {
+    const view = this.#readView(address, 1),
+      offset = this.#lookupOffset;
+    return view.getInt8(offset);
+  }
+  readUint16(address: GuestAddress): number {
+    const view = this.#readView(address, 2),
+      offset = this.#lookupOffset;
+    return view.getUint16(offset, true);
+  }
+  readInt16(address: GuestAddress): number {
+    const view = this.#readView(address, 2),
+      offset = this.#lookupOffset;
+    return view.getInt16(offset, true);
+  }
+  readUint32(address: GuestAddress): number {
+    const view = this.#readView(address, 4),
+      offset = this.#lookupOffset;
+    return view.getUint32(offset, true);
+  }
+  readInt32(address: GuestAddress): number {
+    const view = this.#readView(address, 4),
+      offset = this.#lookupOffset;
+    return view.getInt32(offset, true);
+  }
+  readUint64(address: GuestAddress): bigint {
+    const view = this.#readView(address, 8),
+      offset = this.#lookupOffset;
+    return view.getBigUint64(offset, true);
+  }
+  readUint64Words(address: GuestAddress, target: { low: number; high: number }): void {
+    const view = this.#readView(address, 8),
+      offset = this.#lookupOffset;
+    const low = view.getUint32(offset, true),
+      high = view.getUint32(offset + 4, true);
+    target.low = low;
+    target.high = high;
+  }
+  readInt64(address: GuestAddress): bigint {
+    const view = this.#readView(address, 8),
+      offset = this.#lookupOffset;
+    return view.getBigInt64(offset, true);
+  }
+  readFloat32(address: GuestAddress): number {
+    const view = this.#readView(address, 4),
+      offset = this.#lookupOffset;
+    return view.getFloat32(offset, true);
+  }
   readFloat32Vector(address: GuestAddress): Vec3 {
-    const view = this.#readView(address, 12), offset = this.#lookupOffset;
+    const view = this.#readView(address, 12),
+      offset = this.#lookupOffset;
     return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
   }
-  readFloat64(address: GuestAddress): number { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getFloat64(offset, true); }
+  readFloat64(address: GuestAddress): number {
+    const view = this.#readView(address, 8),
+      offset = this.#lookupOffset;
+    return view.getFloat64(offset, true);
+  }
   readPointer(address: GuestAddress): GuestAddress | null {
     return this.pointer(this.pointerBytes === 4 ? BigInt(this.readUint32(address)) : this.readUint64(address));
   }
-  writeUint8(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 1, (view, offset) => view.setUint8(offset, value)); }
-  writeInt8(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 1, (view, offset) => view.setInt8(offset, value)); }
-  writeUint16(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 2, (view, offset) => view.setUint16(offset, value, true)); }
-  writeInt16(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 2, (view, offset) => view.setInt16(offset, value, true)); }
-  writeUint32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setUint32(offset, value, true)); }
-  writeInt32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setInt32(offset, value, true)); }
-  writeUint64(address: GuestAddress, value: bigint): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setBigUint64(offset, value, true)); }
+  writeUint8(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 1, (view, offset) => view.setUint8(offset, value));
+  }
+  writeInt8(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 1, (view, offset) => view.setInt8(offset, value));
+  }
+  writeUint16(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 2, (view, offset) => view.setUint16(offset, value, true));
+  }
+  writeInt16(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 2, (view, offset) => view.setInt16(offset, value, true));
+  }
+  writeUint32(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 4, (view, offset) => view.setUint32(offset, value, true));
+  }
+  writeInt32(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 4, (view, offset) => view.setInt32(offset, value, true));
+  }
+  writeUint64(address: GuestAddress, value: bigint): undefined {
+    return this.#writeScalar(address, 8, (view, offset) => view.setBigUint64(offset, value, true));
+  }
   writeUint64Words(address: GuestAddress, low: number, high: number): undefined {
-    const lowWord = low >>> 0, highWord = high >>> 0;
+    const lowWord = low >>> 0,
+      highWord = high >>> 0;
     return this.#writeScalar(address, 8, (view, offset) => {
-      view.setUint32(offset, lowWord, true); view.setUint32(offset + 4, highWord, true);
+      view.setUint32(offset, lowWord, true);
+      view.setUint32(offset + 4, highWord, true);
     });
   }
-  writeInt64(address: GuestAddress, value: bigint): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setBigInt64(offset, value, true)); }
-  writeFloat32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setFloat32(offset, value, true)); }
-  writeFloat64(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setFloat64(offset, value, true)); }
+  writeInt64(address: GuestAddress, value: bigint): undefined {
+    return this.#writeScalar(address, 8, (view, offset) => view.setBigInt64(offset, value, true));
+  }
+  writeFloat32(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 4, (view, offset) => view.setFloat32(offset, value, true));
+  }
+  writeFloat64(address: GuestAddress, value: number): undefined {
+    return this.#writeScalar(address, 8, (view, offset) => view.setFloat64(offset, value, true));
+  }
   writePointer(address: GuestAddress, value: GuestAddress | null): undefined {
     if (value !== null) this.#owned(value, 0, "write");
     const raw = value?.byteOffset ?? 0n;
@@ -696,21 +847,27 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   allocatorImage(): GuestAllocatorImage {
-    return { hints: [...this.#allocationHints].map(([alignment, hint]) => ({ alignment, base: hint.base, byteLength: hint.byteLength })),
-      slabs: this.#slabs.map(slab => ({ base: slab.base, used: slab.used.slice(), next: slab.next })), freePages: [...this.#freePages] };
+    return {
+      hints: [...this.#allocationHints].map(([alignment, hint]) => ({ alignment, base: hint.base, byteLength: hint.byteLength })),
+      slabs: this.#slabs.map(slab => ({ base: slab.base, used: slab.used.slice(), next: slab.next })),
+      freePages: [...this.#freePages],
+    };
   }
   /** Replaces the allocation cursor and pool state; the mappings they describe must already exist. */
   restoreAllocator(image: GuestAllocatorImage): undefined {
     for (const slab of image.slabs) {
-      if (slab.used.byteLength !== pagesPerSlab || !Number.isSafeInteger(slab.next) || slab.next < 0 || slab.next > pagesPerSlab) throw new RangeError("Invalid guest allocator slab");
+      if (slab.used.byteLength !== pagesPerSlab || !Number.isSafeInteger(slab.next) || slab.next < 0 || slab.next > pagesPerSlab)
+        throw new RangeError("Invalid guest allocator slab");
       this.check(this.#address(slab.base), pageBytes * pagesPerSlab, "read");
     }
-    for (const page of image.freePages) if (!Number.isSafeInteger(page) || page < 0 || page >= image.slabs.length * pagesPerSlab) throw new RangeError("Invalid guest allocator free page");
+    for (const page of image.freePages)
+      if (!Number.isSafeInteger(page) || page < 0 || page >= image.slabs.length * pagesPerSlab) throw new RangeError("Invalid guest allocator free page");
     this.#allocationHints.clear();
     for (const hint of image.hints) this.#allocationHints.set(hint.alignment, { base: hint.base, byteLength: hint.byteLength });
     this.#slabs.length = 0;
     for (const slab of image.slabs) this.#slabs.push({ base: slab.base, used: slab.used.slice(), next: slab.next });
-    this.#freePages.length = 0; this.#freePages.push(...image.freePages);
+    this.#freePages.length = 0;
+    this.#freePages.push(...image.freePages);
     return undefined;
   }
 
@@ -724,8 +881,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
         indices.set(mapping.bytes.buffer, backing);
         backings.push(new Uint8Array(mapping.bytes.buffer).slice());
       }
-      return { base: mapping.base, byteLength: mapping.byteLength, permissions: mapping.permissions,
-        label: mapping.label, backing, backingOffset: mapping.bytes.byteOffset };
+      return {
+        base: mapping.base,
+        byteLength: mapping.byteLength,
+        permissions: mapping.permissions,
+        label: mapping.label,
+        backing,
+        backingOffset: mapping.bytes.byteOffset,
+      };
     });
     return { module: this.module, pointerBytes: this.pointerBytes, allocationBase: this.#allocationBase, backings, mappings };
   }
@@ -740,12 +903,22 @@ export class SparseGuestMemory implements MappedGuestMemory {
     for (const mapping of snapshot.mappings) {
       memory.#available(mapping.base, mapping.byteLength);
       const backing = backings[mapping.backing];
-      if (!Number.isSafeInteger(mapping.backing) || backing === undefined || !Number.isSafeInteger(mapping.backingOffset)
-        || mapping.backingOffset < 0 || mapping.backingOffset + mapping.byteLength > backing.byteLength) {
+      if (
+        !Number.isSafeInteger(mapping.backing) ||
+        backing === undefined ||
+        !Number.isSafeInteger(mapping.backingOffset) ||
+        mapping.backingOffset < 0 ||
+        mapping.backingOffset + mapping.byteLength > backing.byteLength
+      ) {
         throw new RangeError("Invalid guest snapshot backing range");
       }
-      memory.#insert({ base: mapping.base, byteLength: mapping.byteLength, permissions: mapping.permissions,
-        label: mapping.label, bytes: backing.subarray(mapping.backingOffset, mapping.backingOffset + mapping.byteLength) });
+      memory.#insert({
+        base: mapping.base,
+        byteLength: mapping.byteLength,
+        permissions: mapping.permissions,
+        label: mapping.label,
+        bytes: backing.subarray(mapping.backingOffset, mapping.backingOffset + mapping.byteLength),
+      });
     }
     return memory;
   }
@@ -757,15 +930,17 @@ export class SparseGuestMemory implements MappedGuestMemory {
     throw new GuestMemoryFault(reason, this.module, address, length, access, detail);
   }
   #range(base: bigint, byteLength: number, access: GuestAccess | "map"): undefined {
-    if (!Number.isSafeInteger(byteLength) || byteLength < 0) this.#fault("invalid-length", base, byteLength, access, "length must be a nonnegative safe integer");
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0)
+      this.#fault("invalid-length", base, byteLength, access, "length must be a nonnegative safe integer");
     if (base === 0n) this.#fault("null-address", base, byteLength, access, "null is not a mapped address");
-    if (base < 0n || base >= this.#limit || byteLength !== 0 && base + BigInt(byteLength) > this.#limit) {
+    if (base < 0n || base >= this.#limit || (byteLength !== 0 && base + BigInt(byteLength) > this.#limit)) {
       this.#fault("address-overflow", base, byteLength, access, `range exceeds ${this.pointerBytes * 8}-bit address space`);
     }
     return undefined;
   }
   #owned(address: GuestAddress, byteLength: number, access: GuestAccess | "map"): undefined {
-    if (address.addressSpace !== this.addressSpace) this.#fault("foreign-address-space", address.byteOffset, byteLength, access, "pointer belongs to another execution owner");
+    if (address.addressSpace !== this.addressSpace)
+      this.#fault("foreign-address-space", address.byteOffset, byteLength, access, "pointer belongs to another execution owner");
     return this.#range(address.byteOffset, byteLength, access);
   }
   #available(base: bigint, byteLength: number): undefined {
@@ -780,14 +955,18 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   #insert(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase" | "changes">): undefined {
     let changes = this.#backingChanges.get(mapping.bytes.buffer);
-    if (changes === undefined) { changes = { exposed: false, firstPage: Infinity, lastPage: -1, pages: new Map<number, CodePage>() }; this.#backingChanges.set(mapping.bytes.buffer, changes); }
+    if (changes === undefined) {
+      changes = { exposed: false, firstPage: Infinity, lastPage: -1, pages: new Map<number, CodePage>() };
+      this.#backingChanges.set(mapping.bytes.buffer, changes);
+    }
     this.#mappingGeneration += 1;
     this.#mappedTotal += mapping.byteLength;
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes({ ...mapping, changes }));
     return undefined;
   }
   #firstEndAfter(address: bigint): number {
-    let low = 0, high = this.#mappings.length;
+    let low = 0,
+      high = this.#mappings.length;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
       const mapping = this.#mappings[middle];
@@ -801,7 +980,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
     this.#owned(address, byteLength, access ?? "map");
     const recent = this.#recentMappings[access ?? "any"];
     if (byteLength > 0 && recent?.active === true && address.byteOffset >= recent.base && address.byteOffset + BigInt(byteLength) <= recent.end) {
-      if (access !== null && !allows(recent.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+      if (access !== null && !allows(recent.permissions, access))
+        this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
       return [{ mapping: recent, offset: Number(address.byteOffset - recent.base), byteLength }];
     }
     const chunks: Chunk[] = [];
@@ -817,7 +997,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const end = mapping.end;
       if (cursor >= end) continue;
       if (cursor < mapping.base) break;
-      if (access !== null && !allows(mapping.permissions, access)) this.#fault("permission", cursor, remaining, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
+      if (access !== null && !allows(mapping.permissions, access))
+        this.#fault("permission", cursor, remaining, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
       const offset = Number(cursor - mapping.base);
       const length = Math.min(remaining, mapping.byteLength - offset);
       chunks.push({ mapping, offset, byteLength: length });
@@ -836,7 +1017,13 @@ export class SparseGuestMemory implements MappedGuestMemory {
     let consumed = 0;
     for (const chunk of chunks) {
       if (chunk.mapping.bytes.buffer !== buffer || chunk.mapping.bytes.byteOffset + chunk.offset !== start + consumed) {
-        this.#fault("noncontiguous-borrow", address.byteOffset, byteLength, "borrow", "a live view requires contiguous backing storage; use checked loads or copy for fragmented ranges");
+        this.#fault(
+          "noncontiguous-borrow",
+          address.byteOffset,
+          byteLength,
+          "borrow",
+          "a live view requires contiguous backing storage; use checked loads or copy for fragmented ranges",
+        );
       }
       consumed += chunk.byteLength;
     }
@@ -855,7 +1042,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   #replaceRange(base: bigint, byteLength: number, permissions: GuestPermissions | null): undefined {
     if (byteLength === 0) return undefined;
-    const end = base + BigInt(byteLength), first = this.#firstEndAfter(base);
+    const end = base + BigInt(byteLength),
+      first = this.#firstEndAfter(base);
     const next: Mapping[] = [];
     let last = first;
     for (; last < this.#mappings.length; last++) {
@@ -868,18 +1056,33 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);
       if (permissions === null) this.#mappedTotal -= endOffset - startOffset;
       if (startOffset > 0) next.push(mappedBytes({ ...mapping, byteLength: startOffset, bytes: mapping.bytes.subarray(0, startOffset) }));
-      if (permissions !== null) next.push(mappedBytes({ ...mapping, base: mapping.base + BigInt(startOffset), byteLength: endOffset - startOffset,
-        permissions, bytes: mapping.bytes.subarray(startOffset, endOffset) }));
-      if (endOffset < mapping.byteLength) next.push(mappedBytes({ ...mapping, base: mapping.base + BigInt(endOffset), byteLength: mapping.byteLength - endOffset,
-        bytes: mapping.bytes.subarray(endOffset) }));
+      if (permissions !== null)
+        next.push(
+          mappedBytes({
+            ...mapping,
+            base: mapping.base + BigInt(startOffset),
+            byteLength: endOffset - startOffset,
+            permissions,
+            bytes: mapping.bytes.subarray(startOffset, endOffset),
+          }),
+        );
+      if (endOffset < mapping.byteLength)
+        next.push(
+          mappedBytes({
+            ...mapping,
+            base: mapping.base + BigInt(endOffset),
+            byteLength: mapping.byteLength - endOffset,
+            bytes: mapping.bytes.subarray(endOffset),
+          }),
+        );
     }
     if (permissions === null) {
-      const touched = this.#mappings[first], previous = this.#mappings[first - 1];
-      const gapStart = touched !== undefined && touched.base < base ? base
-        : previous === undefined ? this.#allocationBase : previous.base + BigInt(previous.byteLength);
+      const touched = this.#mappings[first],
+        previous = this.#mappings[first - 1];
+      const gapStart =
+        touched !== undefined && touched.base < base ? base : previous === undefined ? this.#allocationBase : previous.base + BigInt(previous.byteLength);
       const lowerBound = gapStart < this.#allocationBase ? this.#allocationBase : gapStart;
-      for (const [alignment, hint] of this.#allocationHints) if (lowerBound < hint.base)
-        this.#allocationHints.set(alignment, { ...hint, base: lowerBound });
+      for (const [alignment, hint] of this.#allocationHints) if (lowerBound < hint.base) this.#allocationHints.set(alignment, { ...hint, base: lowerBound });
     }
     this.#mappingGeneration += 1;
     if (next.length <= 3) this.#mappings.splice(first, last - first, ...next);
@@ -896,22 +1099,30 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const recent = this.#recentMappings[access];
     // A contained range inherits the mapping's checked address-space bounds.
     if (address.addressSpace === this.addressSpace && Number.isSafeInteger(byteLength) && byteLength > 0) {
-      const raw = address.byteOffset, numeric = Number(raw), safe = Number.isSafeInteger(numeric);
+      const raw = address.byteOffset,
+        numeric = Number(raw),
+        safe = Number.isSafeInteger(numeric);
       if (recent?.active === true) {
-        const offset = safe && recent.numericBase !== null ? numeric - recent.numericBase
-          : raw >= recent.base && raw < recent.end ? Number(raw - recent.base) : -1;
+        const offset =
+          safe && recent.numericBase !== null ? numeric - recent.numericBase : raw >= recent.base && raw < recent.end ? Number(raw - recent.base) : -1;
         if (offset >= 0 && offset + byteLength <= recent.byteLength) {
-          if (!allows(recent.permissions, access)) this.#fault("permission", raw, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+          if (!allows(recent.permissions, access))
+            this.#fault("permission", raw, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
           this.#lookupOffset = offset;
           return recent;
         }
       }
       for (const candidate of this.#workingSet) {
         if (candidate === recent || !candidate.active) continue;
-        const offset = safe && candidate.numericBase !== null ? numeric - candidate.numericBase
-          : raw >= candidate.base && raw < candidate.end ? Number(raw - candidate.base) : -1;
+        const offset =
+          safe && candidate.numericBase !== null
+            ? numeric - candidate.numericBase
+            : raw >= candidate.base && raw < candidate.end
+              ? Number(raw - candidate.base)
+              : -1;
         if (offset < 0 || offset + byteLength > candidate.byteLength) continue;
-        if (!allows(candidate.permissions, access)) this.#fault("permission", raw, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
+        if (!allows(candidate.permissions, access))
+          this.#fault("permission", raw, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
         this.#recentMappings[access] = candidate;
         this.#lookupOffset = offset;
         return candidate;
@@ -921,7 +1132,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (byteLength === 0) return null;
     const mapping = this.#mappings[this.#firstEndAfter(address.byteOffset)];
     if (mapping === undefined || address.byteOffset < mapping.base || address.byteOffset + BigInt(byteLength) > mapping.end) return null;
-    if (!allows(mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
+    if (!allows(mapping.permissions, access))
+      this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
     this.#remember(access, mapping);
     this.#lookupOffset = Number(address.byteOffset - mapping.base);
     return mapping;
@@ -941,7 +1153,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, byteLength);
       return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength }]);
     }
-    const chunks = this.#chunks(address, byteLength, "write"), bytes = new Uint8Array(byteLength);
+    const chunks = this.#chunks(address, byteLength, "write"),
+      bytes = new Uint8Array(byteLength);
     write(new DataView(bytes.buffer), 0);
     return this.#commitWrite(chunks, bytes);
   }

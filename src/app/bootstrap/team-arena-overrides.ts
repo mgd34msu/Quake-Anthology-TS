@@ -1,29 +1,42 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SaveImage } from "../../contracts/session.ts";
 import type { CvarArchiveEntry, CvarRegistry } from "../../core/cvars/index.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../persistence/value.ts";
 import { simulationProviderCheckpoint } from "./simulation/save.ts";
 import { teamArenaServerOverrides } from "./team-arena-skirmish.ts";
 
-export interface OverrideSeat { readonly seat: number; readonly client: number; }
-export interface OverrideRegistry extends OverrideSeat { readonly cvars: CvarRegistry; }
+export interface OverrideSeat {
+  readonly seat: number;
+  readonly client: number;
+}
+export interface OverrideRegistry extends OverrideSeat {
+  readonly cvars: CvarRegistry;
+}
 export interface TeamArenaOverrides {
   readonly phase: "active" | "released";
   readonly seats: readonly (OverrideSeat & { readonly baseline: string; readonly effective: string })[];
 }
 const schema = "world:team-arena-overrides";
 function requireSeats(state: TeamArenaOverrides, expected: readonly OverrideSeat[]): void {
-  if (state.seats.length !== expected.length || new Set(state.seats.map(row => row.seat)).size !== state.seats.length
-    || new Set(state.seats.map(row => row.client)).size !== state.seats.length
-    || state.seats.some(row => !expected.some(seat => seat.seat === row.seat && seat.client === row.client)))
+  if (
+    state.seats.length !== expected.length ||
+    new Set(state.seats.map(row => row.seat)).size !== state.seats.length ||
+    new Set(state.seats.map(row => row.client)).size !== state.seats.length ||
+    state.seats.some(row => !expected.some(seat => seat.seat === row.seat && seat.client === row.client))
+  )
     throw new Error("Saved Team Arena override seats do not match local clients");
 }
 export function captureTeamArenaOverrides(seats: readonly OverrideRegistry[]): TeamArenaOverrides {
-  const state: TeamArenaOverrides = { phase: "active", seats: seats.map(row => {
-    const baseline = row.cvars.find("ui_drawTimer");
-    if (baseline === undefined) throw new Error("Team Arena timer baseline is missing");
-    return { seat: row.seat, client: row.client, baseline: baseline.value, effective: row.cvars.variableString("cg_drawTimer") };
-  }) };
-  requireSeats(state, seats); return state;
+  const state: TeamArenaOverrides = {
+    phase: "active",
+    seats: seats.map(row => {
+      const baseline = row.cvars.find("ui_drawTimer");
+      if (baseline === undefined) throw new Error("Team Arena timer baseline is missing");
+      return { seat: row.seat, client: row.client, baseline: baseline.value, effective: row.cvars.variableString("cg_drawTimer") };
+    }),
+  };
+  requireSeats(state, seats);
+  return state;
 }
 export function readTeamArenaOverrides(image: SaveImage, seats: readonly OverrideSeat[]): TeamArenaOverrides | null {
   if (!image.providers.some(row => row.schema === schema)) return null;
@@ -35,19 +48,33 @@ export function decodeTeamArenaOverrides(value: unknown, seats: readonly Overrid
   const reader = new SaveReader(value, "Team Arena overrides");
   const phase = reader.field("phase").string();
   if (phase !== "active" && phase !== "released") return reader.fail("invalid override phase");
-  const state: TeamArenaOverrides = { phase, seats: reader.field("seats").list(row => ({ seat: row.field("seat").integer(0), client: row.field("client").integer(0),
-    baseline: row.field("baseline").string(), effective: row.field("effective").string() })) };
-  requireSeats(state, seats); return state;
+  const state: TeamArenaOverrides = {
+    phase,
+    seats: reader.field("seats").list(row => ({
+      seat: row.field("seat").integer(0),
+      client: row.field("client").integer(0),
+      baseline: row.field("baseline").string(),
+      effective: row.field("effective").string(),
+    })),
+  };
+  requireSeats(state, seats);
+  return state;
 }
 export function saveTeamArenaOverrides(image: SaveImage, state: TeamArenaOverrides | null, seats: readonly OverrideRegistry[]): SaveImage {
   if (state === null) return image;
   requireSeats(state, seats);
-  const saved = { phase: state.phase, seats: state.seats.map(row => {
-    const seat = seats.find(seat => seat.seat === row.seat && seat.client === row.client);
-    if (seat === undefined) throw new Error("Missing saved override seat");
-    return { ...row, effective: seat.cvars.variableString("cg_drawTimer") };
-  }) };
-  return { ...image, providers: [...image.providers, { provider: image.recipe.map.entities.provider, schema, version: 1, bytes: encodeCheckpointValue(saved) }] };
+  const saved = {
+    phase: state.phase,
+    seats: state.seats.map(row => {
+      const seat = seats.find(seat => seat.seat === row.seat && seat.client === row.client);
+      if (seat === undefined) throw new Error("Missing saved override seat");
+      return { ...row, effective: seat.cvars.variableString("cg_drawTimer") };
+    }),
+  };
+  return {
+    ...image,
+    providers: [...image.providers, { provider: image.recipe.map.entities.provider, schema, version: 1, bytes: encodeCheckpointValue(saved) }],
+  };
 }
 export function applyTeamArenaOverrides(state: TeamArenaOverrides | null, seats: readonly OverrideRegistry[]): void {
   if (state === null) return;
@@ -56,7 +83,8 @@ export function applyTeamArenaOverrides(state: TeamArenaOverrides | null, seats:
   for (const row of state.seats) {
     const seat = seats.find(seat => seat.seat === row.seat && seat.client === row.client);
     if (seat === undefined) throw new Error("Missing override seat");
-    seat.cvars.set("ui_drawTimer", row.baseline, true); seat.cvars.set("cg_drawTimer", row.effective, true);
+    seat.cvars.set("ui_drawTimer", row.baseline, true);
+    seat.cvars.set("cg_drawTimer", row.effective, true);
   }
 }
 export function releaseTeamArenaOverrides(state: TeamArenaOverrides | null, seats: readonly OverrideRegistry[]): TeamArenaOverrides | null {

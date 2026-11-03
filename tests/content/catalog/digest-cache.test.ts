@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, spyOn, test } from "bun:test";
 import * as fsPromises from "node:fs/promises";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -24,6 +25,10 @@ test("digestFile caches by fingerprint and rehashes rewritten files", async () =
       expect(await digestFile(path)).toBe(digestBytes(modified));
       expect(opens.mock.calls.filter(call => call[0] === path)).toHaveLength(2);
       expect(await digestFile(path)).not.toBe(digestBytes(original));
-    } finally { opens.mockRestore(); }
-  } finally { await rm(root, { recursive: true, force: true }); }
+    } finally {
+      opens.mockRestore();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

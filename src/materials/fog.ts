@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // BSP fog volumes, coordinates and lookup texture translated from id Software's
 // GPL-2.0-or-later renderer/tr_bsp.c, tr_shade_calc.c, tr_shade.c and tr_image.c.
 
@@ -32,16 +33,23 @@ function at<T>(items: readonly T[], index: number): T {
 /** R_LoadFogs reads the six axial brush sides before the optional visible side. */
 /** tr_bsp.c scales the fog color by tr.identityLight, so fog volumes keep the brightness of lit surfaces when overbright shifts them. */
 export function prepareFogVolume(map: FogBrushMap, index: number, parameters: NonNullable<ShaderDefinition["fog"]>, identityLight = 1): FogVolume {
-  const fog = at(map.fogs, index), brush = at(map.brushes, fog.brush);
+  const fog = at(map.fogs, index),
+    brush = at(map.brushes, fog.brush);
   if (brush.sideCount < 6) throw new Error(`fog brush ${fog.brush} has fewer than six axial sides`);
   const plane = (side: number): Plane => at(map.planes, at(map.brushSides, brush.firstSide + side).plane);
-  const bounds = { min: { x: -plane(0).distance, y: -plane(2).distance, z: -plane(4).distance },
-    max: { x: plane(1).distance, y: plane(3).distance, z: plane(5).distance } };
+  const bounds = {
+    min: { x: -plane(0).distance, y: -plane(2).distance, z: -plane(4).distance },
+    max: { x: plane(1).distance, y: plane(3).distance, z: plane(5).distance },
+  };
   const outsidePlane = fog.visibleSide < 0 ? null : plane(fog.visibleSide);
   const surface = outsidePlane === null ? null : { normal: sub3({ x: 0, y: 0, z: 0 }, outsidePlane.normal), distance: -outsidePlane.distance };
   const byte = (value: number): number => (Math.trunc(Math.fround(Math.fround(value * identityLight) * 255)) & 255) / 255;
-  return { bounds, surface, color: { x: byte(parameters.color.x), y: byte(parameters.color.y), z: byte(parameters.color.z), w: 1 },
-    tcScale: Math.fround(1 / Math.fround(Math.max(1, parameters.depthForOpaque) * 8)) };
+  return {
+    bounds,
+    surface,
+    color: { x: byte(parameters.color.x), y: byte(parameters.color.y), z: byte(parameters.color.z), w: 1 },
+    tcScale: Math.fround(1 / Math.fround(Math.max(1, parameters.depthForOpaque) * 8)),
+  };
 }
 
 /** Renderer distance is camera-forward depth, with the source half-texel S bias. */
@@ -56,9 +64,14 @@ export function fogCoordinates(fog: FogVolume, origin: Vec3, forward: Vec3): (po
     // depth vector afterwards. Define the documented constant-interior case.
     if (surface === null) return { x, y: 31 / 32 };
     const depth = Math.fround(dot3(position, surface.normal) - surface.distance);
-    const y = eyeDepth < 0
-      ? depth < 1 ? 1 / 32 : Math.fround(1 / 32 + Math.fround(Math.fround(30 / 32 * depth) / Math.fround(depth - eyeDepth)))
-      : depth < 0 ? 1 / 32 : 31 / 32;
+    const y =
+      eyeDepth < 0
+        ? depth < 1
+          ? 1 / 32
+          : Math.fround(1 / 32 + Math.fround(Math.fround((30 / 32) * depth) / Math.fround(depth - eyeDepth)))
+        : depth < 0
+          ? 1 / 32
+          : 31 / 32;
     return { x, y };
   };
 }
@@ -77,10 +90,11 @@ export function fogFactor(s: number, t: number): number {
 
 export function createFogTexture(pixels: Uint8Array = new Uint8Array(256 * 32 * 4)): ImageLevel {
   if (pixels.length !== 256 * 32 * 4) throw new RangeError("Fog texture requires 256x32 RGBA bytes");
-  for (let y = 0; y < 32; y++) for (let x = 0; x < 256; x++) {
-    const density = fogFactor((x + 0.5) / 256, (y + 0.5) / 32);
-    pixels.set([255, 255, 255, Math.trunc(Math.fround(255 * density))], (y * 256 + x) * 4);
-  }
+  for (let y = 0; y < 32; y++)
+    for (let x = 0; x < 256; x++) {
+      const density = fogFactor((x + 0.5) / 256, (y + 0.5) / 32);
+      pixels.set([255, 255, 255, Math.trunc(Math.fround(255 * density))], (y * 256 + x) * 4);
+    }
   return { width: 256, height: 32, pixels };
 }
 
@@ -88,11 +102,24 @@ export function attenuateFogColor(color: Vec4, adjustment: FogAdjustment, coordi
   if (adjustment === "none") return color;
   const attenuation = Math.fround(1 - fogFactor(coordinates.x, coordinates.y));
   const modulate = (component: number): number => Math.trunc(Math.fround(Math.round(component * 255) * attenuation)) / 255;
-  const rgb = adjustment === "rgb" || adjustment === "rgba", alpha = adjustment === "alpha" || adjustment === "rgba";
-  return { x: rgb ? modulate(color.x) : color.x, y: rgb ? modulate(color.y) : color.y, z: rgb ? modulate(color.z) : color.z, w: alpha ? modulate(color.w) : color.w };
+  const rgb = adjustment === "rgb" || adjustment === "rgba",
+    alpha = adjustment === "alpha" || adjustment === "rgba";
+  return {
+    x: rgb ? modulate(color.x) : color.x,
+    y: rgb ? modulate(color.y) : color.y,
+    z: rgb ? modulate(color.z) : color.z,
+    w: alpha ? modulate(color.w) : color.w,
+  };
 }
 
 export function fogPassState(pass: Exclude<FogPass, "none">, cull: RenderState["cull"]): RenderState {
-  return { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: pass, depthWrite: false,
-    alphaTest: "none", cull, depthRange: [0, 1], polygonOffset: null };
+  return {
+    blend: { source: "src-alpha", destination: "one-minus-src-alpha" },
+    depthTest: pass,
+    depthWrite: false,
+    alphaTest: "none",
+    cull,
+    depthRange: [0, 1],
+    polygonOffset: null,
+  };
 }

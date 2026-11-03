@@ -11,7 +11,12 @@ const writers = ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "se
 /** A view of a copy of bytes the module mapped read-only. Reads see them; a store through it faults, as a store to those pages does in the module's own process. */
 function readOnlyView(buffer: ArrayBufferLike, byteOffset: number, byteLength: number): DataView {
   const view = new DataView(buffer, byteOffset, byteLength);
-  for (const name of writers) Object.defineProperty(view, name, { value: () => { throw new RangeError("Native module memory is read-only"); } });
+  for (const name of writers)
+    Object.defineProperty(view, name, {
+      value: () => {
+        throw new RangeError("Native module memory is read-only");
+      },
+    });
   return view;
 }
 
@@ -55,16 +60,23 @@ export class NativeGameMemory implements Q3GameMemory {
     const address = this.at(word);
     return address === null ? null : Number(address.byteOffset);
   }
-  pointerWord(address: number | null): number { return address === null ? 0 : address | 0; }
+  pointerWord(address: number | null): number {
+    return address === null ? 0 : address | 0;
+  }
   viewAt(address: number, length: number): DataView {
-    const pointer = this.required(address | 0), bytes = this.bytes(pointer, length);
-    return this.readOnly.has(bytes) ? readOnlyView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const pointer = this.required(address | 0),
+      bytes = this.bytes(pointer, length);
+    return this.readOnly.has(bytes)
+      ? readOnlyView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
   pointer(word: number): Uint8Array | null {
     const address = this.at(word);
     if (address === null) return null;
-    const mapping = this.memory.mappings().find(candidate => candidate.base <= address.byteOffset && address.byteOffset < candidate.base + BigInt(candidate.byteLength));
+    const mapping = this.memory
+      .mappings()
+      .find(candidate => candidate.base <= address.byteOffset && address.byteOffset < candidate.base + BigInt(candidate.byteLength));
     if (mapping === undefined) throw new RangeError("Native game pointer is not mapped");
     return this.bytes(address, Number(mapping.base + BigInt(mapping.byteLength) - address.byteOffset));
   }
@@ -73,7 +85,8 @@ export class NativeGameMemory implements Q3GameMemory {
     return this.bytes(relativeOffset === 0 ? base : this.memory.offset(base, BigInt(relativeOffset)), length);
   }
   view(word: number, length: number, relativeOffset = 0): DataView {
-    const base = this.required(word), address = relativeOffset === 0 ? base : this.memory.offset(base, BigInt(relativeOffset));
+    const base = this.required(word),
+      address = relativeOffset === 0 ? base : this.memory.offset(base, BigInt(relativeOffset));
     return this.viewAt(Number(address.byteOffset), length);
   }
   readString(word: number): string {
@@ -86,18 +99,25 @@ export class NativeGameMemory implements Q3GameMemory {
     const address = this.at(word);
     if (address === null) throw new CommonError("fatal", "Q_strncpyz: NULL dest");
     if (!Number.isInteger(capacity) || capacity < 1) throw new CommonError("fatal", "Q_strncpyz: destsize < 1");
-    const bytes = this.writable(this.bytes(address, capacity)), end = Math.min(text.length, capacity - 1);
+    const bytes = this.writable(this.bytes(address, capacity)),
+      end = Math.min(text.length, capacity - 1);
     bytes.fill(0);
     for (let index = 0; index < end; index++) bytes[index] = text.charCodeAt(index) & 255;
   }
 
   regionView(region: Uint8Array, offset = 0, length = region.byteLength - offset): DataView {
-    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > region.byteLength) throw new RangeError("Native game region view exceeds its region");
-    return this.readOnly.has(region) ? readOnlyView(region.buffer, region.byteOffset + offset, length) : new DataView(region.buffer, region.byteOffset + offset, length);
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > region.byteLength)
+      throw new RangeError("Native game region view exceeds its region");
+    return this.readOnly.has(region)
+      ? readOnlyView(region.buffer, region.byteOffset + offset, length)
+      : new DataView(region.buffer, region.byteOffset + offset, length);
   }
-  regionWrite(region: Uint8Array, bytes: Uint8Array): void { this.writable(region).set(bytes); }
+  regionWrite(region: Uint8Array, bytes: Uint8Array): void {
+    this.writable(region).set(bytes);
+  }
   regionFill(region: Uint8Array, start: number, length: number, value: number): void {
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(length) || start < 0 || length < 0 || start + length > region.byteLength) throw new RangeError("Native game region fill exceeds its region");
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(length) || start < 0 || length < 0 || start + length > region.byteLength)
+      throw new RangeError("Native game region fill exceeds its region");
     this.writable(region).fill(value & 255, start, start + length);
   }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { decodeSaveImage, encodeSaveImage } from "../../src/persistence/save-image.ts";
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../src/persistence/value.ts";

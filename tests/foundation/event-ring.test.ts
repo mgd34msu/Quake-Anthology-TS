@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
-import {
-  EventRing,
-} from "../../src/foundation/index.ts";
+import { EventRing } from "../../src/foundation/index.ts";
 
 describe("foundation event ring", () => {
   test("admission is ordered, bounded and never overwrites", () => {
@@ -31,7 +30,11 @@ describe("foundation event ring", () => {
     expect(ring.first).toBe(2);
     expect(ring.at(1)).toBeNull();
     const seen: number[] = [];
-    expect(ring.drain(slow, (record) => { seen.push(record); })).toBe(2);
+    expect(
+      ring.drain(slow, record => {
+        seen.push(record);
+      }),
+    ).toBe(2);
     expect(seen).toEqual([20, 30]);
     expect(ring.take(fast)).toEqual([30]);
     ring.retire();
@@ -46,7 +49,7 @@ describe("foundation event ring", () => {
     const cursor = ring.openCursor();
     ring.append(1);
     const seen: number[] = [];
-    ring.drain(cursor, (record) => {
+    ring.drain(cursor, record => {
       seen.push(record);
       ring.append(2);
     });
@@ -66,7 +69,9 @@ describe("foundation event ring", () => {
     expect(ring.at(id)).toBeNull();
     expect(ring.leasedRecord(id)).toBe(record);
     const retained: number[] = [];
-    ring.visitRetained((leased) => { retained.push(leased.value); });
+    ring.visitRetained(leased => {
+      retained.push(leased.value);
+    });
     expect(retained).toEqual([7]);
     expect(ring.releaseLease(id)).toBe(true);
     expect(ring.leasedRecord(id)).toBeNull();

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
@@ -15,7 +16,9 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
   const make = (classname: string, origin: Vec3 = { x: 0, y: 0, z: 0 }): Q2Entity => {
     const actor: OwnedActor = actors.allocate("q2:horde-test", `q2:${classname}`);
     const entity = new Q2Entity(actor, { classname, ordinal: entities.length, values: new Map() });
-    entities.push(entity); health.set(actor.id, 100); origins.set(actor.id, origin);
+    entities.push(entity);
+    health.set(actor.id, 100);
+    origins.set(actor.id, origin);
     return entity;
   };
   const resolveSaved = (savedId: { slot: number; generation: number }): ActorId => {
@@ -31,7 +34,10 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
       emit: () => undefined,
     },
     solid: () => undefined,
-    schedule: (entity, delay) => { scheduled.push({ entity, delay }); return undefined; },
+    schedule: (entity, delay) => {
+      scheduled.push({ entity, delay });
+      return undefined;
+    },
     body: entity => ({ origin: origins.get(entity.actor.id) ?? { x: 0, y: 0, z: 0 } }),
     spawn: (fields: Q2SpawnFields) => make(fields.classname),
   };
@@ -46,8 +52,11 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
   expect(scheduled).toEqual([{ entity: manager, delay: 1 }]);
 
   const think = horde.callbacks.think["q2:horde/manager"];
-  const tick = (): void => { think(manager, game); };
-  tick(); tick();
+  const tick = (): void => {
+    think(manager, game);
+  };
+  tick();
+  tick();
   expect(horde.wave).toBe(1);
   const spawned = entities.filter(entity => entity.classname.startsWith("monster_"));
   expect(spawned).toHaveLength(6);

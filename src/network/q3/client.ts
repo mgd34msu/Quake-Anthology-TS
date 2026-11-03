@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // cl_parse.c, cl_cgame.c and cl_input.c connection storage and ordered packet calls.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ClientId, SeatId } from "../../contracts/identity.ts";
@@ -19,7 +20,10 @@ import { SNAPSHOT_BACKUP, SnapshotHistory } from "./snapshot-history.ts";
 import { EntityStateRecord } from "./state/entity.ts";
 import type { Product } from "./state/product.ts";
 
-export interface Q3ConnectionIdentity { readonly client: ClientId; readonly seat: SeatId | null; }
+export interface Q3ConnectionIdentity {
+  readonly client: ClientId;
+  readonly seat: SeatId | null;
+}
 export interface Q3ClientBindings {
   /** Session retirement invalidates continuation after an awaited source callback. */
   assertCurrent(): void;
@@ -34,19 +38,31 @@ export interface Q3ClientBindings {
   levelShot(): void;
   readonly localServerRunning: () => boolean;
 }
-export type Q3ClientPacketResult = Exclude<ChannelResult, { readonly kind: "accepted" }>
+export type Q3ClientPacketResult =
+  | Exclude<ChannelResult, { readonly kind: "accepted" }>
   | { readonly kind: "accepted"; readonly sequence: number; readonly dropped: number; readonly message: ServerMessage; readonly plaintext: Uint8Array };
-export type Q3ClientMode = { readonly kind: "network"; readonly challenge: number; readonly qport: number }
+export type Q3ClientMode =
+  | { readonly kind: "network"; readonly challenge: number; readonly qport: number }
   | { readonly kind: "demo"; readonly reader: DemoMessageReader };
 
-function copyCommand(command: WireUserCommand): WireUserCommand { return { ...command, angles: [...command.angles] }; }
-function zeroCommand(): WireUserCommand { return { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }; }
+function copyCommand(command: WireUserCommand): WireUserCommand {
+  return { ...command, angles: [...command.angles] };
+}
+function zeroCommand(): WireUserCommand {
+  return { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 };
+}
 /** The wire command ring also feeds the selected movement predictor. */
 export class Q3CommandHistory {
   private readonly commands = Array.from({ length: 64 }, zeroCommand);
   private number = 0;
-  get currentNumber(): number { return this.number; }
-  append(command: WireUserCommand): number { this.number = (this.number + 1) | 0; this.commands[this.number & 63] = copyCommand(command); return this.number; }
+  get currentNumber(): number {
+    return this.number;
+  }
+  append(command: WireUserCommand): number {
+    this.number = (this.number + 1) | 0;
+    this.commands[this.number & 63] = copyCommand(command);
+    return this.number;
+  }
   read(number: number): WireUserCommand | null {
     if (!Number.isInteger(number)) throw new RangeError("Invalid user command number");
     if (number > this.number) throw new CommonError("drop", "CL_GetUserCmd: requested future command");
@@ -55,15 +71,33 @@ export class Q3CommandHistory {
     if (command === undefined) throw new RangeError("Missing command ring slot");
     return copyCommand(command);
   }
-  restart(): void { for (let index = 0; index < 64; index++) this.commands[index] = zeroCommand(); }
-  clear(): void { this.restart(); this.number = 0; }
+  restart(): void {
+    for (let index = 0; index < 64; index++) this.commands[index] = zeroCommand();
+  }
+  clear(): void {
+    this.restart();
+    this.number = 0;
+  }
 }
 
-interface SentPacket { readonly commandNumber: number; readonly serverTime: number; readonly realTime: number; }
-export interface Q3ClientSendOptions { readonly realTime: number; readonly packetDup: number; readonly noDelta: boolean; }
+interface SentPacket {
+  readonly commandNumber: number;
+  readonly serverTime: number;
+  readonly realTime: number;
+}
+export interface Q3ClientSendOptions {
+  readonly realTime: number;
+  readonly packetDup: number;
+  readonly noDelta: boolean;
+}
 export interface Q3ClientSendReadiness {
-  readonly realTime: number; readonly active: boolean; readonly primed: boolean;
-  readonly cinematic: boolean; readonly downloading: boolean; readonly local: boolean; readonly lan: boolean;
+  readonly realTime: number;
+  readonly active: boolean;
+  readonly primed: boolean;
+  readonly cinematic: boolean;
+  readonly downloading: boolean;
+  readonly local: boolean;
+  readonly lan: boolean;
   readonly maximumPackets: number;
 }
 
@@ -72,9 +106,13 @@ export class Q3ClientConnection {
   readonly reliable = new ClientReliableCommands();
   readonly parseEntities = new SourceParseEntities();
   readonly history = new SnapshotHistory(this.parseEntities);
-  readonly gameState = new ClientGameStateStorage(message => { throw new CommonError("drop", message); });
+  readonly gameState = new ClientGameStateStorage(message => {
+    throw new CommonError("drop", message);
+  });
   readonly commands = new Q3CommandHistory();
-  readonly sourceState = new SourceMessageState(text => { this.bindings.print(text); });
+  readonly sourceState = new SourceMessageState(text => {
+    this.bindings.print(text);
+  });
   readonly baselines = Array.from({ length: 1024 }, () => new EntityStateRecord<number>(0));
   readonly channel: Netchannel | null;
   private readonly serverCommands = Array.from({ length: 64 }, () => "");
@@ -91,7 +129,12 @@ export class Q3ClientConnection {
   demoWaiting = true;
   lastPacketSentTime = 0;
 
-  constructor(readonly identity: Q3ConnectionIdentity, readonly product: Product, readonly mode: Q3ClientMode, readonly bindings: Q3ClientBindings) {
+  constructor(
+    readonly identity: Q3ConnectionIdentity,
+    readonly product: Product,
+    readonly mode: Q3ClientMode,
+    readonly bindings: Q3ClientBindings,
+  ) {
     this.channel = mode.kind === "network" ? new Netchannel("client", mode.qport) : null;
   }
   private serverCommand(sequence: number): string {
@@ -102,7 +145,11 @@ export class Q3ClientConnection {
   private async clearActive(): Promise<void> {
     await this.bindings.clearActive();
     this.bindings.assertCurrent();
-    this.history.clear(); this.snapshotPings.clear(); this.parseEntities.clear(); this.gameState.clear(); this.commands.clear();
+    this.history.clear();
+    this.snapshotPings.clear();
+    this.parseEntities.clear();
+    this.gameState.clear();
+    this.commands.clear();
     this.serverId = 0;
     for (const baseline of this.baselines) baseline.copyFrom(new EntityStateRecord<number>(0));
     this.outPackets.fill({ commandNumber: 0, serverTime: 0, realTime: 0 });
@@ -110,7 +157,7 @@ export class Q3ClientConnection {
   }
   snapshotPing(number: number): number | null {
     const entry = this.history.readSlot(number);
-    return entry?.status === "valid" && entry.snapshot.messageNumber === number ? this.snapshotPings.get(number) ?? null : null;
+    return entry?.status === "valid" && entry.snapshot.messageNumber === number ? (this.snapshotPings.get(number) ?? null) : null;
   }
   private ping(snapshot: Snapshot, realTime: number): number {
     for (let index = 0; index < 32; index++) {
@@ -124,20 +171,49 @@ export class Q3ClientConnection {
     this.bindings.assertCurrent();
     if (this.mode.kind === "network" && (sequence <= this.serverMessageSequence || sequence < 1)) throw new RangeError("Server message sequence must advance");
     this.serverMessageSequence = sequence;
-    const cursor = new ServerMessageCursor(bytes, "<q3-server-message>", null, this.mode.kind === "network" ? 4 : 0, this.parseEntities, size => this.bindings.downloadSize(size));
-    let acknowledge = 0, commandSequence = 0, clientNumber = 0, checksumFeed = 0;
+    const cursor = new ServerMessageCursor(bytes, "<q3-server-message>", null, this.mode.kind === "network" ? 4 : 0, this.parseEntities, size =>
+      this.bindings.downloadSize(size),
+    );
+    let acknowledge = 0,
+      commandSequence = 0,
+      clientNumber = 0,
+      checksumFeed = 0;
     let entries: GamestateEntry[] = [];
     const operations: ServerOperation[] = [];
     const client = this;
     while (true) {
       this.bindings.assertCurrent();
-      const step = cursor.next({ product: this.product, get messageNumber() { return client.serverMessageSequence; }, get reliableSequence() { return client.reliable.sequence; },
-        get serverCommandSequence() { return client.serverCommandSequence; }, get parseEntitiesNumber() { return client.parseEntities.number; },
-        baseline: number => this.baselines[number] ?? null, history: number => this.history.borrowSlot(number, this.product) });
+      const step = cursor.next({
+        product: this.product,
+        get messageNumber() {
+          return client.serverMessageSequence;
+        },
+        get reliableSequence() {
+          return client.reliable.sequence;
+        },
+        get serverCommandSequence() {
+          return client.serverCommandSequence;
+        },
+        get parseEntitiesNumber() {
+          return client.parseEntities.number;
+        },
+        baseline: number => this.baselines[number] ?? null,
+        history: number => this.history.borrowSlot(number, this.product),
+      });
       switch (step.kind) {
-        case "acknowledge": acknowledge = step.sequence; this.reliable.assignAcknowledgement(step.sequence); break;
-        case "gamestate-start": await this.clearActive(); entries = []; break;
-        case "gamestate-sequence": commandSequence = step.sequence; this.serverCommandSequence = step.sequence; this.gameState.beginEntries(); break;
+        case "acknowledge":
+          acknowledge = step.sequence;
+          this.reliable.assignAcknowledgement(step.sequence);
+          break;
+        case "gamestate-start":
+          await this.clearActive();
+          entries = [];
+          break;
+        case "gamestate-sequence":
+          commandSequence = step.sequence;
+          this.serverCommandSequence = step.sequence;
+          this.gameState.beginEntries();
+          break;
         case "gamestate-entry": {
           entries.push(step.entry);
           if (step.entry.kind === "configstring") this.gameState.append(step.entry.index, step.entry.value);
@@ -148,49 +224,81 @@ export class Q3ClientConnection {
           }
           break;
         }
-        case "gamestate-client": clientNumber = step.number; this.clientNumber = step.number; break;
-        case "gamestate-checksum": checksumFeed = step.checksum; this.checksumFeed = step.checksum; break;
+        case "gamestate-client":
+          clientNumber = step.number;
+          this.clientNumber = step.number;
+          break;
+        case "gamestate-checksum":
+          checksumFeed = step.checksum;
+          this.checksumFeed = step.checksum;
+          break;
         case "gamestate-end": {
           const state: Gamestate = { kind: "gamestate", commandSequence, entries, clientNumber, checksumFeed };
           operations.push(state);
-          await this.applySystemInfo(); this.bindings.assertCurrent();
+          await this.applySystemInfo();
+          this.bindings.assertCurrent();
           await this.bindings.gamestate(state, this.generation);
           break;
         }
-        case "snapshot-header": if (step.deltaNumber <= 0) this.demoWaiting = false; break;
+        case "snapshot-header":
+          if (step.deltaNumber <= 0) this.demoWaiting = false;
+          break;
         case "operation": {
-          const operation = step.operation; operations.push(operation);
+          const operation = step.operation;
+          operations.push(operation);
           switch (operation.kind) {
-            case "nop": break;
-            case "command": this.serverCommandSequence = operation.sequence; this.serverCommands[operation.sequence & 63] = operation.text.slice(0, 1023); break;
+            case "nop":
+              break;
+            case "command":
+              this.serverCommandSequence = operation.sequence;
+              this.serverCommands[operation.sequence & 63] = operation.text.slice(0, 1023);
+              break;
             case "snapshot": {
               if (this.history.publish(operation)) {
-                const snapshot = operation.snapshot, ping = this.ping(snapshot, realTime);
-                for (const number of this.snapshotPings.keys()) if (((snapshot.messageNumber - number) | 0) >= SNAPSHOT_BACKUP) this.snapshotPings.delete(number);
+                const snapshot = operation.snapshot,
+                  ping = this.ping(snapshot, realTime);
+                for (const number of this.snapshotPings.keys())
+                  if (((snapshot.messageNumber - number) | 0) >= SNAPSHOT_BACKUP) this.snapshotPings.delete(number);
                 this.snapshotPings.set(snapshot.messageNumber, ping);
                 this.bindings.snapshot(snapshot, ping);
               }
               break;
             }
-            case "download": await this.bindings.download(operation.block); break;
+            case "download":
+              await this.bindings.download(operation.block);
+              break;
           }
           break;
         }
-        case "end": return { reliableAcknowledge: acknowledge, serverCommandSequence: this.serverCommandSequence, parseEntitiesNumber: this.parseEntities.number, operations, terminal: step.terminal };
+        case "end":
+          return {
+            reliableAcknowledge: acknowledge,
+            serverCommandSequence: this.serverCommandSequence,
+            parseEntitiesNumber: this.parseEntities.number,
+            operations,
+            terminal: step.terminal,
+          };
       }
     }
   }
   private async applySystemInfo(): Promise<void> {
-    const info = this.gameState.get(1) ?? "", fields = info.split("\\");
+    const info = this.gameState.get(1) ?? "",
+      fields = info.split("\\");
     this.serverId = 0;
     for (let index = info.startsWith("\\") ? 1 : 0; index + 1 < fields.length; index += 2) {
-      if (fields[index]?.toLowerCase() === "sv_serverid") { this.serverId = nativeAtoi(fields[index + 1] ?? ""); break; }
+      if (fields[index]?.toLowerCase() === "sv_serverid") {
+        this.serverId = nativeAtoi(fields[index + 1] ?? "");
+        break;
+      }
     }
     await this.bindings.systemInfo(info);
   }
   copyGamestate(): Gamestate {
     const entries: GamestateEntry[] = [];
-    for (let index = 0; index < 1024; index++) { const value = this.gameState.get(index); if (value !== null) entries.push({ kind: "configstring", index, value }); }
+    for (let index = 0; index < 1024; index++) {
+      const value = this.gameState.get(index);
+      if (value !== null) entries.push({ kind: "configstring", index, value });
+    }
     for (const [number, entity] of this.baselines.entries()) if (entity.number !== 0) entries.push({ kind: "baseline", number, entity: entity.copy() });
     return { kind: "gamestate", commandSequence: this.serverCommandSequence, entries, clientNumber: this.clientNumber, checksumFeed: this.checksumFeed };
   }
@@ -206,7 +314,9 @@ export class Q3ClientConnection {
   }
   async readDemo(realTime: number): Promise<ServerMessage | DemoEnd> {
     if (this.mode.kind !== "demo") throw new Error("Network connection cannot read demo messages");
-    const record = this.mode.reader.next(sequence => { this.serverMessageSequence = sequence; });
+    const record = this.mode.reader.next(sequence => {
+      this.serverMessageSequence = sequence;
+    });
     return record.kind === "end" ? record : this.receiveMessage(record.sequence, record.payload, realTime);
   }
   /** Call at CG_GetServerCommand, rather than eagerly executing commands during packet parse. */
@@ -219,9 +329,14 @@ export class Q3ClientConnection {
     if (sequence > this.serverCommandSequence) throw new CommonError("drop", "CL_GetServerCommand: requested a command not received");
     this.lastExecutedServerCommand = sequence;
     return this.serverCommandExecutor.execute(this.serverCommand(sequence), this.gameState, {
-      assertCurrent: () => this.bindings.assertCurrent(), systemInfo: () => this.applySystemInfo(),
-      mapRestart: () => { this.commands.restart(); this.bindings.mapRestart(); },
-      localServerRunning: () => this.bindings.localServerRunning(), levelShot: () => this.bindings.levelShot(),
+      assertCurrent: () => this.bindings.assertCurrent(),
+      systemInfo: () => this.applySystemInfo(),
+      mapRestart: () => {
+        this.commands.restart();
+        this.bindings.mapRestart();
+      },
+      localServerRunning: () => this.bindings.localServerRunning(),
+      levelShot: () => this.bindings.levelShot(),
     });
   }
   transmit(options: Q3ClientSendOptions, delivery: ChannelDelivery): void {
@@ -230,7 +345,8 @@ export class Q3ClientConnection {
     const packetDup = Math.max(0, Math.min(5, Math.trunc(options.packetDup)));
     const old = this.outPackets[(this.channel.outgoingSequence - 1 - packetDup) & 31];
     if (old === undefined) throw new RangeError("Missing outgoing packet slot");
-    const count = Math.min(32, this.commands.currentNumber - old.commandNumber), commands: WireUserCommand[] = [];
+    const count = Math.min(32, this.commands.currentNumber - old.commandNumber),
+      commands: WireUserCommand[] = [];
     for (let index = 0; index < count; index++) {
       const command = this.commands.read(this.commands.currentNumber - count + index + 1);
       if (command === null) throw new Error("Outgoing user command was overwritten");
@@ -243,7 +359,11 @@ export class Q3ClientConnection {
       const kind = options.noDelta || latest === null || this.demoWaiting || latest.messageNumber !== this.serverMessageSequence ? "move-no-delta" : "move";
       writeClientMovement(writer, { kind, commands }, header, { checksumFeed: this.checksumFeed, serverCommand: sequence => this.serverCommand(sequence) });
     }
-    this.outPackets[this.channel.outgoingSequence & 31] = { commandNumber: this.commands.currentNumber, serverTime: commands.at(-1)?.serverTime ?? 0, realTime: options.realTime };
+    this.outPackets[this.channel.outgoingSequence & 31] = {
+      commandNumber: this.commands.currentNumber,
+      serverTime: commands.at(-1)?.serverTime ?? 0,
+      realTime: options.realTime,
+    };
     this.lastPacketSentTime = options.realTime;
     const bytes = xorClientMessage(finishClientMessage(writer), this.mode.challenge, sequence => this.serverCommand(sequence));
     this.channel.beginTransmit(bytes, delivery);

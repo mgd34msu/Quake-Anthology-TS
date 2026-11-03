@@ -7,14 +7,17 @@ import { discoverInstalledContent, expectedProducts } from "../../../src/content
 
 function pakWith(entries: readonly string[]): Uint8Array {
   const directoryOffset = 12 + entries.length;
-  const bytes = new Uint8Array(directoryOffset + entries.length * 64), view = new DataView(bytes.buffer);
+  const bytes = new Uint8Array(directoryOffset + entries.length * 64),
+    view = new DataView(bytes.buffer);
   bytes.set(new TextEncoder().encode("PACK"));
-  view.setUint32(4, directoryOffset, true); view.setUint32(8, entries.length * 64, true);
+  view.setUint32(4, directoryOffset, true);
+  view.setUint32(8, entries.length * 64, true);
   entries.forEach((entry, index) => {
     bytes[12 + index] = 6;
     const offset = directoryOffset + index * 64;
     bytes.set(new TextEncoder().encode(entry), offset);
-    view.setUint32(offset + 56, 12 + index, true); view.setUint32(offset + 60, 1, true);
+    view.setUint32(offset + 56, 12 + index, true);
+    view.setUint32(offset + 60, 1, true);
   });
   return bytes;
 }
@@ -37,5 +40,7 @@ test("requiredPrograms are enforced through the base chain during availability",
     const withProgram = await discoverInstalledContent({ corpusRoot: root, products });
     expect(withProgram.product("q1-quakeworld").availability.kind).toBe("installed");
     expect(withProgram.product("q1-quakeworld-hipnotic").availability.kind).toBe("installed");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,125 +1,146 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Per-connection protocol selection. Wire identity never selects the game API.
-import type { Q2ProtocolIdentity } from '../../contracts/protocol.ts';
-import { createMessage, loadMessage, checkMessageRead } from './message.ts';
-import type { SizeBuf } from './message.ts';
-import { createVanillaContext } from './codecs/vanilla.ts';
-import { createRereleaseContext } from './codecs/q2repro.ts';
-import { createR1Context } from './codecs/r1q2.ts';
-import { createQ2ProContext } from './codecs/q2pro.ts';
-import { createKexContext } from './codecs/kexdemo.ts';
-import { q2proExtensions, q2proExtensionsV2 } from './codecs/q2pro-fields.ts';
-import type { ProtocolCodec } from './codecs/codec.ts';
-export type Q2CodecSupport = {
-    readonly kind: 'supported';
-    readonly encode: boolean;
-    readonly decode: boolean;
-} | {
-    readonly kind: 'unbound';
-    readonly reason: string;
-};
+import type { Q2ProtocolIdentity } from "../../contracts/protocol.ts";
+import { createMessage, loadMessage, checkMessageRead } from "./message.ts";
+import type { SizeBuf } from "./message.ts";
+import { createVanillaContext } from "./codecs/vanilla.ts";
+import { createRereleaseContext } from "./codecs/q2repro.ts";
+import { createR1Context } from "./codecs/r1q2.ts";
+import { createQ2ProContext } from "./codecs/q2pro.ts";
+import { createKexContext } from "./codecs/kexdemo.ts";
+import { q2proExtensions, q2proExtensionsV2 } from "./codecs/q2pro-fields.ts";
+import type { ProtocolCodec } from "./codecs/codec.ts";
+export type Q2CodecSupport =
+  | {
+      readonly kind: "supported";
+      readonly encode: boolean;
+      readonly decode: boolean;
+    }
+  | {
+      readonly kind: "unbound";
+      readonly reason: string;
+    };
 export function q2CodecSupport(protocol: Q2ProtocolIdentity): Q2CodecSupport {
-    if (protocol.kind === 'q2-q2pro' && protocol.revision === 1016)
-        return { kind: 'unbound', reason: 'Q2PRO revision 1016 is reserved by the native protocol' };
-    return { kind: 'supported', encode: true, decode: true };
+  if (protocol.kind === "q2-q2pro" && protocol.revision === 1016) return { kind: "unbound", reason: "Q2PRO revision 1016 is reserved by the native protocol" };
+  return { kind: "supported", encode: true, decode: true };
 }
-export function negotiatedR1Q2Protocol(offered: Extract<Q2ProtocolIdentity, { kind: 'q2-r1q2' }>, reported: number | undefined): Extract<Q2ProtocolIdentity, { kind: 'q2-r1q2' }> {
-    if (reported !== 1903 && reported !== 1904 && reported !== 1905) throw new Error(`Unsupported R1Q2 server revision ${reported}`);
-    // R1Q2 can report its highest revision while sending the revision requested at connect.
-    const revision = reported < offered.revision ? reported : offered.revision;
-    return { kind: 'q2-r1q2', version: 35, revision };
+export function negotiatedR1Q2Protocol(
+  offered: Extract<Q2ProtocolIdentity, { kind: "q2-r1q2" }>,
+  reported: number | undefined,
+): Extract<Q2ProtocolIdentity, { kind: "q2-r1q2" }> {
+  if (reported !== 1903 && reported !== 1904 && reported !== 1905) throw new Error(`Unsupported R1Q2 server revision ${reported}`);
+  // R1Q2 can report its highest revision while sending the revision requested at connect.
+  const revision = reported < offered.revision ? reported : offered.revision;
+  return { kind: "q2-r1q2", version: 35, revision };
 }
 export class Q2WireCodec {
-    readonly message = createMessage(0);
-    private selectedCodec: ProtocolCodec;
-    private selectedProtocol: Q2ProtocolIdentity;
-    readonly rerelease: ReturnType<typeof createRereleaseContext>;
-    readonly kex: ReturnType<typeof createKexContext>;
-    private readonly r1: ReturnType<typeof createR1Context>;
-    private readonly q2pro: ReturnType<typeof createQ2ProContext>;
-    constructor(private readonly offeredProtocol: Q2ProtocolIdentity) {
-        const protocol = offeredProtocol;
-        this.selectedProtocol = protocol;
-        const support = q2CodecSupport(protocol);
-        if (support.kind === 'unbound')
-            throw new Error(support.reason);
-        this.rerelease = createRereleaseContext(this.message);
-        this.kex = createKexContext(this.message);
-        this.r1 = createR1Context(this.message);
-        this.q2pro = createQ2ProContext(this.message);
-        switch (protocol.kind) {
-            case 'q2-classic':
-                this.selectedCodec = createVanillaContext(this.message).VANILLA_CODEC;
-                break;
-            case 'q2-r1q2':
-                this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
-                break;
-            case 'q2-q2pro':
-                this.selectedCodec = this.q2pro.createQ2ProCodec(protocol.revision);
-                break;
-            case 'q2-rerelease':
-                this.selectedCodec = this.rerelease.Q2REPRO_CODEC;
-                break;
-            case 'q2-private-classic':
-                this.selectedCodec = this.rerelease.Q2REPRO_CLASSIC_CODEC;
-                break;
-            case 'q2-kex':
-            case 'q2-kex-demo':
-                this.kex.setKexProtocol(protocol.version);
-                this.selectedCodec = this.kex.KEX_DEMO_CODEC;
-                break;
-        }
-    }
-    get protocol(): Q2ProtocolIdentity { return this.selectedProtocol; }
-    get codec(): ProtocolCodec { return this.selectedCodec; }
-    acceptServerRevision(reported: number | undefined): void {
-        if (this.offeredProtocol.kind !== 'q2-r1q2') return;
-        const protocol = negotiatedR1Q2Protocol(this.offeredProtocol, reported);
+  readonly message = createMessage(0);
+  private selectedCodec: ProtocolCodec;
+  private selectedProtocol: Q2ProtocolIdentity;
+  readonly rerelease: ReturnType<typeof createRereleaseContext>;
+  readonly kex: ReturnType<typeof createKexContext>;
+  private readonly r1: ReturnType<typeof createR1Context>;
+  private readonly q2pro: ReturnType<typeof createQ2ProContext>;
+  constructor(private readonly offeredProtocol: Q2ProtocolIdentity) {
+    const protocol = offeredProtocol;
+    this.selectedProtocol = protocol;
+    const support = q2CodecSupport(protocol);
+    if (support.kind === "unbound") throw new Error(support.reason);
+    this.rerelease = createRereleaseContext(this.message);
+    this.kex = createKexContext(this.message);
+    this.r1 = createR1Context(this.message);
+    this.q2pro = createQ2ProContext(this.message);
+    switch (protocol.kind) {
+      case "q2-classic":
+        this.selectedCodec = createVanillaContext(this.message).VANILLA_CODEC;
+        break;
+      case "q2-r1q2":
         this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
-        this.selectedProtocol = protocol;
+        break;
+      case "q2-q2pro":
+        this.selectedCodec = this.q2pro.createQ2ProCodec(protocol.revision);
+        break;
+      case "q2-rerelease":
+        this.selectedCodec = this.rerelease.Q2REPRO_CODEC;
+        break;
+      case "q2-private-classic":
+        this.selectedCodec = this.rerelease.Q2REPRO_CLASSIC_CODEC;
+        break;
+      case "q2-kex":
+      case "q2-kex-demo":
+        this.kex.setKexProtocol(protocol.version);
+        this.selectedCodec = this.kex.KEX_DEMO_CODEC;
+        break;
     }
-    acceptQ2ProFeatures(revision: Extract<Q2ProtocolIdentity, { kind: 'q2-q2pro' }>['revision'], flags: number): void {
-        if (this.protocol.kind !== 'q2-q2pro' || this.protocol.revision !== revision || !Number.isInteger(flags) || flags < 0 || flags > 65535)
-            throw new Error('Recorded Q2PRO features disagree with protocol identity');
-        this.q2pro.features.revision = revision;
-        this.q2pro.features.flags = flags;
+  }
+  get protocol(): Q2ProtocolIdentity {
+    return this.selectedProtocol;
+  }
+  get codec(): ProtocolCodec {
+    return this.selectedCodec;
+  }
+  acceptServerRevision(reported: number | undefined): void {
+    if (this.offeredProtocol.kind !== "q2-r1q2") return;
+    const protocol = negotiatedR1Q2Protocol(this.offeredProtocol, reported);
+    this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
+    this.selectedProtocol = protocol;
+  }
+  acceptQ2ProFeatures(revision: Extract<Q2ProtocolIdentity, { kind: "q2-q2pro" }>["revision"], flags: number): void {
+    if (this.protocol.kind !== "q2-q2pro" || this.protocol.revision !== revision || !Number.isInteger(flags) || flags < 0 || flags > 65535)
+      throw new Error("Recorded Q2PRO features disagree with protocol identity");
+    this.q2pro.features.revision = revision;
+    this.q2pro.features.flags = flags;
+  }
+  get q2proRevision(): number {
+    return this.q2pro.features.revision;
+  }
+  get q2proExtended(): boolean {
+    return this.protocol.kind === "q2-q2pro" && q2proExtensions(this.q2pro.features);
+  }
+  get q2proExtendedV2(): boolean {
+    return this.protocol.kind === "q2-q2pro" && q2proExtensionsV2(this.q2pro.features);
+  }
+  get floatingCoordinates(): boolean {
+    return this.protocol.kind === "q2-rerelease" || this.protocol.kind === "q2-private-classic" || this.protocol.kind === "q2-kex";
+  }
+  get wideIndexes(): boolean {
+    return this.protocol.version >= 1038;
+  }
+  begin(bytes: Uint8Array): void {
+    loadMessage(this.message, bytes);
+  }
+  finish(): void {
+    checkMessageRead(this.message);
+  }
+  opcode(raw: number): number {
+    if (this.protocol.kind === "q2-r1q2") {
+      this.r1.setR1Q2FrameExtrabits(raw & 0xe0);
+      return raw & 31;
     }
-    get q2proRevision(): number { return this.q2pro.features.revision; }
-    get q2proExtended(): boolean { return this.protocol.kind === 'q2-q2pro' && q2proExtensions(this.q2pro.features); }
-    get q2proExtendedV2(): boolean { return this.protocol.kind === 'q2-q2pro' && q2proExtensionsV2(this.q2pro.features); }
-    get floatingCoordinates(): boolean { return this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-private-classic' || this.protocol.kind === 'q2-kex'; }
-    get wideIndexes(): boolean { return this.protocol.version >= 1038; }
-    begin(bytes: Uint8Array): void { loadMessage(this.message, bytes); }
-    finish(): void { checkMessageRead(this.message); }
-    opcode(raw: number): number {
-        if (this.protocol.kind === 'q2-r1q2') {
-            this.r1.setR1Q2FrameExtrabits(raw & 0xe0);
-            return raw & 31;
-        }
-        if (this.protocol.kind === 'q2-q2pro') {
-            this.q2pro.noteQ2ProFrameOpcodeExtrabits(raw & 0xe0);
-            return raw & 31;
-        }
-        return raw;
+    if (this.protocol.kind === "q2-q2pro") {
+      this.q2pro.noteQ2ProFrameOpcodeExtrabits(raw & 0xe0);
+      return raw & 31;
     }
-    /** Compression envelopes resume their containing packet after the nested stream. */
-    nested<T>(bytes: Uint8Array, read: () => T): T {
-        const previous = { data: this.message.data, cursize: this.message.cursize, readcount: this.message.readcount };
-        this.begin(bytes);
-        try {
-            const value = read();
-            this.finish();
-            return value;
-        }
-        finally {
-            loadMessage(this.message, previous.data);
-            this.message.cursize = previous.cursize;
-            this.message.readcount = previous.readcount;
-        }
+    return raw;
+  }
+  /** Compression envelopes resume their containing packet after the nested stream. */
+  nested<T>(bytes: Uint8Array, read: () => T): T {
+    const previous = { data: this.message.data, cursize: this.message.cursize, readcount: this.message.readcount };
+    this.begin(bytes);
+    try {
+      const value = read();
+      this.finish();
+      return value;
+    } finally {
+      loadMessage(this.message, previous.data);
+      this.message.cursize = previous.cursize;
+      this.message.readcount = previous.readcount;
     }
+  }
 }
 export function decodeWithQ2Codec<T>(wire: Q2WireCodec, bytes: Uint8Array, read: (codec: ProtocolCodec, message: SizeBuf) => T): T {
-    wire.begin(bytes);
-    const result = read(wire.codec, wire.message);
-    wire.finish();
-    return result;
+  wire.begin(bytes);
+  const result = read(wire.codec, wire.message);
+  wire.finish();
+  return result;
 }

@@ -1,17 +1,51 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type {
-  GuestArchitecture, GuestFlag, GuestFlags, GuestIntegerRegisters, GuestIntegerWidth,
-  GuestProcessorState, GuestSimdScratch, GuestSimdState, GuestRegister, GuestSegment,
+  GuestArchitecture,
+  GuestFlag,
+  GuestFlags,
+  GuestIntegerRegisters,
+  GuestIntegerWidth,
+  GuestProcessorState,
+  GuestSimdScratch,
+  GuestSimdState,
+  GuestRegister,
+  GuestSegment,
 } from "./contracts.ts";
 
 const registerIndex: Readonly<Record<GuestRegister, number>> = {
-  rax: 0, rcx: 1, rdx: 2, rbx: 3, rsp: 4, rbp: 5, rsi: 6, rdi: 7,
-  r8: 8, r9: 9, r10: 10, r11: 11, r12: 12, r13: 13, r14: 14, r15: 15,
+  rax: 0,
+  rcx: 1,
+  rdx: 2,
+  rbx: 3,
+  rsp: 4,
+  rbp: 5,
+  rsi: 6,
+  rdi: 7,
+  r8: 8,
+  r9: 9,
+  r10: 10,
+  r11: 11,
+  r12: 12,
+  r13: 13,
+  r14: 14,
+  r15: 15,
 };
 const flagMask: Readonly<Record<GuestFlag, number>> = {
-  carry: 0x1, parity: 0x4, "auxiliary-carry": 0x10, zero: 0x40, sign: 0x80, trap: 0x100,
-  interrupt: 0x200, direction: 0x400, overflow: 0x800, resume: 0x10000, "virtual-8086": 0x20000,
-  "alignment-check": 0x40000, "virtual-interrupt": 0x80000, "virtual-interrupt-pending": 0x100000, identification: 0x200000,
+  carry: 0x1,
+  parity: 0x4,
+  "auxiliary-carry": 0x10,
+  zero: 0x40,
+  sign: 0x80,
+  trap: 0x100,
+  interrupt: 0x200,
+  direction: 0x400,
+  overflow: 0x800,
+  resume: 0x10000,
+  "virtual-8086": 0x20000,
+  "alignment-check": 0x40000,
+  "virtual-interrupt": 0x80000,
+  "virtual-interrupt-pending": 0x100000,
+  identification: 0x200000,
 };
 const littleEndianWords = new Uint8Array(Uint32Array.of(1).buffer)[0] === 1;
 
@@ -26,33 +60,51 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
     this.#words = littleEndianWords ? new Uint32Array(this.#bytes.buffer) : null;
   }
   static createManaged(architecture: GuestArchitecture): IntegerRegisterFile {
-    const registers = new IntegerRegisterFile(architecture), view = registers.#view;
+    const registers = new IntegerRegisterFile(architecture),
+      view = registers.#view;
     Object.defineProperties(view, {
-      getUint32: { value: view.getUint32 }, setUint8: { value: view.setUint8 },
-      setUint16: { value: view.setUint16 }, setUint32: { value: view.setUint32 },
-      getBigUint64: { value: view.getBigUint64 }, setBigUint64: { value: view.setBigUint64 },
+      getUint32: { value: view.getUint32 },
+      setUint8: { value: view.setUint8 },
+      setUint16: { value: view.setUint16 },
+      setUint32: { value: view.setUint32 },
+      getBigUint64: { value: view.getBigUint64 },
+      setBigUint64: { value: view.setBigUint64 },
     });
     Object.freeze(view);
     Object.defineProperties(registers, {
-      integerView: { get: () => view }, integerWords: { get: () => registers.#words }, read: { value: registers.read }, write: { value: registers.write },
-      checkpoint: { value: registers.checkpoint }, restore: { value: registers.restore },
+      integerView: { get: () => view },
+      integerWords: { get: () => registers.#words },
+      read: { value: registers.read },
+      write: { value: registers.write },
+      checkpoint: { value: registers.checkpoint },
+      restore: { value: registers.restore },
       attached: { value: registers.attached },
     });
     Object.freeze(registers);
     return registers;
   }
-  attached(): boolean { return this.#bytes.byteLength === (this.architecture === "i386" ? 64 : 128); }
-  get integerView(): DataView { return this.#view; }
-  get integerWords(): Uint32Array | null { return this.#words; }
+  attached(): boolean {
+    return this.#bytes.byteLength === (this.architecture === "i386" ? 64 : 128);
+  }
+  get integerView(): DataView {
+    return this.#view;
+  }
+  get integerWords(): Uint32Array | null {
+    return this.#words;
+  }
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
     if (width === 64) return this.#view.getBigUint64(offset, true);
-    return BigInt(width === 32 ? this.#view.getUint32(offset, true) : width === 16
-      ? this.#view.getUint16(offset, true) : this.#view.getUint8(offset + (highByte ? 1 : 0)));
+    return BigInt(
+      width === 32 ? this.#view.getUint32(offset, true) : width === 16 ? this.#view.getUint16(offset, true) : this.#view.getUint8(offset + (highByte ? 1 : 0)),
+    );
   }
   write(register: GuestRegister, width: GuestIntegerWidth, value: bigint, highByte = false): undefined {
     const offset = this.#offset(register, width, highByte);
-    if (width === 64) { this.#view.setBigUint64(offset, value, true); return undefined; }
+    if (width === 64) {
+      this.#view.setBigUint64(offset, value, true);
+      return undefined;
+    }
     const normalized = BigInt.asUintN(width, value);
     if (width === 32) {
       this.#view.setBigUint64(offset, normalized, true);
@@ -100,26 +152,48 @@ export class ProcessorFlags implements GuestFlags {
     const flags = new ProcessorFlags(value);
     Object.defineProperties(flags, {
       value: { get: () => flags.#read(), set: (next: bigint) => flags.#write(next) },
-      lowWord: { get: () => flags.#low }, highWord: { get: () => flags.#high },
-      restoreWords: { value: flags.restoreWords }, writeLowWord: { value: flags.writeLowWord },
-      get: { value: flags.get }, set: { value: flags.set },
+      lowWord: { get: () => flags.#low },
+      highWord: { get: () => flags.#high },
+      restoreWords: { value: flags.restoreWords },
+      writeLowWord: { value: flags.writeLowWord },
+      get: { value: flags.get },
+      set: { value: flags.set },
     });
     Object.freeze(flags);
     return flags;
   }
-  get value(): bigint { return this.#read(); }
-  set value(value: bigint) { this.#write(value); }
-  #read(): bigint { return this.#value ??= (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+  get value(): bigint {
+    return this.#read();
+  }
+  set value(value: bigint) {
+    this.#write(value);
+  }
+  #read(): bigint {
+    return (this.#value ??= (BigInt(this.#high) << 32n) | BigInt(this.#low));
+  }
   #write(value: bigint): void {
     this.#value = BigInt.asUintN(64, value);
     this.#low = Number(this.#value & 0xffffffffn);
     this.#high = Number(this.#value >> 32n);
   }
-  get lowWord(): number { return this.#low; }
-  get highWord(): number { return this.#high; }
-  restoreWords(low: number, high: number): void { this.#low = low >>> 0; this.#high = high >>> 0; this.#value = null; }
-  writeLowWord(value: number): void { this.#low = value >>> 0; this.#value = null; }
-  get(flag: GuestFlag): boolean { return (this.#low & flagMask[flag]) !== 0; }
+  get lowWord(): number {
+    return this.#low;
+  }
+  get highWord(): number {
+    return this.#high;
+  }
+  restoreWords(low: number, high: number): void {
+    this.#low = low >>> 0;
+    this.#high = high >>> 0;
+    this.#value = null;
+  }
+  writeLowWord(value: number): void {
+    this.#low = value >>> 0;
+    this.#value = null;
+  }
+  get(flag: GuestFlag): boolean {
+    return (this.#low & flagMask[flag]) !== 0;
+  }
   set(flag: GuestFlag, value: boolean): undefined {
     const mask = flagMask[flag];
     this.writeLowWord(value ? this.#low | mask : this.#low & ~mask);
@@ -140,8 +214,11 @@ export interface GuestProcessorInitialState {
 /** The loader/runtime supplies its selected initial environment; this does not execute instructions. */
 function createSimdState(initial: GuestProcessorInitialState): GuestSimdState {
   const xmm = new Uint8Array(initial.architecture === "i386" ? 128 : 256);
-  const scratch: GuestSimdScratch = { registers: Array.from({ length: xmm.length / 16 }, (_, index) => xmm.subarray(index * 16, index * 16 + 16)),
-    operand: new Uint8Array(16), scalar: { view: new DataView(xmm.buffer, xmm.byteOffset, xmm.byteLength), low: 0, high: 0 } };
+  const scratch: GuestSimdScratch = {
+    registers: Array.from({ length: xmm.length / 16 }, (_, index) => xmm.subarray(index * 16, index * 16 + 16)),
+    operand: new Uint8Array(16),
+    scalar: { view: new DataView(xmm.buffer, xmm.byteOffset, xmm.byteLength), low: 0, high: 0 },
+  };
   const simd: GuestSimdState = { xmm, scratch, mxcsr: initial.mxcsr, mxcsrMask: initial.mxcsrMask };
   // Hidden from enumeration so snapshots and structural comparisons see only architectural state.
   Object.defineProperty(simd, "scratch", { enumerable: false });
@@ -170,32 +247,57 @@ function createState(initial: GuestProcessorInitialState, managed: boolean): Gue
   if (initial.instructionPointer < 0n || initial.instructionPointer >= limit || initial.stackPointer < 0n || initial.stackPointer >= limit) {
     throw new RangeError("Initial guest IP or stack pointer exceeds its architecture");
   }
-  if (!Number.isInteger(initial.x87ControlWord) || initial.x87ControlWord < 0 || initial.x87ControlWord > 0xffff
-    || !Number.isInteger(initial.mxcsr) || initial.mxcsr < 0 || initial.mxcsr > 0xffffffff
-    || !Number.isInteger(initial.mxcsrMask) || initial.mxcsrMask < 0 || initial.mxcsrMask > 0xffffffff) {
+  if (
+    !Number.isInteger(initial.x87ControlWord) ||
+    initial.x87ControlWord < 0 ||
+    initial.x87ControlWord > 0xffff ||
+    !Number.isInteger(initial.mxcsr) ||
+    initial.mxcsr < 0 ||
+    initial.mxcsr > 0xffffffff ||
+    !Number.isInteger(initial.mxcsrMask) ||
+    initial.mxcsrMask < 0 ||
+    initial.mxcsrMask > 0xffffffff
+  ) {
     throw new RangeError("Initial floating-point control state exceeds its register width");
   }
   const segment = (): GuestSegment => ({ selector: 0, base: 0n, limit: limit - 1n });
   registers.write("rsp", width, initial.stackPointer);
   const flags = managed ? ProcessorFlags.createManaged(initial.flags) : new ProcessorFlags(initial.flags);
   const state: GuestProcessorState = {
-    architecture: initial.architecture, registers, instructionPointer: initial.instructionPointer,
+    architecture: initial.architecture,
+    registers,
+    instructionPointer: initial.instructionPointer,
     flags,
     segments: { cs: segment(), ds: segment(), es: segment(), ss: segment(), fs: segment(), gs: segment() },
-    x87: { registers: new Uint8Array(80), controlWord: initial.x87ControlWord, statusWord: 0, tagWord: 0xffff,
-      lastOpcode: 0, instructionPointer: 0n, dataPointer: 0n, instructionSelector: 0, dataSelector: 0 },
+    x87: {
+      registers: new Uint8Array(80),
+      controlWord: initial.x87ControlWord,
+      statusWord: 0,
+      tagWord: 0xffff,
+      lastOpcode: 0,
+      instructionPointer: 0n,
+      dataPointer: 0n,
+      instructionSelector: 0,
+      dataSelector: 0,
+    },
     simd: createSimdState(initial),
   };
   if (managed) {
     let instructionPointer = initial.instructionPointer;
-    Object.defineProperty(state, "instructionPointer", { configurable: false,
-      get: () => instructionPointer, set: (value: bigint) => { instructionPointer = value; } });
+    Object.defineProperty(state, "instructionPointer", {
+      configurable: false,
+      get: () => instructionPointer,
+      set: (value: bigint) => {
+        instructionPointer = value;
+      },
+    });
     const segments = state.segments;
     for (const value of [segments.cs, segments.ds, segments.es, segments.ss, segments.fs, segments.gs]) Object.seal(value);
     Object.freeze(state.segments);
     Object.defineProperty(state.x87, "registers", { writable: false, configurable: false });
     Object.defineProperty(state.simd, "xmm", { writable: false, configurable: false });
-    Object.seal(state.x87); Object.seal(state.simd);
+    Object.seal(state.x87);
+    Object.seal(state.simd);
     for (const key of ["architecture", "registers", "flags", "segments", "x87", "simd"]) {
       Object.defineProperty(state, key, { writable: false, configurable: false });
     }

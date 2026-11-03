@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Classic CTF 1.09b g_ctf.c and rerelease ctf/g_ctf.cpp grapple. GPL-2.0-or-later. */
 import { projectQ2Actor, q2ActorShotMask } from "../foundation/weapons/projection.ts";
 import { angleVectorsRule, vectorToAnglesRule } from "../../../core/math.ts";
@@ -11,22 +12,39 @@ import { CtfGrappleState, grappleBody, grappleVelocity } from "./grapple-service
 import type { GrappleHooks } from "./grapple-services.ts";
 
 const MOD_GRAPPLE = 34;
-export interface CtfGrappleSettings { readonly flySpeed: number; readonly pullSpeed: number; readonly damage: number; readonly playersCollide: boolean; }
+export interface CtfGrappleSettings {
+  readonly flySpeed: number;
+  readonly pullSpeed: number;
+  readonly damage: number;
+  readonly playersCollide: boolean;
+}
 function isCrush(reaction: DeathReaction): boolean {
   const cause = reaction.attack?.cause;
   if (cause === undefined) return false;
   switch (cause.kind) {
-    case "q1": return cause.deathType === "crush";
-    case "q2": return cause.meansOfDeath === 20;
-    case "q3": return cause.meansOfDeath === 17;
-    case "environment": return cause.hazard === "crush";
+    case "q1":
+      return cause.deathType === "crush";
+    case "q2":
+      return cause.meansOfDeath === 20;
+    case "q3":
+      return cause.meansOfDeath === 17;
+    case "environment":
+      return cause.hazard === "crush";
   }
 }
 
 export class Q2CtfGrappleEquipment {
   readonly states = new Map<ActorId, CtfGrappleState>();
-  constructor(readonly hooks: GrappleHooks, readonly canDamage: (owner: ActorId, target: ActorId) => boolean = () => true,
-    readonly settings: (actor: ActorId, game: Q2GameServices) => CtfGrappleSettings = () => ({ flySpeed: 650, pullSpeed: 650, damage: 10, playersCollide: true })) {}
+  constructor(
+    readonly hooks: GrappleHooks,
+    readonly canDamage: (owner: ActorId, target: ActorId) => boolean = () => true,
+    readonly settings: (actor: ActorId, game: Q2GameServices) => CtfGrappleSettings = () => ({
+      flySpeed: 650,
+      pullSpeed: 650,
+      damage: 10,
+      playersCollide: true,
+    }),
+  ) {}
   private readonly boundGames = new WeakSet<Q2GameServices>();
   bind(game: Q2GameServices): undefined {
     if (this.boundGames.has(game)) return undefined;
@@ -36,11 +54,17 @@ export class Q2CtfGrappleEquipment {
       if (owned !== undefined) {
         this.states.delete(actor.id);
         const hook = game.entity(owned.grapple);
-        if (hook !== null && game.host.actors.isLive(hook.actor.id)) { this.loop(hook, game, ""); game.cancel(hook); game.remove(hook); }
+        if (hook !== null && game.host.actors.isLive(hook.actor.id)) {
+          this.loop(hook, game, "");
+          game.cancel(hook);
+          game.remove(hook);
+        }
       }
       for (const [owner, state] of this.states) {
         if (state.grapple === null || !state.grapple.equals(actor.id)) continue;
-        state.grapple = null; state.grappleState = "fly"; state.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
+        state.grapple = null;
+        state.grappleState = "fly";
+        state.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
         this.restoreKnockback(owner, game, state);
         if (game.options.edition === "classic" && game.host.actors.isLive(owner)) this.hooks.setGrapplePrediction(owner, false);
       }
@@ -51,37 +75,56 @@ export class Q2CtfGrappleEquipment {
   state(actor: ActorId): CtfGrappleState {
     const found = this.states.get(actor);
     if (found !== undefined) return found;
-    const created = new CtfGrappleState(); this.states.set(actor, created); return created;
+    const created = new CtfGrappleState();
+    this.states.set(actor, created);
+    return created;
   }
   private readonly sourceTouch: Q2Touch = (hook, game, contact) => this.touch(hook, game, contact);
-  private readonly sourceDie: Q2Die = (hook, game, reaction) => isCrush(reaction) ? this.resetHook(hook, game) : undefined;
-  get callbacks(): Q2CallbackDefinitions { return { touch: { CTFGrappleTouch: this.sourceTouch }, die: { grapple_die: this.sourceDie } }; }
+  private readonly sourceDie: Q2Die = (hook, game, reaction) => (isCrush(reaction) ? this.resetHook(hook, game) : undefined);
+  get callbacks(): Q2CallbackDefinitions {
+    return { touch: { CTFGrappleTouch: this.sourceTouch }, die: { grapple_die: this.sourceDie } };
+  }
   private restoreKnockback(owner: ActorId, game: Q2GameServices, state: CtfGrappleState): undefined {
     if (state.grappleNoKnockback === null) return undefined;
     const actor = game.host.actors.resolveOwned(owner);
     if (actor !== null && game.host.combat.read(owner) !== null) game.host.combat.setTraits(actor, { noKnockback: state.grappleNoKnockback });
-    state.grappleNoKnockback = null; return undefined;
+    state.grappleNoKnockback = null;
+    return undefined;
   }
   private loop(hook: Q2Entity, game: Q2GameServices, path: string): undefined {
     if (hook.sound === path) return undefined;
     const origin = game.body(hook).origin;
-    if (hook.sound !== "") game.host.emit({ kind: "sound", actor: hook.actor.id, origin, path: hook.sound, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "stop" });
+    if (hook.sound !== "")
+      game.host.emit({ kind: "sound", actor: hook.actor.id, origin, path: hook.sound, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "stop" });
     hook.sound = path;
-    if (path !== "") game.host.emit({ kind: "sound", actor: hook.actor.id, origin, path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "start" });
+    if (path !== "")
+      game.host.emit({ kind: "sound", actor: hook.actor.id, origin, path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "start" });
     return undefined;
   }
 
   sound(entity: ActorId, owner: ActorId, game: Q2GameServices, file: string, reliable = false): undefined {
-    return game.host.emit({ kind: "sound", actor: entity, origin: grappleBody(entity, game).origin, path: `weapons/grapple/${file}.wav`, channel: 1,
-      volume: this.hooks.volume(owner), attenuation: 1, reliable: game.options.edition === "classic" && reliable, loop: "once" });
+    return game.host.emit({
+      kind: "sound",
+      actor: entity,
+      origin: grappleBody(entity, game).origin,
+      path: `weapons/grapple/${file}.wav`,
+      channel: 1,
+      volume: this.hooks.volume(owner),
+      attenuation: 1,
+      reliable: game.options.edition === "classic" && reliable,
+      loop: "once",
+    });
   }
 
   /** CTFPlayerResetGrapple accepts the existing player actor. */
   reset(player: ActorId, game: Q2GameServices): undefined {
-    const source = this.states.get(player), hook = source === undefined ? null : game.entity(source.grapple);
+    const source = this.states.get(player),
+      hook = source === undefined ? null : game.entity(source.grapple);
     if (hook !== null) return this.resetHook(hook, game);
     if (source !== undefined && source.grapple !== null) {
-      source.grapple = null; source.grappleState = "fly"; source.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
+      source.grapple = null;
+      source.grappleState = "fly";
+      source.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
       this.restoreKnockback(player, game, source);
       if (game.options.edition === "classic") this.hooks.setGrapplePrediction(player, false);
     }
@@ -93,8 +136,11 @@ export class Q2CtfGrappleEquipment {
     const source = this.states.get(owner);
     if (source === undefined || source.grapple === null) return game.remove(hook);
     if (game.host.actors.isLive(owner) && game.host.bodies.read(owner) !== null) this.sound(owner, owner, game, "grreset", true);
-    source.grapple = null; source.grappleState = "fly"; source.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
-    this.restoreKnockback(owner, game, source); this.loop(hook, game, "");
+    source.grapple = null;
+    source.grappleState = "fly";
+    source.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
+    this.restoreKnockback(owner, game, source);
+    this.loop(hook, game, "");
     if (game.options.edition === "classic") this.hooks.setGrapplePrediction(owner, false);
     game.host.bodies.detach(hook.actor);
     return game.remove(hook);
@@ -109,16 +155,36 @@ export class Q2CtfGrappleEquipment {
     game.move(hook, { velocity: zero });
     this.hooks.noise(owner, game, game.body(hook).origin, "impact");
     if (game.host.combat.read(contact.other)?.canTakeDamage === true) {
-      if (game.options.edition === "classic" || hook.damage !== 0) game.damage(contact.other, hook, owner, hook.damage, 1, zero, game.body(hook).origin, contact.plane?.normal ?? zero, MOD_GRAPPLE, 0, "q2:weapon_grapple");
+      if (game.options.edition === "classic" || hook.damage !== 0)
+        game.damage(
+          contact.other,
+          hook,
+          owner,
+          hook.damage,
+          1,
+          zero,
+          game.body(hook).origin,
+          contact.plane?.normal ?? zero,
+          MOD_GRAPPLE,
+          0,
+          "q2:weapon_grapple",
+        );
       if (!game.host.actors.isLive(hook.actor.id) || !game.host.actors.isLive(owner)) return undefined;
       return this.resetHook(hook, game);
     }
-    source.grappleState = "pull"; hook.enemy = contact.other; game.solid(hook, "none");
-    const anchor = this.hooks.anchor(contact.other, game), body = game.host.bodies.read(contact.other);
+    source.grappleState = "pull";
+    hook.enemy = contact.other;
+    game.solid(hook, "none");
+    const anchor = this.hooks.anchor(contact.other, game),
+      body = game.host.bodies.read(contact.other);
     if (anchor === "none" || body === null) return this.resetHook(hook, game);
-    game.host.bodies.attach(hook.actor, { anchor: contact.other,
-      follow: anchor === "box" || anchor === "player" || anchor === "corpse" ? { kind: "center" }
-        : { kind: "translation", offset: subtract(game.body(hook).origin, body.origin) } });
+    game.host.bodies.attach(hook.actor, {
+      anchor: contact.other,
+      follow:
+        anchor === "box" || anchor === "player" || anchor === "corpse"
+          ? { kind: "center" }
+          : { kind: "translation", offset: subtract(game.body(hook).origin, body.origin) },
+    });
     if (game.options.edition === "classic") this.sound(owner, owner, game, "grpull", true);
     this.sound(hook.actor.id, owner, game, "grhit");
     if (game.options.edition === "rerelease") this.loop(hook, game, "weapons/grapple/grpull.wav");
@@ -133,11 +199,22 @@ export class Q2CtfGrappleEquipment {
 
   fireFromPose(player: ActorId, game: Q2GameServices): undefined {
     if (this.state(player).grappleState !== "fly") return undefined;
-    const pose = this.hooks.pose(player, game), settings = this.settings(player, game);
-    const shot = projectQ2Actor(player, game, { hand: pose.hand, viewHeight: pose.viewHeight, playersCollide: settings.playersCollide }, pose.angles, { x: 24, y: 8, z: -6 });
+    const pose = this.hooks.pose(player, game),
+      settings = this.settings(player, game);
+    const shot = projectQ2Actor(player, game, { hand: pose.hand, viewHeight: pose.viewHeight, playersCollide: settings.playersCollide }, pose.angles, {
+      x: 24,
+      y: 8,
+      z: -6,
+    });
     if (game.options.edition === "classic") this.sound(player, player, game, "grfire", true);
-    const launched = this.fireGrapple(player, game, shot.start, shot.direction, game.options.edition === "classic" ? 10 : settings.damage,
-      game.options.edition === "classic" ? 650 : settings.flySpeed);
+    const launched = this.fireGrapple(
+      player,
+      game,
+      shot.start,
+      shot.direction,
+      game.options.edition === "classic" ? 10 : settings.damage,
+      game.options.edition === "classic" ? 650 : settings.flySpeed,
+    );
     if (!game.host.actors.isLive(player)) return undefined;
     if (game.options.edition === "rerelease" && launched) this.sound(player, player, game, "grfire");
     return this.hooks.noise(player, game, shot.start, "weapon");
@@ -147,26 +224,73 @@ export class Q2CtfGrappleEquipment {
     this.bind(game);
     const source = this.state(owner);
     if (source.grapple !== null) return false;
-    const hook = game.create("grapple"), normalized = normalize(direction);
+    const hook = game.create("grapple"),
+      normalized = normalize(direction);
     hook.clipMask = q2ActorShotMask(game, this.settings(owner, game).playersCollide);
     if (game.options.edition === "rerelease") {
-      hook.flags |= 0x800 | 0x100000; hook.die = this.sourceDie;
-      game.host.combat.create(hook.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null, noKnockback: true });
+      hook.flags |= 0x800 | 0x100000;
+      hook.die = this.sourceDie;
+      game.host.combat.create(hook.actor, {
+        health: 0,
+        armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+        mass: 0,
+        canTakeDamage: true,
+        invulnerable: false,
+        team: null,
+        noKnockback: true,
+      });
     }
-    hook.projectile = true; hook.effects = effects; hook.model = "models/weapons/grapple/hook/tris.md2"; hook.owner = owner; hook.touch = this.sourceTouch; hook.damage = damage;
-    game.move(hook, { origin: start, angles: vectorToAnglesRule(normalized, "native"), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } }, false);
-    source.grapple = hook.actor.id; source.grappleState = "fly"; game.solid(hook, "box"); game.motion(hook, "fly-missile");
-    const trajectory = game.host.isPlayer(owner) ? game.host.weaponBehavior?.launch({ projectile: hook.actor, shooter: owner, weapon: "q2:weapon_grapple", role: "grapple", timeSeconds: game.host.now(), body: game.body(hook) }) ?? null : null;
-    if (trajectory !== null) { game.projectTrajectory(hook, trajectory); }
+    hook.projectile = true;
+    hook.effects = effects;
+    hook.model = "models/weapons/grapple/hook/tris.md2";
+    hook.owner = owner;
+    hook.touch = this.sourceTouch;
+    hook.damage = damage;
+    game.move(
+      hook,
+      { origin: start, angles: vectorToAnglesRule(normalized, "native"), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } },
+      false,
+    );
+    source.grapple = hook.actor.id;
+    source.grappleState = "fly";
+    game.solid(hook, "box");
+    game.motion(hook, "fly-missile");
+    const trajectory = game.host.isPlayer(owner)
+      ? (game.host.weaponBehavior?.launch({
+          projectile: hook.actor,
+          shooter: owner,
+          weapon: "q2:weapon_grapple",
+          role: "grapple",
+          timeSeconds: game.host.now(),
+          body: game.body(hook),
+        }) ?? null)
+      : null;
+    if (trajectory !== null) {
+      game.projectTrajectory(hook, trajectory);
+    }
     const launchOrigin = game.body(hook).origin;
     game.show(hook);
     const trace = game.host.trace({ start: grappleBody(owner, game).origin, end: launchOrigin, bounds: null, ignore: hook.actor.id, mask: hook.clipMask });
     if (trace.fraction < 1) {
-      game.move(hook, { origin: game.options.edition === "classic" ? add(launchOrigin, scale(trajectory === null ? normalized : normalize(trajectory.velocity), -10)) : add(trace.end, trace.sourcePlane.normal) });
+      game.move(hook, {
+        origin:
+          game.options.edition === "classic"
+            ? add(launchOrigin, scale(trajectory === null ? normalized : normalize(trajectory.velocity), -10))
+            : add(trace.end, trace.sourcePlane.normal),
+      });
       const other = trace.hit.kind === "actor" ? trace.hit.actor : game.host.worldActor();
-      const surface = trace.kind === "q2" ? trace.surface === null ? null : { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value }
-        : { name: "", nativeFlags: trace.surfaceFlags ?? 0, nativeValue: 0 };
-      this.touch(hook, game, { self: hook.actor, other, plane: game.options.edition === "classic" ? null : trace.sourcePlane, surface: game.options.edition === "classic" ? null : surface });
+      const surface =
+        trace.kind === "q2"
+          ? trace.surface === null
+            ? null
+            : { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value }
+          : { name: "", nativeFlags: trace.surfaceFlags ?? 0, nativeValue: 0 };
+      this.touch(hook, game, {
+        self: hook.actor,
+        other,
+        plane: game.options.edition === "classic" ? null : trace.sourcePlane,
+        surface: game.options.edition === "classic" ? null : surface,
+      });
       return false;
     }
     if (game.options.edition === "rerelease") this.loop(hook, game, "weapons/grapple/grfly.wav");
@@ -174,27 +298,42 @@ export class Q2CtfGrappleEquipment {
   }
 
   private cable(hook: Q2Entity, owner: ActorId, game: Q2GameServices): undefined {
-    const origin = grappleBody(owner, game).origin, end = game.body(hook).origin;
+    const origin = grappleBody(owner, game).origin,
+      end = game.body(hook).origin;
     const pose = this.hooks.pose(owner, game);
     if (game.options.edition === "rerelease") {
       if (this.state(owner).grappleState === "hang") return undefined;
-      const shot = projectQ2Actor(owner, game, { hand: pose.hand, viewHeight: pose.viewHeight, playersCollide: this.settings(owner, game).playersCollide }, pose.angles, { x: 7, y: 2, z: -9 });
+      const shot = projectQ2Actor(
+        owner,
+        game,
+        { hand: pose.hand, viewHeight: pose.viewHeight, playersCollide: this.settings(owner, game).playersCollide },
+        pose.angles,
+        { x: 7, y: 2, z: -9 },
+      );
       return this.hooks.emit({ kind: "grapple-cable", actor: owner, start: shot.start, end, offset: zero });
     }
-    const axes = angleVectorsRule(pose.angles, "native"), hand = pose.hand;
-    const start = add(add(add(origin, scale(axes.forward, 16)), scale(axes.right, hand === "left" ? -16 : hand === "center" ? 0 : 16)), { x: 0, y: 0, z: pose.viewHeight - 8 });
+    const axes = angleVectorsRule(pose.angles, "native"),
+      hand = pose.hand;
+    const start = add(add(add(origin, scale(axes.forward, 16)), scale(axes.right, hand === "left" ? -16 : hand === "center" ? 0 : 16)), {
+      x: 0,
+      y: 0,
+      z: pose.viewHeight - 8,
+    });
     if (length(subtract(start, end)) < 64) return undefined;
     return this.hooks.emit({ kind: "grapple-cable", actor: owner, start: origin, end, offset: subtract(start, origin) });
   }
 
   /** CTFGrapplePull accepts the hook; the session calls playerFrame once after movement. */
   pull(hook: Q2Entity, game: Q2GameServices, damagePulse = true): undefined {
-    const owner = hook.owner; if (owner === null || !game.host.actors.isLive(owner) || game.host.bodies.read(owner) === null) return this.resetHook(hook, game);
+    const owner = hook.owner;
+    if (owner === null || !game.host.actors.isLive(owner) || game.host.bodies.read(owner) === null) return this.resetHook(hook, game);
     const pose = this.hooks.pose(owner, game);
     if (hook.enemy !== null) {
-      const anchor = this.hooks.anchor(hook.enemy, game), body = game.host.bodies.read(hook.enemy);
+      const anchor = this.hooks.anchor(hook.enemy, game),
+        body = game.host.bodies.read(hook.enemy);
       if (body === null || anchor === "none") return this.resetHook(hook, game);
-      if (anchor === "box" || anchor === "player" || anchor === "corpse") game.move(hook, { origin: add(body.origin, scale(add(body.bounds.min, body.bounds.max), 0.5)) });
+      if (anchor === "box" || anchor === "player" || anchor === "corpse")
+        game.move(hook, { origin: add(body.origin, scale(add(body.bounds.min, body.bounds.max), 0.5)) });
       else game.move(hook, { velocity: body.velocity });
       if (game.options.edition === "classic" && damagePulse && game.host.combat.read(hook.enemy)?.canTakeDamage === true && this.canDamage(owner, hook.enemy)) {
         game.damage(hook.enemy, hook, owner, 1, 1, game.body(hook).velocity, game.body(hook).origin, zero, MOD_GRAPPLE, 0, "q2:weapon_grapple");
@@ -206,14 +345,18 @@ export class Q2CtfGrappleEquipment {
     this.cable(hook, owner, game);
     const source = this.state(owner);
     if (source.grappleState === "fly") return undefined;
-    const body = grappleBody(owner, game), direction = subtract(game.body(hook).origin, add(body.origin, { x: 0, y: 0, z: pose.viewHeight }));
+    const body = grappleBody(owner, game),
+      direction = subtract(game.body(hook).origin, add(body.origin, { x: 0, y: 0, z: pose.viewHeight }));
     if (source.grappleState === "pull" && length(direction) < 64) {
       source.grappleState = "hang";
-      if (game.options.edition === "classic") { this.hooks.setGrapplePrediction(owner, true); this.sound(owner, owner, game, "grhang", true); }
-      else this.loop(hook, game, "weapons/grapple/grhang.wav");
+      if (game.options.edition === "classic") {
+        this.hooks.setGrapplePrediction(owner, true);
+        this.sound(owner, owner, game, "grhang", true);
+      } else this.loop(hook, game, "weapons/grapple/grhang.wav");
     }
     if (game.options.edition === "rerelease") {
-      const actor = game.host.actors.resolveOwned(owner), combat = game.host.combat.read(owner);
+      const actor = game.host.actors.resolveOwned(owner),
+        combat = game.host.combat.read(owner);
       if (actor !== null && combat !== null) {
         if (source.grappleNoKnockback === null) source.grappleNoKnockback = combat.noKnockback ?? false;
         game.host.combat.setTraits(actor, { noKnockback: true });
@@ -224,7 +367,8 @@ export class Q2CtfGrappleEquipment {
   }
 
   playerFrame(player: ActorId, game: Q2GameServices, damagePulse = true): undefined {
-    const state = this.states.get(player), hook = state === undefined ? null : game.entity(state.grapple);
+    const state = this.states.get(player),
+      hook = state === undefined ? null : game.entity(state.grapple);
     return hook === null ? undefined : this.pull(hook, game, damagePulse);
   }
 }

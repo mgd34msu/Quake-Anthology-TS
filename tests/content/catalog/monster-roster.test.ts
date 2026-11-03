@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
@@ -24,7 +25,9 @@ test("campaign slot catalogs cover all registered species, expansions and bosses
     for (const classname of Object.keys(source.creatures)) {
       const reference = { provider: source.provider, content: source.family === "q1" ? q1.content : q2.content };
       const role = slots.find(slot => slot.classname === classname)?.role;
-      expect(target(source.family, reference, classname)).toEqual(role === "boss" || role === "special" ? { kind: "map-defined" } : { source: reference, classname });
+      expect(target(source.family, reference, classname)).toEqual(
+        role === "boss" || role === "special" ? { kind: "map-defined" } : { source: reference, classname },
+      );
     }
   }
   expect(campaignMonsterSlots("q1").some(slot => slot.classname === "monster_armagon")).toBe(true);
@@ -35,9 +38,16 @@ test("campaign slot catalogs cover all registered species, expansions and bosses
 });
 
 test("role defaults preserve flight, water, boss scripts and explicit overrides", () => {
-  for (const [authored, replacement] of [["monster_soldier", "monster_army"], ["monster_soldier_light", "monster_army"], ["monster_infantry", "monster_enforcer"],
-    ["monster_berserk", "monster_demon1"], ["monster_gunner", "monster_ogre"], ["monster_flyer", "monster_wizard"], ["monster_flipper", "monster_fish"],
-    ["monster_tank", "monster_shambler"]] satisfies readonly (readonly [string, string])[])
+  for (const [authored, replacement] of [
+    ["monster_soldier", "monster_army"],
+    ["monster_soldier_light", "monster_army"],
+    ["monster_infantry", "monster_enforcer"],
+    ["monster_berserk", "monster_demon1"],
+    ["monster_gunner", "monster_ogre"],
+    ["monster_flyer", "monster_wizard"],
+    ["monster_flipper", "monster_fish"],
+    ["monster_tank", "monster_shambler"],
+  ] satisfies readonly (readonly [string, string])[])
     expect(target("q2", q1, authored)).toEqual({ source: q1, classname: replacement });
   expect(target("q1", q2, "monster_fish")).toEqual({ source: q2, classname: "monster_flipper" });
   expect(target("q1", q2, "monster_eel")).toEqual({ source: q2, classname: "monster_flipper" });
@@ -73,7 +83,11 @@ test("all Quake monster sources replace Q2 parasites with their inherited dog wh
     if (replacement === undefined || "kind" in replacement) throw new Error("Missing Quake dog replacement");
     expect(monsterSource(replacement)).toBe(source);
     expect(source.creatures[replacement.classname]?.resources).toContain("progs/dog.mdl");
-    for (const override of [{ kind: "map-defined" }, { source: q2, classname: "monster_parasite" }, { source: reference, classname: "monster_ogre" }] satisfies readonly MonsterSelectionTarget[])
+    for (const override of [
+      { kind: "map-defined" },
+      { source: q2, classname: "monster_parasite" },
+      { source: reference, classname: "monster_ogre" },
+    ] satisfies readonly MonsterSelectionTarget[])
       expect(defaultMonsterRoster("q2", reference, { monster_parasite: override }).byClassname["monster_parasite"]).toEqual(override);
   }
   expect(target("q2", q2, "monster_parasite")).toEqual({ kind: "map-defined" });
@@ -87,7 +101,11 @@ test("all Quake II monster sources replace Quake dogs with parasites while prese
     if (replacement === undefined || "kind" in replacement) throw new Error("Missing Quake II parasite replacement");
     expect(monsterSource(replacement)).toBe(source);
     expect(source.creatures[replacement.classname]?.resources).toContain("models/monsters/parasite/tris.md2");
-    for (const override of [{ kind: "map-defined" }, { source: q1, classname: "monster_dog" }, { source: reference, classname: "monster_berserk" }] satisfies readonly MonsterSelectionTarget[])
+    for (const override of [
+      { kind: "map-defined" },
+      { source: q1, classname: "monster_dog" },
+      { source: reference, classname: "monster_berserk" },
+    ] satisfies readonly MonsterSelectionTarget[])
       expect(defaultMonsterRoster("q1", reference, { monster_dog: override }).byClassname["monster_dog"]).toEqual(override);
   }
   expect(target("q1", q1, "monster_dog")).toEqual({ source: q1, classname: "monster_dog" });
@@ -117,22 +135,29 @@ test("installed Quake dog rosters retain their source behavior and resources acr
       if (parasite === undefined || "kind" in parasite) throw new Error("Native parasite survived default Quake roster");
       expect(monsterSource(parasite)).toBe(source);
       expect(parasite.classname).toBe("monster_dog");
-    } finally { await content.close(); }
+    } finally {
+      await content.close();
+    }
   }
 }, 60000);
 
 test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
-  for (const [game, map, family, source] of [["q2-rerelease-baseq2", "base1", "q2", q1], ["q1-rerelease-id1", "e1m1", "q1", q2]] satisfies readonly (readonly [string, string, "q1" | "q2", ProviderReference])[]) {
+  for (const [game, map, family, source] of [
+    ["q2-rerelease-baseq2", "base1", "q2", q1],
+    ["q1-rerelease-id1", "e1m1", "q1", q2],
+  ] satisfies readonly (readonly [string, string, "q1" | "q2", ProviderReference])[]) {
     const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", game, "--map", map]);
     if (parsed.kind !== "run") throw new Error("Expected launch command");
-    const preset = applicationPreset(catalog, parsed.options), selected = { ...source, content: catalog.require(source === q1 ? "q1-rerelease-id1" : "q2-rerelease-baseq2").id }, enemies = defaultMonsterRoster(family, selected);
+    const preset = applicationPreset(catalog, parsed.options),
+      selected = { ...source, content: catalog.require(source === q1 ? "q1-rerelease-id1" : "q2-rerelease-baseq2").id },
+      enemies = defaultMonsterRoster(family, selected);
     const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
     expect(recipe.enemies).toEqual(enemies);
     expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
     expect(recipe.weapons).toEqual(preset.weapons);
     if (recipe.enemies.kind !== "replace") throw new Error("Expected automatic roster");
-    const replacements = new Set(Object.values(recipe.enemies.byClassname).flatMap(value => "classname" in value ? [value.classname] : []));
+    const replacements = new Set(Object.values(recipe.enemies.byClassname).flatMap(value => ("classname" in value ? [value.classname] : [])));
     expect(replacements.size).toBeGreaterThan(5);
     expect(recipe.timing.some(clock => clock.provider === source.provider)).toBe(true);
   }

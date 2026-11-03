@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* MD3 LOD registration order from Q3 renderer/tr_model.c. GPL-2.0-or-later. */
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import { parseMd3 } from "./md3.ts";
 import type { Md3Model } from "./md3.ts";
 
-export type Md3LodSlot = { readonly kind: "missing"; readonly path: string }
+export type Md3LodSlot =
+  | { readonly kind: "missing"; readonly path: string }
   | { readonly kind: "loaded"; readonly path: string; readonly model: Md3Model }
   | { readonly kind: "invalid"; readonly path: string; readonly error: string }
   | { readonly kind: "alias"; readonly path: string; readonly sourceSlot: number };
@@ -16,7 +18,9 @@ export interface Md3LodModel {
   readonly byteLength: number;
 }
 
-export interface Md3ModelReader { read(path: string): Promise<Uint8Array | null>; }
+export interface Md3ModelReader {
+  read(path: string): Promise<Uint8Array | null>;
+}
 
 export function md3LodPaths(path: string): readonly [string, string, string] {
   const dot = path.lastIndexOf(".");
@@ -28,7 +32,9 @@ export function md3LodPaths(path: string): readonly [string, string, string] {
 export async function loadMd3Lods(path: string, reader: Md3ModelReader): Promise<Md3LodModel | null> {
   const paths = md3LodPaths(path);
   const slots: [Md3LodSlot, Md3LodSlot, Md3LodSlot] = [
-    { kind: "missing", path: paths[0] }, { kind: "missing", path: paths[1] }, { kind: "missing", path: paths[2] },
+    { kind: "missing", path: paths[0] },
+    { kind: "missing", path: paths[1] },
+    { kind: "missing", path: paths[2] },
   ];
   const loadOrder: number[] = [];
   let numLods = 0;
@@ -68,8 +74,12 @@ export function md3AtLod(model: Md3LodModel, lod: number): Md3Model | null {
   const slot = model.slots[lod];
   if (slot === undefined) return null;
   switch (slot.kind) {
-    case "loaded": return slot.model;
-    case "alias": return md3AtLod(model, slot.sourceSlot);
-    case "missing": case "invalid": return null;
+    case "loaded":
+      return slot.model;
+    case "alias":
+      return md3AtLod(model, slot.sourceSlot);
+    case "missing":
+    case "invalid":
+      return null;
   }
 }

@@ -1,4 +1,16 @@
-import { add3Double, angleVectorsRule, distance3Double, dot3Double, length3Double, ma3Double, normalize3DoubleOrZero, scale3Double, sub3Double, vectorToAnglesRule } from "../../../core/math.ts";
+// SPDX-License-Identifier: GPL-2.0-or-later
+import {
+  add3Double,
+  angleVectorsRule,
+  distance3Double,
+  dot3Double,
+  length3Double,
+  ma3Double,
+  normalize3DoubleOrZero,
+  scale3Double,
+  sub3Double,
+  vectorToAnglesRule,
+} from "../../../core/math.ts";
 // Vector and angle arithmetic for the game-agnostic bot brain, delegating
 // to the unified engine math in src/core/math.ts (double-precision helpers
 // and the "bot" angle rules, bit-identical to the former local formulas).

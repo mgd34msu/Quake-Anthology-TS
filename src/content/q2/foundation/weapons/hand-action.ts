@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II hand grenade source timing adapted to an independent input action.
  * Copyright id Software. GPL-2.0-or-later. */
 import { calculateHandThrow, handDeadline, handFrameSeconds, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
@@ -37,9 +38,21 @@ export interface HandActionHost {
 function emit(state: { readonly expiresAt: number }, input: HandActionInput, host: HandActionHost, held: boolean): HandAction {
   host.sound("cook-stop");
   host.consume();
-  host.emit(calculateHandThrow({ ...input.throw, edition: input.edition, now: input.now,
-    alive: input.lifecycle === "alive" || input.lifecycle === "removing", fuseDeadline: input.lifecycle === "dead" && input.edition === "classic" ? input.now : state.expiresAt, held }));
-  return { kind: "recovering", readyAt: handDeadline(input.now, firingInterval(host, handRecoverySeconds(input)), input.edition), requireRelease: held && input.held };
+  host.emit(
+    calculateHandThrow({
+      ...input.throw,
+      edition: input.edition,
+      now: input.now,
+      alive: input.lifecycle === "alive" || input.lifecycle === "removing",
+      fuseDeadline: input.lifecycle === "dead" && input.edition === "classic" ? input.now : state.expiresAt,
+      held,
+    }),
+  );
+  return {
+    kind: "recovering",
+    readyAt: handDeadline(input.now, firingInterval(host, handRecoverySeconds(input)), input.edition),
+    requireRelease: held && input.held,
+  };
 }
 
 function firingInterval(host: HandActionHost, seconds: number): number {
@@ -79,28 +92,35 @@ export function stepHandAction(state: HandAction, input: HandActionInput, host: 
     return { kind: "disarmed" };
   }
   switch (state.kind) {
-    case "disarmed": return input.held ? state : { kind: "idle" };
+    case "disarmed":
+      return input.held ? state : { kind: "idle" };
     case "idle":
       if (!input.pressed || !host.reserve()) return state;
-      return { kind: "preparing", frame: input.edition === "classic" ? 1 : 2,
-        nextAt: handFrameDeadline(input, host), releaseQueued: input.released || !input.held };
+      return {
+        kind: "preparing",
+        frame: input.edition === "classic" ? 1 : 2,
+        nextAt: handFrameDeadline(input, host),
+        releaseQueued: input.released || !input.held,
+      };
     case "preparing": {
-      let frame = state.frame, nextAt = state.nextAt;
+      let frame = state.frame,
+        nextAt = state.nextAt;
       while (input.now >= nextAt && frame < 11) {
         if (frame === 5) host.sound("cock");
         frame++;
         nextAt = handFrameDeadline(input, host, nextAt);
       }
-      if (input.now < nextAt) return { kind: "preparing", frame, nextAt,
-        releaseQueued: state.releaseQueued || input.released || !input.held };
+      if (input.now < nextAt) return { kind: "preparing", frame, nextAt, releaseQueued: state.releaseQueued || input.released || !input.held };
       host.sound("cook-start");
       const cooking: Extract<HandAction, { readonly kind: "cooking" }> = { kind: "cooking", expiresAt: handFuseDeadline(nextAt, input.edition) };
       // A previously observed tap can complete its throw animation during catch-up.
       // A release first observed on this turn belongs to now, not the earlier hold frame.
       return state.releaseQueued ? release(cooking, input, host, nextAt) : cook(cooking, input, host);
     }
-    case "cooking": return cook(state, input, host);
-    case "releasing": return input.now < state.throwAt ? state : emit(state, input, host, false);
+    case "cooking":
+      return cook(state, input, host);
+    case "releasing":
+      return input.now < state.throwAt ? state : emit(state, input, host, false);
     case "recovering": {
       const requireRelease = state.requireRelease && input.held && !input.released;
       if (input.now < state.readyAt) return { ...state, requireRelease };

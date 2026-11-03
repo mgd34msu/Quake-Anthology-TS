@@ -24,7 +24,10 @@ export interface SystemVImportCoverage {
   readonly support: "implemented" | "unsupported-function" | "unsupported-data";
   readonly reached: number;
 }
-export interface SystemVInitializeOptions { readonly context: GuestCallContext; readonly instructionBudget: number; }
+export interface SystemVInitializeOptions {
+  readonly context: GuestCallContext;
+  readonly instructionBudget: number;
+}
 export type SystemVImplementation = (context: GuestCallContext, args: readonly GuestCallValue[]) => GuestCallResult;
 export interface SystemVServiceHost {
   readonly memory: MappedGuestMemory;
@@ -36,20 +39,39 @@ export interface SystemVServiceHost {
   readonly threadPointer: GuestAddress;
   readonly errnoAddress: GuestAddress;
   errno: number;
-  service(library: string, name: string, versions: readonly (string | null)[], parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: SystemVImplementation): void;
+  service(
+    library: string,
+    name: string,
+    versions: readonly (string | null)[],
+    parameters: readonly GuestStorage[],
+    result: GuestStorage | "void",
+    invoke: SystemVImplementation,
+  ): void;
   data(library: string, name: string, version: string | null, address: GuestAddress, byteLength: number): void;
   resolveAddress(library: string, name: string, version: string | null): GuestAddress | null;
   unavailable(library: string, name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", detail: string): GuestAddress;
   allocate(size: number): GuestAddress;
   free(address: GuestAddress | null): void;
   allocationSize(address: GuestAddress): number | null;
-  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[]): GuestCallResult;
+  invoke(
+    context: GuestCallContext,
+    target: GuestAddress,
+    parameters: readonly GuestStorage[],
+    result: GuestStorage | "void",
+    args: readonly GuestCallValue[],
+  ): GuestCallResult;
   registerDestructor(target: GuestAddress, argument: GuestAddress | null, dso: GuestAddress | null): void;
   finalizeDestructors(context: GuestCallContext, dso: GuestAddress | null): void;
   tlsAddress(moduleId: bigint, offset: bigint): GuestAddress;
 }
 export class UnsupportedSystemVService extends Error {
-  constructor(readonly library: string, readonly symbol: string, readonly version: string | null, readonly context: GuestCallContext, readonly detail: string) {
+  constructor(
+    readonly library: string,
+    readonly symbol: string,
+    readonly version: string | null,
+    readonly context: GuestCallContext,
+    readonly detail: string,
+  ) {
     super(`Unsupported System V guest service ${library}:${symbol}${version === null ? "" : `@${version}`}: ${detail}`);
     this.name = "UnsupportedSystemVService";
   }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { frontendSeatSettings } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides } from "./frontend-preferences.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
@@ -11,7 +12,10 @@ import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 export class StartupInputProfile {
   private baseline = "";
   private gamepadBaseline = "";
-  private constructor(private readonly settings: ConfigStore, readonly input: SeatInput) {}
+  private constructor(
+    private readonly settings: ConfigStore,
+    readonly input: SeatInput,
+  ) {}
 
   static retained(settings: ConfigStore, input: SeatInput): StartupInputProfile {
     const profile = new StartupInputProfile(settings, input);
@@ -32,18 +36,29 @@ export class StartupInputProfile {
   }
 
   async save(values: FrontendPreferenceOverrides = {}, history?: readonly string[]): Promise<void> {
-    const bindings = this.input.bindings.map(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis"
-      ? { ...binding, input: { ...binding.input, device: 0 } } : binding);
+    const bindings = this.input.bindings.map(binding =>
+      binding.input.kind === "controller-button" || binding.input.kind === "controller-axis" ? { ...binding, input: { ...binding.input, device: 0 } } : binding,
+    );
     const current = JSON.stringify(this.input.bindings);
     const bindingsChanged = current !== this.baseline;
     const gamepadCurrent = JSON.stringify(this.input.gamepad.tuning);
     const gamepadChanged = gamepadCurrent !== this.gamepadBaseline;
     if (!bindingsChanged && !gamepadChanged && Object.keys(values).length === 0 && history === undefined) return;
     const saved = await this.settings.loadSeat("input/seat-1.json");
-    const baseline: SeatSettings = saved ?? { version: 1, gamepad: structuredClone(this.input.gamepad.tuning),
-      mouse: { ...defaultMouseTuning }, history: [], rumble: true, controller: { kind: "automatic" }, bindings };
-    const preferences = frontendSeatSettings(values, { ...baseline,
-      ...(bindingsChanged ? { bindings } : {}), ...(gamepadChanged ? { gamepad: structuredClone(this.input.gamepad.tuning) } : {}) });
+    const baseline: SeatSettings = saved ?? {
+      version: 1,
+      gamepad: structuredClone(this.input.gamepad.tuning),
+      mouse: { ...defaultMouseTuning },
+      history: [],
+      rumble: true,
+      controller: { kind: "automatic" },
+      bindings,
+    };
+    const preferences = frontendSeatSettings(values, {
+      ...baseline,
+      ...(bindingsChanged ? { bindings } : {}),
+      ...(gamepadChanged ? { gamepad: structuredClone(this.input.gamepad.tuning) } : {}),
+    });
     const selected = history === undefined ? preferences : { ...preferences, history: [...history] };
     if (bindingsChanged || gamepadChanged || JSON.stringify(selected) !== JSON.stringify(baseline)) await this.settings.saveSeat("input/seat-1.json", selected);
     this.baseline = current;

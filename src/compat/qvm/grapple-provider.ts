@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { QvmCheckpoint } from "../../contracts/execution.ts";
@@ -40,15 +41,33 @@ export class QvmGrappleProvider {
   readonly profile: QvmGrappleProfile;
   private readonly owners = new Set<ActorId>();
   private readonly declaration: string;
-  constructor(readonly game: QvmGame, artifact: QvmModuleOptions["artifact"], profile: QvmGrappleProfile, private readonly bridge: QvmGrappleBridge) {
+  constructor(
+    readonly game: QvmGame,
+    artifact: QvmModuleOptions["artifact"],
+    profile: QvmGrappleProfile,
+    private readonly bridge: QvmGrappleBridge,
+  ) {
     this.profile = readQvmGrappleProfile(qvmGrappleProfileDeclaration(profile), artifact);
     this.declaration = JSON.stringify(qvmGrappleProfileDeclaration(this.profile));
-    const actual = game.module.profile.module, expected = this.profile.module;
-    if (actual.id !== expected.id || actual.digest !== expected.digest || actual.artifactPath !== expected.artifactPath || actual.revision !== expected.revision
-      || game.module.abiProfile !== this.profile.abiProfile) throw new Error("Grapple module differs from its declared artifact");
+    const actual = game.module.profile.module,
+      expected = this.profile.module;
+    if (
+      actual.id !== expected.id ||
+      actual.digest !== expected.digest ||
+      actual.artifactPath !== expected.artifactPath ||
+      actual.revision !== expected.revision ||
+      game.module.abiProfile !== this.profile.abiProfile
+    )
+      throw new Error("Grapple module differs from its declared artifact");
     this.validateLayout();
-    const scratch = bridge.scratch, sourceEnd = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
-    if (!Number.isSafeInteger(scratch.word) || scratch.word % 4 !== 0 || scratch.word < sourceEnd || scratch.byteLength < Math.max(16, profile.movement.byteLength))
+    const scratch = bridge.scratch,
+      sourceEnd = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
+    if (
+      !Number.isSafeInteger(scratch.word) ||
+      scratch.word % 4 !== 0 ||
+      scratch.word < sourceEnd ||
+      scratch.byteLength < Math.max(16, profile.movement.byteLength)
+    )
       throw new Error("Grapple scratch must be a reserved span beyond declared source data");
     game.module.memory.view(scratch.word, scratch.byteLength);
   }
@@ -56,15 +75,21 @@ export class QvmGrappleProvider {
     if (this.game.data.entityStrideBytes !== this.profile.entityStride || this.game.data.clientStrideBytes !== this.profile.clientStride)
       throw new Error("Grapple profile differs from located entity or client records");
   }
-  private word(pointer: number, offset = 0): number { return this.game.module.memory.view(pointer, offset + 4).getInt32(offset, true); }
-  private write(pointer: number, value: number): void { this.game.module.memory.view(pointer, 4).setInt32(0, value, true); }
+  private word(pointer: number, offset = 0): number {
+    return this.game.module.memory.view(pointer, offset + 4).getInt32(offset, true);
+  }
+  private write(pointer: number, value: number): void {
+    this.game.module.memory.view(pointer, 4).setInt32(0, value, true);
+  }
   private vector(pointer: number): Vec3 {
     const view = this.game.module.memory.view(pointer, 12);
     return { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) };
   }
   private writeVector(pointer: number, value: Vec3): void {
     const view = this.game.module.memory.view(pointer, 12);
-    view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);
+    view.setFloat32(0, value.x, true);
+    view.setFloat32(4, value.y, true);
+    view.setFloat32(8, value.z, true);
   }
   private owner(actor: ActorId): { readonly entity: number; readonly client: number } {
     const entity = this.bridge.entity(actor);
@@ -76,7 +101,8 @@ export class QvmGrappleProvider {
     return { entity, client };
   }
   private hook(owner: ActorId): number | null {
-    const player = this.owner(owner), hook = this.word(player.client, this.profile.fields.hook);
+    const player = this.owner(owner),
+      hook = this.word(player.client, this.profile.fields.hook);
     if (hook === 0) return null;
     this.game.data.numberFromPointer(hook);
     if (this.word(hook, this.profile.fields.inuse) === 0 || this.word(hook, this.profile.fields.parent) !== player.entity)
@@ -86,19 +112,35 @@ export class QvmGrappleProvider {
   private projection(actor: ActorId): QvmGrappleProjection | null {
     const hook = this.hook(actor);
     if (hook === null) return null;
-    const player = this.owner(actor), entity = this.game.data.entityFromPointer(hook);
-    return { hook, origin: entity.r.currentOrigin, velocity: entity.s.pos.delta,
-      target: this.bridge.actor(this.word(hook, this.profile.fields.target)), mover: this.profile.fields.mover === null ? null : this.bridge.actor(this.word(hook, this.profile.fields.mover)),
-      pulling: (this.word(player.client, 12) & this.profile.pullingFlag) !== 0, point: this.vector(player.client + 92), ownerVelocity: this.vector(player.client + 32) };
+    const player = this.owner(actor),
+      entity = this.game.data.entityFromPointer(hook);
+    return {
+      hook,
+      origin: entity.r.currentOrigin,
+      velocity: entity.s.pos.delta,
+      target: this.bridge.actor(this.word(hook, this.profile.fields.target)),
+      mover: this.profile.fields.mover === null ? null : this.bridge.actor(this.word(hook, this.profile.fields.mover)),
+      pulling: (this.word(player.client, 12) & this.profile.pullingFlag) !== 0,
+      point: this.vector(player.client + 92),
+      ownerVelocity: this.vector(player.client + 32),
+    };
   }
   private publish(actor: ActorId): void {
     this.bridge.publish(actor, this.projection(actor));
     this.bridge.velocity(actor, this.vector(this.owner(actor).client + 32));
   }
   beginFrame(timeMilliseconds: number, frame: number): void {
-    if (!Number.isInteger(timeMilliseconds) || timeMilliseconds < this.word(this.profile.globals.time) || timeMilliseconds > 0x7fffffff
-      || !Number.isInteger(frame) || frame < this.word(this.profile.globals.frame) || frame > 0x7fffffff) throw new Error("Invalid grapple source frame");
-    this.write(this.profile.globals.time, timeMilliseconds); this.write(this.profile.globals.frame, frame);
+    if (
+      !Number.isInteger(timeMilliseconds) ||
+      timeMilliseconds < this.word(this.profile.globals.time) ||
+      timeMilliseconds > 0x7fffffff ||
+      !Number.isInteger(frame) ||
+      frame < this.word(this.profile.globals.frame) ||
+      frame > 0x7fffffff
+    )
+      throw new Error("Invalid grapple source frame");
+    this.write(this.profile.globals.time, timeMilliseconds);
+    this.write(this.profile.globals.frame, frame);
     this.bridge.synchronize();
   }
   fire(actor: ActorId): void {
@@ -118,7 +160,10 @@ export class QvmGrappleProvider {
   step(): void {
     this.bridge.synchronize();
     for (const actor of [...this.owners]) {
-      if (this.word(this.owner(actor).entity, this.profile.fields.health) <= 0) { this.release(actor, true); continue; }
+      if (this.word(this.owner(actor).entity, this.profile.fields.health) <= 0) {
+        this.release(actor, true);
+        continue;
+      }
       const hook = this.hook(actor);
       if (hook !== null) {
         if (this.game.data.entityFromPointer(hook).s.eType === 3) this.game.module.call([hook], this.profile.callbacks.missile);
@@ -135,19 +180,31 @@ export class QvmGrappleProvider {
     if (!this.owners.has(actor)) return null;
     const projection = this.projection(actor);
     if (projection === null || !projection.pulling) return null;
-    const globals = this.profile.globals, memory = this.game.module.memory, scratch = this.bridge.scratch.word;
-    const movement = this.word(globals.movement), forwardBytes = memory.span(globals.forward, 12), savedForward = forwardBytes.slice(), groundPlane = this.word(globals.groundPlane);
-    const scratchBytes = memory.span(scratch, this.profile.movement.byteLength), savedScratch = scratchBytes.slice(), player = this.owner(actor);
-    const forwardOffset = forwardBytes.byteOffset - memory.bytes.byteOffset, scratchOffset = scratchBytes.byteOffset - memory.bytes.byteOffset;
+    const globals = this.profile.globals,
+      memory = this.game.module.memory,
+      scratch = this.bridge.scratch.word;
+    const movement = this.word(globals.movement),
+      forwardBytes = memory.span(globals.forward, 12),
+      savedForward = forwardBytes.slice(),
+      groundPlane = this.word(globals.groundPlane);
+    const scratchBytes = memory.span(scratch, this.profile.movement.byteLength),
+      savedScratch = scratchBytes.slice(),
+      player = this.owner(actor);
+    const forwardOffset = forwardBytes.byteOffset - memory.bytes.byteOffset,
+      scratchOffset = scratchBytes.byteOffset - memory.bytes.byteOffset;
     try {
       memory.fillBytes(scratchOffset, scratchBytes.length, 0);
       for (const word of this.profile.movement.words) this.write(scratch + word.offset, word.value);
-      this.write(scratch, player.client); this.write(globals.movement, scratch); this.writeVector(globals.forward, forward);
+      this.write(scratch, player.client);
+      this.write(globals.movement, scratch);
+      this.writeVector(globals.forward, forward);
       this.game.module.call([], this.profile.callbacks.pull);
       this.publish(actor);
       return this.vector(player.client + 32);
     } finally {
-      this.write(globals.movement, movement); memory.writeBytes(forwardOffset, savedForward); this.write(globals.groundPlane, groundPlane);
+      this.write(globals.movement, movement);
+      memory.writeBytes(forwardOffset, savedForward);
+      this.write(globals.groundPlane, groundPlane);
       memory.writeBytes(scratchOffset, savedScratch);
     }
   }
@@ -155,12 +212,18 @@ export class QvmGrappleProvider {
     if (this.profile.callbacks.moveMoverHooks === null) return;
     const mover = this.bridge.entity(actor);
     if (mover === null) throw new Error("Grapple mover has no source entity");
-    const memory = this.game.module.memory, scratch = this.bridge.scratch.word, bytes = memory.span(scratch, 12), saved = bytes.slice();
+    const memory = this.game.module.memory,
+      scratch = this.bridge.scratch.word,
+      bytes = memory.span(scratch, 12),
+      saved = bytes.slice();
     const offset = bytes.byteOffset - memory.bytes.byteOffset;
     try {
-      this.writeVector(scratch, translation); this.game.module.call([mover, scratch], this.profile.callbacks.moveMoverHooks);
+      this.writeVector(scratch, translation);
+      this.game.module.call([mover, scratch], this.profile.callbacks.moveMoverHooks);
       for (const owner of this.owners) this.publish(owner);
-    } finally { memory.writeBytes(offset, saved); }
+    } finally {
+      memory.writeBytes(offset, saved);
+    }
   }
   /** Called before the shared actor and its mirrored source record are released or teleported. */
   actorReleased(actor: ActorId): void {
@@ -170,17 +233,27 @@ export class QvmGrappleProvider {
     }
   }
   capture(): QvmGrappleCheckpoint {
-    return { version: 1, profile: this.declaration, module: this.game.module.checkpoint(),
-      owners: [...this.owners].map(actor => ({ slot: actor.slot, generation: actor.generation })) };
+    return {
+      version: 1,
+      profile: this.declaration,
+      module: this.game.module.checkpoint(),
+      owners: [...this.owners].map(actor => ({ slot: actor.slot, generation: actor.generation })),
+    };
   }
   restore(checkpoint: QvmGrappleCheckpoint): void {
     if (checkpoint.version !== 1 || checkpoint.profile !== this.declaration) throw new Error("Saved grapple profile differs from its source declaration");
     const owners = checkpoint.owners.map(actor => this.bridge.restoreActor(actor));
     if (new Set(owners).size !== owners.length) throw new Error("Saved grapple has duplicate owners");
-    this.game.module.restore(checkpoint.module); this.validateLayout();
+    this.game.module.restore(checkpoint.module);
+    this.validateLayout();
     for (const owner of this.owners) this.bridge.publish(owner, null);
     this.owners.clear();
-    for (const owner of owners) { this.owners.add(owner); this.publish(owner); }
+    for (const owner of owners) {
+      this.owners.add(owner);
+      this.publish(owner);
+    }
   }
-  close(): void { for (const owner of [...this.owners]) this.release(owner, true); }
+  close(): void {
+    for (const owner of [...this.owners]) this.release(owner, true);
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -13,14 +14,36 @@ for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelea
     const fallback = new CvarRegistry({ dialect, context });
     const shared = new CvarRegistry({ dialect: "q3", context });
     shared.register("gain", "1", CvarFlag.Archive);
-    shared.registerAlias({ name: "foreign_gain", target: "gain", conversion: { kind: "identity" }, documentation: {
-      summary: "Shared effects gain.", usage: "foreign_gain <value>", examples: ["foreign_gain 0.5"] } });
+    shared.registerAlias({
+      name: "foreign_gain",
+      target: "gain",
+      conversion: { kind: "identity" },
+      documentation: {
+        summary: "Shared effects gain.",
+        usage: "foreign_gain <value>",
+        examples: ["foreign_gain 0.5"],
+      },
+    });
     shared.register("locked", "original", CvarFlag.ReadOnly);
     shared.register("sequence", "set foreign_gain 0.25; wait; set foreign_gain 0.5");
-    const effects: string[] = [], output: string[] = [];
-    shared.bindValue("gain", { validate: () => null, changed: value => { effects.push(value); } });
+    const effects: string[] = [],
+      output: string[] = [];
+    shared.bindValue("gain", {
+      validate: () => null,
+      changed: value => {
+        effects.push(value);
+      },
+    });
     const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => dialect, server: () => null, seat: () => fallback, shared: () => shared });
-    const commands = new CommandBuffer({ dialect, context, cvars: fallback, cvarRouting: routing, print: text => { output.push(text); } });
+    const commands = new CommandBuffer({
+      dialect,
+      context,
+      cvars: fallback,
+      cvarRouting: routing,
+      print: text => {
+        output.push(text);
+      },
+    });
     commands.append("set foreign_gain 0.75\nset locked changed\nvstr sequence\nset foreign_gain 0.875\ncmdlist\ncvarlist\n");
     commands.execute();
     expect(shared.variableString("gain")).toBe("0.25");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 /** Base Q2 supply quantities feed the selected Q3 arsenal's capacities. */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Shared source operations used by Hipnotic/Rogue monster callbacks. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -7,13 +8,24 @@ import { POINT, length, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { throwGib, throwHead } from "../../base/projectiles.ts";
 import type { MissionMonster } from "./runtime.ts";
 
-export function number(monster: MissionMonster, key: string, value: number): undefined { monster.entity.fields.set(key, String(Math.fround(value))); return undefined; }
+export function number(monster: MissionMonster, key: string, value: number): undefined {
+  monster.entity.fields.set(key, String(Math.fround(value)));
+  return undefined;
+}
 export function dropToFloor(monster: MissionMonster): boolean {
-  const { game, entity } = monster, body = game.body(entity);
-  const trace = game.host.trace({ start: body.origin, end: vadd(body.origin, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: false });
+  const { game, entity } = monster,
+    body = game.body(entity);
+  const trace = game.host.trace({
+    start: body.origin,
+    end: vadd(body.origin, { x: 0, y: 0, z: -256 }),
+    bounds: body.bounds,
+    ignore: entity.actor.id,
+    monsters: false,
+  });
   if (trace.fraction === 1 || trace.allSolid) return false;
   entity.movementFlags |= 512;
-  game.setBody(entity, { origin: trace.end, ground: trace.actor }); game.link(entity);
+  game.setBody(entity, { origin: trace.end, ground: trace.actor });
+  game.link(entity);
   return true;
 }
 export function gib(monster: MissionMonster, head: string, gibs: readonly string[], sound = "player/udeath.wav"): undefined {
@@ -26,14 +38,23 @@ export function gib(monster: MissionMonster, head: string, gibs: readonly string
 export function eye(game: Q1EntityServices, actor: ActorId): Vec3 | null {
   const body = game.host.bodies.read(actor);
   const entity = game.entity(actor);
-  return body === null ? null : vadd(body.origin, entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: game.isPlayer(actor) ? 22 : (entity?.movementFlags ?? 0) & 2 ? 10 : 25 });
+  return body === null
+    ? null
+    : vadd(
+        body.origin,
+        entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: game.isPlayer(actor) ? 22 : (entity?.movementFlags ?? 0) & 2 ? 10 : 25 },
+      );
 }
 export function radiusActors(game: Q1EntityServices, origin: Vec3, radius: number): readonly ActorId[] {
-  return game.host.actors.observations().flatMap(actor => {
-    const entity = game.entity(actor.id), body = game.host.bodies.read(actor.id);
-    if (body === null || entity?.solid === "none") return [];
-    return length(vsub(origin, vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)))) <= radius ? [actor.id] : [];
-  }).reverse();
+  return game.host.actors
+    .observations()
+    .flatMap(actor => {
+      const entity = game.entity(actor.id),
+        body = game.host.bodies.read(actor.id);
+      if (body === null || entity?.solid === "none") return [];
+      return length(vsub(origin, vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)))) <= radius ? [actor.id] : [];
+    })
+    .reverse();
 }
 export function eelZap(monster: MissionMonster): undefined {
   const { game, entity } = monster;
@@ -47,10 +68,25 @@ export function eelZap(monster: MissionMonster): undefined {
   }
   return undefined;
 }
-export function missile(game: Q1EntityServices, owner: ActorId, classname: string, model: string, origin: Vec3, velocity: Vec3, touch: string, seconds = 5): Q1Actor {
-  const entity = game.create(classname); entity.owner = owner; entity.model = model; entity.movement = "flymissile"; entity.solid = "bbox";
-  game.setBody(entity, { origin, velocity, bounds: POINT, ground: null }); entity.touch = game.named.touch(entity, touch);
-  game.schedule(entity, seconds, game.named.action(entity, "SUB_Remove")); game.link(entity);
+export function missile(
+  game: Q1EntityServices,
+  owner: ActorId,
+  classname: string,
+  model: string,
+  origin: Vec3,
+  velocity: Vec3,
+  touch: string,
+  seconds = 5,
+): Q1Actor {
+  const entity = game.create(classname);
+  entity.owner = owner;
+  entity.model = model;
+  entity.movement = "flymissile";
+  entity.solid = "bbox";
+  game.setBody(entity, { origin, velocity, bounds: POINT, ground: null });
+  entity.touch = game.named.touch(entity, touch);
+  game.schedule(entity, seconds, game.named.action(entity, "SUB_Remove"));
+  game.link(entity);
   return entity;
 }
 export const humanBounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };

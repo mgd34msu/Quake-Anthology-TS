@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
 import type { SourceObjectiveDeclaration, SourceMatchField } from "./source-match.ts";
 import type { NativeModProtectionRegion } from "./native-mod-region.ts";
@@ -36,19 +37,30 @@ export interface NativeModSourceCall {
 }
 export type NativeModCallback = ModCallbackBinding & NativeModSourceCall;
 export interface NativeModPickup extends ModPickupRule<NativeModSourceCall> {
-  readonly context: readonly { readonly record: string; readonly offset: number;
-    readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
-      | Extract<NativeModValue, { readonly kind: "time" | "address" }> }[];
+  readonly context: readonly {
+    readonly record: string;
+    readonly offset: number;
+    readonly value:
+      | { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
+      | Extract<NativeModValue, { readonly kind: "time" | "address" }>;
+  }[];
 }
-export interface NativeModAdmissionCall extends NativeModSourceCall { readonly accepts: "always" | "nonzero"; }
+export interface NativeModAdmissionCall extends NativeModSourceCall {
+  readonly accepts: "always" | "nonzero";
+}
 export interface NativeModClientInputField {
   readonly record: string;
   readonly offset: number;
-  readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
-    | Extract<NativeModValue, { readonly kind: "time" }>;
+  readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue } | Extract<NativeModValue, { readonly kind: "time" }>;
 }
-export type NativeModInputOutput = { readonly kind: "field"; readonly record: string; readonly offset: number }
-  | { readonly kind: "handler"; readonly entry: NativeModEntry; readonly arguments: readonly NativeModValue[]; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
+export type NativeModInputOutput =
+  | { readonly kind: "field"; readonly record: string; readonly offset: number }
+  | {
+      readonly kind: "handler";
+      readonly entry: NativeModEntry;
+      readonly arguments: readonly NativeModValue[];
+      readonly inputs: readonly Exclude<ModClientInput, "view-angles">[];
+    };
 /** Private client arrays belong to the pinned module, separately from canonical client identities. */
 export interface NativeModClients {
   readonly outputs?: readonly ModClientOutputDeclaration<NativeModArmorField, { readonly record: string; readonly offset: number }>[];
@@ -67,7 +79,8 @@ export interface NativeModClients {
   readonly inputFields?: readonly NativeModClientInputField[];
   readonly pose?: { readonly viewHeight: NativeModArmorField; readonly crouched: { readonly field: NativeModArmorField; readonly mask: number } };
 }
-export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" | "team" | "score" }>
+export type NativeModActorField =
+  | Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" | "team" | "score" }>
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }
   | ({ readonly offset: number; readonly encoding: NativeModScalar } & SourceMatchField)
   | { readonly offset: number; readonly binding: "health"; readonly encoding: NativeModScalar }
@@ -88,7 +101,12 @@ export interface NativeModSourceActors {
   readonly release: NativeModEntry;
   readonly update: { readonly entry: NativeModEntry; readonly returns: NativeModScalar | "void" };
   readonly frameSeconds: number;
-  readonly clock: readonly { readonly address: NativeModAddress; readonly input: "time" | "frame"; readonly encoding: NativeModScalar; readonly units: "seconds" | "milliseconds" }[];
+  readonly clock: readonly {
+    readonly address: NativeModAddress;
+    readonly input: "time" | "frame";
+    readonly encoding: NativeModScalar;
+    readonly units: "seconds" | "milliseconds";
+  }[];
   readonly fields: {
     readonly velocity: number;
     readonly ground: number;
@@ -104,8 +122,13 @@ export interface NativeModSourceActors {
   };
   readonly combat?: NativeModCombat;
 }
-export interface NativeModScalarField { readonly offset: number; readonly encoding: NativeModScalar; }
-export interface NativeModArmorField extends NativeModScalarField { readonly record: string; }
+export interface NativeModScalarField {
+  readonly offset: number;
+  readonly encoding: NativeModScalar;
+}
+export interface NativeModArmorField extends NativeModScalarField {
+  readonly record: string;
+}
 export type NativeModArmorSelection =
   | { readonly kind: "positive"; readonly field: NativeModArmorField }
   | { readonly kind: "enum"; readonly field: NativeModArmorField; readonly value: number; readonly none: number };
@@ -121,19 +144,30 @@ export interface NativeModRegularArmorItem {
   readonly selection: NativeModArmorSelection;
   readonly points: NativeModArmorField;
 }
-export type NativeModArmor = { readonly kind: "none" } | {
-  readonly kind: "q2";
-  readonly regular: readonly { readonly item: ItemId; readonly selection: NativeModArmorSelection; readonly points: NativeModArmorField;
-    readonly normalProtection: number; readonly energyProtection: number }[];
-  readonly power: readonly NativeModPowerArmorItem[];
-} | {
-  readonly kind: "source";
-  readonly regular: readonly NativeModRegularArmorItem[];
-  readonly power: readonly NativeModPowerArmorItem[];
-};
+export type NativeModArmor =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "q2";
+      readonly regular: readonly {
+        readonly item: ItemId;
+        readonly selection: NativeModArmorSelection;
+        readonly points: NativeModArmorField;
+        readonly normalProtection: number;
+        readonly energyProtection: number;
+      }[];
+      readonly power: readonly NativeModPowerArmorItem[];
+    }
+  | {
+      readonly kind: "source";
+      readonly regular: readonly NativeModRegularArmorItem[];
+      readonly power: readonly NativeModPowerArmorItem[];
+    };
 interface NativeModProtectionClaim {
   readonly id: string;
-  readonly admission?: { readonly kind: "claim" } | { readonly kind: "replace-current-primary" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
+  readonly admission?:
+    | { readonly kind: "claim" }
+    | { readonly kind: "replace-current-primary" }
+    | { readonly kind: "replace-primary"; readonly owner: ProviderId };
 }
 type NativeModProtectionCall = { readonly abi: "source-call"; readonly call: NativeModSourceCall } | NativeModProtectionRegion;
 interface NativeModQ2ArmorCall {
@@ -141,12 +175,19 @@ interface NativeModQ2ArmorCall {
   readonly flags: "q2-classic" | "q2-rerelease";
   readonly globals?: NativeModSourceCall["globals"];
 }
-export type NativeModProtectionDefinition = NativeModProtectionClaim & (
-  | { readonly channel: "powered"; readonly storage: readonly NativeModPowerArmorItem[];
-      readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-power-armor" }) }
-  | { readonly channel: "regular"; readonly storage: readonly NativeModRegularArmorItem[];
-      readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-armor"; readonly sparks: number }) }
-);
+export type NativeModProtectionDefinition = NativeModProtectionClaim &
+  (
+    | {
+        readonly channel: "powered";
+        readonly storage: readonly NativeModPowerArmorItem[];
+        readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-power-armor" });
+      }
+    | {
+        readonly channel: "regular";
+        readonly storage: readonly NativeModRegularArmorItem[];
+        readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-armor"; readonly sparks: number });
+      }
+  );
 export interface NativeModDeferredDamage {
   readonly process: NativeModEntry;
   readonly attacker: number;
@@ -169,14 +210,21 @@ export interface NativeModCombat {
   readonly deferred?: NativeModDeferredDamage;
 }
 export interface NativeModDeclaration {
-  readonly objectives?: readonly SourceObjectiveDeclaration<{ readonly address: NativeModAddress; readonly encoding: NativeModScalar }, NativeModAddress, NativeModSourceCall>[];
+  readonly objectives?: readonly SourceObjectiveDeclaration<
+    { readonly address: NativeModAddress; readonly encoding: NativeModScalar },
+    NativeModAddress,
+    NativeModSourceCall
+  >[];
   readonly clientPresentation?: NativeModClientPresentation;
   readonly version: 1;
   readonly runtime: "native";
   readonly program: { readonly path: string; readonly digest: ContentDigest };
   readonly target:
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-i386" }> }
-    | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
+    | {
+        readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>;
+        readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }>;
+      };
   readonly sourceActors?: NativeModSourceActors;
   readonly protection?: readonly NativeModProtectionDefinition[];
   readonly pickups?: readonly NativeModPickup[];

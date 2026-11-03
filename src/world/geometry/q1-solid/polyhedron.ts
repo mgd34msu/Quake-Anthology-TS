@@ -1,26 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* BSP cell clipping follows id Software's winding clipping and convex brush
  * representation. Copyright (C) 1996-2005 Id Software. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 
-export interface CellFace { readonly plane: Plane; readonly vertices: readonly Vec3[]; }
-export interface ConvexCell { readonly faces: readonly CellFace[]; }
+export interface CellFace {
+  readonly plane: Plane;
+  readonly vertices: readonly Vec3[];
+}
+export interface ConvexCell {
+  readonly faces: readonly CellFace[];
+}
 interface CellBounds {
-  readonly minX: number; readonly minY: number; readonly minZ: number;
-  readonly maxX: number; readonly maxY: number; readonly maxZ: number;
+  readonly minX: number;
+  readonly minY: number;
+  readonly minZ: number;
+  readonly maxX: number;
+  readonly maxY: number;
+  readonly maxZ: number;
 }
 const cellBounds = new WeakMap<ConvexCell, CellBounds | null>();
 function boundsForCell(cell: ConvexCell): CellBounds | null {
   const cached = cellBounds.get(cell);
   if (cached !== undefined) return cached;
-  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const face of cell.faces) for (const point of face.vertices) {
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
-      cellBounds.set(cell, null);
-      return null;
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+  for (const face of cell.faces)
+    for (const point of face.vertices) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+        cellBounds.set(cell, null);
+        return null;
+      }
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      minZ = Math.min(minZ, point.z);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+      maxZ = Math.max(maxZ, point.z);
     }
-    minX = Math.min(minX, point.x); minY = Math.min(minY, point.y); minZ = Math.min(minZ, point.z);
-    maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y); maxZ = Math.max(maxZ, point.z);
-  }
   const bounds = minX === Infinity ? null : { minX, minY, minZ, maxX, maxY, maxZ };
   cellBounds.set(cell, bounds);
   return bounds;
@@ -34,45 +54,66 @@ export const length = (a: Vec3): number => Math.sqrt(dot(a, a));
 export const unit = (a: Vec3): Vec3 => scale(a, 1 / length(a));
 export const negatePlane = (p: Plane): Plane => ({ normal: scale(p.normal, -1), distance: -p.distance });
 export const lerp = (a: Vec3, b: Vec3, t: number): Vec3 => add(a, scale(sub(b, a), t));
-export const AXES: readonly [Vec3, Vec3, Vec3] = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
+export const AXES: readonly [Vec3, Vec3, Vec3] = [
+  { x: 1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 0, y: 0, z: 1 },
+];
 
 export function boxCell(bounds: Bounds): ConvexCell {
   const { min: a, max: b } = bounds;
-  const p000 = { x: a.x, y: a.y, z: a.z }, p001 = { x: a.x, y: a.y, z: b.z };
-  const p010 = { x: a.x, y: b.y, z: a.z }, p011 = { x: a.x, y: b.y, z: b.z };
-  const p100 = { x: b.x, y: a.y, z: a.z }, p101 = { x: b.x, y: a.y, z: b.z };
-  const p110 = { x: b.x, y: b.y, z: a.z }, p111 = { x: b.x, y: b.y, z: b.z };
-  const cell = { faces: [
-    { plane: { normal: AXES[0], distance: b.x }, vertices: [p100, p110, p111, p101] },
-    { plane: { normal: scale(AXES[0], -1), distance: -a.x }, vertices: [p000, p001, p011, p010] },
-    { plane: { normal: AXES[1], distance: b.y }, vertices: [p010, p011, p111, p110] },
-    { plane: { normal: scale(AXES[1], -1), distance: -a.y }, vertices: [p000, p100, p101, p001] },
-    { plane: { normal: AXES[2], distance: b.z }, vertices: [p001, p101, p111, p011] },
-    { plane: { normal: scale(AXES[2], -1), distance: -a.z }, vertices: [p000, p010, p110, p100] },
-  ] };
-  cellBounds.set(cell, { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), minZ: Math.min(a.z, b.z),
-    maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y), maxZ: Math.max(a.z, b.z) });
+  const p000 = { x: a.x, y: a.y, z: a.z },
+    p001 = { x: a.x, y: a.y, z: b.z };
+  const p010 = { x: a.x, y: b.y, z: a.z },
+    p011 = { x: a.x, y: b.y, z: b.z };
+  const p100 = { x: b.x, y: a.y, z: a.z },
+    p101 = { x: b.x, y: a.y, z: b.z };
+  const p110 = { x: b.x, y: b.y, z: a.z },
+    p111 = { x: b.x, y: b.y, z: b.z };
+  const cell = {
+    faces: [
+      { plane: { normal: AXES[0], distance: b.x }, vertices: [p100, p110, p111, p101] },
+      { plane: { normal: scale(AXES[0], -1), distance: -a.x }, vertices: [p000, p001, p011, p010] },
+      { plane: { normal: AXES[1], distance: b.y }, vertices: [p010, p011, p111, p110] },
+      { plane: { normal: scale(AXES[1], -1), distance: -a.y }, vertices: [p000, p100, p101, p001] },
+      { plane: { normal: AXES[2], distance: b.z }, vertices: [p001, p101, p111, p011] },
+      { plane: { normal: scale(AXES[2], -1), distance: -a.z }, vertices: [p000, p010, p110, p100] },
+    ],
+  };
+  cellBounds.set(cell, {
+    minX: Math.min(a.x, b.x),
+    minY: Math.min(a.y, b.y),
+    minZ: Math.min(a.z, b.z),
+    maxX: Math.max(a.x, b.x),
+    maxY: Math.max(a.y, b.y),
+    maxZ: Math.max(a.z, b.z),
+  });
   return cell;
 }
 
 /** Keep n.p <= d. The query envelope bounds otherwise unbounded BSP cells. */
 export function clipCell(cell: ConvexCell, plane: Plane): ConvexCell | null {
-  const faces: CellFace[] = [], cap: Vec3[] = [];
-  let outside = false, inside = false;
-  classify: for (const face of cell.faces) for (const point of face.vertices) {
-    const d = dot(point, plane.normal) - plane.distance;
-    if (d > 1e-8) outside = true;
-    if (d < -1e-8) inside = true;
-    if (outside && inside) break classify;
-  }
+  const faces: CellFace[] = [],
+    cap: Vec3[] = [];
+  let outside = false,
+    inside = false;
+  classify: for (const face of cell.faces)
+    for (const point of face.vertices) {
+      const d = dot(point, plane.normal) - plane.distance;
+      if (d > 1e-8) outside = true;
+      if (d < -1e-8) inside = true;
+      if (outside && inside) break classify;
+    }
   if (!outside) return cell;
   if (!inside) return null;
   for (const face of cell.faces) {
     const vertices: Vec3[] = [];
     for (let i = 0; i < face.vertices.length; i++) {
-      const a = face.vertices[i], b = face.vertices[(i + 1) % face.vertices.length];
+      const a = face.vertices[i],
+        b = face.vertices[(i + 1) % face.vertices.length];
       if (a === undefined || b === undefined) continue;
-      const da = dot(a, plane.normal) - plane.distance, db = dot(b, plane.normal) - plane.distance;
+      const da = dot(a, plane.normal) - plane.distance,
+        db = dot(b, plane.normal) - plane.distance;
       if (da <= 0) vertices.push(a);
       if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
         const point = lerp(a, b, da / (da - db));
@@ -89,7 +130,8 @@ function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | n
   if (cap.length >= 3) {
     const center = scale(cap.reduce(add, { x: 0, y: 0, z: 0 }), 1 / cap.length);
     const axis = Math.abs(plane.normal.z) < 0.9 ? AXES[2] : AXES[1];
-    const u = unit(cross(axis, plane.normal)), v = cross(plane.normal, u);
+    const u = unit(cross(axis, plane.normal)),
+      v = cross(plane.normal, u);
     const angled = cap.map(point => ({ point, angle: Math.atan2(dot(sub(point, center), v), dot(sub(point, center), u)) }));
     angled.sort((a, b) => a.angle - b.angle);
     faces.push({ plane, vertices: angled.map(entry => entry.point) });
@@ -99,7 +141,9 @@ function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | n
 
 function capContainsPoint(cap: readonly Vec3[], point: Vec3): boolean {
   for (const vertex of cap) {
-    const x = vertex.x - point.x, y = vertex.y - point.y, z = vertex.z - point.z;
+    const x = vertex.x - point.x,
+      y = vertex.y - point.y,
+      z = vertex.z - point.z;
     if (Math.sqrt(x * x + y * y + z * z) < 1e-7) return true;
   }
   return false;
@@ -111,8 +155,16 @@ export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: Con
   if (Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z) && Number.isFinite(plane.distance)) {
     const bounds = boundsForCell(cell);
     if (bounds !== null) {
-      const lower = (n.x < 0 ? bounds.maxX : bounds.minX) * n.x + (n.y < 0 ? bounds.maxY : bounds.minY) * n.y + (n.z < 0 ? bounds.maxZ : bounds.minZ) * n.z - plane.distance;
-      const upper = (n.x < 0 ? bounds.minX : bounds.maxX) * n.x + (n.y < 0 ? bounds.minY : bounds.maxY) * n.y + (n.z < 0 ? bounds.minZ : bounds.maxZ) * n.z - plane.distance;
+      const lower =
+        (n.x < 0 ? bounds.maxX : bounds.minX) * n.x +
+        (n.y < 0 ? bounds.maxY : bounds.minY) * n.y +
+        (n.z < 0 ? bounds.maxZ : bounds.minZ) * n.z -
+        plane.distance;
+      const upper =
+        (n.x < 0 ? bounds.minX : bounds.maxX) * n.x +
+        (n.y < 0 ? bounds.minY : bounds.maxY) * n.y +
+        (n.z < 0 ? bounds.minZ : bounds.maxZ) * n.z -
+        plane.distance;
       if (Number.isFinite(lower) && Number.isFinite(upper)) {
         if (upper < -1e-8) return { front: null, back: cell };
         if (lower > 1e-8) return { front: cell, back: null };
@@ -120,54 +172,95 @@ export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: Con
       }
     }
   }
-  let outside = false, inside = false;
-  classify: for (const face of cell.faces) for (const point of face.vertices) {
-    const distance = dot(point, plane.normal) - plane.distance;
-    if (!Number.isFinite(distance)) return { front: clipCell(cell, negatePlane(plane)), back: clipCell(cell, plane) };
-    if (distance > 1e-8) outside = true;
-    if (distance < -1e-8) inside = true;
-    if (outside && inside) break classify;
-  }
+  let outside = false,
+    inside = false;
+  classify: for (const face of cell.faces)
+    for (const point of face.vertices) {
+      const distance = dot(point, plane.normal) - plane.distance;
+      if (!Number.isFinite(distance)) return { front: clipCell(cell, negatePlane(plane)), back: clipCell(cell, plane) };
+      if (distance > 1e-8) outside = true;
+      if (distance < -1e-8) inside = true;
+      if (outside && inside) break classify;
+    }
   if (!outside || !inside) return { front: inside ? null : cell, back: outside ? null : cell };
   const opposite = negatePlane(plane);
-  const front: CellFace[] = [], back: CellFace[] = [], cap: Vec3[] = [];
+  const front: CellFace[] = [],
+    back: CellFace[] = [],
+    cap: Vec3[] = [];
   // Child bounds accumulate over the same vertex visits so boundsForCell
   // never needs its second pass; a NaN component poisons the product and
   // skips seeding, matching boundsForCell's null for non-finite points.
-  let fMinX = Infinity, fMinY = Infinity, fMinZ = Infinity, fMaxX = -Infinity, fMaxY = -Infinity, fMaxZ = -Infinity, fPoison = 1;
-  let bMinX = Infinity, bMinY = Infinity, bMinZ = Infinity, bMaxX = -Infinity, bMaxY = -Infinity, bMaxZ = -Infinity, bPoison = 1;
+  let fMinX = Infinity,
+    fMinY = Infinity,
+    fMinZ = Infinity,
+    fMaxX = -Infinity,
+    fMaxY = -Infinity,
+    fMaxZ = -Infinity,
+    fPoison = 1;
+  let bMinX = Infinity,
+    bMinY = Infinity,
+    bMinZ = Infinity,
+    bMaxX = -Infinity,
+    bMaxY = -Infinity,
+    bMaxZ = -Infinity,
+    bPoison = 1;
   for (const face of cell.faces) {
-    const frontVertices: Vec3[] = [], backVertices: Vec3[] = [];
+    const frontVertices: Vec3[] = [],
+      backVertices: Vec3[] = [];
     for (let i = 0; i < face.vertices.length; i++) {
-      const a = face.vertices[i], b = face.vertices[(i + 1) % face.vertices.length];
+      const a = face.vertices[i],
+        b = face.vertices[(i + 1) % face.vertices.length];
       if (a === undefined || b === undefined) continue;
-      const da = dot(a, plane.normal) - plane.distance, db = dot(b, plane.normal) - plane.distance;
+      const da = dot(a, plane.normal) - plane.distance,
+        db = dot(b, plane.normal) - plane.distance;
       if (!Number.isFinite(da) || !Number.isFinite(db)) return { front: clipCell(cell, opposite), back: clipCell(cell, plane) };
-      if (da >= 0) { frontVertices.push(a); fPoison *= a.x * a.y * a.z;
-        if (a.x < fMinX) fMinX = a.x; if (a.x > fMaxX) fMaxX = a.x;
-        if (a.y < fMinY) fMinY = a.y; if (a.y > fMaxY) fMaxY = a.y;
-        if (a.z < fMinZ) fMinZ = a.z; if (a.z > fMaxZ) fMaxZ = a.z; }
-      if (da <= 0) { backVertices.push(a); bPoison *= a.x * a.y * a.z;
-        if (a.x < bMinX) bMinX = a.x; if (a.x > bMaxX) bMaxX = a.x;
-        if (a.y < bMinY) bMinY = a.y; if (a.y > bMaxY) bMaxY = a.y;
-        if (a.z < bMinZ) bMinZ = a.z; if (a.z > bMaxZ) bMaxZ = a.z; }
+      if (da >= 0) {
+        frontVertices.push(a);
+        fPoison *= a.x * a.y * a.z;
+        if (a.x < fMinX) fMinX = a.x;
+        if (a.x > fMaxX) fMaxX = a.x;
+        if (a.y < fMinY) fMinY = a.y;
+        if (a.y > fMaxY) fMaxY = a.y;
+        if (a.z < fMinZ) fMinZ = a.z;
+        if (a.z > fMaxZ) fMaxZ = a.z;
+      }
+      if (da <= 0) {
+        backVertices.push(a);
+        bPoison *= a.x * a.y * a.z;
+        if (a.x < bMinX) bMinX = a.x;
+        if (a.x > bMaxX) bMaxX = a.x;
+        if (a.y < bMinY) bMinY = a.y;
+        if (a.y > bMaxY) bMaxY = a.y;
+        if (a.z < bMinZ) bMinZ = a.z;
+        if (a.z > bMaxZ) bMaxZ = a.z;
+      }
       if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
         const point = lerp(a, b, da / (da - db));
-        frontVertices.push(point); backVertices.push(point);
-        const product = point.x * point.y * point.z; fPoison *= product; bPoison *= product;
-        if (point.x < fMinX) fMinX = point.x; if (point.x > fMaxX) fMaxX = point.x;
-        if (point.y < fMinY) fMinY = point.y; if (point.y > fMaxY) fMaxY = point.y;
-        if (point.z < fMinZ) fMinZ = point.z; if (point.z > fMaxZ) fMaxZ = point.z;
-        if (point.x < bMinX) bMinX = point.x; if (point.x > bMaxX) bMaxX = point.x;
-        if (point.y < bMinY) bMinY = point.y; if (point.y > bMaxY) bMaxY = point.y;
-        if (point.z < bMinZ) bMinZ = point.z; if (point.z > bMaxZ) bMaxZ = point.z;
+        frontVertices.push(point);
+        backVertices.push(point);
+        const product = point.x * point.y * point.z;
+        fPoison *= product;
+        bPoison *= product;
+        if (point.x < fMinX) fMinX = point.x;
+        if (point.x > fMaxX) fMaxX = point.x;
+        if (point.y < fMinY) fMinY = point.y;
+        if (point.y > fMaxY) fMaxY = point.y;
+        if (point.z < fMinZ) fMinZ = point.z;
+        if (point.z > fMaxZ) fMaxZ = point.z;
+        if (point.x < bMinX) bMinX = point.x;
+        if (point.x > bMaxX) bMaxX = point.x;
+        if (point.y < bMinY) bMinY = point.y;
+        if (point.y > bMaxY) bMaxY = point.y;
+        if (point.z < bMinZ) bMinZ = point.z;
+        if (point.z > bMaxZ) bMaxZ = point.z;
         if (!capContainsPoint(cap, point)) cap.push(point);
       } else if (da === 0 && !capContainsPoint(cap, a)) cap.push(a);
     }
     if (frontVertices.length >= 3) front.push({ plane: face.plane, vertices: frontVertices });
     if (backVertices.length >= 3) back.push({ plane: face.plane, vertices: backVertices });
   }
-  const frontCell = closeCell(front, cap.slice(), opposite), backCell = closeCell(back, cap, plane);
+  const frontCell = closeCell(front, cap.slice(), opposite),
+    backCell = closeCell(back, cap, plane);
   if (frontCell !== null && fMinX !== Infinity && fPoison === fPoison)
     cellBounds.set(frontCell, { minX: fMinX, minY: fMinY, minZ: fMinZ, maxX: fMaxX, maxY: fMaxY, maxZ: fMaxZ });
   if (backCell !== null && bMinX !== Infinity && bPoison === bPoison)
@@ -187,9 +280,26 @@ export function boxSeparatingPlanes(cell: ConvexCell, axes: readonly Vec3[]): re
     const magnitude = length(normal);
     if (magnitude < 1e-8) return;
     const n = scale(normal, 1 / magnitude);
-    const axial = n.y === 0 && n.z === 0 ? (n.x === 1 ? 1 : n.x === -1 ? 2 : 0)
-      : n.x === 0 && n.z === 0 ? (n.y === 1 ? 4 : n.y === -1 ? 8 : 0)
-      : n.x === 0 && n.y === 0 ? (n.z === 1 ? 16 : n.z === -1 ? 32 : 0) : 0;
+    const axial =
+      n.y === 0 && n.z === 0
+        ? n.x === 1
+          ? 1
+          : n.x === -1
+            ? 2
+            : 0
+        : n.x === 0 && n.z === 0
+          ? n.y === 1
+            ? 4
+            : n.y === -1
+              ? 8
+              : 0
+          : n.x === 0 && n.y === 0
+            ? n.z === 1
+              ? 16
+              : n.z === -1
+                ? 32
+                : 0
+            : 0;
     if ((axialSeen & axial) !== 0) return;
     if (!normals.some(p => dot(p, n) > 1 - 1e-10)) normals.push(n);
     axialSeen |= axial;
@@ -197,13 +307,21 @@ export function boxSeparatingPlanes(cell: ConvexCell, axes: readonly Vec3[]): re
   for (const face of cell.faces) {
     insert(face.plane.normal);
     for (let i = 0; i < face.vertices.length; i++) {
-      const a = face.vertices[i], b = face.vertices[(i + 1) % face.vertices.length];
+      const a = face.vertices[i],
+        b = face.vertices[(i + 1) % face.vertices.length];
       if (a === undefined || b === undefined) continue;
       const edge = sub(b, a);
-      for (const axis of axes) { const n = cross(edge, axis); insert(n); insert(scale(n, -1)); }
+      for (const axis of axes) {
+        const n = cross(edge, axis);
+        insert(n);
+        insert(scale(n, -1));
+      }
     }
   }
-  for (const axis of axes) { insert(axis); insert(scale(axis, -1)); }
+  for (const axis of axes) {
+    insert(axis);
+    insert(scale(axis, -1));
+  }
   const vertices = cellVertices(cell);
   return normals.map(normal => ({ normal, distance: vertices.reduce((d, p) => Math.max(d, dot(normal, p)), -Infinity) }));
 }

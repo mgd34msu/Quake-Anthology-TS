@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_items.c pickup functions.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
-import { GameType, Holdable, ItemType, MissionpackStatIndex, PersistentIndex,
-  Powerup, statSchema, Weapon } from "../shared/definitions.ts";
+import { GameType, Holdable, ItemType, MissionpackStatIndex, PersistentIndex, Powerup, statSchema, Weapon } from "../shared/definitions.ts";
 import { itemAt, itemList } from "../shared/items.ts";
 import type { ItemDefinition } from "../shared/items.ts";
 import { dot3, length3, normalize3, sub3 } from "../../../../core/math.ts";
@@ -74,7 +74,6 @@ function addAmmoTo(client: GameClient, weapon: Weapon, count: number): void {
   ammo.set(weapon, total > 200 ? 200 : total);
 }
 
-
 function pickupAmmoFrom(itemEntity: GameEntity, client: GameClient, item: ItemDefinition): number {
   if (item.type !== ItemType.IT_AMMO) throw new Error("Pickup_Ammo requires an ammo item");
   const quantity = itemEntity.count !== 0 ? itemEntity.count : item.quantity;
@@ -87,13 +86,16 @@ export function pickupAmmo(itemEntity: GameEntity, other: GameEntity): number {
   return pickupAmmoFrom(itemEntity, input.client, input.item);
 }
 
-export function q3WeaponPickupQuantity(input: { readonly count: number; readonly quantity: number;
-  readonly dropped: boolean; readonly gameType: number; readonly currentAmmo: number }): number {
+export function q3WeaponPickupQuantity(input: {
+  readonly count: number;
+  readonly quantity: number;
+  readonly dropped: boolean;
+  readonly gameType: number;
+  readonly currentAmmo: number;
+}): number {
   if (input.count < 0) return 0;
   const quantity = input.count !== 0 ? input.count : input.quantity;
-  return !input.dropped && input.gameType !== GameType.GT_TEAM
-    ? input.currentAmmo < quantity ? quantity - input.currentAmmo : 1
-    : quantity;
+  return !input.dropped && input.gameType !== GameType.GT_TEAM ? (input.currentAmmo < quantity ? quantity - input.currentAmmo : 1) : quantity;
 }
 
 export function q3WeaponRespawnSeconds(context: WeaponPickupContext): number {
@@ -102,27 +104,36 @@ export function q3WeaponRespawnSeconds(context: WeaponPickupContext): number {
 
 export function q3ItemRespawnSeconds(item: ItemDefinition, context: WeaponPickupContext): number {
   switch (item.type) {
-    case ItemType.IT_WEAPON: return q3WeaponRespawnSeconds(context);
-    case ItemType.IT_AMMO: return RESPAWN_AMMO;
-    case ItemType.IT_ARMOR: return RESPAWN_ARMOR;
-    case ItemType.IT_HEALTH: return item.quantity === 100 ? RESPAWN_MEGAHEALTH : RESPAWN_HEALTH;
-    case ItemType.IT_HOLDABLE: return RESPAWN_HOLDABLE;
-    case ItemType.IT_POWERUP: return RESPAWN_POWERUP;
-    case ItemType.IT_PERSISTANT_POWERUP: return -1;
-    case ItemType.IT_TEAM: throw new Error("Team objective lifecycle requires its original pickup handler");
-    case ItemType.IT_BAD: throw new Error("Invalid item has no pickup lifecycle");
+    case ItemType.IT_WEAPON:
+      return q3WeaponRespawnSeconds(context);
+    case ItemType.IT_AMMO:
+      return RESPAWN_AMMO;
+    case ItemType.IT_ARMOR:
+      return RESPAWN_ARMOR;
+    case ItemType.IT_HEALTH:
+      return item.quantity === 100 ? RESPAWN_MEGAHEALTH : RESPAWN_HEALTH;
+    case ItemType.IT_HOLDABLE:
+      return RESPAWN_HOLDABLE;
+    case ItemType.IT_POWERUP:
+      return RESPAWN_POWERUP;
+    case ItemType.IT_PERSISTANT_POWERUP:
+      return -1;
+    case ItemType.IT_TEAM:
+      throw new Error("Team objective lifecycle requires its original pickup handler");
+    case ItemType.IT_BAD:
+      throw new Error("Invalid item has no pickup lifecycle");
   }
 }
 
-function pickupWeaponFrom(
-  itemEntity: GameEntity,
-  client: GameClient,
-  item: ItemDefinition,
-  context: WeaponPickupContext,
-): number {
+function pickupWeaponFrom(itemEntity: GameEntity, client: GameClient, item: ItemDefinition, context: WeaponPickupContext): number {
   if (item.type !== ItemType.IT_WEAPON) throw new Error("Pickup_Weapon requires a weapon item");
-  const quantity = q3WeaponPickupQuantity({ count: itemEntity.count, quantity: item.quantity,
-    dropped: (itemEntity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType, currentAmmo: client.ps.ammo.get(item.tag) });
+  const quantity = q3WeaponPickupQuantity({
+    count: itemEntity.count,
+    quantity: item.quantity,
+    dropped: (itemEntity.flags & GameFlags.DROPPED_ITEM) !== 0,
+    gameType: context.gameType,
+    currentAmmo: client.ps.ammo.get(item.tag),
+  });
 
   const weapons = statSchema(client.ps.product).weapons;
   client.ps.stats.set(weapons, client.ps.stats.get(weapons) | (1 << item.tag));
@@ -234,12 +245,7 @@ export function pickupPersistentPowerup(itemEntity: GameEntity, other: GameEntit
   return pickupPersistentPowerupFrom(itemEntity, input.client, input.item, input.itemIndex, () => rawHandicap, other);
 }
 
-function pickupPowerupFrom(
-  itemEntity: GameEntity,
-  client: GameClient,
-  item: ItemDefinition,
-  context: PowerupPickupContext,
-): number {
+function pickupPowerupFrom(itemEntity: GameEntity, client: GameClient, item: ItemDefinition, context: PowerupPickupContext): number {
   if (item.type !== ItemType.IT_POWERUP) throw new Error("Pickup_Powerup requires a powerup item");
   if (!Number.isInteger(context.time) || context.time < -2_147_483_648 || context.time > 2_147_483_647) {
     throw new RangeError("Powerup pickup time must be a signed 32-bit millisecond value");

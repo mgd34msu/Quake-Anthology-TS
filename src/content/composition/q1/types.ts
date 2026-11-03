@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -56,7 +57,12 @@ export type Q1CompositionEvent =
   | { readonly kind: "client-left"; readonly actor: ActorId; readonly slot: number }
   | { readonly kind: "ctf-status"; readonly actor: ActorId; readonly status: CtfStatus }
   | { readonly kind: "ctf-capture"; readonly team: CtfTeam; readonly total: number }
-  | { readonly kind: "prompt"; readonly actor: ActorId; readonly title: string; readonly choices: readonly { readonly label: string; readonly impulse: number }[] }
+  | {
+      readonly kind: "prompt";
+      readonly actor: ActorId;
+      readonly title: string;
+      readonly choices: readonly { readonly label: string; readonly impulse: number }[];
+    }
   | { readonly kind: "clear-prompt"; readonly actor: ActorId }
   | { readonly kind: "source-log"; readonly actor: ActorId; readonly action: string }
   | { readonly kind: "developer-message"; readonly text: string }

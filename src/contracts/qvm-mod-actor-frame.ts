@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QvmModSourceCall } from "./qvm-mod-callbacks.ts";
 
 /** Original frame loops retain their locals, clocks, expiry, and entity dispatch. */

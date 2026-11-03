@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModuleIdentity, QvmAbiProfile } from "./execution.ts";
 import type { Vec3 } from "./math.ts";
 
@@ -52,9 +53,15 @@ export interface QvmGrappleDefinition {
     readonly projectileModel: string;
     readonly viewModel: string;
     readonly weaponIndex: number;
-    readonly viewAnchor: { readonly path: string; readonly tag: string; readonly offset: Vec3; readonly fovOffset: { readonly above: number; readonly scale: number } };
+    readonly viewAnchor: {
+      readonly path: string;
+      readonly tag: string;
+      readonly offset: Vec3;
+      readonly fovOffset: { readonly above: number; readonly scale: number };
+    };
     readonly viewAttachments: readonly { readonly path: string; readonly tag: string }[];
-    readonly cable: { readonly kind: "shader"; readonly path: string; readonly width: number }
+    readonly cable:
+      | { readonly kind: "shader"; readonly path: string; readonly width: number }
       | { readonly kind: "model"; readonly flight: string; readonly pull: string; readonly hold: string; readonly segmentLength: number };
     readonly fireSound: string | null;
     readonly attachSound: string | null;

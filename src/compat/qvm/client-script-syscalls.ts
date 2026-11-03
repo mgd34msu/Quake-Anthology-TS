@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q3 client PC traps over the shared botlib source parser. GPL-2.0-or-later. */
 import { SaveReader } from "../../persistence/value.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
@@ -30,20 +31,34 @@ export class QvmClientScripts {
     this.assertCurrent();
     if (this.operations !== 0 || this.pending.size !== 0) throw new Error("Cannot checkpoint an active client script operation");
     const memory = this.memory.checkpoint();
-    return { memory: memory.image, globals: this.services.globals.captureOwnedSaveState(),
-      readers: [...this.readers].map(([handle, reader]) => ({ handle, state: reader.captureSaveState(memory) })) };
+    return {
+      memory: memory.image,
+      globals: this.services.globals.captureOwnedSaveState(),
+      readers: [...this.readers].map(([handle, reader]) => ({ handle, state: reader.captureSaveState(memory) })),
+    };
   }
   restoreCheckpoint(value: unknown): void {
     this.assertCurrent();
     if (this.readers.size !== 0 || this.operations !== 0 || this.pending.size !== 0) throw new Error("Client script restore requires an empty idle owner");
-    const r = new SaveReader(value, "client-scripts"), memory = this.memory.restore(r.field("memory").value);
+    const r = new SaveReader(value, "client-scripts"),
+      memory = this.memory.restore(r.field("memory").value);
     this.services.globals.restoreOwnedSaveState(r.field("globals").value);
     for (const row of r.field("readers").list(item => ({ handle: item.field("handle").integer(1), state: item.field("state").value }))) {
       if (row.handle >= 64 || this.readers.has(row.handle)) r.fail("invalid client script slot");
-      const reader = ScriptSourceReader.restoreSaveState(row.state, { resolve: request => this.include(request) }, {
-        memory: this.memory, globals: this.services.globals,
-        report: diagnostic => { this.assertCurrent(); this.services.print(`file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`); this.assertCurrent(); },
-      }, memory);
+      const reader = ScriptSourceReader.restoreSaveState(
+        row.state,
+        { resolve: request => this.include(request) },
+        {
+          memory: this.memory,
+          globals: this.services.globals,
+          report: diagnostic => {
+            this.assertCurrent();
+            this.services.print(`file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
+            this.assertCurrent();
+          },
+        },
+        memory,
+      );
       this.readers.set(row.handle, reader);
     }
   }
@@ -64,12 +79,18 @@ export class QvmClientScripts {
     this.operations--;
     if (this.closed && this.operations === 0) this.memory.dispose();
   }
-  addDefine(text: string): number { this.assertCurrent(); return Number(this.services.globals.add(text)); }
+  addDefine(text: string): number {
+    this.assertCurrent();
+    return Number(this.services.globals.add(text));
+  }
 
   private async source(filename: string): Promise<SourceScriptStorage | undefined> {
     this.assertCurrent();
     if (filename.length >= 32000) throw new RangeError("Com_sprintf formatted bot path exceeds its 32000-byte source buffer");
-    if (filename.length >= 64) { this.services.print(`Com_sprintf: overflow of ${filename.length} in 64\n`); this.assertCurrent(); }
+    if (filename.length >= 64) {
+      this.services.print(`Com_sprintf: overflow of ${filename.length} in 64\n`);
+      this.assertCurrent();
+    }
     const resource = await this.services.mounts.open(filename.slice(0, 63));
     this.assertCurrent();
     if (resource === null) return undefined;
@@ -97,21 +118,39 @@ export class QvmClientScripts {
     try {
       const root = await this.source(filename);
       if (root === undefined) return 0;
-      try { this.assertCurrent(); }
-      catch (error) { root.dispose(); throw error; }
-      const reader = ScriptSourceReader.open(root, { resolve: request => this.include(request) }, {
-        memory: this.memory, globals: this.services.globals,
-        report: diagnostic => { this.assertCurrent(); this.services.print(`file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`); this.assertCurrent(); },
-      });
+      try {
+        this.assertCurrent();
+      } catch (error) {
+        root.dispose();
+        throw error;
+      }
+      const reader = ScriptSourceReader.open(
+        root,
+        { resolve: request => this.include(request) },
+        {
+          memory: this.memory,
+          globals: this.services.globals,
+          report: diagnostic => {
+            this.assertCurrent();
+            this.services.print(`file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`);
+            this.assertCurrent();
+          },
+        },
+      );
       this.readers.set(handle, reader);
       return handle;
-    } finally { this.pending.delete(handle); this.completed(); }
+    } finally {
+      this.pending.delete(handle);
+      this.completed();
+    }
   }
   free(handle: number): number {
     this.assertCurrent();
     const reader = this.readers.get(handle);
     if (reader === undefined) return 0;
-    reader.dispose(); this.readers.delete(handle); return 1;
+    reader.dispose();
+    this.readers.delete(handle);
+    return 1;
   }
   async read(handle: number, publish: (reader: ScriptSourceReader) => void): Promise<number> {
     this.assertCurrent();
@@ -120,16 +159,25 @@ export class QvmClientScripts {
     this.operations++;
     try {
       let read: boolean;
-      try { read = await reader.nextAsync(() => this.assertCurrent()) !== undefined; }
-      catch (error) { if (!reader.isSourceFailure(error)) throw error; read = false; }
+      try {
+        read = (await reader.nextAsync(() => this.assertCurrent())) !== undefined;
+      } catch (error) {
+        if (!reader.isSourceFailure(error)) throw error;
+        read = false;
+      }
       this.assertCurrent();
       if (this.readers.get(handle) !== reader) throw new Error("QVM source handle was freed during token read");
       publish(reader);
       return Number(read);
-    } finally { this.completed(); }
+    } finally {
+      this.completed();
+    }
   }
 
-  position(handle: number) { this.assertCurrent(); return this.readers.get(handle)?.position; }
+  position(handle: number) {
+    this.assertCurrent();
+    return this.readers.get(handle)?.position;
+  }
 }
 
 export function qvmClientScriptSyscall(call: QvmHostCall, scripts: QvmClientScripts): QvmHostResult | null {
@@ -139,10 +187,13 @@ export function qvmClientScriptSyscall(call: QvmHostCall, scripts: QvmClientScri
   const { guest, words } = call;
   if (call.code === define) return scripts.addDefine(guest.readString(words.getInt32(4, true)));
   switch (call.code - load) {
-    case 0: return scripts.load(guest.readString(words.getInt32(4, true)));
-    case 1: return scripts.free(words.getInt32(4, true));
+    case 0:
+      return scripts.load(guest.readString(words.getInt32(4, true)));
+    case 1:
+      return scripts.free(words.getInt32(4, true));
     case 2: {
-      const handle = words.getInt32(4, true), pointer = words.getInt32(8, true);
+      const handle = words.getInt32(4, true),
+        pointer = words.getInt32(8, true);
       return scripts.read(handle, reader => writeQvmScriptToken(guest.view(pointer, QVM_SCRIPT_TOKEN_BYTES), reader.rawToken));
     }
     case 3: {
@@ -153,6 +204,7 @@ export function qvmClientScriptSyscall(call: QvmHostCall, scripts: QvmClientScri
       guest.view(words.getInt32(12, true), 4).setInt32(0, position.line, true);
       return 1;
     }
-    default: return null;
+    default:
+      return null;
   }
 }

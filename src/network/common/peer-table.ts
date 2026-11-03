@@ -2,7 +2,10 @@
 import { IdIndex } from "../../foundation/id-index.ts";
 import type { NetworkAddress } from "./endpoint.ts";
 
-const KIND_IPV4 = 1, KIND_IPV6 = 2, KIND_LOOPBACK = 3, KIND_IPX = 4;
+const KIND_IPV4 = 1,
+  KIND_IPV6 = 2,
+  KIND_LOOPBACK = 3,
+  KIND_IPX = 4;
 
 function textHash(text: string): number {
   let hash = 0x811c9dc5;
@@ -43,42 +46,60 @@ export class PeerTable {
     this.freeCount = capacity;
   }
 
-  get count(): number { return this.capacity - this.freeCount; }
-  live(slot: number): boolean { return this.used[slot] === 1; }
+  get count(): number {
+    return this.capacity - this.freeCount;
+  }
+  live(slot: number): boolean {
+    return this.used[slot] === 1;
+  }
 
   private static kindOf(address: NetworkAddress): number {
     switch (address.kind) {
-      case "ipv4": return KIND_IPV4;
-      case "ipv6": return KIND_IPV6;
-      case "loopback": return KIND_LOOPBACK;
-      case "ipx": return KIND_IPX;
+      case "ipv4":
+        return KIND_IPV4;
+      case "ipv6":
+        return KIND_IPV6;
+      case "loopback":
+        return KIND_LOOPBACK;
+      case "ipx":
+        return KIND_IPX;
     }
   }
   private static firstWord(address: NetworkAddress): number {
     switch (address.kind) {
-      case "ipv4": return ((address.host[0] << 24 | address.host[1] << 16 | address.host[2] << 8 | address.host[3]) >>> 0);
-      case "ipv6": return textHash(address.host);
-      case "loopback": return textHash(address.id);
-      case "ipx": return address.network >>> 0;
+      case "ipv4":
+        return ((address.host[0] << 24) | (address.host[1] << 16) | (address.host[2] << 8) | address.host[3]) >>> 0;
+      case "ipv6":
+        return textHash(address.host);
+      case "loopback":
+        return textHash(address.id);
+      case "ipx":
+        return address.network >>> 0;
     }
   }
   private static secondWord(address: NetworkAddress): number {
-    return address.kind === "ipx" ? (address.node[0] << 24 | address.node[1] << 16 | address.node[2] << 8 | address.node[3]) >>> 0 : 0;
+    return address.kind === "ipx" ? ((address.node[0] << 24) | (address.node[1] << 16) | (address.node[2] << 8) | address.node[3]) >>> 0 : 0;
   }
   private static thirdWord(address: NetworkAddress): number {
-    return address.kind === "ipx" ? address.node[4] << 8 | address.node[5] : 0;
+    return address.kind === "ipx" ? (address.node[4] << 8) | address.node[5] : 0;
   }
   private static nameOf(address: NetworkAddress): string | null {
     return address.kind === "ipv6" ? address.host : address.kind === "loopback" ? address.id : null;
   }
   private matches(slot: number, address: NetworkAddress): boolean {
-    return this.kinds[slot] === PeerTable.kindOf(address) && this.first[slot] === PeerTable.firstWord(address) && this.second[slot] === PeerTable.secondWord(address)
-      && this.third[slot] === PeerTable.thirdWord(address) && this.names[slot] === PeerTable.nameOf(address);
+    return (
+      this.kinds[slot] === PeerTable.kindOf(address) &&
+      this.first[slot] === PeerTable.firstWord(address) &&
+      this.second[slot] === PeerTable.secondWord(address) &&
+      this.third[slot] === PeerTable.thirdWord(address) &&
+      this.names[slot] === PeerTable.nameOf(address)
+    );
   }
 
   /** Returns the slot holding this address, or -1. */
   find(address: NetworkAddress): number {
-    const kind = PeerTable.kindOf(address), cursor = this.index.begin(PeerTable.firstWord(address), kind);
+    const kind = PeerTable.kindOf(address),
+      cursor = this.index.begin(PeerTable.firstWord(address), kind);
     for (let slot = this.index.next(cursor); slot >= 0; slot = this.index.next(cursor)) if (this.matches(slot, address)) return slot;
     return -1;
   }

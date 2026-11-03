@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * UI_Alloc, UI_InitMemory, String_Alloc and String_Report from id Software's code/ui/ui_shared.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -7,7 +8,11 @@ import type { UiItemDefinition, UiMenuDefinition, UiModelReference, UiScript, Ui
 
 /** A char pointer into retained byte storage; String_Init does not invalidate or clear it. */
 export class UiStringReference {
-  constructor(private readonly bytes: Uint8Array, readonly offset: number, private readonly pointers?: ReadonlyMap<number, UiMemoryPointer>) {
+  constructor(
+    private readonly bytes: Uint8Array,
+    readonly offset: number,
+    private readonly pointers?: ReadonlyMap<number, UiMemoryPointer>,
+  ) {
     if (!Number.isInteger(offset) || offset < 0 || offset >= bytes.length) throw new RangeError("UI string pointer is outside its byte storage");
   }
   read(): string {
@@ -27,7 +32,8 @@ export class UiStringReference {
     throw new RangeError("UI string reads beyond its retained byte storage");
   }
   static literal(text: string): UiStringReference {
-    const nul = text.indexOf("\0"), length = nul < 0 ? text.length : nul;
+    const nul = text.indexOf("\0"),
+      length = nul < 0 ? text.length : nul;
     const bytes = new Uint8Array(length + 1);
     for (let index = 0; index < length; index++) {
       const byte = text.charCodeAt(index);
@@ -82,13 +88,23 @@ export class UiMemoryAllocation {
     this.bytes.fill(0, this.offset, this.offset + this.size);
   }
 
-  getInt32(offset: number): number { this.checkNumeric(offset); return this.view.getInt32(offset, true); }
-  getFloat32(offset: number): number { this.checkNumeric(offset); return this.view.getFloat32(offset, true); }
+  getInt32(offset: number): number {
+    this.checkNumeric(offset);
+    return this.view.getInt32(offset, true);
+  }
+  getFloat32(offset: number): number {
+    this.checkNumeric(offset);
+    return this.view.getFloat32(offset, true);
+  }
   setInt32(offset: number, value: number): void {
-    this.checkWord(offset); this.discardPointers(offset, 4); this.view.setInt32(offset, value, true);
+    this.checkWord(offset);
+    this.discardPointers(offset, 4);
+    this.view.setInt32(offset, value, true);
   }
   setFloat32(offset: number, value: number): void {
-    this.checkWord(offset); this.discardPointers(offset, 4); this.view.setFloat32(offset, value, true);
+    this.checkWord(offset);
+    this.discardPointers(offset, 4);
+    this.view.setFloat32(offset, value, true);
   }
 
   getString(offset: number): string | undefined {
@@ -106,7 +122,9 @@ export class UiMemoryAllocation {
     this.setPointer(offset, value === undefined ? undefined : { kind: "string", value: typeof value === "string" ? UiStringReference.literal(value) : value });
   }
 
-  stringReference(): UiStringReference { return new UiStringReference(this.bytes, this.offset, this.pointers); }
+  stringReference(): UiStringReference {
+    return new UiStringReference(this.bytes, this.offset, this.pointers);
+  }
 
   stringArray(offset: number, count: number): (string | null)[] {
     const values: (string | null)[] = Array.from({ length: count }, () => null);
@@ -115,7 +133,9 @@ export class UiMemoryAllocation {
       Object.defineProperty(values, index, {
         enumerable: true,
         get: (): string | null => this.getString(offset + index * 4) ?? null,
-        set: (value: string | null): void => { this.setString(offset + index * 4, value ?? undefined); },
+        set: (value: string | null): void => {
+          this.setString(offset + index * 4, value ?? undefined);
+        },
       });
     }
     return values;
@@ -136,7 +156,7 @@ export class UiMemoryAllocation {
   isNullPointer(offset: number): boolean {
     this.checkWord(offset);
     const pointer = this.pointers.get(this.offset + offset);
-    if (pointer === undefined || pointer.kind === "resource" && pointer.handle !== undefined) {
+    if (pointer === undefined || (pointer.kind === "resource" && pointer.handle !== undefined)) {
       this.checkNumeric(offset);
       return this.view.getUint32(offset, true) === 0;
     }
@@ -183,7 +203,10 @@ export class UiMemoryAllocation {
     this.checkWord(offset);
     const pointer = this.pointers.get(this.offset + offset);
     if (pointer?.kind === "resource") return pointer.value;
-    if (pointer === undefined) { this.checkNumeric(offset); return undefined; }
+    if (pointer === undefined) {
+      this.checkNumeric(offset);
+      return undefined;
+    }
     throw new Error("UI resource handle read aliases a different typed pointer");
   }
 
@@ -202,7 +225,7 @@ export class UiMemoryAllocation {
   private pointer(offset: number): UiMemoryPointer | undefined {
     this.checkWord(offset);
     const pointer = this.pointers.get(this.offset + offset);
-    if (pointer === undefined || pointer.kind === "resource" && pointer.handle !== undefined) {
+    if (pointer === undefined || (pointer.kind === "resource" && pointer.handle !== undefined)) {
       this.checkNumeric(offset);
       if (this.view.getUint32(offset, true) !== 0) throw new Error("UI pointer read contains non-pointer bytes");
       return undefined;
@@ -249,16 +272,29 @@ export class TeamArenaUiMemory {
   private allocationPoint = 0;
   private exhausted = false;
 
-  constructor(readonly profile: "qvm32", private readonly print: (text: string) => void, readonly module: "ui" | "cgame" = "ui") {
+  constructor(
+    readonly profile: "qvm32",
+    private readonly print: (text: string) => void,
+    readonly module: "ui" | "cgame" = "ui",
+  ) {
     this.bytes = new Uint8Array(module === "cgame" ? 128 * 1024 : 1024 * 1024);
     this.strings = new Uint8Array(module === "cgame" ? 128 * 1024 : 384 * 1024);
   }
 
-  get stringBytes(): number { return this.stringPoint; }
-  get allocatedBytes(): number { return this.allocationPoint; }
-  get outOfMemory(): boolean { return this.exhausted; }
+  get stringBytes(): number {
+    return this.stringPoint;
+  }
+  get allocatedBytes(): number {
+    return this.allocationPoint;
+  }
+  get outOfMemory(): boolean {
+    return this.exhausted;
+  }
 
-  initializeMemory(): void { this.allocationPoint = 0; this.exhausted = false; }
+  initializeMemory(): void {
+    this.allocationPoint = 0;
+    this.exhausted = false;
+  }
 
   borrow(offset: number, size: number): UiMemoryAllocation {
     return new UiMemoryAllocation(this.bytes, this.pointers, offset, size);

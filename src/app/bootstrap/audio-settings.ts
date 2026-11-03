@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { validMenuTrack, type MusicPreferences } from "./audio/playlist-settings.ts";
 import { audioOutputFormat, defaultAudioOutputFormat, type AudioOutputFormat } from "../../audio/output.ts";
-import type { ConfigStore } from '../../settings/config.ts';
+import type { ConfigStore } from "../../settings/config.ts";
 
 export interface AudioPreferences extends Partial<MusicPreferences> {
   readonly deviceName: string | null;
@@ -9,29 +10,78 @@ export interface AudioPreferences extends Partial<MusicPreferences> {
   readonly musicVolume: number;
 }
 function preferences(value: unknown): AudioPreferences {
-  if (typeof value !== 'object' || value === null || !('version' in value) || value.version !== 1
-    || !('deviceName' in value) || !(value.deviceName === null || typeof value.deviceName === 'string' && value.deviceName.length > 0 && !value.deviceName.includes(String.fromCharCode(0)))
-    || !('effectsVolume' in value) || typeof value.effectsVolume !== 'number' || !Number.isFinite(value.effectsVolume) || value.effectsVolume < 0 || value.effectsVolume > 1
-    || !('musicVolume' in value) || typeof value.musicVolume !== 'number' || !Number.isFinite(value.musicVolume) || value.musicVolume < 0 || value.musicVolume > 1)
-    throw new Error('Invalid audio preferences');
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("version" in value) ||
+    value.version !== 1 ||
+    !("deviceName" in value) ||
+    !(
+      value.deviceName === null ||
+      (typeof value.deviceName === "string" && value.deviceName.length > 0 && !value.deviceName.includes(String.fromCharCode(0)))
+    ) ||
+    !("effectsVolume" in value) ||
+    typeof value.effectsVolume !== "number" ||
+    !Number.isFinite(value.effectsVolume) ||
+    value.effectsVolume < 0 ||
+    value.effectsVolume > 1 ||
+    !("musicVolume" in value) ||
+    typeof value.musicVolume !== "number" ||
+    !Number.isFinite(value.musicVolume) ||
+    value.musicVolume < 0 ||
+    value.musicVolume > 1
+  )
+    throw new Error("Invalid audio preferences");
   const musicShuffle = "musicShuffle" in value ? value.musicShuffle : false;
   const menuTrack = "menuTrack" in value ? value.menuTrack : "auto";
   if (typeof musicShuffle !== "boolean" || typeof menuTrack !== "string" || !validMenuTrack(menuTrack)) throw new Error("Invalid music preferences");
-  return { ...("musicShuffle" in value ? { musicShuffle } : {}), ...("menuTrack" in value ? { menuTrack } : {}), outputFormat: "outputFormat" in value ? audioOutputFormat(value.outputFormat) : defaultAudioOutputFormat, deviceName: value.deviceName, effectsVolume: value.effectsVolume, musicVolume: value.musicVolume };
+  return {
+    ...("musicShuffle" in value ? { musicShuffle } : {}),
+    ...("menuTrack" in value ? { menuTrack } : {}),
+    outputFormat: "outputFormat" in value ? audioOutputFormat(value.outputFormat) : defaultAudioOutputFormat,
+    deviceName: value.deviceName,
+    effectsVolume: value.effectsVolume,
+    musicVolume: value.musicVolume,
+  };
 }
 export async function loadAudioSettings(store: ConfigStore, warn: (text: string) => void = () => {}): Promise<Partial<AudioPreferences>> {
-  const text = await store.loadText('audio.json');
+  const text = await store.loadText("audio.json");
   if (text === null) return {};
   // Text that is not JSON behaves like the absent document; parsed
   // values still face the preferences validation below.
   let value: unknown;
-  try { value = JSON.parse(text); } catch { return {}; }
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return {};
+  }
   // A hand-edited or foreign file falls back to defaults instead of stopping the launch.
-  try { return preferences(value); }
-  catch (error) { warn(`Ignoring audio.json: ${error instanceof Error ? error.message : String(error)}\n`); return {}; }
+  try {
+    return preferences(value);
+  } catch (error) {
+    warn(`Ignoring audio.json: ${error instanceof Error ? error.message : String(error)}\n`);
+    return {};
+  }
 }
-export async function saveAudioSettings(store: ConfigStore, audio: { readonly musicPreferences?: MusicPreferences; readonly outputFormat?: AudioOutputFormat; readonly selectedOutput: string | null; readonly effectsVolume: number; readonly musicVolume: number }): Promise<void> {
-  const saved = audio.musicPreferences ?? await loadAudioSettings(store);
-  const value = preferences({ musicShuffle: saved.musicShuffle ?? false, menuTrack: saved.menuTrack ?? "auto", version: 1, outputFormat: audio.outputFormat ?? defaultAudioOutputFormat, deviceName: audio.selectedOutput, effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume });
-  await store.dump('audio.json', `${JSON.stringify({ version: 1, ...value })}\n`);
+export async function saveAudioSettings(
+  store: ConfigStore,
+  audio: {
+    readonly musicPreferences?: MusicPreferences;
+    readonly outputFormat?: AudioOutputFormat;
+    readonly selectedOutput: string | null;
+    readonly effectsVolume: number;
+    readonly musicVolume: number;
+  },
+): Promise<void> {
+  const saved = audio.musicPreferences ?? (await loadAudioSettings(store));
+  const value = preferences({
+    musicShuffle: saved.musicShuffle ?? false,
+    menuTrack: saved.menuTrack ?? "auto",
+    version: 1,
+    outputFormat: audio.outputFormat ?? defaultAudioOutputFormat,
+    deviceName: audio.selectedOutput,
+    effectsVolume: audio.effectsVolume,
+    musicVolume: audio.musicVolume,
+  });
+  await store.dump("audio.json", `${JSON.stringify({ version: 1, ...value })}\n`);
 }

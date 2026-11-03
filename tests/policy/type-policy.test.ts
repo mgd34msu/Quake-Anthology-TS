@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,8 +10,14 @@ import type { PolicyDiagnostic } from "../../tools/check-policy.ts";
 const root = resolve(import.meta.dir, "../..");
 const temporary = mkdtempSync(join(tmpdir(), "quake-unified-type-policy-"));
 const projectConfiguration: unknown = JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf8"));
-if (projectConfiguration === null || typeof projectConfiguration !== "object" || !("compilerOptions" in projectConfiguration)
-  || projectConfiguration.compilerOptions === null || typeof projectConfiguration.compilerOptions !== "object") throw new Error("Missing project compiler options");
+if (
+  projectConfiguration === null ||
+  typeof projectConfiguration !== "object" ||
+  !("compilerOptions" in projectConfiguration) ||
+  projectConfiguration.compilerOptions === null ||
+  typeof projectConfiguration.compilerOptions !== "object"
+)
+  throw new Error("Missing project compiler options");
 const fixtureOptions = { ...projectConfiguration.compilerOptions, types: [] };
 const fixtures: Readonly<Record<string, string>> = {
   "explicit-any": "export const value: any = 1;",
@@ -20,18 +27,18 @@ const fixtures: Readonly<Record<string, string>> = {
   "non-null": "export function value(x: string | undefined): string { return x!; }",
   "definite-property": "export class State { value!: number; }",
   "definite-variable": "export let value!: number;",
-  "ignore": "// @ts-ignore\nexport const value: number = 'bad';",
+  ignore: "// @ts-ignore\nexport const value: number = 'bad';",
   "expect-error": "// @ts-expect-error\nexport const value: number = 'bad';",
-  "nocheck": "// @ts-nocheck\nexport const value: number = 'bad';",
+  nocheck: "// @ts-nocheck\nexport const value: number = 'bad';",
   "lint-suppression": "/* eslint-disable */\nexport const value = 1;",
-  "ambient": "export declare const value: number;",
-  "inferred": "export const value = JSON.parse('{}');",
-  "parameter": "export function value(input) { return input; }",
+  ambient: "export declare const value: number;",
+  inferred: "export const value = JSON.parse('{}');",
+  parameter: "export function value(input) { return input; }",
   "typed-initializer": "export const value: number = JSON.parse('1');",
   "typed-assignment": "export let value = 1; value = JSON.parse('2');",
-  "property": "export const value: unknown = JSON.parse('{}').property;",
+  property: "export const value: unknown = JSON.parse('{}').property;",
   "nested-object": "export const value = { child: JSON.parse('{}') };",
-  "promise": "export const value = Promise.resolve(JSON.parse('{}'));",
+  promise: "export const value = Promise.resolve(JSON.parse('{}'));",
   "async-void-variable": "export const value: () => void = async () => {};",
   "async-void-argument": "function run(callback: () => void) { callback(); } run(async () => {});",
   "async-void-property": "export const host: { run(): void } = { run: async () => {} };",
@@ -44,9 +51,12 @@ const fixtures: Readonly<Record<string, string>> = {
   "async-void-extends": "class Base { run(): void {} } export class Service extends Base { async run() {} }",
   "async-void-thenable": "const run = (): PromiseLike<void> => Promise.resolve(); export const callback: () => void = run;",
   "async-void-union-result": "const run = (): void | Promise<void> => Promise.resolve(); export const callback: () => void = run;",
-  "async-void-overload": "interface Callback { (): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode: 'async') => void { return callback; }",
-  "async-void-optional-overload": "interface Callback { (): void; (mode?: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode?: 'async') => void { return callback; }",
-  "async-void-rest-overload": "interface Callback { (): void; (...modes: 'async'[]): Promise<void>; } export function adapt(callback: Callback): (...modes: 'async'[]) => void { return callback; }",
+  "async-void-overload":
+    "interface Callback { (): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode: 'async') => void { return callback; }",
+  "async-void-optional-overload":
+    "interface Callback { (): void; (mode?: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode?: 'async') => void { return callback; }",
+  "async-void-rest-overload":
+    "interface Callback { (): void; (...modes: 'async'[]): Promise<void>; } export function adapt(callback: Callback): (...modes: 'async'[]) => void { return callback; }",
   "external-assignment": "import { raw } from './external'; export const value: number = raw;",
   "external-argument": "import { raw } from './external'; function consume(x: number) { return x; } export const value = consume(raw);",
   "external-return": "import { raw } from './external'; export function value(): number { return raw; }",
@@ -55,17 +65,20 @@ const fixtures: Readonly<Record<string, string>> = {
   "external-promise": "import { promise } from './external'; export const value = promise;",
   "external-map": "import { map } from './external'; export const value = map;",
   "external-record": "import { record } from './external'; export const value = record;",
-  "eval": "export const value = eval('1');",
+  eval: "export const value = eval('1');",
   "function-constructor": "export const value = new Function('return 1');",
   "computed-function": "export const value = globalThis['Function']('return 1');",
-  "function-constructor-property": "export function run(): unknown { const code: unknown = (() => {}).constructor('return 7'); if (typeof code !== 'function') throw new Error('not callable'); const result: unknown = code(); return result; }",
+  "function-constructor-property":
+    "export function run(): unknown { const code: unknown = (() => {}).constructor('return 7'); if (typeof code !== 'function') throw new Error('not callable'); const result: unknown = code(); return result; }",
   "function-constructor-computed": "export const raw: unknown = (() => {})['constructor']('return 7');",
   "function-constructor-destructure": "const { constructor: compile } = () => {}; export const raw: unknown = compile('return 7');",
-  "inferred-any-property": "type Unsafe = { value: ReturnType<typeof JSON.parse> }; function narrow(input: Unsafe): { value: number } { return input; } export const wrongNumber: number = narrow({ value: 'string' }).value;",
-  "external-value-property": "function narrow(input: PropertyDescriptor): { value?: number } { return input; } export const wrongNumber = narrow({ value: 'string' }).value;",
+  "inferred-any-property":
+    "type Unsafe = { value: ReturnType<typeof JSON.parse> }; function narrow(input: Unsafe): { value: number } { return input; } export const wrongNumber: number = narrow({ value: 'string' }).value;",
+  "external-value-property":
+    "function narrow(input: PropertyDescriptor): { value?: number } { return input; } export const wrongNumber = narrow({ value: 'string' }).value;",
   "external-callback-return": "export const read: () => number = JSON.parse.bind(JSON, '\"string\"'); export const wrongNumber: number = read();",
   "assertion-function": "export function check(value: unknown): asserts value is number { void value; }",
-  "wasm": "export const value = WebAssembly.compile(new Uint8Array());",
+  wasm: "export const value = WebAssembly.compile(new Uint8Array());",
   "ffi-import": "import { dlopen } from 'bun:ffi'; export { dlopen };",
   "ffi-dynamic": "export const value = import('bun:ffi');",
   "ffi-cc": "import { cc as compileNative } from 'bun:ffi'; export { compileNative };",
@@ -90,7 +103,7 @@ const fixtures: Readonly<Record<string, string>> = {
   "safe-reflect-dynamic-key": "export function read(value: object, key: string): unknown { const found: unknown = Reflect.get(value, key); return found; }",
   "safe-reflect-literal-key": "export function size(value: object): unknown { const found: unknown = Reflect.get(value, 'size'); return found; }",
   "safe-data-text": "export const value = 'data:text/javascript,1'; export const vm = { name: 'vm' };",
-  "safe": "export const value: unknown = JSON.parse('{}'); export function read(x: unknown): number { if (typeof x !== 'number') throw new Error('number required'); return x; }",
+  safe: "export const value: unknown = JSON.parse('{}'); export function read(x: unknown): number { if (typeof x !== 'number') throw new Error('number required'); return x; }",
   "safe-parentheses": "export const value: unknown = (JSON.parse('{}'));",
   "safe-await": "import { promise } from './external'; export const value: unknown = await promise;",
   "safe-property": "export class Value { raw: unknown = JSON.parse('{}'); }",
@@ -105,12 +118,18 @@ const fixtures: Readonly<Record<string, string>> = {
   "safe-sync-value": "export const callback: () => void = () => 1;",
   "safe-async-class": "interface Host { run(): Promise<void>; } export class Service implements Host { async run() {} }",
   "safe-recursive-host": "interface Host { next: Host | null; run(): void; } export const host: Host = { next: null, run() {} };",
-  "safe-sync-overload": "interface Callback { (): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): () => void { return callback; }",
-  "safe-sync-method-overload": "interface Host { run(): void; run(mode: 'async'): Promise<void>; } export function adapt(host: Host): { run(): void } { return host; }",
-  "safe-sync-generic-overload": "interface Callback { <T>(value: T): void; <T>(value: T, mode: 'async'): Promise<void>; } export function adapt(callback: Callback): <T>(value: T) => void { return callback; }",
-  "safe-sync-literal-overload": "interface Callback { (mode: 'sync'): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode: 'sync') => void { return callback; }",
-  "safe-sync-literal-method-overload": "interface Host { run(mode: 'sync'): void; run(mode: 'async'): Promise<void>; } export function adapt(host: Host): { run(mode: 'sync'): void } { return host; }",
-  "safe-sync-primitive-overload": "interface Callback { (value: number): void; (value: string): Promise<void>; } export function adapt(callback: Callback): (value: number) => void { return callback; }",
+  "safe-sync-overload":
+    "interface Callback { (): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): () => void { return callback; }",
+  "safe-sync-method-overload":
+    "interface Host { run(): void; run(mode: 'async'): Promise<void>; } export function adapt(host: Host): { run(): void } { return host; }",
+  "safe-sync-generic-overload":
+    "interface Callback { <T>(value: T): void; <T>(value: T, mode: 'async'): Promise<void>; } export function adapt(callback: Callback): <T>(value: T) => void { return callback; }",
+  "safe-sync-literal-overload":
+    "interface Callback { (mode: 'sync'): void; (mode: 'async'): Promise<void>; } export function adapt(callback: Callback): (mode: 'sync') => void { return callback; }",
+  "safe-sync-literal-method-overload":
+    "interface Host { run(mode: 'sync'): void; run(mode: 'async'): Promise<void>; } export function adapt(host: Host): { run(mode: 'sync'): void } { return host; }",
+  "safe-sync-primitive-overload":
+    "interface Callback { (value: number): void; (value: string): Promise<void>; } export function adapt(callback: Callback): (value: number) => void { return callback; }",
   "safe-string": "export const value = '// @ts-ignore and x as const';",
   "safe-names": "export const value = { eval: 'label', Function: 'label', WebAssembly: 'label' }; export const label = value['Function'];",
   "src/native-addon": "export { value } from './engine.node';",
@@ -136,19 +155,28 @@ const fixtures: Readonly<Record<string, string>> = {
   "src/helper-bridge": "import '../helper.ts';",
   "src/generated-bridge": "export const value: unknown = await import('../dist/native-engine');",
   "src/platform/native-ffi": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libengine.so', { run: { args: [], returns: 'void' } });",
-  "src/platform/native-symbol": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libSDL2-2.0.so.0', { SDL_LoadObject: { args: ['cstring'], returns: 'ptr' } });",
+  "src/platform/native-symbol":
+    "import { dlopen } from 'bun:ffi'; export const value = dlopen('libSDL2-2.0.so.0', { SDL_LoadObject: { args: ['cstring'], returns: 'ptr' } });",
   "src/platform/ffi-alias": "import { dlopen } from 'bun:ffi'; const load = dlopen; export const value = load('libengine.so', {});",
   "src/platform/ffi-opaque": "import { dlopen } from 'bun:ffi'; const symbols = {}; export const value = dlopen('libSDL2-2.0.so.0', symbols);",
-  "src/platform/ffi-linked-native": "import { linkSymbols } from 'bun:ffi'; export const value = linkSymbols({ runEngine: { args: [], returns: 'void', ptr: null } });",
-  "src/platform/ffi-linked-fake-gl": "import { linkSymbols } from 'bun:ffi'; export function open(pointer: bigint) { return linkSymbols({ glRunGame: { args: [], returns: 'void', ptr: pointer } }); }",
-  "src/platform/ffi-linked-pointer": "import { linkSymbols } from 'bun:ffi'; export function open(pointer: bigint) { return linkSymbols({ glGetError: { args: [], returns: 'u32', ptr: pointer } }); }",
+  "src/platform/ffi-linked-native":
+    "import { linkSymbols } from 'bun:ffi'; export const value = linkSymbols({ runEngine: { args: [], returns: 'void', ptr: null } });",
+  "src/platform/ffi-linked-fake-gl":
+    "import { linkSymbols } from 'bun:ffi'; export function open(pointer: bigint) { return linkSymbols({ glRunGame: { args: [], returns: 'void', ptr: pointer } }); }",
+  "src/platform/ffi-linked-pointer":
+    "import { linkSymbols } from 'bun:ffi'; export function open(pointer: bigint) { return linkSymbols({ glGetError: { args: [], returns: 'u32', ptr: pointer } }); }",
   "src/platform/ffi-reexport": "export * from 'bun:ffi';",
-  "src/ffi-indirect": "import { dlopen } from './platform/ffi-reexport'; export const value = dlopen('libSDL2-2.0.so.0', { SDL_GetTicks: { args: [], returns: 'u32' } });",
-  "src/platform/safe-sdl": "import { dlopen } from 'bun:ffi'; export const value = dlopen(process.env['QUAKE_SDL2_LIBRARY'] ?? 'libSDL2-2.0.so.0', { SDL_GetTicks: { args: [], returns: 'u32' } });",
+  "src/ffi-indirect":
+    "import { dlopen } from './platform/ffi-reexport'; export const value = dlopen('libSDL2-2.0.so.0', { SDL_GetTicks: { args: [], returns: 'u32' } });",
+  "src/platform/safe-sdl":
+    "import { dlopen } from 'bun:ffi'; export const value = dlopen(process.env['QUAKE_SDL2_LIBRARY'] ?? 'libSDL2-2.0.so.0', { SDL_GetTicks: { args: [], returns: 'u32' } });",
   "src/platform/safe-gl": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libGL.so.1', { glGetError: { args: [], returns: 'u32' } });",
-  "src/platform/safe-unix-terminal": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { tcgetattr: { args: ['i32', 'buffer'], returns: 'i32' }, tcsetattr: { args: ['i32', 'i32', 'buffer'], returns: 'i32' }, sigaction: { args: ['i32', 'buffer', 'buffer'], returns: 'i32' } });",
-  "src/platform/safe-unix-calendar": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { localtime_r: { args: ['buffer', 'buffer'], returns: 'ptr' }, tzset: { args: [], returns: 'void' } });",
-  "src/platform/safe-unix-signal-exit": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { _exit: { args: ['i32'], returns: 'void' } });",
+  "src/platform/safe-unix-terminal":
+    "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { tcgetattr: { args: ['i32', 'buffer'], returns: 'i32' }, tcsetattr: { args: ['i32', 'i32', 'buffer'], returns: 'i32' }, sigaction: { args: ['i32', 'buffer', 'buffer'], returns: 'i32' } });",
+  "src/platform/safe-unix-calendar":
+    "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { localtime_r: { args: ['buffer', 'buffer'], returns: 'ptr' }, tzset: { args: [], returns: 'void' } });",
+  "src/platform/safe-unix-signal-exit":
+    "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { _exit: { args: ['i32'], returns: 'void' } });",
   "src/platform/unix-shell": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { system: { args: ['cstring'], returns: 'i32' } });",
   "src/platform/unix-gl-symbol": "import { dlopen } from 'bun:ffi'; export const value = dlopen('libc.so.6', { glGetError: { args: [], returns: 'u32' } });",
   "tools/safe-orchestration": "export const value = Bun.spawnSync(['bun', 'run', 'typecheck']);",
@@ -160,12 +188,17 @@ const results = new Map<string, readonly PolicyDiagnostic[]>();
 
 beforeAll(async () => {
   const external = join(temporary, "external.d.ts");
-  await Bun.write(external, "export declare const raw: any; export declare const array: any[]; export declare const promise: Promise<any>; export declare const map: Map<string, any>; export declare const record: Record<string, any>; export declare function incoming(): any;");
-  const paths = await Promise.all(Object.entries(fixtures).map(async ([name, source]) => {
-    const path = join(temporary, `${name}.ts`);
-    await Bun.write(path, source);
-    return path;
-  }));
+  await Bun.write(
+    external,
+    "export declare const raw: any; export declare const array: any[]; export declare const promise: Promise<any>; export declare const map: Map<string, any>; export declare const record: Record<string, any>; export declare function incoming(): any;",
+  );
+  const paths = await Promise.all(
+    Object.entries(fixtures).map(async ([name, source]) => {
+      const path = join(temporary, `${name}.ts`);
+      await Bun.write(path, source);
+      return path;
+    }),
+  );
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
@@ -181,10 +214,16 @@ beforeAll(async () => {
   };
   const program = ts.createProgram([...paths, external], options);
   const diagnostics = auditProgram(program, paths, temporary);
-  for (const name of Object.keys(fixtures)) results.set(name, diagnostics.filter((diagnostic) => diagnostic.file === join(temporary, `${name}.ts`)));
+  for (const name of Object.keys(fixtures))
+    results.set(
+      name,
+      diagnostics.filter(diagnostic => diagnostic.file === join(temporary, `${name}.ts`)),
+    );
 }, 20_000);
 
-afterAll(() => { rmSync(temporary, { recursive: true, force: true }); });
+afterAll(() => {
+  rmSync(temporary, { recursive: true, force: true });
+});
 
 function diagnosticsFor(name: string): readonly PolicyDiagnostic[] {
   const found = results.get(name);
@@ -194,54 +233,128 @@ function diagnosticsFor(name: string): readonly PolicyDiagnostic[] {
 
 describe("TypeScript policy", () => {
   const rules: Readonly<Record<string, string>> = {
-    "explicit-any": "explicit-any", "as-cast": "assertion", "const-cast": "assertion", "angle-cast": "assertion",
-    "non-null": "non-null", "definite-property": "definite-assignment", "definite-variable": "definite-assignment",
-    ignore: "suppression", "expect-error": "suppression", nocheck: "suppression", "lint-suppression": "suppression", ambient: "ambient",
-    inferred: "unsafe-any", parameter: "unsafe-any", "typed-initializer": "unsafe-assignment",
-    "typed-assignment": "unsafe-assignment", property: "unsafe-any", "nested-object": "unsafe-any",
-    promise: "unsafe-any", "external-assignment": "unsafe-assignment", "external-argument": "unsafe-argument",
-    "async-void-variable": "async-void", "async-void-argument": "async-void", "async-void-property": "async-void",
-    "async-void-method": "async-void", "async-void-alias": "async-void", "async-void-assignment": "async-void",
-    "async-void-return": "async-void", "async-void-array": "async-void", "async-void-class": "async-void",
-    "async-void-extends": "async-void", "async-void-thenable": "async-void", "async-void-union-result": "async-void",
-    "async-void-overload": "async-void", "async-void-optional-overload": "async-void", "async-void-rest-overload": "async-void",
-    "external-return": "unsafe-return", "external-array": "unsafe-any", "external-call": "unsafe-any",
-    "external-promise": "unsafe-any", "external-map": "unsafe-any", "external-record": "unsafe-any", eval: "dynamic-implementation", "function-constructor": "dynamic-implementation",
-    "computed-function": "dynamic-implementation", "function-constructor-property": "dynamic-implementation",
-    "function-constructor-computed": "dynamic-implementation", "function-constructor-destructure": "dynamic-implementation",
-    "inferred-any-property": "unsafe-any", wasm: "dynamic-implementation", "ffi-import": "ffi-boundary",
-    "external-value-property": "unsafe-conversion", "external-callback-return": "unsafe-conversion", "assertion-function": "assertion",
-    "ffi-dynamic": "ffi-boundary", "ffi-cc": "native-implementation", "ffi-namespace": "native-implementation",
+    "explicit-any": "explicit-any",
+    "as-cast": "assertion",
+    "const-cast": "assertion",
+    "angle-cast": "assertion",
+    "non-null": "non-null",
+    "definite-property": "definite-assignment",
+    "definite-variable": "definite-assignment",
+    ignore: "suppression",
+    "expect-error": "suppression",
+    nocheck: "suppression",
+    "lint-suppression": "suppression",
+    ambient: "ambient",
+    inferred: "unsafe-any",
+    parameter: "unsafe-any",
+    "typed-initializer": "unsafe-assignment",
+    "typed-assignment": "unsafe-assignment",
+    property: "unsafe-any",
+    "nested-object": "unsafe-any",
+    promise: "unsafe-any",
+    "external-assignment": "unsafe-assignment",
+    "external-argument": "unsafe-argument",
+    "async-void-variable": "async-void",
+    "async-void-argument": "async-void",
+    "async-void-property": "async-void",
+    "async-void-method": "async-void",
+    "async-void-alias": "async-void",
+    "async-void-assignment": "async-void",
+    "async-void-return": "async-void",
+    "async-void-array": "async-void",
+    "async-void-class": "async-void",
+    "async-void-extends": "async-void",
+    "async-void-thenable": "async-void",
+    "async-void-union-result": "async-void",
+    "async-void-overload": "async-void",
+    "async-void-optional-overload": "async-void",
+    "async-void-rest-overload": "async-void",
+    "external-return": "unsafe-return",
+    "external-array": "unsafe-any",
+    "external-call": "unsafe-any",
+    "external-promise": "unsafe-any",
+    "external-map": "unsafe-any",
+    "external-record": "unsafe-any",
+    eval: "dynamic-implementation",
+    "function-constructor": "dynamic-implementation",
+    "computed-function": "dynamic-implementation",
+    "function-constructor-property": "dynamic-implementation",
+    "function-constructor-computed": "dynamic-implementation",
+    "function-constructor-destructure": "dynamic-implementation",
+    "inferred-any-property": "unsafe-any",
+    wasm: "dynamic-implementation",
+    "ffi-import": "ffi-boundary",
+    "external-value-property": "unsafe-conversion",
+    "external-callback-return": "unsafe-conversion",
+    "assertion-function": "assertion",
+    "ffi-dynamic": "ffi-boundary",
+    "ffi-cc": "native-implementation",
+    "ffi-namespace": "native-implementation",
     "ffi-computed": "native-implementation",
-    "src/native-addon": "native-implementation", "src/native-library": "native-implementation",
-    "src/native-library-alias": "native-implementation", "src/opaque-import": "runtime-boundary",
-    "src/create-require": "native-loader", "src/commonjs": "native-loader", "src/process-dlopen": "native-loader",
-    "src/process-dlopen-alias": "native-loader", "src/process-dlopen-computed": "native-loader", "src/builtin-loader": "native-loader",
-    "src/child-process": "runtime-subprocess", "src/child-process-dynamic": "runtime-subprocess", "src/child-process-reexport": "runtime-subprocess",
-    "src/bun-spawn": "runtime-subprocess", "src/bun-spawn-computed": "runtime-subprocess", "src/bun-spawn-destructure": "runtime-subprocess",
-    "src/bun-spawn-alias": "runtime-subprocess", "src/bun-shell": "runtime-subprocess", "src/execve": "runtime-subprocess",
-    "src/tool-bridge": "runtime-boundary", "src/helper-bridge": "runtime-boundary", "src/generated-bridge": "runtime-boundary",
-    "src/platform/native-ffi": "ffi-library", "src/platform/native-symbol": "ffi-symbol", "src/platform/ffi-alias": "ffi-binding",
-    "src/platform/ffi-opaque": "ffi-symbol", "src/platform/ffi-linked-native": "ffi-symbol",
-    "src/platform/ffi-linked-fake-gl": "ffi-symbol", "src/platform/ffi-linked-pointer": "ffi-pointer",
-    "src/platform/ffi-reexport": "ffi-binding", "src/ffi-indirect": "ffi-boundary",
-    "src/platform/unix-shell": "ffi-symbol", "src/platform/unix-gl-symbol": "ffi-symbol",
-    "vm-import": "dynamic-implementation", "vm-bare-dynamic": "dynamic-implementation", "vm-reexport": "dynamic-implementation",
-    "data-import": "dynamic-implementation", "data-static-import": "dynamic-implementation",
-    "worker-eval": "dynamic-implementation", "worker-eval-variable": "dynamic-implementation", "worker-eval-shorthand": "dynamic-implementation",
-    "worker-eval-spread": "dynamic-implementation", "worker-eval-node": "dynamic-implementation",
-    "reflect-process-dlopen": "native-loader", "reflect-descriptor-dlopen": "native-loader", "reflect-constructor": "dynamic-implementation",
+    "src/native-addon": "native-implementation",
+    "src/native-library": "native-implementation",
+    "src/native-library-alias": "native-implementation",
+    "src/opaque-import": "runtime-boundary",
+    "src/create-require": "native-loader",
+    "src/commonjs": "native-loader",
+    "src/process-dlopen": "native-loader",
+    "src/process-dlopen-alias": "native-loader",
+    "src/process-dlopen-computed": "native-loader",
+    "src/builtin-loader": "native-loader",
+    "src/child-process": "runtime-subprocess",
+    "src/child-process-dynamic": "runtime-subprocess",
+    "src/child-process-reexport": "runtime-subprocess",
+    "src/bun-spawn": "runtime-subprocess",
+    "src/bun-spawn-computed": "runtime-subprocess",
+    "src/bun-spawn-destructure": "runtime-subprocess",
+    "src/bun-spawn-alias": "runtime-subprocess",
+    "src/bun-shell": "runtime-subprocess",
+    "src/execve": "runtime-subprocess",
+    "src/tool-bridge": "runtime-boundary",
+    "src/helper-bridge": "runtime-boundary",
+    "src/generated-bridge": "runtime-boundary",
+    "src/platform/native-ffi": "ffi-library",
+    "src/platform/native-symbol": "ffi-symbol",
+    "src/platform/ffi-alias": "ffi-binding",
+    "src/platform/ffi-opaque": "ffi-symbol",
+    "src/platform/ffi-linked-native": "ffi-symbol",
+    "src/platform/ffi-linked-fake-gl": "ffi-symbol",
+    "src/platform/ffi-linked-pointer": "ffi-pointer",
+    "src/platform/ffi-reexport": "ffi-binding",
+    "src/ffi-indirect": "ffi-boundary",
+    "src/platform/unix-shell": "ffi-symbol",
+    "src/platform/unix-gl-symbol": "ffi-symbol",
+    "vm-import": "dynamic-implementation",
+    "vm-bare-dynamic": "dynamic-implementation",
+    "vm-reexport": "dynamic-implementation",
+    "data-import": "dynamic-implementation",
+    "data-static-import": "dynamic-implementation",
+    "worker-eval": "dynamic-implementation",
+    "worker-eval-variable": "dynamic-implementation",
+    "worker-eval-shorthand": "dynamic-implementation",
+    "worker-eval-spread": "dynamic-implementation",
+    "worker-eval-node": "dynamic-implementation",
+    "reflect-process-dlopen": "native-loader",
+    "reflect-descriptor-dlopen": "native-loader",
+    "reflect-constructor": "dynamic-implementation",
     "src/reflect-bun-spawn": "runtime-subprocess",
   };
   for (const [name, rule] of Object.entries(rules)) {
-    test(`rejects ${name}`, () => { expect(diagnosticsFor(name).some((diagnostic) => diagnostic.rule === rule)).toBe(true); });
+    test(`rejects ${name}`, () => {
+      expect(diagnosticsFor(name).some(diagnostic => diagnostic.rule === rule)).toBe(true);
+    });
   }
-  for (const name of Object.keys(fixtures).filter((name) => name.startsWith("safe") || name.includes("/safe-"))) {
-    test(`accepts ${name}`, () => { expect(diagnosticsFor(name)).toEqual([]); });
+  for (const name of Object.keys(fixtures).filter(name => name.startsWith("safe") || name.includes("/safe-"))) {
+    test(`accepts ${name}`, () => {
+      expect(diagnosticsFor(name)).toEqual([]);
+    });
   }
   test("reports exact source location and rule", () => {
     expect(diagnosticsFor("explicit-any")).toContainEqual({
-      file: join(temporary, "explicit-any.ts"), line: 1, column: 21, rule: "explicit-any",
+      file: join(temporary, "explicit-any.ts"),
+      line: 1,
+      column: 21,
+      rule: "explicit-any",
       message: "Explicit any is forbidden; narrow unknown at the boundary.",
     });
   });
@@ -249,7 +362,7 @@ describe("TypeScript policy", () => {
     const declaration = join(temporary, "project.d.ts");
     await Bun.write(declaration, "export interface HiddenImplementation { run(): void; }");
     const program = ts.createProgram([declaration], { strict: true, types: [] });
-    expect(auditProgram(program, [declaration]).some((diagnostic) => diagnostic.rule === "ambient")).toBe(true);
+    expect(auditProgram(program, [declaration]).some(diagnostic => diagnostic.rule === "ambient")).toBe(true);
   });
   test("CLI checks source beyond tsconfig and rejects other implementation languages", async () => {
     const project = join(temporary, "cli-project");
@@ -266,8 +379,8 @@ describe("TypeScript policy", () => {
     await Bun.write(join(project, "dist/allowed-output.js"), "export const built = 1;");
     await Bun.write(join(project, "node_modules/vendor/index.js"), "module.exports = 1;");
     const diagnostics = auditProject(project);
-    expect(diagnostics.filter((diagnostic) => diagnostic.rule === "implementation-language")).toHaveLength(2);
-    expect(diagnostics.some((diagnostic) => diagnostic.file === join(project, "tools/outside-config.ts") && diagnostic.rule === "assertion")).toBe(true);
+    expect(diagnostics.filter(diagnostic => diagnostic.rule === "implementation-language")).toHaveLength(2);
+    expect(diagnostics.some(diagnostic => diagnostic.file === join(project, "tools/outside-config.ts") && diagnostic.rule === "assertion")).toBe(true);
     const dirty = Bun.spawnSync([process.execPath, executable, project]);
     expect(dirty.exitCode).toBe(1);
     expect(dirty.stderr.toString()).toContain("tools/outside-config.ts:1:22 [assertion]");
@@ -277,7 +390,17 @@ describe("TypeScript policy", () => {
     const project = join(temporary, "native-artifacts");
     await Bun.write(join(project, "src/main.ts"), "export const value = 1;");
     await Bun.write(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: fixtureOptions, include: ["src/**/*.ts"] }));
-    const nativeFiles = ["src/engine.node", "src/engine.so", "src/engine.so.2", "src/engine.dll", "src/engine.dylib", "src/engine.o", "artifacts/engine.node", "src/dist/engine.node", "src/.artifacts/engine.node"];
+    const nativeFiles = [
+      "src/engine.node",
+      "src/engine.so",
+      "src/engine.so.2",
+      "src/engine.dll",
+      "src/engine.dylib",
+      "src/engine.o",
+      "artifacts/engine.node",
+      "src/dist/engine.node",
+      "src/.artifacts/engine.node",
+    ];
     for (const file of nativeFiles) await Bun.write(join(project, file), "fixture");
     const headers: Readonly<Record<string, readonly number[]>> = {
       "src/engine": [0x7f, 0x45, 0x4c, 0x46],
@@ -292,7 +415,10 @@ describe("TypeScript policy", () => {
     expect(diagnostics).toHaveLength(nativeFiles.length + Object.keys(headers).length);
     for (const file of [...nativeFiles, ...Object.keys(headers)]) {
       expect(diagnostics).toContainEqual({
-        file: join(project, file), line: 1, column: 1, rule: "implementation-language",
+        file: join(project, file),
+        line: 1,
+        column: 1,
+        rule: "implementation-language",
         message: "Project implementation must be .ts; native sources/binaries, JavaScript, shader and WASM artifacts are forbidden.",
       });
     }
@@ -301,11 +427,18 @@ describe("TypeScript policy", () => {
     const project = join(temporary, "compiler-escapes");
     await Bun.write(join(project, "src/main.ts"), "export const value = 1;");
     await Bun.write(join(project, "docs/omitted.ts"), "export const value: number = 'wrong';");
-    await Bun.write(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { ...fixtureOptions,
-      noUncheckedIndexedAccess: false, noImplicitAny: false, noCheck: true }, include: ["src/main.ts"] }));
+    await Bun.write(
+      join(project, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { ...fixtureOptions, noUncheckedIndexedAccess: false, noImplicitAny: false, noCheck: true },
+        include: ["src/main.ts"],
+      }),
+    );
     const diagnostics = auditProject(project);
     expect(diagnostics.filter(value => value.rule === "compiler-policy").map(value => value.message)).toEqual([
-      "noUncheckedIndexedAccess must be enabled.", "noCheck must be disabled.", "noImplicitAny cannot override strict mode.",
+      "noUncheckedIndexedAccess must be enabled.",
+      "noCheck must be disabled.",
+      "noImplicitAny cannot override strict mode.",
     ]);
     await Bun.write(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: fixtureOptions, include: ["src/main.ts"] }));
     expect(auditProject(project).some(value => value.rule === "typescript" && value.file === join(project, "docs/omitted.ts"))).toBe(true);
@@ -337,7 +470,7 @@ describe("TypeScript policy", () => {
   });
   test("audits referenced declaration files inside ignored output", async () => {
     const project = join(temporary, "reference-escapes");
-    await Bun.write(join(project, "tools/main.ts"), "/// <reference path=\"../dist/hidden.d.ts\" />\nexport const value = 1;");
+    await Bun.write(join(project, "tools/main.ts"), '/// <reference path="../dist/hidden.d.ts" />\nexport const value = 1;');
     await Bun.write(join(project, "dist/hidden.d.ts"), "declare const hiddenUnchecked: any;");
     await Bun.write(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: fixtureOptions, include: ["tools/main.ts"] }));
     const diagnostics = auditProject(project);

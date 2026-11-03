@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { UnifiedAudio } from "./engine.ts";
 export type { UnifiedAudioOptions } from "./engine.ts";
 export { AudioMixer, SOUND_TIME_EPOCH, spatializeSoundOrigin } from "./mixer.ts";

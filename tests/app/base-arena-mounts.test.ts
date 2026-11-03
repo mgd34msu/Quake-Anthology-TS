@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,7 +11,8 @@ import { readBaseArenaCatalog } from "../../src/app/bootstrap/base-arena-catalog
 test("arena discovery uses active loose overlays and preserves restricted mounts", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-arena-mounts-"));
   try {
-    const base = join(root, "base"), user = join(root, "user");
+    const base = join(root, "base"),
+      user = join(root, "user");
     await mkdir(join(base, "scripts"), { recursive: true });
     await mkdir(join(user, "scripts"), { recursive: true });
     await writeFile(join(base, "scripts/arenas.txt"), '{ map training type single special training bots "crash" }');
@@ -43,13 +45,18 @@ test("malformed arena files and unusable rows are skipped", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-arena-bad-"));
   try {
     await mkdir(join(root, "scripts"), { recursive: true });
-    await writeFile(join(root, "scripts/arenas.txt"),
-      '{ map good type single bots "sarge" }\n{ type single bots "visor" }\n{ map "bad name!" type single bots "grunt" }');
+    await writeFile(
+      join(root, "scripts/arenas.txt"),
+      '{ map good type single bots "sarge" }\n{ type single bots "visor" }\n{ map "bad name!" type single bots "grunt" }',
+    );
     await writeFile(join(root, "scripts/broken.arena"), "this is not an arena file {");
-    const sources: ContentMount[] = [
-      { kind: "loose", identity: createMountIdentity("mount:arena:bad", "q3:classic:baseq3:test", 0), rootPath: root },
-    ];
-    const plan: ResolvedMountPlan = { id: "mount-plan:arena-bad:0", mounts: sources, defaultOrder: sources.map(source => source.identity.id), prefixOrders: [] };
+    const sources: ContentMount[] = [{ kind: "loose", identity: createMountIdentity("mount:arena:bad", "q3:classic:baseq3:test", 0), rootPath: root }];
+    const plan: ResolvedMountPlan = {
+      id: "mount-plan:arena-bad:0",
+      mounts: sources,
+      defaultOrder: sources.map(source => source.identity.id),
+      prefixOrders: [],
+    };
     using mounts = await openMountPlan(plan);
     const catalog = await readBaseArenaCatalog(mounts);
     expect(catalog.arenas.map(arena => arena.map)).toEqual(["maps/good.bsp"]);

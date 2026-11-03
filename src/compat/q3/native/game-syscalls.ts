@@ -9,7 +9,8 @@ import type { NativeGameMemory } from "./memory.ts";
  * extension the table rejects), the words carry the arguments, and pointer arguments resolve through the module's own address space.
  */
 export function nativeQ3GameCall(words: DataView, guest: NativeGameMemory, commandArguments: readonly string[] | null): SharedHostCall {
-  const trap = words.getInt32(0, true), code = decodeQvmGameImport(trap);
+  const trap = words.getInt32(0, true),
+    code = decodeQvmGameImport(trap);
   return code === null
     ? { kind: "extension", role: "qagame", code: trap, words, guest, abiProfile: "q3-modern", commandArguments }
     : { kind: "engine", role: "qagame", code, words, guest, abiProfile: "q3-modern", commandArguments };

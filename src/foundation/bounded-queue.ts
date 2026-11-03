@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Fixed-capacity drop-oldest history, for the small capped queues the
  * engine retains for presentation (dynamic lights, damage indicators, ping
@@ -27,9 +28,15 @@ export class BoundedQueue<T> {
     return this.powerOfTwo ? index & (this.slots.length - 1) : index % this.slots.length;
   }
 
-  get capacity(): number { return this.slots.length; }
-  get length(): number { return this.count; }
-  get dropped(): number { return this.droppedCount; }
+  get capacity(): number {
+    return this.slots.length;
+  }
+  get length(): number {
+    return this.count;
+  }
+  get dropped(): number {
+    return this.droppedCount;
+  }
 
   /** Appends one value, discarding the oldest when full. */
   push(value: T): void {
@@ -54,11 +61,11 @@ export class BoundedQueue<T> {
   }
 
   peekOldest(): T | undefined {
-    return this.count === 0 ? undefined : this.slots[this.head] ?? undefined;
+    return this.count === 0 ? undefined : (this.slots[this.head] ?? undefined);
   }
 
   peekNewest(): T | undefined {
-    return this.count === 0 ? undefined : this.slots[this.wrap(this.head + this.count - 1)] ?? undefined;
+    return this.count === 0 ? undefined : (this.slots[this.wrap(this.head + this.count - 1)] ?? undefined);
   }
 
   /** Visits retained values oldest first, allocating nothing. */
@@ -130,7 +137,9 @@ export class BoundedQueue<T> {
   /** Array copy for boundaries that already speak in arrays. */
   toArray(): T[] {
     const out: T[] = [];
-    this.forEach((value) => { out.push(value); });
+    this.forEach(value => {
+      out.push(value);
+    });
     return out;
   }
 

@@ -8,8 +8,12 @@ import { ParseKfont } from "./kfont.ts";
 import type { ImagePicture, TextureRect } from "./draw2d.ts";
 
 export interface AtlasGlyph {
-  readonly x: number; readonly y: number; readonly width: number; readonly height: number;
-  readonly advance: number; readonly color: boolean;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly advance: number;
+  readonly color: boolean;
 }
 export interface TextAtlas {
   readonly kind: "classic" | "kfont" | "truetype";
@@ -19,23 +23,33 @@ export interface TextAtlas {
   readonly capInk?: { readonly top: number; readonly height: number };
   readonly glyphs: ReadonlyMap<number, AtlasGlyph>;
 }
-export type TextFontSelection = { readonly kind: "classic"; readonly classic: TextAtlas; readonly unicode: TextAtlas | null }
+export type TextFontSelection =
+  | { readonly kind: "classic"; readonly classic: TextAtlas; readonly unicode: TextAtlas | null }
   | { readonly kind: "atlas"; readonly font: TextAtlas; readonly classic: TextAtlas; readonly fallbacks?: readonly TextAtlas[] };
 export interface FontImageServices {
   read(path: string): Promise<Uint8Array | null>;
   registerImage(name: string, content: RenderImage): Promise<RendererImage>;
   releaseImage(image: RendererImage): void;
 }
-export type TextFontRequest = { readonly kind: "classic"; readonly unicodeFont: string | null }
+export type TextFontRequest =
+  | { readonly kind: "classic"; readonly unicodeFont: string | null }
   | { readonly kind: "kfont"; readonly path: string }
   | { readonly kind: "truetype"; readonly path: string; readonly pixelSize: number; readonly codepoints: readonly number[] };
 
 export function classicCharset(image: RendererImage, name = "conchars", colorPolicy: "baked" | "tinted" = "baked"): TextAtlas {
   if (image.width % 16 !== 0 || image.height % 16 !== 0) throw new RangeError("Charset needs 16 by 16 glyph cells");
-  const width = image.width / 16, height = image.height / 16, glyphs = new Map<number, AtlasGlyph>();
-  for (let code = 0; code < 256; code++) glyphs.set(code, {
-    x: (code & 15) * width, y: (code >> 4) * height, width, height, advance: width, color: colorPolicy === "baked",
-  });
+  const width = image.width / 16,
+    height = image.height / 16,
+    glyphs = new Map<number, AtlasGlyph>();
+  for (let code = 0; code < 256; code++)
+    glyphs.set(code, {
+      x: (code & 15) * width,
+      y: (code >> 4) * height,
+      width,
+      height,
+      advance: width,
+      color: colorPolicy === "baked",
+    });
   return { kind: "classic", name, picture: { kind: "image", name, image }, lineHeight: height, glyphs };
 }
 
@@ -46,10 +60,9 @@ export class TextFontRegistry {
   private closed = false;
   constructor(private readonly services: FontImageServices) {}
   async select(request: TextFontRequest, classic: TextAtlas): Promise<TextFontSelection> {
-    if (request.kind === "classic") return { kind: "classic", classic,
-      unicode: request.unicodeFont === null ? null : await this.loadKfont(request.unicodeFont) };
-    const font = request.kind === "kfont" ? await this.loadKfont(request.path)
-      : await this.loadTrueType(request.path, request.pixelSize, request.codepoints);
+    if (request.kind === "classic")
+      return { kind: "classic", classic, unicode: request.unicodeFont === null ? null : await this.loadKfont(request.unicodeFont) };
+    const font = request.kind === "kfont" ? await this.loadKfont(request.path) : await this.loadTrueType(request.path, request.pixelSize, request.codepoints);
     return font === null ? { kind: "classic", classic, unicode: null } : { kind: "atlas", font, classic };
   }
   loadKfont(path: string): Promise<TextAtlas | null> {
@@ -60,12 +73,10 @@ export class TextFontRegistry {
       if (parsed === null) return null;
       const bitmap = await this.services.read(parsed.textureToken);
       if (bitmap === null) return null;
-      const level = parsed.textureToken.toLowerCase().endsWith(".png")
-        ? decodePng(bitmap, parsed.textureToken) : decodeTga(bitmap, parsed.textureToken);
+      const level = parsed.textureToken.toLowerCase().endsWith(".png") ? decodePng(bitmap, parsed.textureToken) : decodeTga(bitmap, parsed.textureToken);
       const glyphs = new Map<number, AtlasGlyph>();
       for (const [code, glyph] of parsed.glyphs) {
-        if (glyph.x < 0 || glyph.y < 0 || glyph.w < 0 || glyph.h < 0
-          || glyph.x + glyph.w > level.width || glyph.y + glyph.h > level.height)
+        if (glyph.x < 0 || glyph.y < 0 || glyph.w < 0 || glyph.h < 0 || glyph.x + glyph.w > level.width || glyph.y + glyph.h > level.height)
           throw new RangeError(`Kfont glyph ${code} exceeds ${parsed.textureToken}`);
         glyphs.set(code, { x: glyph.x, y: glyph.y, width: glyph.w, height: glyph.h, advance: glyph.w, color: false });
       }
@@ -75,34 +86,42 @@ export class TextFontRegistry {
   loadTrueType(path: string, pixelSize: number, codepoints: readonly number[]): Promise<TextAtlas | null> {
     if (!Number.isInteger(pixelSize) || pixelSize <= 0 || pixelSize > 1024) throw new RangeError("Invalid TrueType pixel size");
     const coverage = [...new Set([...codepoints, 32, 63])].sort((a, b) => a - b);
-    for (const code of coverage) if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || code >= 0xd800 && code <= 0xdfff)
-      throw new RangeError("Font coverage must contain Unicode scalar values");
+    for (const code of coverage)
+      if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))
+        throw new RangeError("Font coverage must contain Unicode scalar values");
     const key = `truetype:${path}:${pixelSize}:${coverage.join(",")}`;
     return this.cached(key, async () => {
       const bytes = await this.services.read(path);
       if (bytes === null) return null;
       const parsed = parseFont(bytes);
       if (!parsed.ok) throw new Error(`${path}: ${parsed.reason}`);
-      const atlas = buildFontAtlas(parsed.font, coverage, pixelSize), glyphs = new Map<number, AtlasGlyph>();
-      for (const [code, glyph] of atlas.glyphs) glyphs.set(code, { x: glyph.x, y: glyph.y,
-        width: glyph.w, height: glyph.h, advance: glyph.w, color: glyph.color });
+      const atlas = buildFontAtlas(parsed.font, coverage, pixelSize),
+        glyphs = new Map<number, AtlasGlyph>();
+      for (const [code, glyph] of atlas.glyphs)
+        glyphs.set(code, { x: glyph.x, y: glyph.y, width: glyph.w, height: glyph.h, advance: glyph.w, color: glyph.color });
       return this.register("truetype", key, atlas, atlas.lineHeight, glyphs);
     });
   }
   async loadTrueTypePages(path: string, pixelSize: number, codepoints: readonly number[]): Promise<readonly TextAtlas[]> {
     if (!Number.isInteger(pixelSize) || pixelSize <= 0 || pixelSize > 1024) throw new RangeError("Invalid TrueType pixel size");
-    const bytes = await this.services.read(path); if (bytes === null) return [];
-    const parsed = parseFont(bytes); if (!parsed.ok) throw new Error(`${path}: ${parsed.reason}`);
+    const bytes = await this.services.read(path);
+    if (bytes === null) return [];
+    const parsed = parseFont(bytes);
+    if (!parsed.ok) throw new Error(`${path}: ${parsed.reason}`);
     const coverage = [...new Set(codepoints)].filter(code => {
-      if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || code >= 0xd800 && code <= 0xdfff) throw new RangeError("Font coverage must contain Unicode scalar values");
+      if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))
+        throw new RangeError("Font coverage must contain Unicode scalar values");
       return parsed.font.cmapLookup(code) !== 0;
     });
     const pages: TextAtlas[] = [];
     for (let offset = 0; offset < coverage.length; offset += 128) {
-      const codes = coverage.slice(offset, offset + 128), key = `truetype-page:${path}:${pixelSize}:${codes.join(",")}`;
+      const codes = coverage.slice(offset, offset + 128),
+        key = `truetype-page:${path}:${pixelSize}:${codes.join(",")}`;
       const page = await this.cached(key, async () => {
-        const atlas = buildFontAtlas(parsed.font, codes, pixelSize), glyphs = new Map<number, AtlasGlyph>();
-        for (const [code, glyph] of atlas.glyphs) glyphs.set(code, { x: glyph.x, y: glyph.y, width: glyph.w, height: glyph.h, advance: glyph.w, color: glyph.color });
+        const atlas = buildFontAtlas(parsed.font, codes, pixelSize),
+          glyphs = new Map<number, AtlasGlyph>();
+        for (const [code, glyph] of atlas.glyphs)
+          glyphs.set(code, { x: glyph.x, y: glyph.y, width: glyph.w, height: glyph.h, advance: glyph.w, color: glyph.color });
         return this.register("truetype", key, atlas, atlas.lineHeight, glyphs);
       });
       if (page !== null) pages.push(page);
@@ -113,7 +132,8 @@ export class TextFontRegistry {
     if (this.closed) return;
     this.closed = true;
     for (const image of this.images) this.services.releaseImage(image);
-    this.images.clear(); this.cache.clear();
+    this.images.clear();
+    this.cache.clear();
   }
   private cached(key: string, load: () => Promise<TextAtlas | null>): Promise<TextAtlas | null> {
     if (this.closed) throw new Error("Text font registry is closed");
@@ -124,31 +144,55 @@ export class TextFontRegistry {
       return font;
     });
     this.cache.set(key, pending);
-    pending.catch(() => { if (this.cache.get(key) === pending) this.cache.delete(key); });
+    pending.catch(() => {
+      if (this.cache.get(key) === pending) this.cache.delete(key);
+    });
     return pending;
   }
-  private async register(kind: "kfont" | "truetype", name: string, level: ImageLevel,
-    lineHeight: number, glyphs: ReadonlyMap<number, AtlasGlyph>): Promise<TextAtlas> {
+  private async register(
+    kind: "kfont" | "truetype",
+    name: string,
+    level: ImageLevel,
+    lineHeight: number,
+    glyphs: ReadonlyMap<number, AtlasGlyph>,
+  ): Promise<TextAtlas> {
     if (this.closed) throw new Error("Text font registry is closed");
     const image = await this.services.registerImage(name, { kind: "rgba8", levels: [level], borderColor: { x: 0, y: 0, z: 0, w: 0 } });
-    if (this.closed) { this.services.releaseImage(image); throw new Error("Text font registry closed during image registration"); }
+    if (this.closed) {
+      this.services.releaseImage(image);
+      throw new Error("Text font registry closed during image registration");
+    }
     this.images.add(image);
-    let top = lineHeight, bottom = -1;
+    let top = lineHeight,
+      bottom = -1;
     for (const code of [72, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57]) {
       const glyph = glyphs.get(code);
       if (glyph === undefined) continue;
-      for (let y = 0; y < glyph.height; y++) for (let x = 0; x < glyph.width; x++) {
-        if ((level.pixels[((glyph.y + y) * level.width + glyph.x + x) * 4 + 3] ?? 0) > 127) {
-          top = Math.min(top, y); bottom = Math.max(bottom, y);
+      for (let y = 0; y < glyph.height; y++)
+        for (let x = 0; x < glyph.width; x++) {
+          if ((level.pixels[((glyph.y + y) * level.width + glyph.x + x) * 4 + 3] ?? 0) > 127) {
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
         }
-      }
     }
-    return { kind, name, picture: { kind: "image", name, image }, lineHeight, glyphs,
-      ...(bottom < top ? {} : { capInk: { top: top * 8 / lineHeight, height: (bottom - top + 1) * 8 / lineHeight } }) };
+    return {
+      kind,
+      name,
+      picture: { kind: "image", name, image },
+      lineHeight,
+      glyphs,
+      ...(bottom < top ? {} : { capInk: { top: (top * 8) / lineHeight, height: ((bottom - top + 1) * 8) / lineHeight } }),
+    };
   }
 }
 
-export interface ResolvedTextGlyph { readonly atlas: TextAtlas; readonly glyph: AtlasGlyph; readonly codepoint: number; readonly visible: boolean; }
+export interface ResolvedTextGlyph {
+  readonly atlas: TextAtlas;
+  readonly glyph: AtlasGlyph;
+  readonly codepoint: number;
+  readonly visible: boolean;
+}
 function atlasGlyph(atlas: TextAtlas, codepoint: number): ResolvedTextGlyph | null {
   const glyph = atlas.glyphs.get(codepoint);
   return glyph === undefined || glyph.width === 0 ? null : { atlas, glyph, codepoint, visible: codepoint !== 32 };
@@ -170,18 +214,25 @@ export function resolveTextGlyph(selection: TextFontSelection, codepoint: number
   const glyph = atlasGlyph(selection.font, codepoint);
   if (glyph !== null) return glyph;
   for (const fallback of selection.fallbacks ?? []) {
-    const glyph = atlasGlyph(fallback, codepoint); if (glyph !== null) return glyph;
+    const glyph = atlasGlyph(fallback, codepoint);
+    if (glyph !== null) return glyph;
   }
   if (codepoint <= 255) return classic(codepoint);
   return atlasGlyph(selection.font, 63) ?? classic(63);
 }
 export function glyphUv(glyph: ResolvedTextGlyph): TextureRect {
-  return { s: glyph.glyph.x / glyph.atlas.picture.image.width, t: glyph.glyph.y / glyph.atlas.picture.image.height,
+  return {
+    s: glyph.glyph.x / glyph.atlas.picture.image.width,
+    t: glyph.glyph.y / glyph.atlas.picture.image.height,
     s2: (glyph.glyph.x + glyph.glyph.width) / glyph.atlas.picture.image.width,
-    t2: (glyph.glyph.y + glyph.glyph.height) / glyph.atlas.picture.image.height };
+    t2: (glyph.glyph.y + glyph.glyph.height) / glyph.atlas.picture.image.height,
+  };
 }
 export function textCodepoints(text: string): readonly number[] {
   const points = new Set<number>();
-  for (const character of text) { const code = character.codePointAt(0); if (code !== undefined) points.add(code); }
+  for (const character of text) {
+    const code = character.codePointAt(0);
+    if (code !== undefined) points.add(code);
+  }
   return [...points];
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q3 server/sv_game.c information traps shared by primary and component modules. GPL-2.0-or-later. */
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -20,7 +21,8 @@ function configIndex(index: number, operation: string): void {
 
 export function qvmServerInformationSyscall(call: SharedHostCall, services: QvmServerInformationServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
-  const { guest, words } = call, word = (index: number): number => words.getInt32(index * 4, true);
+  const { guest, words } = call,
+    word = (index: number): number => words.getInt32(index * 4, true);
   switch (call.code) {
     case QvmGameImport.G_SET_CONFIGSTRING: {
       configIndex(word(1), "SV_SetConfigstring");
@@ -28,11 +30,15 @@ export function qvmServerInformationSyscall(call: SharedHostCall, services: QvmS
       return result === undefined ? 0 : result.then(() => 0);
     }
     case QvmGameImport.G_GET_CONFIGSTRING:
-      capacity(word(3), "SV_GetConfigstring"); configIndex(word(1), "SV_GetConfigstring");
-      guest.writeString(word(2), services.configstrings.get(qvmConfigstring(word(1), services.abiProfile)), word(3)); return 0;
+      capacity(word(3), "SV_GetConfigstring");
+      configIndex(word(1), "SV_GetConfigstring");
+      guest.writeString(word(2), services.configstrings.get(qvmConfigstring(word(1), services.abiProfile)), word(3));
+      return 0;
     case QvmGameImport.G_GET_SERVERINFO:
       capacity(word(2), "SV_GetServerinfo");
-      guest.writeString(word(1), services.cvars.infoString(CvarFlag.ServerInfo), word(2)); return 0;
-    default: return null;
+      guest.writeString(word(1), services.cvars.infoString(CvarFlag.ServerInfo), word(2));
+      return 0;
+    default:
+      return null;
   }
 }

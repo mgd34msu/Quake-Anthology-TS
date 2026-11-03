@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's botlib/be_ai_move.c mover, grapple and weapon travel.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, sub3, vec3 } from "../../../../core/math.ts";
@@ -46,7 +47,7 @@ export function travelElevator(context: BotTravelContext, state: BotMoveState, r
   if (distance < 64) {
     if (distance > 60) distance = 60;
     const speed = f(360 - f(360 - f(6 * distance)));
-    if ((state.moveFlags & BotMoveFlag.SWIMMING) || !context.checkBarrierJump(state, direction, 50)) {
+    if (state.moveFlags & BotMoveFlag.SWIMMING || !context.checkBarrierJump(state, direction, 50)) {
       if (speed > 5) context.actions.move(state.client, direction, speed);
     }
     result.moveDirection = direction;
@@ -56,7 +57,8 @@ export function travelElevator(context: BotTravelContext, state: BotMoveState, r
   }
   const startOffset = sub3(reach.start, state.origin);
   const startDirection = state.moveFlags & BotMoveFlag.SWIMMING ? startOffset : vec3(startOffset.x, startOffset.y, 0);
-  const startDistance = length3(startDirection), first = normalize3(startDirection);
+  const startDistance = length3(startDirection),
+    first = normalize3(startDirection);
   if (!context.moverDown(reach)) {
     distance = startDistance;
     direction = first;
@@ -74,7 +76,8 @@ export function travelElevator(context: BotTravelContext, state: BotMoveState, r
   }
   const centerOffset = sub3(moverBottomCenter(context, reach), state.origin);
   const centerDirection = state.moveFlags & BotMoveFlag.SWIMMING ? centerOffset : vec3(centerOffset.x, centerOffset.y, 0);
-  const centerDistance = length3(centerDirection), second = normalize3(centerDirection);
+  const centerDistance = length3(centerDirection),
+    second = normalize3(centerDirection);
   if (startDistance < 20 || centerDistance < startDistance || dot3(first, second) < 0) {
     distance = centerDistance;
     direction = second;
@@ -102,36 +105,50 @@ export function finishTravelElevator(context: BotTravelContext, state: BotMoveSt
   return result;
 }
 
-function funcBobStartEnd(context: BotTravelContext, reach: AasReachability): {
-  readonly start: Vec3; readonly end: Vec3; readonly origin: Vec3 | null;
+function funcBobStartEnd(
+  context: BotTravelContext,
+  reach: AasReachability,
+): {
+  readonly start: Vec3;
+  readonly end: Vec3;
+  readonly origin: Vec3 | null;
 } {
   const model = reach.face & 0xffff;
-  const info = context.modelInfo(model), origin = info?.origin ?? null;
+  const info = context.modelInfo(model),
+    origin = info?.origin ?? null;
   if (origin === null) {
     context.print(1, `BotFuncBobStartEnd: no entity with model ${model}\n`);
     return { start: vec3(0, 0, 0), end: vec3(0, 0, 0), origin: null };
   }
   if (info === null) throw new Error("Source bobbing mover has no shared model binding");
   const bounds = info.bounds;
-  const sum = add3(bounds.min, bounds.max), middle = vec3(sum.x * 0.5, sum.y * 0.5, sum.z * 0.5);
+  const sum = add3(bounds.min, bounds.max),
+    middle = vec3(sum.x * 0.5, sum.y * 0.5, sum.z * 0.5);
   const flags = reach.face >> 16;
-  const first = reach.edge >> 16, second = (reach.edge << 16) >> 16;
-  if (flags & 1) return {
-    start: vec3(first, middle.y, middle.z), end: vec3(second, middle.y, middle.z),
-    origin: vec3(origin.x + middle.x, middle.y, middle.z),
-  };
-  if (flags & 2) return {
-    start: vec3(middle.x, first, middle.z), end: vec3(middle.x, second, middle.z),
-    origin: vec3(middle.x, origin.y + middle.y, middle.z),
-  };
+  const first = reach.edge >> 16,
+    second = (reach.edge << 16) >> 16;
+  if (flags & 1)
+    return {
+      start: vec3(first, middle.y, middle.z),
+      end: vec3(second, middle.y, middle.z),
+      origin: vec3(origin.x + middle.x, middle.y, middle.z),
+    };
+  if (flags & 2)
+    return {
+      start: vec3(middle.x, first, middle.z),
+      end: vec3(middle.x, second, middle.z),
+      origin: vec3(middle.x, origin.y + middle.y, middle.z),
+    };
   return {
-    start: vec3(middle.x, middle.y, first), end: vec3(middle.x, middle.y, second),
+    start: vec3(middle.x, middle.y, first),
+    end: vec3(middle.x, middle.y, second),
     origin: vec3(middle.x, middle.y, origin.z + middle.z),
   };
 }
 
 export function travelFuncBobbing(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), bob = funcBobStartEnd(context, reach);
+  const result = new BotMoveResult(),
+    bob = funcBobStartEnd(context, reach);
   if (context.onMover(state, reach)) {
     if (bob.origin === null) throw new Error("BotTravel_FuncBobbing consumes an undefined mover origin");
     if (length3(sub3(bob.origin, bob.end)) < 24) {
@@ -156,7 +173,7 @@ export function travelFuncBobbing(context: BotTravelContext, state: BotMoveState
   if (distance < 64) {
     if (distance > 60) distance = 60;
     const speed = f(360 - f(360 - f(6 * distance)));
-    if ((state.moveFlags & BotMoveFlag.SWIMMING) || !context.checkBarrierJump(state, direction, 50)) {
+    if (state.moveFlags & BotMoveFlag.SWIMMING || !context.checkBarrierJump(state, direction, 50)) {
       if (speed > 5) context.actions.move(state.client, direction, speed);
     }
     result.moveDirection = direction;
@@ -166,7 +183,8 @@ export function travelFuncBobbing(context: BotTravelContext, state: BotMoveState
   }
   const startOffset = sub3(reach.start, state.origin);
   const startDirection = state.moveFlags & BotMoveFlag.SWIMMING ? startOffset : vec3(startOffset.x, startOffset.y, 0);
-  const startDistance = length3(startDirection), first = normalize3(startDirection);
+  const startDistance = length3(startDirection),
+    first = normalize3(startDirection);
   if (bob.origin === null) throw new Error("BotTravel_FuncBobbing consumes an undefined mover origin");
   if (length3(sub3(bob.origin, bob.start)) > 16) {
     distance = startDistance;
@@ -185,7 +203,8 @@ export function travelFuncBobbing(context: BotTravelContext, state: BotMoveState
   }
   const centerOffset = sub3(moverBottomCenter(context, reach), state.origin);
   const centerDirection = state.moveFlags & BotMoveFlag.SWIMMING ? centerOffset : vec3(centerOffset.x, centerOffset.y, 0);
-  const centerDistance = length3(centerDirection), second = normalize3(centerDirection);
+  const centerDistance = length3(centerDirection),
+    second = normalize3(centerDirection);
   if (startDistance < 20 || centerDistance < startDistance || dot3(first, second) < 0) {
     distance = centerDistance;
     direction = second;
@@ -205,7 +224,8 @@ export function travelFuncBobbing(context: BotTravelContext, state: BotMoveState
 }
 
 export function finishTravelFuncBobbing(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
-  const result = new BotMoveResult(), bob = funcBobStartEnd(context, reach);
+  const result = new BotMoveResult(),
+    bob = funcBobStartEnd(context, reach);
   if (bob.origin === null) throw new Error("BotFinishTravel_FuncBobbing consumes an undefined mover origin");
   const direction = sub3(bob.origin, bob.end);
   if (length3(direction) < 16) {
@@ -250,7 +270,7 @@ export function* resetGrappleCalls(context: BotTravelContext, state: BotMoveStat
   const reach = context.reachability(state.lastReachability);
   // AAS_ReachabilityFromNum zeroes its result when the number is out of range.
   if (reach === null || (reach.travelType & TravelType.MASK) !== TravelType.GRAPPLEHOOK) {
-    if ((state.moveFlags & BotMoveFlag.ACTIVEGRAPPLE) || state.grappleVisibleTime !== 0) {
+    if (state.moveFlags & BotMoveFlag.ACTIVEGRAPPLE || state.grappleVisibleTime !== 0) {
       if (context.variable("offhandGrapple").value !== 0) yield* context.actions.commandCalls(state.client, context.variable("grappleOffCommand").string);
       state.moveFlags &= ~BotMoveFlag.ACTIVEGRAPPLE;
       state.grappleVisibleTime = 0;
@@ -302,13 +322,20 @@ export function* travelGrappleCalls(context: BotTravelContext, state: BotMoveSta
     const offset = sub3(reach.start, state.origin);
     const moveOffset = state.moveFlags & BotMoveFlag.SWIMMING ? offset : vec3(offset.x, offset.y, 0);
     const viewDirection = sub3(reach.end, add3(state.origin, state.viewOffset));
-    const distance = length3(moveOffset), direction = normalize3(moveOffset);
+    const distance = length3(moveOffset),
+      direction = normalize3(moveOffset);
     result.idealViewAngles = context.vectorToAngles(viewDirection);
     result.flags |= BotMoveResultFlag.MOVEMENTVIEW;
-    if (distance < 5 && Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 2
-      && Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 2) {
+    if (
+      distance < 5 &&
+      Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 2 &&
+      Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 2
+    ) {
       const trace = context.host.trace(add3(state.origin, state.viewOffset), reach.end, null, state.entityNum, 1);
-      if (length3(sub3(reach.end, trace.end)) > 16) { result.failure = true; return result; }
+      if (length3(sub3(reach.end, trace.end)) > 16) {
+        result.failure = true;
+        return result;
+      }
       if (context.variable("offhandGrapple").value !== 0) yield* context.actions.commandCalls(state.client, context.variable("grappleOnCommand").string);
       else context.actions.attack(state.client);
       state.moveFlags |= BotMoveFlag.ACTIVEGRAPPLE;
@@ -328,11 +355,15 @@ export function* travelGrappleCalls(context: BotTravelContext, state: BotMoveSta
 export function travelRocketJump(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
   const result = new BotMoveResult();
   const offset = vec3(reach.start.x - state.origin.x, reach.start.y - state.origin.y, 0);
-  let distance = length3(offset), direction = normalize3(offset);
+  let distance = length3(offset),
+    direction = normalize3(offset);
   const initialAngles = context.vectorToAngles(direction);
   result.idealViewAngles = vec3(90, initialAngles.y, initialAngles.z);
-  if (distance < 5 && Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 5
-    && Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 5) {
+  if (
+    distance < 5 &&
+    Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 5 &&
+    Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 5
+  ) {
     direction = normalize3(vec3(reach.end.x - state.origin.x, reach.end.y - state.origin.y, 0));
     context.actions.jump(state.client);
     context.actions.attack(state.client);
@@ -356,12 +387,16 @@ export function travelRocketJump(context: BotTravelContext, state: BotMoveState,
 export function travelBFGJump(context: BotTravelContext, state: BotMoveState, reach: AasReachability): BotMoveResult {
   const result = new BotMoveResult();
   const offset = vec3(reach.start.x - state.origin.x, reach.start.y - state.origin.y, 0);
-  let distance = length3(offset), direction = normalize3(offset);
+  let distance = length3(offset),
+    direction = normalize3(offset);
   // The donor initializes native BFG's indeterminate aim with the neighboring rocket calculation.
   const initialAngles = context.vectorToAngles(direction);
   result.idealViewAngles = vec3(90, initialAngles.y, initialAngles.z);
-  if (distance < 5 && Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 5
-    && Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 5) {
+  if (
+    distance < 5 &&
+    Math.abs(movementAngleDifference(result.idealViewAngles.x, state.viewAngles.x)) < 5 &&
+    Math.abs(movementAngleDifference(result.idealViewAngles.y, state.viewAngles.y)) < 5
+  ) {
     direction = normalize3(vec3(reach.end.x - state.origin.x, reach.end.y - state.origin.y, 0));
     context.actions.jump(state.client);
     context.actions.attack(state.client);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { DamageRequest } from "../../../contracts/gameplay.ts";
 import type { UseParticipant } from "./game/state.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
@@ -14,8 +15,13 @@ import { q3WeaponItem, Q3_WEAPON_ITEMS } from "../foundation/arsenal.ts";
 import type { Q3DamageCall } from "./game/combat.ts";
 import { EntityShared } from "./shared/entity-shared.ts";
 
-const ZERO_BODY: BodyState = { origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
-  bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, ground: null };
+const ZERO_BODY: BodyState = {
+  origin: { x: 0, y: 0, z: 0 },
+  angles: { x: 0, y: 0, z: 0 },
+  velocity: { x: 0, y: 0, z: 0 },
+  bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+  ground: null,
+};
 
 export interface Q3RecordHost {
   readonly actors: SessionActorRegistry;
@@ -68,15 +74,18 @@ export class Q3EntityRecords {
     states.forEach((state, slot) => {
       const record = this.record(slot);
       if (record.actor !== null) throw new Error("Q3 ownership hydration requires fresh records");
-      this.assign(record, state.actor); record.active = state.active; record.borrowed = state.borrowed;
+      this.assign(record, state.actor);
+      record.active = state.active;
+      record.borrowed = state.borrowed;
     });
   }
 
   restoreCallbacks(): void {
-    for (const record of this.records) if (record.actor !== null && !record.borrowed) {
-      this.host.combat.bindDamageAdmission(record.actor, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
-      this.bindCallbacks(record);
-    }
+    for (const record of this.records)
+      if (record.actor !== null && !record.borrowed) {
+        this.host.combat.bindDamageAdmission(record.actor, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
+        this.bindCallbacks(record);
+      }
   }
 
   captureClientBacking(slot: number): { readonly sourceStats: readonly number[]; readonly specialAmmo: readonly number[] } {
@@ -88,63 +97,125 @@ export class Q3EntityRecords {
   restoreClientBacking(slot: number, state: { readonly sourceStats: readonly number[]; readonly specialAmmo: readonly number[] }): void {
     const backing = this.clientBacking[slot];
     if (backing === undefined || state.sourceStats.length !== 16 || state.specialAmmo.length !== 16) throw new Error("Invalid Q3 private client backing");
-    backing.sourceStats.set(state.sourceStats); backing.specialAmmo.set(state.specialAmmo);
+    backing.sourceStats.set(state.sourceStats);
+    backing.specialAmmo.set(state.specialAmmo);
   }
 
-  constructor(readonly host: Q3RecordHost, readonly provider: ProviderId, readonly product: Product) {
+  constructor(
+    readonly host: Q3RecordHost,
+    readonly provider: ProviderId,
+    readonly product: Product,
+  ) {
     this.records = Array.from({ length: MAX_GENTITIES }, (_, slot): SourceRecord => {
       const record = (): SourceRecord => this.record(slot);
       const body = {
-        read: (): BodyState => { const actor = record().actor; return actor === null ? ZERO_BODY : host.bodies.read(actor.id) ?? ZERO_BODY; },
-        write: (value: BodyState): void => { host.bodies.write(this.ensureActor(slot), value); },
-        linked: () => { const actor = record().actor; return actor === null ? null : host.bodies.linked(actor.id); },
+        read: (): BodyState => {
+          const actor = record().actor;
+          return actor === null ? ZERO_BODY : (host.bodies.read(actor.id) ?? ZERO_BODY);
+        },
+        write: (value: BodyState): void => {
+          host.bodies.write(this.ensureActor(slot), value);
+        },
+        linked: () => {
+          const actor = record().actor;
+          return actor === null ? null : host.bodies.linked(actor.id);
+        },
       };
-      const entity = new GameEntity(slot, { body, actor: () => this.ensureActor(slot),
+      const entity = new GameEntity(slot, {
+        body,
+        actor: () => this.ensureActor(slot),
         active: () => record().active && record().actor !== null && host.actors.isLive(this.ensureActor(slot).id),
-        health: () => { const actor = record().actor; return actor === null ? 0 : host.combat.read(actor.id)?.health ?? 0; },
-        setHealth: value => { host.combat.setHealth(this.ensureActor(slot), value); },
-        takedamage: () => { const actor = record().actor; return actor !== null && (host.combat.read(actor.id)?.canTakeDamage ?? false); },
-        setTakedamage: value => { host.combat.setTraits(this.ensureActor(slot), { canTakeDamage: value }); },
-        runThink: time => { host.runThink(this.ensureActor(slot), time); },
-        schedule: value => { const actor = record().actor; if (actor !== null) host.schedule(actor, value <= 0 ? null : value); },
+        health: () => {
+          const actor = record().actor;
+          return actor === null ? 0 : (host.combat.read(actor.id)?.health ?? 0);
+        },
+        setHealth: value => {
+          host.combat.setHealth(this.ensureActor(slot), value);
+        },
+        takedamage: () => {
+          const actor = record().actor;
+          return actor !== null && (host.combat.read(actor.id)?.canTakeDamage ?? false);
+        },
+        setTakedamage: value => {
+          host.combat.setTraits(this.ensureActor(slot), { canTakeDamage: value });
+        },
+        runThink: time => {
+          host.runThink(this.ensureActor(slot), time);
+        },
+        schedule: value => {
+          const actor = record().actor;
+          if (actor !== null) host.schedule(actor, value <= 0 ? null : value);
+        },
       });
       return { entity, actor: null, active: false, borrowed: false };
     });
-    this.clients = Array.from({ length: MAX_CLIENTS }, (_, slot) => new GameClient(product, this.playerBinding(slot), host.ammoTimerStored === undefined ? undefined : (weapon, value) => {
-      const actor = this.record(slot).actor; if (actor !== null) host.ammoTimerStored?.(actor.id, weapon, value);
-    }));
+    this.clients = Array.from(
+      { length: MAX_CLIENTS },
+      (_, slot) =>
+        new GameClient(
+          product,
+          this.playerBinding(slot),
+          host.ammoTimerStored === undefined
+            ? undefined
+            : (weapon, value) => {
+                const actor = this.record(slot).actor;
+                if (actor !== null) host.ammoTimerStored?.(actor.id, weapon, value);
+              },
+        ),
+    );
     this.unobserve = host.actors.onRelease(actor => {
-      for (const record of this.records) if (record.actor === actor) { this.assign(record, null); record.active = false; }
+      for (const record of this.records)
+        if (record.actor === actor) {
+          this.assign(record, null);
+          record.active = false;
+        }
       return undefined;
     });
   }
 
-  close(): void { this.unobserve(); }
+  close(): void {
+    this.unobserve();
+  }
 
-  get(slot: number): GameEntity | undefined { return this.records[slot]?.entity; }
-  client(slot: number): GameClient { const client = this.clients[slot]; if (client === undefined) throw new RangeError(`Q3 client ${slot} outside 0..63`); return client; }
+  get(slot: number): GameEntity | undefined {
+    return this.records[slot]?.entity;
+  }
+  client(slot: number): GameClient {
+    const client = this.clients[slot];
+    if (client === undefined) throw new RangeError(`Q3 client ${slot} outside 0..63`);
+    return client;
+  }
   /** Actor lookups run per trace hit and per tick, so records are indexed by actor slot instead of scanned. */
   private readonly byActorSlot = new Map<number, SourceRecord[]>();
   private assign(record: SourceRecord, actor: OwnedActor | null): void {
     const previous = record.actor;
     if (previous !== null) {
-      const bucket = this.byActorSlot.get(previous.id.slot), index = bucket?.indexOf(record) ?? -1;
+      const bucket = this.byActorSlot.get(previous.id.slot),
+        index = bucket?.indexOf(record) ?? -1;
       if (bucket !== undefined && index >= 0) bucket.splice(index, 1);
     }
     record.actor = actor;
     if (actor !== null) {
       const bucket = this.byActorSlot.get(actor.id.slot);
-      if (bucket === undefined) this.byActorSlot.set(actor.id.slot, [record]); else bucket.push(record);
+      if (bucket === undefined) this.byActorSlot.set(actor.id.slot, [record]);
+      else bucket.push(record);
     }
   }
   private recordOf(actor: ActorId): SourceRecord | undefined {
     return this.byActorSlot.get(actor.slot)?.find(record => record.actor?.id.equals(actor));
   }
-  private record(slot: number): SourceRecord { const record = this.records[slot]; if (record === undefined) throw new RangeError(`Q3 entity ${slot} outside 0..1023`); return record; }
+  private record(slot: number): SourceRecord {
+    const record = this.records[slot];
+    if (record === undefined) throw new RangeError(`Q3 entity ${slot} outside 0..1023`);
+    return record;
+  }
 
   private ensureActor(slot: number): OwnedActor {
     const record = this.record(slot);
-    if (record.actor !== null) { this.host.actors.assertOwned(record.actor); return record.actor; }
+    if (record.actor !== null) {
+      this.host.actors.assertOwned(record.actor);
+      return record.actor;
+    }
     const actor = this.host.actors.allocateAtSource(this.provider, slot, slot < MAX_CLIENTS ? "q3:player" : "q3:entity");
     this.assign(record, actor);
     this.host.bodies.create(actor, ZERO_BODY);
@@ -155,10 +226,19 @@ export class Q3EntityRecords {
   private bindOwnedServices(record: SourceRecord): void {
     const actor = record.actor;
     if (actor === null) throw new Error("Cannot bind Q3 services without an actor");
-    if (this.host.combat.read(actor.id) === null) this.host.combat.create(actor, {
-      health: 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
-      mass: 200, canTakeDamage: false, invulnerable: false, team: null,
-    }, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
+    if (this.host.combat.read(actor.id) === null)
+      this.host.combat.create(
+        actor,
+        {
+          health: 0,
+          armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
+          mass: 200,
+          canTakeDamage: false,
+          invulnerable: false,
+          team: null,
+        },
+        request => this.host.admitDamage?.(record.entity, request) ?? "continue",
+      );
     else this.host.combat.bindDamageAdmission(actor, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
     if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, []);
     this.bindCallbacks(record);
@@ -168,10 +248,19 @@ export class Q3EntityRecords {
   adopt(slot: number, actor: OwnedActor): GameEntity {
     this.host.actors.assertOwned(actor);
     const record = this.record(slot);
-    if (slot < MAX_CLIENTS || slot >= 1022 || actor.owner !== this.provider || record.actor !== null
-      || this.nativeByActor(actor.id) !== null || this.host.bodies.read(actor.id) === null)
+    if (
+      slot < MAX_CLIENTS ||
+      slot >= 1022 ||
+      actor.owner !== this.provider ||
+      record.actor !== null ||
+      this.nativeByActor(actor.id) !== null ||
+      this.host.bodies.read(actor.id) === null
+    )
       throw new Error("Q3 owned actor adoption requires an unused entity slot and its existing body");
-    this.assign(record, actor); record.active = true; record.borrowed = false; record.entity.s.number = slot;
+    this.assign(record, actor);
+    record.active = true;
+    record.borrowed = false;
+    record.entity.s.number = slot;
     this.bindOwnedServices(record);
     return record.entity;
   }
@@ -181,7 +270,9 @@ export class Q3EntityRecords {
     this.host.actors.assertOwned(actor);
     const record = this.record(slot);
     if (record.actor !== null && record.actor !== actor) throw new Error(`Q3 slot ${slot} already has an actor`);
-    this.assign(record, actor); record.active = true; record.borrowed = true;
+    this.assign(record, actor);
+    record.active = true;
+    record.borrowed = true;
     if (player) record.entity.client = this.client(slot);
     record.entity.s.number = slot;
     return record.entity;
@@ -189,7 +280,8 @@ export class Q3EntityRecords {
 
   activate(slot: number): GameEntity {
     const record = this.record(slot);
-    this.ensureActor(slot); record.active = true;
+    this.ensureActor(slot);
+    record.active = true;
     return record.entity;
   }
 
@@ -197,7 +289,9 @@ export class Q3EntityRecords {
     const record = this.record(slot);
     const actor = record.actor;
     if (actor !== null && !record.borrowed) this.host.actors.release(actor);
-    this.assign(record, null); record.active = false; record.borrowed = false;
+    this.assign(record, null);
+    record.active = false;
+    record.borrowed = false;
   }
 
   release(entity: GameEntity): void {
@@ -205,7 +299,9 @@ export class Q3EntityRecords {
     if (record.entity !== entity) throw new Error("Q3 entity belongs to another record owner");
     const actor = record.actor;
     if (actor !== null && !record.borrowed) this.host.actors.release(actor);
-    this.assign(record, null); record.active = false; record.borrowed = false;
+    this.assign(record, null);
+    record.active = false;
+    record.borrowed = false;
     const fresh = new GameEntity(entity.slot, entity.binding);
     Object.assign(entity, fresh);
     // Body getters retain their forwarding binding; source metadata is cleared.
@@ -213,7 +309,7 @@ export class Q3EntityRecords {
   }
 
   nativeByActor(actor: ActorId | null): GameEntity | null {
-    return actor === null ? null : this.recordOf(actor)?.entity ?? null;
+    return actor === null ? null : (this.recordOf(actor)?.entity ?? null);
   }
 
   byActor(actor: ActorId | null): GameEntity | null {
@@ -221,7 +317,9 @@ export class Q3EntityRecords {
     return this.recordOf(actor)?.entity ?? this.host.foreign(actor);
   }
 
-  private reactionOther(actor: ActorId | null): DamageInflictor { return this.damageInflictor(actor); }
+  private reactionOther(actor: ActorId | null): DamageInflictor {
+    return this.damageInflictor(actor);
+  }
 
   useParticipant(actor: ActorId | null): UseParticipant | null {
     if (actor === null) return null;
@@ -232,30 +330,55 @@ export class Q3EntityRecords {
     if (actor === null) return this.record(1022).entity;
     const native = this.recordOf(actor);
     if (native !== undefined) return native.entity;
-    return { kind: "shared-actor", actor, origin: () => {
-      const body = this.host.bodies.read(actor);
-      return this.host.actors.isLive(actor) && body !== null ? body.origin : null;
-    } };
+    return {
+      kind: "shared-actor",
+      actor,
+      origin: () => {
+        const body = this.host.bodies.read(actor);
+        return this.host.actors.isLive(actor) && body !== null ? body.origin : null;
+      },
+    };
   }
 
   private bindCallbacks(record: SourceRecord): void {
     const actor = record.actor;
     if (actor === null) throw new Error("Cannot bind inactive Q3 record callbacks");
     const entity = record.entity;
-    const pain = (reaction: PainReaction): undefined => { entity.pain?.(entity, this.reactionOther(reaction.attacker), reaction.damage); return undefined; };
+    const pain = (reaction: PainReaction): undefined => {
+      entity.pain?.(entity, this.reactionOther(reaction.attacker), reaction.damage);
+      return undefined;
+    };
     const die = (reaction: DeathReaction): undefined => {
       const call = this.host.damageCall();
       if (entity.die === null) throw new Error("G_Damage lethal target has no die callback");
-      entity.die(entity, this.damageInflictor(reaction.inflictor), this.reactionOther(reaction.attacker), reaction.damage,
-        call?.methodOfDeath ?? (reaction.attack?.cause.kind === "q3" ? reaction.attack.cause.meansOfDeath : 0)); return undefined;
+      entity.die(
+        entity,
+        this.damageInflictor(reaction.inflictor),
+        this.reactionOther(reaction.attacker),
+        reaction.damage,
+        call?.methodOfDeath ?? (reaction.attack?.cause.kind === "q3" ? reaction.attack.cause.meansOfDeath : 0),
+      );
+      return undefined;
     };
     this.host.callbacks.bind(actor, {
-      think: () => { entity.nextthink = 0; if (entity.think === null) throw new Error("NULL ent->think"); entity.think(entity); return undefined; },
+      think: () => {
+        entity.nextthink = 0;
+        if (entity.think === null) throw new Error("NULL ent->think");
+        entity.think(entity);
+        return undefined;
+      },
       touch: contact => {
         if (entity.touch === null) return undefined;
         const native = this.recordOf(contact.other);
-        entity.touch(entity, native?.entity ?? this.damageInflictor(contact.other), contact); return undefined; },
-      use: (_self, other, activator) => { entity.use?.(entity, this.useParticipant(other), this.useParticipant(activator)); return undefined; }, pain, die,
+        entity.touch(entity, native?.entity ?? this.damageInflictor(contact.other), contact);
+        return undefined;
+      },
+      use: (_self, other, activator) => {
+        entity.use?.(entity, this.useParticipant(other), this.useParticipant(activator));
+        return undefined;
+      },
+      pain,
+      die,
     });
   }
 
@@ -270,32 +393,68 @@ export class Q3EntityRecords {
       this.host.inventory.configure(actor(), { item, count, capacity });
     };
     return {
-      origin: () => body().origin, setOrigin: value => { this.host.bodies.write(actor(), { ...body(), origin: value }); },
-      velocity: () => body().velocity, setVelocity: value => { this.host.bodies.write(actor(), { ...body(), velocity: value }); },
+      origin: () => body().origin,
+      setOrigin: value => {
+        this.host.bodies.write(actor(), { ...body(), origin: value });
+      },
+      velocity: () => body().velocity,
+      setVelocity: value => {
+        this.host.bodies.write(actor(), { ...body(), velocity: value });
+      },
       stats: {
         read: index => {
           if (index === schema.health) return this.record(slot).entity.health;
-          if (index === schema.armor) { const current = this.record(slot).actor; const armor = current === null ? null : this.host.combat.read(current.id)?.armor.regular;
-            return armor === null || armor === undefined || armor.kind === "none" ? 0 : armor.points; }
-          if (index === schema.weapons) { const current = this.record(slot).actor; if (current === null) return 0;
-            return Q3_WEAPON_ITEMS.reduce((bits, weapon) => bits | (this.host.inventory.count(current.id, weapon.item) > 0 ? 1 << weapon.weapon : 0), 0); }
-          const value = sourceStats[index]; if (value === undefined) throw new RangeError(`Q3 stat ${index} outside 0..15`); return value;
+          if (index === schema.armor) {
+            const current = this.record(slot).actor;
+            const armor = current === null ? null : this.host.combat.read(current.id)?.armor.regular;
+            return armor === null || armor === undefined || armor.kind === "none" ? 0 : armor.points;
+          }
+          if (index === schema.weapons) {
+            const current = this.record(slot).actor;
+            if (current === null) return 0;
+            return Q3_WEAPON_ITEMS.reduce((bits, weapon) => bits | (this.host.inventory.count(current.id, weapon.item) > 0 ? 1 << weapon.weapon : 0), 0);
+          }
+          const value = sourceStats[index];
+          if (value === undefined) throw new RangeError(`Q3 stat ${index} outside 0..15`);
+          return value;
         },
         write: (index, value) => {
-          if (index === schema.health) { this.host.combat.setHealth(actor(), value); return; }
-          if (index === schema.armor) { this.host.combat.setRegularPoints(actor(), value, { kind: "q3", points: value, protection: Math.fround(0.66) }); return; }
-          if (index === schema.weapons) { for (const weapon of Q3_WEAPON_ITEMS) configure(weapon.item, value & (1 << weapon.weapon) ? 1 : 0, 1); return; }
+          if (index === schema.health) {
+            this.host.combat.setHealth(actor(), value);
+            return;
+          }
+          if (index === schema.armor) {
+            this.host.combat.setRegularPoints(actor(), value, { kind: "q3", points: value, protection: Math.fround(0.66) });
+            return;
+          }
+          if (index === schema.weapons) {
+            for (const weapon of Q3_WEAPON_ITEMS) configure(weapon.item, value & (1 << weapon.weapon) ? 1 : 0, 1);
+            return;
+          }
           if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 stat ${index} outside 0..15`);
           sourceStats[index] = value;
         },
       },
       ammo: {
-        read: index => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) { const current = this.record(slot).actor;
-          return current === null ? 0 : this.host.inventory.count(current.id, weapon.ammo); }
-          const value = specialAmmo[index]; if (value === undefined) throw new RangeError(`Q3 ammo ${index} outside 0..15`); return value; },
-        write: (index, value) => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) {
-          configure(weapon.ammo, value, 200); return; }
-          if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 ammo ${index} outside 0..15`); specialAmmo[index] = value; },
+        read: index => {
+          const weapon = q3WeaponItem(index);
+          if (weapon?.ammo != null) {
+            const current = this.record(slot).actor;
+            return current === null ? 0 : this.host.inventory.count(current.id, weapon.ammo);
+          }
+          const value = specialAmmo[index];
+          if (value === undefined) throw new RangeError(`Q3 ammo ${index} outside 0..15`);
+          return value;
+        },
+        write: (index, value) => {
+          const weapon = q3WeaponItem(index);
+          if (weapon?.ammo != null) {
+            configure(weapon.ammo, value, 200);
+            return;
+          }
+          if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 ammo ${index} outside 0..15`);
+          specialAmmo[index] = value;
+        },
       },
     };
   }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's game/ai_chat.c and ai_main.c:BotAI_BotInitialChat.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -8,8 +9,7 @@ import { infoValueForKey } from "../../../core/info-string.ts";
 import { vec3 } from "../../../core/math.ts";
 import { GameType, PersistentIndex, Team } from "../../../content/q3/base/shared/definitions.ts";
 import { ENTITYNUM_WORLD } from "../../../content/q3/base/shared/player-state.ts";
-import { botEntityInfo, botEntityVisible, botIsDead, botIsObserver,
-  entityIsDead, entityIsInvisible, entityIsShooting } from "./ai-combat.ts";
+import { botEntityInfo, botEntityVisible, botIsDead, botIsObserver, entityIsDead, entityIsInvisible, entityIsShooting } from "./ai-combat.ts";
 import type { GameAiContext } from "./ai-context.ts";
 import { BotCharacteristic, BotInventory, BotLongTermGoal } from "./ai-definitions.ts";
 import { botSameTeam, botSynonymContext, clientName, easyClientName } from "./ai-orders.ts";
@@ -37,8 +37,7 @@ function cachedMaxClients(context: GameAiContext, name: string): number {
 
 function activePlayer(context: GameAiContext, client: number): boolean {
   const config = context.game.options.configstrings.get(544 + client).slice(0, 1023);
-  return config.length !== 0 && infoValueForKey(config, "n").length !== 0 &&
-    gameAtoi(infoValueForKey(config, "t")) !== Team.TEAM_SPECTATOR;
+  return config.length !== 0 && infoValueForKey(config, "n").length !== 0 && gameAtoi(infoValueForKey(config, "t")) !== Team.TEAM_SPECTATOR;
 }
 
 export function botNumActivePlayers(context: GameAiContext): number {
@@ -81,13 +80,20 @@ function rankedClient(context: GameAiContext, first: boolean): string {
     const player = context.getClientState(client);
     if (player === null) throw new Error("BotClientInRankings: active player has no client state");
     const current = player.persistant.get(PersistentIndex.PERS_SCORE);
-    if (first ? current > score : current < score) { score = current; selected = client; }
+    if (first ? current > score : current < score) {
+      score = current;
+      selected = client;
+    }
   }
   return easyClientName(context, selected, 32);
 }
 
-export function botFirstClientInRankings(context: GameAiContext): string { return rankedClient(context, true); }
-export function botLastClientInRankings(context: GameAiContext): string { return rankedClient(context, false); }
+export function botFirstClientInRankings(context: GameAiContext): string {
+  return rankedClient(context, true);
+}
+export function botLastClientInRankings(context: GameAiContext): string {
+  return rankedClient(context, false);
+}
 
 export function botRandomOpponentName(context: GameAiContext, state: BotState): string {
   const maximum = cachedMaxClients(context, "BotRandomOpponentName");
@@ -108,21 +114,45 @@ export function botMapTitle(context: GameAiContext): string {
 
 export function botWeaponNameForMeansOfDeath(context: GameAiContext, method: number): string {
   switch (method) {
-    case 1: return "Shotgun";
-    case 2: return "Gauntlet";
-    case 3: return "Machinegun";
-    case 4: case 5: return "Grenade Launcher";
-    case 6: case 7: return "Rocket Launcher";
-    case 8: case 9: return "Plasmagun";
-    case 10: return "Railgun";
-    case 11: return "Lightning Gun";
-    case 12: case 13: return "BFG10K";
-    case 23: return context.game.options.product === "missionpack" ? "Nailgun" : "Grapple";
-    case 24: if (context.game.options.product === "missionpack") return "Chaingun"; break;
-    case 25: if (context.game.options.product === "missionpack") return "Proximity Launcher"; break;
-    case 26: if (context.game.options.product === "missionpack") return "Kamikaze"; break;
-    case 27: if (context.game.options.product === "missionpack") return "Prox mine"; break;
-    case 28: if (context.game.options.product === "missionpack") return "Grapple"; break;
+    case 1:
+      return "Shotgun";
+    case 2:
+      return "Gauntlet";
+    case 3:
+      return "Machinegun";
+    case 4:
+    case 5:
+      return "Grenade Launcher";
+    case 6:
+    case 7:
+      return "Rocket Launcher";
+    case 8:
+    case 9:
+      return "Plasmagun";
+    case 10:
+      return "Railgun";
+    case 11:
+      return "Lightning Gun";
+    case 12:
+    case 13:
+      return "BFG10K";
+    case 23:
+      return context.game.options.product === "missionpack" ? "Nailgun" : "Grapple";
+    case 24:
+      if (context.game.options.product === "missionpack") return "Chaingun";
+      break;
+    case 25:
+      if (context.game.options.product === "missionpack") return "Proximity Launcher";
+      break;
+    case 26:
+      if (context.game.options.product === "missionpack") return "Kamikaze";
+      break;
+    case 27:
+      if (context.game.options.product === "missionpack") return "Prox mine";
+      break;
+    case 28:
+      if (context.game.options.product === "missionpack") return "Grapple";
+      break;
   }
   return "[unknown weapon]";
 }
@@ -131,17 +161,31 @@ export function botRandomWeaponName(context: GameAiContext): string {
   const missionpack = context.game.options.product === "missionpack";
   const selected = Math.trunc(Math.fround(context.random() * Math.fround(missionpack ? 11.9 : 8.9)));
   switch (selected) {
-    case 0: return "Gauntlet";
-    case 1: return "Shotgun";
-    case 2: return "Machinegun";
-    case 3: return "Grenade Launcher";
-    case 4: return "Rocket Launcher";
-    case 5: return "Plasmagun";
-    case 6: return "Railgun";
-    case 7: return "Lightning Gun";
-    case 8: if (missionpack) return "Nailgun"; break;
-    case 9: if (missionpack) return "Chaingun"; break;
-    case 10: if (missionpack) return "Proximity Launcher"; break;
+    case 0:
+      return "Gauntlet";
+    case 1:
+      return "Shotgun";
+    case 2:
+      return "Machinegun";
+    case 3:
+      return "Grenade Launcher";
+    case 4:
+      return "Rocket Launcher";
+    case 5:
+      return "Plasmagun";
+    case 6:
+      return "Railgun";
+    case 7:
+      return "Lightning Gun";
+    case 8:
+      if (missionpack) return "Nailgun";
+      break;
+    case 9:
+      if (missionpack) return "Chaingun";
+      break;
+    case 10:
+      if (missionpack) return "Proximity Launcher";
+      break;
   }
   return "BFG10K";
 }
@@ -169,15 +213,27 @@ export function botValidChatPosition(context: GameAiContext, state: BotState): b
   if ((context.game.world.pointContents(vec3(origin.x, origin.y, Math.fround(origin.z - 24)), state.entityNum) & (8 | 16)) !== 0) return false;
   if ((context.game.world.pointContents(vec3(origin.x, origin.y, Math.fround(origin.z + 32)), state.entityNum) & (8 | 16 | 32)) !== 0) return false;
   const bounds = context.navigation.presenceBounds(4);
-  const trace = context.game.world.trace({ start: vec3(origin.x, origin.y, Math.fround(origin.z + 1)),
-    end: vec3(origin.x, origin.y, Math.fround(origin.z - 10)), shape: { kind: "box", mins: bounds.min, maxs: bounds.max },
-    passEntityNum: state.client, mask: 1 });
+  const trace = context.game.world.trace({
+    start: vec3(origin.x, origin.y, Math.fround(origin.z + 1)),
+    end: vec3(origin.x, origin.y, Math.fround(origin.z - 10)),
+    shape: { kind: "box", mins: bounds.min, maxs: bounds.max },
+    passEntityNum: state.client,
+    mask: 1,
+  });
   return trace.entityNum === ENTITYNUM_WORLD;
 }
 
 export function botInitialChat(context: GameAiContext, state: BotState, type: string, ...variables: readonly (string | null)[]): void {
-  const values: [string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null] =
-    [null, null, null, null, null, null, null, null];
+  const values: [string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null] = [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ];
   for (let index = 0; index < 8; index++) {
     const value = variables[index];
     if (value === null || value === undefined) break;
@@ -205,7 +261,16 @@ export function botChatEnterGame(context: GameAiContext, state: BotState): boole
   if (unavailable(context, state) || context.gameType >= GameType.GT_TEAM || context.gameType === GameType.GT_TOURNAMENT) return false;
   if (randomRefused(context, characteristic(context, state, BotCharacteristic.CHAT_ENTEREXITGAME))) return false;
   if (botNumActivePlayers(context) <= 1 || !botValidChatPosition(context, state)) return false;
-  botInitialChat(context, state, "game_enter", easyClientName(context, state.client, 32), botRandomOpponentName(context, state), INVALID_VARIABLE, INVALID_VARIABLE, botMapTitle(context));
+  botInitialChat(
+    context,
+    state,
+    "game_enter",
+    easyClientName(context, state.client, 32),
+    botRandomOpponentName(context, state),
+    INVALID_VARIABLE,
+    INVALID_VARIABLE,
+    botMapTitle(context),
+  );
   return allChat(context, state);
 }
 
@@ -213,13 +278,26 @@ export function botChatExitGame(context: GameAiContext, state: BotState): boolea
   if (unavailable(context, state) || context.gameType >= GameType.GT_TEAM || context.gameType === GameType.GT_TOURNAMENT) return false;
   if (randomRefused(context, characteristic(context, state, BotCharacteristic.CHAT_ENTEREXITGAME))) return false;
   if (botNumActivePlayers(context) <= 1) return false;
-  botInitialChat(context, state, "game_exit", easyClientName(context, state.client, 32), botRandomOpponentName(context, state), INVALID_VARIABLE, INVALID_VARIABLE, botMapTitle(context));
+  botInitialChat(
+    context,
+    state,
+    "game_exit",
+    easyClientName(context, state.client, 32),
+    botRandomOpponentName(context, state),
+    INVALID_VARIABLE,
+    INVALID_VARIABLE,
+    botMapTitle(context),
+  );
   return allChat(context, state);
 }
 
 export function botChatStartLevel(context: GameAiContext, state: BotState): boolean {
-  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING)) return false;
-  if (context.gameType >= GameType.GT_TEAM) { context.library.actions.command(state.client, "vtaunt"); return false; }
+  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING))
+    return false;
+  if (context.gameType >= GameType.GT_TEAM) {
+    context.library.actions.command(state.client, "vtaunt");
+    return false;
+  }
   if (context.gameType === GameType.GT_TOURNAMENT) return false;
   if (randomRefused(context, characteristic(context, state, BotCharacteristic.CHAT_STARTENDLEVEL)) || botNumActivePlayers(context) <= 1) return false;
   botInitialChat(context, state, "level_start", easyClientName(context, state.client, 32));
@@ -227,7 +305,8 @@ export function botChatStartLevel(context: GameAiContext, state: BotState): bool
 }
 
 export function botChatEndLevel(context: GameAiContext, state: BotState): boolean {
-  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING)) return false;
+  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING))
+    return false;
   if (context.gameType >= GameType.GT_TEAM) {
     if (botIsFirstInRankings(context, state)) context.library.actions.command(state.client, "vtaunt");
     return true;
@@ -236,9 +315,16 @@ export function botChatEndLevel(context: GameAiContext, state: BotState): boolea
   if (randomRefused(context, characteristic(context, state, BotCharacteristic.CHAT_STARTENDLEVEL)) || botNumActivePlayers(context) <= 1) return false;
   const first = botIsFirstInRankings(context, state);
   const last = !first && botIsLastInRankings(context, state);
-  botInitialChat(context, state, first ? "level_end_victory" : last ? "level_end_lose" : "level_end",
-    easyClientName(context, state.client, 32), botRandomOpponentName(context, state),
-    first ? INVALID_VARIABLE : botFirstClientInRankings(context), last ? INVALID_VARIABLE : botLastClientInRankings(context), botMapTitle(context));
+  botInitialChat(
+    context,
+    state,
+    first ? "level_end_victory" : last ? "level_end_lose" : "level_end",
+    easyClientName(context, state.client, 32),
+    botRandomOpponentName(context, state),
+    first ? INVALID_VARIABLE : botFirstClientInRankings(context),
+    last ? INVALID_VARIABLE : botLastClientInRankings(context),
+    botMapTitle(context),
+  );
   return allChat(context, state);
 }
 
@@ -252,18 +338,24 @@ export function botChatDeath(context: GameAiContext, state: BotState): boolean {
     botInitialChat(context, state, "death_teammate", name);
     state.chatTo = ChatDestination.Team;
   } else {
-    if (context.gameType >= GameType.GT_TEAM) { context.library.actions.command(state.client, "vtaunt"); return true; }
+    if (context.gameType >= GameType.GT_TEAM) {
+      context.library.actions.command(state.client, "vtaunt");
+      return true;
+    }
     const method = state.botDeathType;
     if (method === 14) botInitialChat(context, state, "death_drown", botRandomOpponentName(context, state));
     else if (method === 15) botInitialChat(context, state, "death_slime", botRandomOpponentName(context, state));
     else if (method === 16) botInitialChat(context, state, "death_lava", botRandomOpponentName(context, state));
     else if (method === 19) botInitialChat(context, state, "death_cratered", botRandomOpponentName(context, state));
-    else if (state.botSuicide || method === 17 || method === 20 || method === 21 || method === 22 || method === 0) botInitialChat(context, state, "death_suicide", botRandomOpponentName(context, state));
+    else if (state.botSuicide || method === 17 || method === 20 || method === 21 || method === 22 || method === 0)
+      botInitialChat(context, state, "death_suicide", botRandomOpponentName(context, state));
     else if (method === 18) botInitialChat(context, state, "death_telefrag", name);
-    else if (context.game.options.product === "missionpack" && method === 26 && context.library.chat.numInitialChats(state.cs, "death_kamikaze") !== 0) botInitialChat(context, state, "death_kamikaze", name);
+    else if (context.game.options.product === "missionpack" && method === 26 && context.library.chat.numInitialChats(state.cs, "death_kamikaze") !== 0)
+      botInitialChat(context, state, "death_kamikaze", name);
     else {
       let type: string;
-      if ((method === 2 || method === 10 || method === 12 || method === 13) && context.random() < 0.5) type = method === 2 ? "death_gauntlet" : method === 10 ? "death_rail" : "death_bfg";
+      if ((method === 2 || method === 10 || method === 12 || method === 13) && context.random() < 0.5)
+        type = method === 2 ? "death_gauntlet" : method === 10 ? "death_rail" : "death_bfg";
       else type = context.random() < characteristic(context, state, BotCharacteristic.CHAT_INSULT) ? "death_insult" : "death_praise";
       botInitialChat(context, state, type, name, botWeaponNameForMeansOfDeath(context, method));
     }
@@ -284,14 +376,22 @@ export function botChatKill(context: GameAiContext, state: BotState): boolean {
     botInitialChat(context, state, "kill_teammate", name);
     state.chatTo = ChatDestination.Team;
   } else {
-    if (context.gameType >= GameType.GT_TEAM) { context.library.actions.command(state.client, "vtaunt"); return false; }
+    if (context.gameType >= GameType.GT_TEAM) {
+      context.library.actions.command(state.client, "vtaunt");
+      return false;
+    }
     const method = state.enemyDeathType;
     let type: string;
     if (method === 2) type = "kill_gauntlet";
     else if (method === 10) type = "kill_rail";
     else if (method === 18) type = "kill_telefrag";
     // The source tests botdeathtype here rather than enemydeathtype.
-    else if (context.game.options.product === "missionpack" && state.botDeathType === 26 && context.library.chat.numInitialChats(state.cs, "kill_kamikaze") !== 0) type = "kill_kamikaze";
+    else if (
+      context.game.options.product === "missionpack" &&
+      state.botDeathType === 26 &&
+      context.library.chat.numInitialChats(state.cs, "kill_kamikaze") !== 0
+    )
+      type = "kill_kamikaze";
     else type = context.random() < characteristic(context, state, BotCharacteristic.CHAT_INSULT) ? "kill_insult" : "kill_praise";
     botInitialChat(context, state, type, name);
   }
@@ -347,16 +447,36 @@ export function botChatHitNoKill(context: GameAiContext, state: BotState): boole
 }
 
 export function botChatRandom(context: GameAiContext, state: BotState): boolean {
-  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING)) return false;
-  if (context.gameType === GameType.GT_TOURNAMENT || state.ltgType === BotLongTermGoal.TEAMHELP || state.ltgType === BotLongTermGoal.TEAMACCOMPANY || state.ltgType === BotLongTermGoal.RUSHBASE) return false;
+  if (context.cvar("bot_nochat").integerValue !== 0 || botIsObserver(context, state) || state.lastChatTime > Math.fround(context.time - TIME_BETWEEN_CHATTING))
+    return false;
+  if (
+    context.gameType === GameType.GT_TOURNAMENT ||
+    state.ltgType === BotLongTermGoal.TEAMHELP ||
+    state.ltgType === BotLongTermGoal.TEAMACCOMPANY ||
+    state.ltgType === BotLongTermGoal.RUSHBASE
+  )
+    return false;
   const chance = characteristic(context, state, BotCharacteristic.CHAT_RANDOM);
   if (context.random() > Math.fround(state.thinkTime * Math.fround(0.1))) return false;
   if (context.cvar("bot_fastchat").integerValue === 0 && (context.random() > chance || context.random() > 0.25)) return false;
   if (botNumActivePlayers(context) <= 1 || !botValidChatPosition(context, state) || botVisibleEnemies(context, state)) return false;
   const name = state.lastKilledPlayer === state.client ? botRandomOpponentName(context, state) : easyClientName(context, state.lastKilledPlayer, 32);
-  if (context.gameType >= GameType.GT_TEAM) { context.library.actions.command(state.client, "vtaunt"); return false; }
+  if (context.gameType >= GameType.GT_TEAM) {
+    context.library.actions.command(state.client, "vtaunt");
+    return false;
+  }
   const type = context.random() < characteristic(context, state, BotCharacteristic.CHAT_MISC) ? "random_misc" : "random_insult";
-  botInitialChat(context, state, type, botRandomOpponentName(context, state), name, INVALID_VARIABLE, INVALID_VARIABLE, botMapTitle(context), botRandomWeaponName(context));
+  botInitialChat(
+    context,
+    state,
+    type,
+    botRandomOpponentName(context, state),
+    name,
+    INVALID_VARIABLE,
+    INVALID_VARIABLE,
+    botMapTitle(context),
+    botRandomWeaponName(context),
+  );
   return allChat(context, state);
 }
 
@@ -373,19 +493,52 @@ export function botChatTest(context: GameAiContext, state: BotState): void {
       context.library.chat.enterChat(state.cs, 0, ChatDestination.All);
     }
   };
-  for (const type of ["game_enter", "game_exit"]) emit(type, () => [easyClientName(context, state.client, 32), botRandomOpponentName(context, state), INVALID_VARIABLE, INVALID_VARIABLE, botMapTitle(context), null, null, null]);
+  for (const type of ["game_enter", "game_exit"])
+    emit(type, () => [
+      easyClientName(context, state.client, 32),
+      botRandomOpponentName(context, state),
+      INVALID_VARIABLE,
+      INVALID_VARIABLE,
+      botMapTitle(context),
+      null,
+      null,
+      null,
+    ]);
   emit("level_start", () => [easyClientName(context, state.client, 32), null, null, null, null, null, null, null]);
-  for (const type of ["level_end_victory", "level_end_lose", "level_end"]) emit(type, () => [easyClientName(context, state.client, 32), botRandomOpponentName(context, state), botFirstClientInRankings(context), botLastClientInRankings(context), botMapTitle(context), null, null, null]);
+  for (const type of ["level_end_victory", "level_end_lose", "level_end"])
+    emit(type, () => [
+      easyClientName(context, state.client, 32),
+      botRandomOpponentName(context, state),
+      botFirstClientInRankings(context),
+      botLastClientInRankings(context),
+      botMapTitle(context),
+      null,
+      null,
+      null,
+    ]);
   let name = easyClientName(context, state.lastKilledBy, 32);
-  for (const type of ["death_drown", "death_slime", "death_lava", "death_cratered", "death_suicide", "death_telefrag"]) emit(type, () => [name, null, null, null, null, null, null, null]);
-  for (const type of ["death_gauntlet", "death_rail", "death_bfg", "death_insult", "death_praise"]) emit(type, () => [name, botWeaponNameForMeansOfDeath(context, state.botDeathType), null, null, null, null, null, null]);
+  for (const type of ["death_drown", "death_slime", "death_lava", "death_cratered", "death_suicide", "death_telefrag"])
+    emit(type, () => [name, null, null, null, null, null, null, null]);
+  for (const type of ["death_gauntlet", "death_rail", "death_bfg", "death_insult", "death_praise"])
+    emit(type, () => [name, botWeaponNameForMeansOfDeath(context, state.botDeathType), null, null, null, null, null, null]);
   name = easyClientName(context, state.lastKilledPlayer, 32);
-  for (const type of ["kill_gauntlet", "kill_rail", "kill_telefrag", "kill_insult", "kill_praise", "enemy_suicide"]) emit(type, () => [name, null, null, null, null, null, null, null]);
+  for (const type of ["kill_gauntlet", "kill_rail", "kill_telefrag", "kill_insult", "kill_praise", "enemy_suicide"])
+    emit(type, () => [name, null, null, null, null, null, null, null]);
   const client = context.game.entity(state.client).player;
   if (client === null) throw new Error("BotChatTest requires a client");
   name = clientName(context, client.lastHurtClient, 32);
   const weapon = botWeaponNameForMeansOfDeath(context, client.lastHurtClient);
   for (const type of ["hit_talking", "hit_nodeath", "hit_nokill"]) emit(type, () => [name, weapon, null, null, null, null, null, null]);
   name = state.lastKilledPlayer === state.client ? botRandomOpponentName(context, state) : easyClientName(context, state.lastKilledPlayer, 32);
-  for (const type of ["random_misc", "random_insult"]) emit(type, () => [botRandomOpponentName(context, state), name, INVALID_VARIABLE, INVALID_VARIABLE, botMapTitle(context), botRandomWeaponName(context), null, null]);
+  for (const type of ["random_misc", "random_insult"])
+    emit(type, () => [
+      botRandomOpponentName(context, state),
+      name,
+      INVALID_VARIABLE,
+      INVALID_VARIABLE,
+      botMapTitle(context),
+      botRandomWeaponName(context),
+      null,
+      null,
+    ]);
 }

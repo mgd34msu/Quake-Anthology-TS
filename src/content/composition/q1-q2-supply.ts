@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { PickupSelection, PickupSupplyProfile } from "../../contracts/pickups.ts";
 import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
@@ -7,7 +8,7 @@ export function q1Q2PickupSelect(current: ItemId | null, incoming: ItemId, selec
   if (selection !== "better") return selection === "always";
   const next = Q2_BASE_WEAPONS.findIndex(weapon => weapon.item === incoming);
   const previous = current === null ? -1 : Q2_BASE_WEAPONS.findIndex(weapon => weapon.item === current);
-  if (next < 0 || current !== null && previous < 0) throw new Error("Cross-game Q2 pickup ranking requires base weapons");
+  if (next < 0 || (current !== null && previous < 0)) throw new Error("Cross-game Q2 pickup ranking requires base weapons");
   return next > previous;
 }
 
@@ -34,9 +35,12 @@ export const Q1_Q2_SUPPLY_PROFILE: PickupSupplyProfile = {
 };
 
 export function q1Q2SupplyLoadout(): { readonly weapon: ItemId; readonly inventory: readonly { readonly item: ItemId; readonly count: number }[] } {
-  return { weapon: "q2:weapon_shotgun", inventory: [
-    { item: "q2:weapon_blaster", count: 1 },
-    { item: "q2:weapon_shotgun", count: 1 },
-    { item: "q2:ammo_shells", count: 25 },
-  ] };
+  return {
+    weapon: "q2:weapon_shotgun",
+    inventory: [
+      { item: "q2:weapon_blaster", count: 1 },
+      { item: "q2:weapon_shotgun", count: 1 },
+      { item: "q2:ammo_shells", count: 25 },
+    ],
+  };
 }

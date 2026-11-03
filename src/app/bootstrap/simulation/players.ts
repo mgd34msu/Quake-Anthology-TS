@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ModClientMovementOutputs } from "../../../contracts/mod-client-outputs.ts";
 import type { QuakeCClientMovement } from "./quakec-client-adapter.ts";
 import { movementJumped } from "./player-jump.ts";
@@ -10,13 +11,34 @@ import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { ExecutableRecipe, GameFamily, ProviderReference, ProviderTiming } from "../../../contracts/content.ts";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { ActorAnimationState, ArsenalState, MovementContinuation, MovementInput, MovementProfile, MovementResult, MovementServices, MovementState, Q1MovementInput, Q2MovementInput, Q2RereleaseMovementInput, Q3MovementInput, Q3MovementResult, Q3MovementState } from "../../../contracts/movement.ts";
+import type {
+  ActorAnimationState,
+  ArsenalState,
+  MovementContinuation,
+  MovementInput,
+  MovementProfile,
+  MovementResult,
+  MovementServices,
+  MovementState,
+  Q1MovementInput,
+  Q2MovementInput,
+  Q2RereleaseMovementInput,
+  Q3MovementInput,
+  Q3MovementResult,
+  Q3MovementState,
+} from "../../../contracts/movement.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
 import type { SceneQueries, TraceHit } from "../../../contracts/scene.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
 import { applyQ2MovementContacts } from "../../../movement/q2/index.ts";
-import { createPlayerMovementProvider, playerMovementEnvironment, playerStandingBounds, playerCrouchedBounds, selectedMovementProfile } from "./player-movement.ts";
+import {
+  createPlayerMovementProvider,
+  playerMovementEnvironment,
+  playerStandingBounds,
+  playerCrouchedBounds,
+  selectedMovementProfile,
+} from "./player-movement.ts";
 import type { Q3MovementHooks } from "../../../movement/q3/types.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -92,13 +114,49 @@ export function movementProfile(recipe: ExecutableRecipe): MovementProfile {
   const timing = providerTiming(recipe, recipe.movement.provider);
   const base = { id: timing.provider, clock: timing.clock, numeric: timing.numeric };
   switch (timing.clock.kind) {
-    case "q1-netquake": return { ...base, kind: "q1-netquake", edition: recipe.movement.content.includes(":rerelease:") ? "rerelease" : "classic",
-      parameters: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 10, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 }, edgeFriction: 2, noClipAngleHack: false };
-    case "q1-quakeworld": return { ...base, kind: "q1-quakeworld",
-      parameters: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } };
-    case "q2-classic": return { ...base, kind: "q2-classic", airAccelerate: 0, snapInitial: true };
-    case "q2-rerelease": return { ...base, kind: "q2-rerelease", airAccelerate: 0, n64Physics: false };
-    case "q3": return { ...base, kind: "q3", product: "baseq3", fixedMilliseconds: timing.clock.fixedMovementMilliseconds, noFootsteps: false };
+    case "q1-netquake":
+      return {
+        ...base,
+        kind: "q1-netquake",
+        edition: recipe.movement.content.includes(":rerelease:") ? "rerelease" : "classic",
+        parameters: {
+          gravity: 800,
+          stopSpeed: 100,
+          maxSpeed: 320,
+          spectatorMaxSpeed: 500,
+          accelerate: 10,
+          airAccelerate: 10,
+          waterAccelerate: 10,
+          friction: 4,
+          waterFriction: 4,
+          entityGravity: 1,
+        },
+        edgeFriction: 2,
+        noClipAngleHack: false,
+      };
+    case "q1-quakeworld":
+      return {
+        ...base,
+        kind: "q1-quakeworld",
+        parameters: {
+          gravity: 800,
+          stopSpeed: 100,
+          maxSpeed: 320,
+          spectatorMaxSpeed: 500,
+          accelerate: 10,
+          airAccelerate: 0.7,
+          waterAccelerate: 10,
+          friction: 4,
+          waterFriction: 4,
+          entityGravity: 1,
+        },
+      };
+    case "q2-classic":
+      return { ...base, kind: "q2-classic", airAccelerate: 0, snapInitial: true };
+    case "q2-rerelease":
+      return { ...base, kind: "q2-rerelease", airAccelerate: 0, n64Physics: false };
+    case "q3":
+      return { ...base, kind: "q3", product: "baseq3", fixedMilliseconds: timing.clock.fixedMovementMilliseconds, noFootsteps: false };
   }
 }
 
@@ -117,15 +175,19 @@ export function movementVelocity(state: MovementState): Vec3 {
 export class MovementPlayer {
   get predictionProfile(): MovementProfile {
     const profile = selectedMovementProfile(this);
-    return profile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(profile) ?? profile : profile;
+    return profile.kind === "q1-quakeworld" ? (this.host.quakeWorld?.profile(profile) ?? profile) : profile;
   }
-  get movementSpeedMultiplier(): number { return this.host.speedMultiplier?.(this.actor) ?? 1; }
+  get movementSpeedMultiplier(): number {
+    return this.host.speedMultiplier?.(this.actor) ?? 1;
+  }
   get predictionEnvironment(): MovementInput["environment"] {
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Prediction player has no combat state");
     return { ...playerMovementEnvironment(this, combat), ...this.fixedEnvironment() };
   }
-  get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null { return this.host.q2MovementConfig?.() ?? null; }
+  get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null {
+    return this.host.q2MovementConfig?.() ?? null;
+  }
   readonly character: GameFamily;
   /** Per-client character definition; bots need not wear the local player's selected character. */
   readonly characterDefinition: ProviderReference;
@@ -168,7 +230,8 @@ export class MovementPlayer {
   private readonly sliceApplications: (ModClientApplication | null)[] = [];
   private readonly appliedMovement: MovementInputApplication = {
     begin: (command, frame, state) => {
-      const index = this.sliceApplications.length; this.sliceApplications.push(null);
+      const index = this.sliceApplications.length;
+      this.sliceApplications.push(null);
       const committed = this.commit(state, false, false);
       if (committed.kind === "actor-removed") return committed;
       const application = this.beginInputApplication("movement-slice", command, frame, state);
@@ -179,7 +242,10 @@ export class MovementPlayer {
       return { ...continuation, command: application?.command ?? command };
     },
     end: (state, failed = false, posture) => {
-      if (posture !== undefined && !failed) { this.bounds = posture.bounds; this.viewHeight = posture.viewHeight; }
+      if (posture !== undefined && !failed) {
+        this.bounds = posture.bounds;
+        this.viewHeight = posture.viewHeight;
+      }
       if (this.host.actors.isLive(this.actor.id) && !failed) this.commit(state, false, false);
       this.host.inputApplications?.finish(this.sliceApplications.pop() ?? null, failed);
       return this.applicationContinuation();
@@ -189,41 +255,83 @@ export class MovementPlayer {
   private applicationContinuation(): MovementContinuation {
     return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
   }
-  private beginInputApplication(scope: ModClientApplication["scope"], command: MovementInput["command"], frame: FrameContext, state: MovementState, arsenal = this.arsenalIntent): ModClientApplication | null {
+  private beginInputApplication(
+    scope: ModClientApplication["scope"],
+    command: MovementInput["command"],
+    frame: FrameContext,
+    state: MovementState,
+    arsenal = this.arsenalIntent,
+  ): ModClientApplication | null {
     const owner = this.host.inputApplications;
     if (owner === undefined || !owner.active) return null;
-    return owner.begin({ identity: { actor: this.actor.id, client: this.client }, scope, command,
-      angleSpace: command.kind === "q1-netquake" || command.kind === "q1-quakeworld" ? "absolute" : "source-relative",
-      absoluteAim: movementApplicationAim(command, state, this.host.combat.read(this.actor.id)?.health ?? 0, this.services.numeric), frame, accepted: this.host.acceptedInput?.() ?? null, arsenal: arsenal ?? null,
-      ...(this.applicationParent === null ? {} : { parentInvocation: this.applicationParent.invocation }) }, (aim, current) => {
-        const state = this.readState(), word = (angle: number): number => Math.trunc(angle * 65536 / 360);
+    return owner.begin(
+      {
+        identity: { actor: this.actor.id, client: this.client },
+        scope,
+        command,
+        angleSpace: command.kind === "q1-netquake" || command.kind === "q1-quakeworld" ? "absolute" : "source-relative",
+        absoluteAim: movementApplicationAim(command, state, this.host.combat.read(this.actor.id)?.health ?? 0, this.services.numeric),
+        frame,
+        accepted: this.host.acceptedInput?.() ?? null,
+        arsenal: arsenal ?? null,
+        ...(this.applicationParent === null ? {} : { parentInvocation: this.applicationParent.invocation }),
+      },
+      (aim, current) => {
+        const state = this.readState(),
+          word = (angle: number): number => Math.trunc((angle * 65536) / 360);
         if (current.kind === "q1-netquake") return { ...current, viewAngles: aim };
         if (current.kind === "q1-quakeworld") return { ...current, angles: aim };
-        if (current.kind === "q2-rerelease" && state.kind === current.kind) return { ...current, angles: { x: aim.x - state.deltaAngles.x, y: aim.y - state.deltaAngles.y, z: aim.z - state.deltaAngles.z } };
-        if (current.kind === "q2-classic" && state.kind === current.kind) return { ...current, angleShorts: [word(aim.x) - state.deltaAngleShorts[0], word(aim.y) - state.deltaAngleShorts[1], word(aim.z) - state.deltaAngleShorts[2]] };
-        if (current.kind === "q3" && state.kind === current.kind) return { ...current, angleWords: [word(aim.x) - state.deltaAngleWords[0], word(aim.y) - state.deltaAngleWords[1], word(aim.z) - state.deltaAngleWords[2]] };
+        if (current.kind === "q2-rerelease" && state.kind === current.kind)
+          return { ...current, angles: { x: aim.x - state.deltaAngles.x, y: aim.y - state.deltaAngles.y, z: aim.z - state.deltaAngles.z } };
+        if (current.kind === "q2-classic" && state.kind === current.kind)
+          return {
+            ...current,
+            angleShorts: [word(aim.x) - state.deltaAngleShorts[0], word(aim.y) - state.deltaAngleShorts[1], word(aim.z) - state.deltaAngleShorts[2]],
+          };
+        if (current.kind === "q3" && state.kind === current.kind)
+          return {
+            ...current,
+            angleWords: [word(aim.x) - state.deltaAngleWords[0], word(aim.y) - state.deltaAngleWords[1], word(aim.z) - state.deltaAngleWords[2]],
+          };
         throw new Error("Input aim output changed movement dialect");
-      });
+      },
+    );
   }
 
   setFlight(enabled: boolean): boolean {
     this.flight = enabled && (this.host.combat.read(this.actor.id)?.health ?? 0) > 0;
     const state = this.readState();
-    if (state.kind === "q1-netquake") this.state = { ...state, moveType: this.flight ? 5 : state.moveType === 5 ? 3 : state.moveType,
-      flags: this.flight ? state.flags & ~512 : state.flags, ground: this.flight ? { kind: "none" } : state.ground };
+    if (state.kind === "q1-netquake")
+      this.state = {
+        ...state,
+        moveType: this.flight ? 5 : state.moveType === 5 ? 3 : state.moveType,
+        flags: this.flight ? state.flags & ~512 : state.flags,
+        ground: this.flight ? { kind: "none" } : state.ground,
+      };
     else if (this.flight) {
       if (state.kind === "q1-quakeworld") this.state = { ...state, spectator: 0, ground: { kind: "none" }, waterJumpTimeSeconds: 0 };
       else if (state.kind === "q2-classic" || state.kind === "q2-rerelease") this.state = { ...state, type: 0, flags: state.flags & ~4 };
       else this.state = { ...state, movementType: 0, ground: { kind: "none" } };
     }
-    if (this.flight) { this.ground = { kind: "none" }; const body = this.host.bodies.read(this.actor.id); if (body !== null) this.host.bodies.write(this.actor, { ...body, ground: null }); }
+    if (this.flight) {
+      this.ground = { kind: "none" };
+      const body = this.host.bodies.read(this.actor.id);
+      if (body !== null) this.host.bodies.write(this.actor, { ...body, ground: null });
+    }
     return this.flight;
   }
 
-  constructor(readonly actor: OwnedActor, readonly client: ClientId, readonly recipe: ExecutableRecipe,
-    private readonly host: PlayerMovementHost, origin: Vec3, angles: Vec3, arsenal: ArsenalState,
+  constructor(
+    readonly actor: OwnedActor,
+    readonly client: ClientId,
+    readonly recipe: ExecutableRecipe,
+    private readonly host: PlayerMovementHost,
+    origin: Vec3,
+    angles: Vec3,
+    arsenal: ArsenalState,
     characterDefinition: ProviderReference = recipe.character.definition,
-    characterAppearance: ProviderReference = recipe.character.appearance) {
+    characterAppearance: ProviderReference = recipe.character.appearance,
+  ) {
     this.characterDefinition = characterDefinition;
     this.characterAppearance = characterAppearance;
     this.character = providerFamily(characterDefinition.provider);
@@ -234,43 +342,139 @@ export class MovementPlayer {
     this.commandAngles = angles;
     this.profile = movementProfile(recipe);
     this.arsenal = arsenal;
-    this.animation = { provider: characterDefinition.provider,
-      state: this.character === "q1" ? { kind: "q1", frame: 12, nextFrameSeconds: 0 }
-        : this.character === "q2" ? { kind: "q2", frame: 0, endFrame: 39, priority: 0, duck: false, run: false }
-        : { kind: "q3", legs: 22, torso: 11, legsTimerMilliseconds: 0, torsoTimerMilliseconds: 0 } };
+    this.animation = {
+      provider: characterDefinition.provider,
+      state:
+        this.character === "q1"
+          ? { kind: "q1", frame: 12, nextFrameSeconds: 0 }
+          : this.character === "q2"
+            ? { kind: "q2", frame: 0, endFrame: 39, priority: 0, duck: false, run: false }
+            : { kind: "q3", legs: 22, torso: 11, legsTimerMilliseconds: 0, torsoTimerMilliseconds: 0 },
+    };
     const owner = this;
-    this.services = { scene: host.scene, numeric: createNumericOperations(this.profile.numeric),
-      get inputApplication() { return host.inputApplications?.active === true ? owner.appliedMovement : undefined; },
-      touch: host.touch, weaponStep: (input, state) => {
+    this.services = {
+      scene: host.scene,
+      numeric: createNumericOperations(this.profile.numeric),
+      get inputApplication() {
+        return host.inputApplications?.active === true ? owner.appliedMovement : undefined;
+      },
+      touch: host.touch,
+      weaponStep: (input, state) => {
         const before = this.commit(state, false, false);
         if (before.kind === "actor-removed") return { arsenal: input.arsenal, animation: input.animation, effects: [], continuation: before };
         const result = host.weaponStep(input, before.state);
-        return { ...result, continuation: this.host.actors.isLive(this.actor.id)
-          ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" } };
-      }, animationStep: host.animationStep };
+        return { ...result, continuation: this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" } };
+      },
+      animationStep: host.animationStep,
+    };
     switch (this.profile.kind) {
-      case "q1-netquake": this.state = { kind: "q1-netquake", origin, velocity: zero, angles,
-        oldOrigin: origin, angularVelocity: zero, viewAngles: angles, punchAngles: zero, moveType: 3, flags: 4096,
-        ground: this.ground, waterLevel: 0, waterType: -1, teleportTimeSeconds: 0, waterJumpDirection: zero, idealPitch: 0, fixAngle: false, health: 100 }; break;
-      case "q1-quakeworld": this.state = { kind: "q1-quakeworld", origin, velocity: zero, angles, oldButtons: 0,
-        waterJumpTimeSeconds: 0, dead: false, spectator: 0, ground: this.ground }; break;
-      case "q2-classic": this.state = { kind: "q2-classic", type: 0, originEighths: eighths(origin), velocityEighths: [0, 0, 0], flags: 0, timeEightMilliseconds: 0, gravity: 800, deltaAngleShorts: [0, 0, 0] }; break;
-      case "q2-rerelease": this.state = { kind: "q2-rerelease", type: 0, origin, velocity: zero, flags: 0, timeMilliseconds: 0, gravity: 800, deltaAngles: zero, viewHeight: this.viewHeight }; break;
-      case "q3": this.state = { kind: "q3", commandTimeMilliseconds: 0, movementType: 0, bobCycle: 0, movementFlags: 0, movementTimeMilliseconds: 0,
-        origin, velocity: zero, gravity: 800, speed: 320, deltaAngleWords: [0, 0, 0], movementDirection: 0, grapplePoint: zero, flags: 0, viewAngles: angles,
-        viewHeight: this.viewHeight, ground: this.ground, predictableEventSequence: 0, jumpPad: null, movementFrame: 0, jumpPadFrame: 0 }; break;
+      case "q1-netquake":
+        this.state = {
+          kind: "q1-netquake",
+          origin,
+          velocity: zero,
+          angles,
+          oldOrigin: origin,
+          angularVelocity: zero,
+          viewAngles: angles,
+          punchAngles: zero,
+          moveType: 3,
+          flags: 4096,
+          ground: this.ground,
+          waterLevel: 0,
+          waterType: -1,
+          teleportTimeSeconds: 0,
+          waterJumpDirection: zero,
+          idealPitch: 0,
+          fixAngle: false,
+          health: 100,
+        };
+        break;
+      case "q1-quakeworld":
+        this.state = {
+          kind: "q1-quakeworld",
+          origin,
+          velocity: zero,
+          angles,
+          oldButtons: 0,
+          waterJumpTimeSeconds: 0,
+          dead: false,
+          spectator: 0,
+          ground: this.ground,
+        };
+        break;
+      case "q2-classic":
+        this.state = {
+          kind: "q2-classic",
+          type: 0,
+          originEighths: eighths(origin),
+          velocityEighths: [0, 0, 0],
+          flags: 0,
+          timeEightMilliseconds: 0,
+          gravity: 800,
+          deltaAngleShorts: [0, 0, 0],
+        };
+        break;
+      case "q2-rerelease":
+        this.state = {
+          kind: "q2-rerelease",
+          type: 0,
+          origin,
+          velocity: zero,
+          flags: 0,
+          timeMilliseconds: 0,
+          gravity: 800,
+          deltaAngles: zero,
+          viewHeight: this.viewHeight,
+        };
+        break;
+      case "q3":
+        this.state = {
+          kind: "q3",
+          commandTimeMilliseconds: 0,
+          movementType: 0,
+          bobCycle: 0,
+          movementFlags: 0,
+          movementTimeMilliseconds: 0,
+          origin,
+          velocity: zero,
+          gravity: 800,
+          speed: 320,
+          deltaAngleWords: [0, 0, 0],
+          movementDirection: 0,
+          grapplePoint: zero,
+          flags: 0,
+          viewAngles: angles,
+          viewHeight: this.viewHeight,
+          ground: this.ground,
+          predictableEventSequence: 0,
+          jumpPad: null,
+          movementFrame: 0,
+          jumpPadFrame: 0,
+        };
+        break;
     }
   }
 
   private clientMovementOutputs(): ModClientMovementOutputs {
     const outputs = this.host.clientOutputs?.() ?? {};
     if (this.profile.kind !== "q1-netquake" && !(this.profile.kind === "q1-quakeworld" && this.host.quakeWorld !== undefined)) return outputs;
-    if (outputs.bodyBounds !== undefined) { this.bodyShapeBase ??= this.bounds; return outputs; }
+    if (outputs.bodyBounds !== undefined) {
+      this.bodyShapeBase ??= this.bounds;
+      return outputs;
+    }
     const base = this.bodyShapeBase;
     if (base === null) return outputs;
     const current = this.bounds;
-    if (current.min.x === base.min.x && current.min.y === base.min.y && current.min.z === base.min.z
-      && current.max.x === base.max.x && current.max.y === base.max.y && current.max.z === base.max.z) this.bodyShapeBase = null;
+    if (
+      current.min.x === base.min.x &&
+      current.min.y === base.min.y &&
+      current.min.z === base.min.z &&
+      current.max.x === base.max.x &&
+      current.max.y === base.max.y &&
+      current.max.z === base.max.z
+    )
+      this.bodyShapeBase = null;
     return { ...outputs, bodyBounds: base };
   }
   private acceptBodyShape(bounds: Bounds): void {
@@ -287,13 +491,19 @@ export class MovementPlayer {
       if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: this.bounds });
     }
     if (pose != null) {
-      this.bounds = pose.bounds; this.viewHeight = pose.viewHeight;
+      this.bounds = pose.bounds;
+      this.viewHeight = pose.viewHeight;
       const body = this.host.bodies.read(this.actor.id);
       if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: pose.bounds });
     }
     this.fixedPoseActive = pose != null;
     const player = this;
-    return { ...(pose == null ? {} : { pose }), get clientOutputs() { return player.clientMovementOutputs(); } };
+    return {
+      ...(pose == null ? {} : { pose }),
+      get clientOutputs() {
+        return player.clientMovementOutputs();
+      },
+    };
   }
 
   setSourceViewRoll(roll: number): void {
@@ -320,22 +530,58 @@ export class MovementPlayer {
     if (body === null) throw new Error("Player no longer has a body");
     const state = this.state;
     const world = this.host.worldActor();
-    this.ground = body.ground === null ? { kind: "none" } : world !== null && body.ground.equals(world)
-      ? { kind: "world", model: 0 } : { kind: "actor", actor: body.ground };
+    this.ground =
+      body.ground === null
+        ? { kind: "none" }
+        : world !== null && body.ground.equals(world)
+          ? { kind: "world", model: 0 }
+          : { kind: "actor", actor: body.ground };
     switch (state.kind) {
       case "q1-netquake": {
-        const current = { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles,
-          ground: this.ground, flags: this.ground.kind === "none" ? state.flags & ~512 : state.flags | 512,
-          health: this.host.combat.read(this.actor.id)?.health ?? 0 };
+        const current = {
+          ...state,
+          origin: body.origin,
+          velocity: body.velocity,
+          angles: body.angles,
+          ground: this.ground,
+          flags: this.ground.kind === "none" ? state.flags & ~512 : state.flags | 512,
+          health: this.host.combat.read(this.actor.id)?.health ?? 0,
+        };
         return this.host.netQuake?.projection?.read(current) ?? current;
       }
       case "q1-quakeworld": {
-        const current = { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
+        const current = {
+          ...state,
+          origin: body.origin,
+          velocity: body.velocity,
+          angles: body.angles,
+          ground: this.ground,
+          dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0,
+        };
         return this.host.quakeWorld?.read(current) ?? current;
       }
-      case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? this.host.gibbed?.() === true ? 3 : 2 : state.type };
-      case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? this.host.gibbed?.() === true ? 5 : 4 : state.type };
-      case "q3": return { ...state, origin: body.origin, velocity: body.velocity, ground: this.ground, movementType: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 3 : state.movementType };
+      case "q2-classic":
+        return {
+          ...state,
+          originEighths: eighths(body.origin),
+          velocityEighths: eighths(body.velocity),
+          type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? (this.host.gibbed?.() === true ? 3 : 2) : state.type,
+        };
+      case "q2-rerelease":
+        return {
+          ...state,
+          origin: body.origin,
+          velocity: body.velocity,
+          type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? (this.host.gibbed?.() === true ? 5 : 4) : state.type,
+        };
+      case "q3":
+        return {
+          ...state,
+          origin: body.origin,
+          velocity: body.velocity,
+          ground: this.ground,
+          movementType: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 3 : state.movementType,
+        };
     }
   }
 
@@ -344,15 +590,27 @@ export class MovementPlayer {
     this.state = state;
     if (state.kind === "q1-netquake") this.ground = (state.flags & 512) !== 0 ? state.ground : { kind: "none" };
     else if (state.kind === "q1-quakeworld" || state.kind === "q3") this.ground = state.ground;
-    if (state.kind === "q1-netquake") { this.waterLevel = state.waterLevel; this.waterType = state.waterType; this.viewAngles = state.viewAngles; }
+    if (state.kind === "q1-netquake") {
+      this.waterLevel = state.waterLevel;
+      this.waterType = state.waterType;
+      this.viewAngles = state.viewAngles;
+    }
     const body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Player has no body during movement");
     if (state.kind === "q1-netquake" && this.host.netQuake !== undefined) this.bounds = body.bounds;
     const angles = state.kind === "q1-netquake" || state.kind === "q1-quakeworld" ? state.angles : this.viewAngles;
     if (state.kind === "q1-quakeworld" && this.host.quakeWorld !== undefined) {
-      this.host.quakeWorld.write(state); this.bounds = body.bounds;
-    } else this.host.bodies.write(this.actor, { ...body, origin: movementOrigin(state), velocity: movementVelocity(state), angles,
-      bounds: this.bounds, ground: this.ground.kind === "actor" ? this.ground.actor : this.ground.kind === "world" ? this.host.worldActor() : null });
+      this.host.quakeWorld.write(state);
+      this.bounds = body.bounds;
+    } else
+      this.host.bodies.write(this.actor, {
+        ...body,
+        origin: movementOrigin(state),
+        velocity: movementVelocity(state),
+        angles,
+        bounds: this.bounds,
+        ground: this.ground.kind === "actor" ? this.ground.actor : this.ground.kind === "world" ? this.host.worldActor() : null,
+      });
     if (state.kind === "q1-netquake") this.host.netQuake?.projection?.write(state);
     if (link) this.host.bodies.link(this.actor);
     if (triggers) this.host.touchTriggers(this.actor);
@@ -362,8 +620,8 @@ export class MovementPlayer {
   private acceptArsenalIntent(intent: ArsenalIntent | undefined): void {
     const pending = this.arsenalIntent;
     if (pending !== undefined && (pending.impulse ?? 0) !== 0 && (intent === undefined || intent.provider === pending.provider)) {
-      this.arsenalIntent = intent === undefined ? { ...pending, weapon: null, useHoldable: false }
-        : { ...intent, impulse: intent.impulse || pending.impulse || 0 };
+      this.arsenalIntent =
+        intent === undefined ? { ...pending, weapon: null, useHoldable: false } : { ...intent, impulse: intent.impulse || pending.impulse || 0 };
     } else this.arsenalIntent = intent;
   }
 
@@ -372,34 +630,76 @@ export class MovementPlayer {
     if (input.sequence <= this.lastSequence) return undefined;
     this.netQuakeCommand = { ...input.command, impulse: input.command.impulse || this.netQuakeCommand?.impulse || 0 };
     this.acceptArsenalIntent(input.arsenal);
-    this.previousButtons = this.buttons; this.buttons = input.command.buttons;
-    this.commandAngles = input.command.viewAngles; this.viewAngles = input.command.viewAngles; this.lastSequence = input.sequence;
+    this.previousButtons = this.buttons;
+    this.buttons = input.command.buttons;
+    this.commandAngles = input.command.viewAngles;
+    this.viewAngles = input.command.viewAngles;
+    this.lastSequence = input.sequence;
     return undefined;
   }
   private netQuakeInput(frame: FrameContext): Q1MovementInput {
     const fixed = this.fixedEnvironment();
-    const state = this.readState(), profile = selectedMovementProfile(this), combat = this.host.combat.read(this.actor.id);
+    const state = this.readState(),
+      profile = selectedMovementProfile(this),
+      combat = this.host.combat.read(this.actor.id);
     if (state.kind !== "q1-netquake" || profile.kind !== "q1-netquake" || combat === null) throw new Error("Missing NetQuake movement state");
     const effective = this.netQuakeSliceCommand ?? this.netQuakeApplication?.command;
     if (effective !== undefined && effective.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
-    const command = effective ?? this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
-      forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
-    return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, currentBounds: this.bounds, shape: { kind: "box", bounds: this.bounds },
-      environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } }, arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
+    const command = effective ??
+      this.netQuakeCommand ?? {
+        kind: "q1-netquake",
+        acknowledgedServerTimeSeconds: 0,
+        viewAngles: this.viewAngles,
+        forwardMove: 0,
+        sideMove: 0,
+        upMove: 0,
+        buttons: 0,
+        impulse: 0,
+      };
+    return {
+      kind: "q1-netquake",
+      actor: this.actor,
+      commandSequence: this.lastSequence,
+      frame,
+      currentBounds: this.bounds,
+      shape: { kind: "box", bounds: this.bounds },
+      environment: {
+        ...playerMovementEnvironment(this, combat),
+        ...fixed,
+        get clientOutputs() {
+          return fixed.clientOutputs ?? {};
+        },
+      },
+      arsenal: this.arsenal,
+      animation: this.animation,
+      execution: "authoritative",
+      state,
+      profile,
+      command,
+    };
   }
   private netQuakeOptions(): Q1MovementOptions {
-    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
-    return { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight,
-      ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }), ...(binding?.jumpAuthority === "selected-movement" ? { sourceWaterDrag: true } : {}), hooks: {
+    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id),
+      binding = this.host.netQuake;
+    return {
+      ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }),
+      viewHeight: this.viewHeight,
+      ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }),
+      ...(binding?.jumpAuthority === "selected-movement" ? { sourceWaterDrag: true } : {}),
+      hooks: {
         bodyShape: bounds => this.acceptBodyShape(bounds),
-        ...(binding === undefined ? {} : { shape: () => {
-          const body = this.host.bodies.read(this.actor.id);
-          if (body === null) throw new Error("NetQuake client lost its authoritative body");
-          return { kind: "box", bounds: body.bounds } satisfies import("../../../contracts/scene.ts").TraceShape;
-        } }),
+        ...(binding === undefined
+          ? {}
+          : {
+              shape: () => {
+                const body = this.host.bodies.read(this.actor.id);
+                if (body === null) throw new Error("NetQuake client lost its authoritative body");
+                return { kind: "box", bounds: body.bounds } satisfies import("../../../contracts/scene.ts").TraceShape;
+              },
+            }),
         playerAction: (actor, action) => this.host.jump(actor, action),
         link: (_actor, next, triggers) => this.commit(next, true, triggers),
-        isBsp: hit => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),
+        isBsp: hit => hit.kind === "world" || (hit.kind === "actor" && this.host.isBrush(hit.actor)),
         beforePhysics: (input, state) => {
           const committed = this.commit(state, false, false);
           if (committed.kind === "actor-removed") return committed;
@@ -418,13 +718,19 @@ export class MovementPlayer {
           binding?.think(input.frame);
           return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
         },
-      } };
+      },
+    };
   }
   prepareNetQuake(frame: FrameContext, prepare?: (command: Q1UserCommand, arsenal: ArsenalIntent | undefined) => ArsenalIntent | undefined): undefined {
     const input = this.netQuakeInput(frame);
     this.netQuakeApplication = this.beginInputApplication("client-command", input.command, frame, input.state);
     this.applicationParent = this.netQuakeApplication;
-    if (!this.host.actors.isLive(this.actor.id)) { this.host.inputApplications?.finish(this.netQuakeApplication); this.netQuakeApplication = null; this.applicationParent = null; return undefined; }
+    if (!this.host.actors.isLive(this.actor.id)) {
+      this.host.inputApplications?.finish(this.netQuakeApplication);
+      this.netQuakeApplication = null;
+      this.applicationParent = null;
+      return undefined;
+    }
     try {
       let effective = this.netQuakeApplication?.command ?? input.command;
       if (effective.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
@@ -433,28 +739,48 @@ export class MovementPlayer {
       if (this.services.inputApplication !== undefined) {
         this.netQuakeSliceOpen = true;
         const before = this.appliedMovement.begin(effective, frame, this.readStateQ1());
-        if (before.kind === "actor-removed") { this.finishNetQuakeInput(); return undefined; }
+        if (before.kind === "actor-removed") {
+          this.finishNetQuakeInput();
+          return undefined;
+        }
         if (before.command.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
-        effective = before.command; this.netQuakeSliceCommand = effective;
+        effective = before.command;
+        this.netQuakeSliceCommand = effective;
       }
       this.buttons = effective.buttons;
       this.host.netQuake?.input(effective);
       const prepared = prepareNetQuake({ ...input, command: effective, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
       this.commit(prepared, false, false);
-    } catch (error) { this.finishNetQuakeInput(true); throw error; }
+    } catch (error) {
+      this.finishNetQuakeInput(true);
+      throw error;
+    }
     return undefined;
   }
   private readStateQ1(): Q1MovementState {
-    const state = this.readState(); if (state.kind !== "q1-netquake") throw new Error("NetQuake source changed movement family"); return state;
+    const state = this.readState();
+    if (state.kind !== "q1-netquake") throw new Error("NetQuake source changed movement family");
+    return state;
   }
   finishNetQuakeInput(failed = false): void {
     const errors: unknown[] = [];
     if (this.netQuakeSliceOpen) {
       this.netQuakeSliceOpen = false;
-      try { this.appliedMovement.end(this.host.actors.isLive(this.actor.id) ? this.readState() : this.state, failed); } catch (error) { errors.push(error); }
+      try {
+        this.appliedMovement.end(this.host.actors.isLive(this.actor.id) ? this.readState() : this.state, failed);
+      } catch (error) {
+        errors.push(error);
+      }
     }
-    try { this.host.inputApplications?.finish(this.netQuakeApplication, failed || errors.length !== 0); } catch (error) { errors.push(error); }
-    finally { this.netQuakeApplication = null; this.netQuakeSliceCommand = null; this.applicationParent = null; }
+    try {
+      this.host.inputApplications?.finish(this.netQuakeApplication, failed || errors.length !== 0);
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      this.netQuakeApplication = null;
+      this.netQuakeSliceCommand = null;
+      this.applicationParent = null;
+    }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "NetQuake input completion failed");
   }
@@ -463,59 +789,112 @@ export class MovementPlayer {
     let result: Q1MovementResult;
     try {
       result = physicsNetQuake(this.netQuakeInput(frame), this.services, this.netQuakeOptions());
-      if (result.status === "active" && this.host.actors.isLive(this.actor.id)) { this.accept(result); this.commit(result.state, false, false); }
+      if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
+        this.accept(result);
+        this.commit(result.state, false, false);
+      }
       if (this.netQuakeCommand !== null) this.netQuakeCommand = { ...this.netQuakeCommand, impulse: 0 };
-    } catch (error) { this.finishNetQuakeInput(true); throw error; }
+    } catch (error) {
+      this.finishNetQuakeInput(true);
+      throw error;
+    }
     this.finishNetQuakeInput();
     if (!observed) return result;
-    if (!this.host.actors.isLive(this.actor.id)) return { kind: "q1-netquake", status: "actor-removed", actor: this.actor.id, commandSequence: result.commandSequence, effects: result.effects };
+    if (!this.host.actors.isLive(this.actor.id))
+      return { kind: "q1-netquake", status: "actor-removed", actor: this.actor.id, commandSequence: result.commandSequence, effects: result.effects };
     return result.status === "active" ? { ...result, state: this.readStateQ1() } : result;
   }
 
   move(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
     if (this.host.inputApplications?.active !== true) return this.moveCommand(input, frame, sourceCommand);
     this.acceptArsenalIntent(input.arsenal);
-    const result = this.withInputCommand<MovementResult>(input.command, frame, (command, arsenal) => this.moveCommand({ ...input, command,
-      ...(arsenal === undefined ? {} : { arsenal }) }, frame, sourceCommand),
-      () => ({ kind: this.profile.kind, status: "actor-removed", actor: this.actor.id, commandSequence: input.sequence, effects: [] }), this.arsenalIntent);
+    const result = this.withInputCommand<MovementResult>(
+      input.command,
+      frame,
+      (command, arsenal) => this.moveCommand({ ...input, command, ...(arsenal === undefined ? {} : { arsenal }) }, frame, sourceCommand),
+      () => ({ kind: this.profile.kind, status: "actor-removed", actor: this.actor.id, commandSequence: input.sequence, effects: [] }),
+      this.arsenalIntent,
+    );
     return this.refreshInputResult(result);
   }
 
   private refreshInputResult(result: MovementResult): MovementResult {
     if (result.status === "actor-removed") return result;
-    const state = this.readState(), body = this.host.bodies.read(this.actor.id);
+    const state = this.readState(),
+      body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Input application lost its live body");
-    this.state = state; this.bounds = body.bounds;
-    const current = { bounds: this.bounds, viewAngles: this.viewAngles, viewHeight: this.viewHeight,
-      ground: this.ground, waterLevel: this.waterLevel, waterType: this.waterType, arsenal: this.arsenal, animation: this.animation };
+    this.state = state;
+    this.bounds = body.bounds;
+    const current = {
+      bounds: this.bounds,
+      viewAngles: this.viewAngles,
+      viewHeight: this.viewHeight,
+      ground: this.ground,
+      waterLevel: this.waterLevel,
+      waterType: this.waterType,
+      arsenal: this.arsenal,
+      animation: this.animation,
+    };
     switch (state.kind) {
-      case "q1-netquake": if (result.kind === state.kind) return { ...result, ...current, state }; break;
-      case "q1-quakeworld": if (result.kind === state.kind) return { ...result, ...current, state }; break;
-      case "q2-classic": if (result.kind === state.kind) return { ...result, ...current, state }; break;
-      case "q2-rerelease": if (result.kind === state.kind) return { ...result, ...current, state }; break;
-      case "q3": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+      case "q1-netquake":
+        if (result.kind === state.kind) return { ...result, ...current, state };
+        break;
+      case "q1-quakeworld":
+        if (result.kind === state.kind) return { ...result, ...current, state };
+        break;
+      case "q2-classic":
+        if (result.kind === state.kind) return { ...result, ...current, state };
+        break;
+      case "q2-rerelease":
+        if (result.kind === state.kind) return { ...result, ...current, state };
+        break;
+      case "q3":
+        if (result.kind === state.kind) return { ...result, ...current, state };
+        break;
     }
     return this.wrongFamily();
   }
 
   /** A source command may apply several selected-movement slices before its outer operation ends. */
-  withInputCommand<Result>(command: MovementInput["command"], frame: FrameContext, operation: (command: MovementInput["command"], arsenal: ArsenalIntent | undefined) => Result, removed: () => Result, arsenal = this.arsenalIntent): Result {
+  withInputCommand<Result>(
+    command: MovementInput["command"],
+    frame: FrameContext,
+    operation: (command: MovementInput["command"], arsenal: ArsenalIntent | undefined) => Result,
+    removed: () => Result,
+    arsenal = this.arsenalIntent,
+  ): Result {
     const owner = this.host.inputApplications;
     if (owner?.active !== true) return operation(command, arsenal);
-    const previous = this.applicationParent, state = this.readState();
-    const application = this.beginInputApplication("client-command", command,
-      movementApplicationFrame(command, state, this.predictionProfile, frame), state, arsenal);
+    const previous = this.applicationParent,
+      state = this.readState();
+    const application = this.beginInputApplication(
+      "client-command",
+      command,
+      movementApplicationFrame(command, state, this.predictionProfile, frame),
+      state,
+      arsenal,
+    );
     this.applicationParent = application;
     try {
-      if (!this.host.actors.isLive(this.actor.id)) { owner.finish(application); return removed(); }
+      if (!this.host.actors.isLive(this.actor.id)) {
+        owner.finish(application);
+        return removed();
+      }
       this.arsenalIntent = application?.arsenal ?? arsenal;
       let result: Result;
-      try { result = operation(application?.command ?? command, application?.arsenal ?? arsenal); } catch (error) { owner.finish(application, true); throw error; }
+      try {
+        result = operation(application?.command ?? command, application?.arsenal ?? arsenal);
+      } catch (error) {
+        owner.finish(application, true);
+        throw error;
+      }
       owner.finish(application);
       if (!this.host.actors.isLive(this.actor.id)) return removed();
       this.state = this.readState();
       return result;
-    } finally { this.applicationParent = previous; }
+    } finally {
+      this.applicationParent = previous;
+    }
   }
 
   moveCommand(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
@@ -528,63 +907,116 @@ export class MovementPlayer {
     this.upMove = "upMove" in input.command ? input.command.upMove : (input.command.buttons & (input.command.kind === "q2-rerelease" ? 8 : 2)) !== 0 ? 200 : 0;
     if (input.command.kind === "q1-netquake") this.viewAngles = input.command.viewAngles;
     else if (input.command.kind === "q1-quakeworld" || input.command.kind === "q2-rerelease") this.viewAngles = input.command.angles;
-    else { const words = input.command.kind === "q2-classic" ? input.command.angleShorts : input.command.angleWords;
-      this.viewAngles = { x: words[0] * 360 / 65536, y: words[1] * 360 / 65536, z: words[2] * 360 / 65536 }; }
+    else {
+      const words = input.command.kind === "q2-classic" ? input.command.angleShorts : input.command.angleWords;
+      this.viewAngles = { x: (words[0] * 360) / 65536, y: (words[1] * 360) / 65536, z: (words[2] * 360) / 65536 };
+    }
     this.commandAngles = this.viewAngles;
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Player has no combat state");
     const fixed = this.fixedEnvironment();
-    const base = { actor: this.actor, commandSequence: input.sequence, frame, currentBounds: this.bounds, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
-      environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } },
-      arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
-    const state = this.state, priorGround = this.ground, selectedProfile = selectedMovementProfile(this), command = input.command;
-    const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
-    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
-    const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
-      bodyShape: (bounds: Bounds) => this.acceptBodyShape(bounds),
-      playerAction: (actor: OwnedActor, action: "jump" | "swim") => { if (action !== "jump" || sourceMovement?.sourceJump !== true) this.host.jump(actor, action); return undefined; },
-      link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
-      isBsp: (hit: TraceHit) => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),
-      qwState: (level: number, type: number): undefined => this.host.quakeWorld?.water(level, type),
-      beforePhysics: (input: MovementInput, next: MovementState) => {
-        const committed = this.commit(next, false, false);
-        if (committed.kind === "actor-removed") return committed;
-        if (input.kind === "q1-quakeworld") this.host.quakeWorld?.beforePhysics(input.command, input.frame);
-        return { kind: "continue", state: this.readState() } satisfies MovementContinuation;
+    const base = {
+      actor: this.actor,
+      commandSequence: input.sequence,
+      frame,
+      currentBounds: this.bounds,
+      shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
+      environment: {
+        ...playerMovementEnvironment(this, combat),
+        ...fixed,
+        get clientOutputs() {
+          return fixed.clientOutputs ?? {};
+        },
       },
-      afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
-    } };
-    const provider = createPlayerMovementProvider(this, { nativeQuakeWorld: this.host.quakeWorld !== undefined,
-      publishPosture: (bounds, viewHeight) => { this.bounds = bounds; this.viewHeight = viewHeight; },
-      q1: q1Options, q2: this.host.rereleaseMovement, q3: {
-      ...this.host.q3Hooks,
-      weapon: context => { this.viewAngles = context.motion.viewangles; return this.host.q3Hooks.weapon(context); },
-    } });
+      arsenal: this.arsenal,
+      animation: this.animation,
+      execution: "authoritative",
+    } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
+    const state = this.state,
+      priorGround = this.ground,
+      selectedProfile = selectedMovementProfile(this),
+      command = input.command;
+    const profile = selectedProfile.kind === "q1-quakeworld" ? (this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile) : selectedProfile;
+    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
+    const q1Options = {
+      ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }),
+      viewHeight: this.viewHeight,
+      hooks: {
+        bodyShape: (bounds: Bounds) => this.acceptBodyShape(bounds),
+        playerAction: (actor: OwnedActor, action: "jump" | "swim") => {
+          if (action !== "jump" || sourceMovement?.sourceJump !== true) this.host.jump(actor, action);
+          return undefined;
+        },
+        link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
+        isBsp: (hit: TraceHit) => hit.kind === "world" || (hit.kind === "actor" && this.host.isBrush(hit.actor)),
+        qwState: (level: number, type: number): undefined => this.host.quakeWorld?.water(level, type),
+        beforePhysics: (input: MovementInput, next: MovementState) => {
+          const committed = this.commit(next, false, false);
+          if (committed.kind === "actor-removed") return committed;
+          if (input.kind === "q1-quakeworld") this.host.quakeWorld?.beforePhysics(input.command, input.frame);
+          return { kind: "continue", state: this.readState() } satisfies MovementContinuation;
+        },
+        afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
+      },
+    };
+    const provider = createPlayerMovementProvider(this, {
+      nativeQuakeWorld: this.host.quakeWorld !== undefined,
+      publishPosture: (bounds, viewHeight) => {
+        this.bounds = bounds;
+        this.viewHeight = viewHeight;
+      },
+      q1: q1Options,
+      q2: this.host.rereleaseMovement,
+      q3: {
+        ...this.host.q3Hooks,
+        weapon: context => {
+          this.viewAngles = context.motion.viewangles;
+          return this.host.q3Hooks.weapon(context);
+        },
+      },
+    });
     let result: MovementResult;
     if (provider.kind === "q1-netquake" && profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
       result = provider.move({ ...base, kind: "q1-netquake", profile, state, command }, this.services);
     } else if (provider.kind === "q1-quakeworld" && profile.kind === "q1-quakeworld" && state.kind === "q1-quakeworld" && command.kind === "q1-quakeworld") {
       // SV_RunCmd copies the command's angles to pmove before the axes are built; a QuakeC host already wrote v_angle into the state.
-      result = provider.move({ ...base, kind: "q1-quakeworld", profile, state: this.host.quakeWorld === undefined ? { ...state, angles: command.angles } : state, command }, this.services);
+      result = provider.move(
+        { ...base, kind: "q1-quakeworld", profile, state: this.host.quakeWorld === undefined ? { ...state, angles: command.angles } : state, command },
+        this.services,
+      );
     } else if (provider.kind === "q2-classic" && profile.kind === "q2-classic" && state.kind === "q2-classic" && command.kind === "q2-classic") {
       const move: Q2MovementInput = { ...base, kind: "q2-classic", profile, state, command };
       const moved = provider.move(move, this.services);
       if (moved.status === "active") {
         this.accept(moved);
         const afterTriggers = this.commit(moved.state, true, true);
-        result = afterTriggers.kind === "actor-removed" ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
-          : afterTriggers.state.kind === "q2-classic" ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
-            : this.wrongFamily();
+        result =
+          afterTriggers.kind === "actor-removed"
+            ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
+            : afterTriggers.state.kind === "q2-classic"
+              ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
+              : this.wrongFamily();
       } else result = moved;
     } else if (provider.kind === "q2-rerelease" && profile.kind === "q2-rerelease" && state.kind === "q2-rerelease" && command.kind === "q2-rerelease") {
-      const move: Q2RereleaseMovementInput = { ...base, kind: "q2-rerelease", profile, state, command, viewOffset: { x: 0, y: 0, z: this.viewHeight }, snapInitial: true };
+      const move: Q2RereleaseMovementInput = {
+        ...base,
+        kind: "q2-rerelease",
+        profile,
+        state,
+        command,
+        viewOffset: { x: 0, y: 0, z: this.viewHeight },
+        snapInitial: true,
+      };
       const moved = provider.move(move, this.services);
       if (moved.status === "active") {
         this.accept(moved);
         const afterTriggers = this.commit(moved.state, true, true);
-        result = afterTriggers.kind === "actor-removed" ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
-          : afterTriggers.state.kind === "q2-rerelease" ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
-            : this.wrongFamily();
+        result =
+          afterTriggers.kind === "actor-removed"
+            ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
+            : afterTriggers.state.kind === "q2-rerelease"
+              ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
+              : this.wrongFamily();
       } else result = moved;
     } else if (provider.kind === "q3" && profile.kind === "q3" && state.kind === "q3" && command.kind === "q3") {
       const move: Q3MovementInput = { ...base, kind: "q3", profile, state, command };
@@ -592,13 +1024,17 @@ export class MovementPlayer {
       if (moved.status === "active") {
         this.accept(moved);
         const afterTriggers = this.commit(moved.state, true, true);
-        result = afterTriggers.kind === "actor-removed" ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
-          : afterTriggers.state.kind === "q3" ? this.applyQ3Contacts(moved, afterTriggers.state)
-            : this.wrongFamily();
+        result =
+          afterTriggers.kind === "actor-removed"
+            ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
+            : afterTriggers.state.kind === "q3"
+              ? this.applyQ3Contacts(moved, afterTriggers.state)
+              : this.wrongFamily();
       } else result = moved;
     } else throw new Error(`Command ${command.kind} does not match movement ${profile.kind}`);
     if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
-      if (sourceMovement?.sourceJump !== true && this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result)) this.host.jump(this.actor, "jump");
+      if (sourceMovement?.sourceJump !== true && this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result))
+        this.host.jump(this.actor, "jump");
       this.accept(result);
       this.commit(result.state, true, result.kind === "q3");
     }
@@ -613,10 +1049,17 @@ export class MovementPlayer {
     let current = state;
     for (const contact of moved.contacts) {
       if (contact.target.kind === "none") continue;
-      const continuation = this.host.touch({ self: this.actor, other: contact.target,
-        plane: contact.trace.sourcePlane,
-        surface: contact.trace.kind === "q3" ? { name: "", nativeFlags: contact.trace.surfaceFlags, nativeValue: 0 } : null }, current);
-      if (continuation.kind === "actor-removed") return { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects };
+      const continuation = this.host.touch(
+        {
+          self: this.actor,
+          other: contact.target,
+          plane: contact.trace.sourcePlane,
+          surface: contact.trace.kind === "q3" ? { name: "", nativeFlags: contact.trace.surfaceFlags, nativeValue: 0 } : null,
+        },
+        current,
+      );
+      if (continuation.kind === "actor-removed")
+        return { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects };
       if (continuation.state.kind !== "q3") return this.wrongFamily();
       current = continuation.state;
     }
@@ -624,11 +1067,19 @@ export class MovementPlayer {
   }
 
   private accept(result: Extract<MovementResult, { readonly status: "active" }>): undefined {
-    this.state = result.state; this.viewAngles = result.viewAngles; this.viewHeight = result.viewHeight;
-    this.bounds = result.bounds; this.ground = result.ground; this.waterLevel = result.waterLevel; this.waterType = result.waterType;
-    this.arsenal = result.arsenal; this.animation = result.animation;
+    this.state = result.state;
+    this.viewAngles = result.viewAngles;
+    this.viewHeight = result.viewHeight;
+    this.bounds = result.bounds;
+    this.ground = result.ground;
+    this.waterLevel = result.waterLevel;
+    this.waterType = result.waterType;
+    this.arsenal = result.arsenal;
+    this.animation = result.animation;
     return undefined;
   }
 
-  private wrongFamily(): never { throw new Error("Source callback changed a player's movement provider"); }
+  private wrongFamily(): never {
+    throw new Error("Source callback changed a player's movement provider");
+  }
 }

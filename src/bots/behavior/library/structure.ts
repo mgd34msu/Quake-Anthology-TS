@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Structure field reader translated from id Software's
  * code/botlib/l_struct.c and l_struct.h.
@@ -21,8 +22,15 @@ const DEFAULT_STRING_BYTES = 79;
 
 export const MAX_STRINGFIELD = 80;
 export enum StructureFieldType {
-  Char = 1, Int = 2, Float = 3, String = 4, Struct = 6,
-  Type = 0xff, Array = 0x100, Bounded = 0x200, Unsigned = 0x400,
+  Char = 1,
+  Int = 2,
+  Float = 3,
+  String = 4,
+  Struct = 6,
+  Type = 0xff,
+  Array = 0x100,
+  Bounded = 0x200,
+  Unsigned = 0x400,
 }
 
 export interface StructureFieldDefinition {
@@ -136,10 +144,7 @@ export class StructureReader {
   readInt(): number {
     const number = this.readNumber(false);
     if (!Number.isInteger(number.value) || number.value < SOURCE_INT_MIN || number.value > SOURCE_INT_MAX) {
-      this.fail(
-        `value ${number.value} out of range [${SOURCE_INT_MIN}, ${SOURCE_INT_MAX}]`,
-        number.location,
-      );
+      this.fail(`value ${number.value} out of range [${SOURCE_INT_MIN}, ${SOURCE_INT_MAX}]`, number.location);
     }
     return number.value;
   }
@@ -172,12 +177,18 @@ export class StructureReader {
         const array = (field.type & StructureFieldType.Array) !== 0;
         if (array) this.expectText("{");
         let offset = base + field.offset;
-        for (let remaining = array ? field.maxarray : 1; remaining-- > 0;) {
+        for (let remaining = array ? field.maxarray : 1; remaining-- > 0; ) {
           if (array && this.checkText("}")) break;
           switch (field.type & StructureFieldType.Type) {
-            case StructureFieldType.Char: this.readCharField(field, bytes, offset); offset++; break;
+            case StructureFieldType.Char:
+              this.readCharField(field, bytes, offset);
+              offset++;
+              break;
             case StructureFieldType.Int:
-            case StructureFieldType.Float: this.readNumberField(field, bytes, offset); offset += 4; break;
+            case StructureFieldType.Float:
+              this.readNumberField(field, bytes, offset);
+              offset += 4;
+              break;
             case StructureFieldType.String: {
               const value = this.readString();
               const target = fieldView(bytes, offset, MAX_STRINGFIELD);
@@ -202,8 +213,7 @@ export class StructureReader {
         }
       }
     } catch (error) {
-      if (error instanceof ScriptLanguageError && this.sourceFailures.has(error)
-        || this.source.isSourceFailure?.(error) === true) return false;
+      if ((error instanceof ScriptLanguageError && this.sourceFailures.has(error)) || this.source.isSourceFailure?.(error) === true) return false;
       throw error;
     }
   }
@@ -245,11 +255,15 @@ export class StructureReader {
     const raw = float ? token.floatValue : token.integerValue | 0;
     if (!float && negative && raw === -2147483648) throw new RangeError("structure negation exceeds the source signed-long range");
     const value = negative ? -raw : raw;
-    const minimum = Math.fround(field.floatmin), maximum = Math.fround(field.floatmax);
+    const minimum = Math.fround(field.floatmin),
+      maximum = Math.fround(field.floatmax);
     if (type === StructureFieldType.Char || type === StructureFieldType.Int) {
       let low = unsigned ? 0 : type === StructureFieldType.Char ? -128 : -32768;
-      let high = type === StructureFieldType.Char ? unsigned ? 255 : 127 : unsigned ? 65535 : 32767;
-      if (bounded) { low = Math.trunc(Math.max(low, minimum)); high = Math.trunc(Math.min(high, maximum)); }
+      let high = type === StructureFieldType.Char ? (unsigned ? 255 : 127) : unsigned ? 65535 : 32767;
+      if (bounded) {
+        low = Math.trunc(Math.max(low, minimum));
+        high = Math.trunc(Math.min(high, maximum));
+      }
       if (value < low || value > high) this.fail(`value ${value} out of range [${low}, ${high}]`, token.location);
     } else if (bounded && (value < minimum || value > maximum)) {
       const bounds = `[${structureDecimal(minimum)}, ${structureDecimal(maximum)}]`;
@@ -300,7 +314,8 @@ export class StructureReader {
       this.fail("unexpected float", token.location);
     }
     const value = (token.flags & NumberFlag.Float) !== 0 ? token.floatValue : token.integerValue | 0;
-    if ((token.flags & NumberFlag.Float) === 0 && negative && value === -2147483648) throw new RangeError("structure negation exceeds the source signed-long range");
+    if ((token.flags & NumberFlag.Float) === 0 && negative && value === -2147483648)
+      throw new RangeError("structure negation exceeds the source signed-long range");
     return Object.freeze({ value: negative ? -value : value, location: frozenLocation(token.location) });
   }
 
@@ -346,7 +361,9 @@ function fieldView(bytes: Uint8Array, offset: number, size: number): DataView {
 
 /** sprintf %f on a promoted binary32, with the source's default rounding mode. */
 function structureDecimal(value: number): string {
-  const bits = float32ToBits(value), exponent = (bits >>> 23) & 255, fraction = bits & 0x7fffff;
+  const bits = float32ToBits(value),
+    exponent = (bits >>> 23) & 255,
+    fraction = bits & 0x7fffff;
   const sign = bits >>> 31 === 0 ? "" : "-";
   if (exponent === 255) return `${sign}${fraction === 0 ? "inf" : "nan"}`;
   const significand = BigInt(exponent === 0 ? fraction : fraction + 0x800000);
@@ -355,14 +372,16 @@ function structureDecimal(value: number): string {
   let rounded: bigint;
   if (shift >= 0) rounded = scaled << BigInt(shift);
   else {
-    const divisor = 1n << BigInt(-shift), lower = scaled / divisor, remainder = scaled % divisor;
-    rounded = remainder * 2n > divisor || remainder * 2n === divisor && lower % 2n !== 0n ? lower + 1n : lower;
+    const divisor = 1n << BigInt(-shift),
+      lower = scaled / divisor,
+      remainder = scaled % divisor;
+    rounded = remainder * 2n > divisor || (remainder * 2n === divisor && lower % 2n !== 0n) ? lower + 1n : lower;
   }
   return `${sign}${rounded / 1000000n}.${String(rounded % 1000000n).padStart(6, "0")}`;
 }
 
 export function writeIndent(write: StructureWrite, indent: number): boolean {
-  for (let remaining = indent; remaining-- > 0;) if (write("\t") < 0) return false;
+  for (let remaining = indent; remaining-- > 0; ) if (write("\t") < 0) return false;
   return true;
 }
 
@@ -377,8 +396,7 @@ export function writeFloat(write: StructureWrite, value: number): boolean {
   return write(text) >= 0;
 }
 
-export function writeStructWithIndent(write: StructureWrite, definition: StructureDefinition,
-  bytes: Uint8Array, indent: number, base = 0): boolean {
+export function writeStructWithIndent(write: StructureWrite, definition: StructureDefinition, bytes: Uint8Array, indent: number, base = 0): boolean {
   if (!writeIndent(write, indent) || write("{\r\n") < 0) return false;
   indent++;
   for (const field of definition.fields) {
@@ -386,17 +404,20 @@ export function writeStructWithIndent(write: StructureWrite, definition: Structu
     let offset = base + field.offset;
     const array = (field.type & StructureFieldType.Array) !== 0;
     if (array && write("{") < 0) return false;
-    for (let remaining = array ? field.maxarray : 1; remaining-- > 0;) {
+    for (let remaining = array ? field.maxarray : 1; remaining-- > 0; ) {
       switch (field.type & StructureFieldType.Type) {
         case StructureFieldType.Char:
           if (write(String(fieldView(bytes, offset, 1).getInt8(0))) < 0) return false;
-          offset++; break;
+          offset++;
+          break;
         case StructureFieldType.Int:
           if (write(String(fieldView(bytes, offset, 4).getInt32(0, true))) < 0) return false;
-          offset += 4; break;
+          offset += 4;
+          break;
         case StructureFieldType.Float:
           if (!writeFloat(write, fieldView(bytes, offset, 4).getFloat32(0, true))) return false;
-          offset += 4; break;
+          offset += 4;
+          break;
         case StructureFieldType.String: {
           let text = "";
           for (let index = offset; ; index++) {
@@ -405,13 +426,15 @@ export function writeStructWithIndent(write: StructureWrite, definition: Structu
             text += String.fromCharCode(byte);
           }
           if (write(`"${text}"`) < 0) return false;
-          offset += MAX_STRINGFIELD; break;
+          offset += MAX_STRINGFIELD;
+          break;
         }
         case StructureFieldType.Struct:
           if (field.substruct === null) throw new RangeError("WriteStructWithIndent: null source substructure");
           // l_struct.c passes structure, not p, including every array element.
           if (!writeStructWithIndent(write, field.substruct, bytes, indent, base)) return false;
-          offset += field.substruct.size; break;
+          offset += field.substruct.size;
+          break;
       }
       if (array && write(remaining > 0 ? "," : "}") < 0) return false;
     }

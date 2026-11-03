@@ -107,4 +107,3 @@ export function buildFogFragmentShaderSource(kind: FogPassKind): string {
   );
   return lines.join("\n");
 }
-

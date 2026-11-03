@@ -1,9 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from the reference port and Ironwail gl_model.c.
  * Copyright (C) 1996-2026 their respective authors. GPL-2.0-or-later. */
 import type { Bounds, Vec3, Vec4 } from "../../contracts/math.ts";
 import type {
-  BspChild, BspEdge, BspFace, BspNode, BspPlane, IndexRange, Q1ClipChild,
-  Q1ClipNode, Q1Leaf, Q1TextureInfo, Q1WorldModel,
+  BspChild,
+  BspEdge,
+  BspFace,
+  BspNode,
+  BspPlane,
+  IndexRange,
+  Q1ClipChild,
+  Q1ClipNode,
+  Q1Leaf,
+  Q1TextureInfo,
+  Q1WorldModel,
 } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Q1BspFormat } from "./types.ts";
@@ -43,8 +53,7 @@ export function index(value: number, count: number, source: string): void {
 }
 
 export function range(value: IndexRange, count: number, source: string): void {
-  if (!Number.isInteger(value.first) || !Number.isInteger(value.count)
-    || value.first < 0 || value.count < 0 || value.first > count - value.count) {
+  if (!Number.isInteger(value.first) || !Number.isInteger(value.count) || value.first < 0 || value.count < 0 || value.first > count - value.count) {
     throw new BinaryError(source, 0, `range ${value.first}+${value.count} outside ${count} records`);
   }
 }
@@ -54,7 +63,7 @@ export function optionalOffset(value: number): number | null {
 }
 
 export function readPlanes(reader: BinaryReader): BspPlane[] {
-  return records(reader, 20, (r) => {
+  return records(reader, 20, r => {
     const normal = vec3(r);
     const distance = r.finiteF32();
     const type = r.i32();
@@ -75,7 +84,7 @@ function nodeChild(reader: BinaryReader, format: Q1RecordFormat, nodeCount: numb
 export function readNodes(reader: BinaryReader, format: Q1RecordFormat): BspNode[] {
   const stride = format === "bsp29" ? 24 : format === "2psb" ? 32 : 44;
   const count = reader.length / stride;
-  return records(reader, stride, (r) => {
+  return records(reader, stride, r => {
     const plane = r.i32();
     const children: [BspChild, BspChild] = [nodeChild(r, format, count), nodeChild(r, format, count)];
     const box = bounds(r, format === "bsp2");
@@ -93,14 +102,15 @@ function clipChild(reader: BinaryReader, format: Q1RecordFormat, count: number):
 export function readClipnodes(reader: BinaryReader, format: Q1RecordFormat): Q1ClipNode[] {
   const stride = format === "bsp29" ? 8 : 12;
   const count = reader.length / stride;
-  return records(reader, stride, (r) => ({
-    plane: r.i32(), children: [clipChild(r, format, count), clipChild(r, format, count)],
+  return records(reader, stride, r => ({
+    plane: r.i32(),
+    children: [clipChild(r, format, count), clipChild(r, format, count)],
   }));
 }
 
 export function readLeaves(reader: BinaryReader, format: Q1RecordFormat): Q1Leaf[] {
   const stride = format === "bsp29" ? 28 : format === "2psb" ? 32 : 44;
-  return records(reader, stride, (r) => {
+  return records(reader, stride, r => {
     const contents = r.i32();
     const visibilityOffset = optionalOffset(r.i32());
     const box = bounds(r, format === "bsp2");
@@ -110,13 +120,13 @@ export function readLeaves(reader: BinaryReader, format: Q1RecordFormat): Q1Leaf
 }
 
 export function readEdges(reader: BinaryReader, format: Q1RecordFormat): BspEdge[] {
-  return records(reader, format === "bsp29" ? 4 : 8, (r) => ({
+  return records(reader, format === "bsp29" ? 4 : 8, r => ({
     vertices: format === "bsp29" ? [r.u16(), r.u16()] : [r.u32(), r.u32()],
   }));
 }
 
 export function readFaces(reader: BinaryReader, format: Q1RecordFormat): BspFace[] {
-  return records(reader, format === "bsp29" ? 20 : 28, (r) => {
+  return records(reader, format === "bsp29" ? 20 : 28, r => {
     const plane = format === "bsp29" ? r.u16() : r.u32();
     const side = format === "bsp29" ? r.u16() : r.u32();
     if (side !== 0 && side !== 1) throw new BinaryError(r.source, r.offset, `invalid face side ${side}`);
@@ -129,12 +139,15 @@ export function readFaces(reader: BinaryReader, format: Q1RecordFormat): BspFace
 }
 
 export function readTextureInfo(reader: BinaryReader): Q1TextureInfo[] {
-  return records(reader, 40, (r) => ({ projection: { s: vec4(r), t: vec4(r) }, texture: r.i32(), flags: r.i32() }));
+  return records(reader, 40, r => ({ projection: { s: vec4(r), t: vec4(r) }, texture: r.i32(), flags: r.i32() }));
 }
 
 export function readModels(reader: BinaryReader): Q1WorldModel[] {
-  return records(reader, 64, (r) => ({
-    bounds: bounds(r), origin: vec3(r), headnodes: [r.i32(), r.i32(), r.i32(), r.i32()],
-    visibleLeaves: r.i32(), faces: { first: r.i32(), count: r.i32() },
+  return records(reader, 64, r => ({
+    bounds: bounds(r),
+    origin: vec3(r),
+    headnodes: [r.i32(), r.i32(), r.i32(), r.i32()],
+    visibleLeaves: r.i32(),
+    faces: { first: r.i32(), count: r.i32() },
   }));
 }

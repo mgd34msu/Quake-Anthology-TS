@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import { tokenizeCommand } from "../../../core/commands/index.ts";
@@ -13,15 +14,24 @@ import type { SimulationPresentationEvent } from "../simulation/types.ts";
 function transportPlayer(source: SourcePlayerState): PlayerStateRecord<number, number, number> {
   const output = new PlayerStateRecord(source.product, source.pmType, source.weapon, source.weaponState);
   const slots = (input: SourcePlayerState["stats"]): PlayerStateSlots => new PlayerStateSlots(input.length, input.copy());
-  output.copyFrom({ ...source, product: source.product, origin: source.origin, velocity: source.velocity,
-    stats: slots(source.stats), persistant: slots(source.persistant), powerups: slots(source.powerups), ammo: slots(source.ammo),
-    events: slots(source.events), eventParms: slots(source.eventParms) });
+  output.copyFrom({
+    ...source,
+    product: source.product,
+    origin: source.origin,
+    velocity: source.velocity,
+    stats: slots(source.stats),
+    persistant: slots(source.persistant),
+    powerups: slots(source.powerups),
+    ammo: slots(source.ammo),
+    events: slots(source.events),
+    eventParms: slots(source.eventParms),
+  });
   return output;
 }
 
 /** One seat's local server transport retains the same snapshot and command rings as cgame. */
 export class ApplicationQ3Source implements SnapshotSource {
-  readonly sourceMode = 'live';
+  readonly sourceMode = "live";
   readonly commands = new ClientCommandHistory();
   private readonly snapshots = new Map<number, Snapshot>();
   private readonly serverCommands = new Map<number, readonly string[]>();
@@ -38,38 +48,54 @@ export class ApplicationQ3Source implements SnapshotSource {
   private readonly product: Q3SourcePresentationState["product"];
   time = 0;
   readonly clientNumber: number;
-  constructor(private currentActor: ActorId, initial: Q3SourcePresentationState,
+  constructor(
+    private currentActor: ActorId,
+    initial: Q3SourcePresentationState,
     private readonly select: (player: PlayerStateRecord<number, number, number>, source: Q3SourcePresentationState) => Q3VisibleEntities,
     private readonly sourceActor: (number: number) => ActorId | null,
     private readonly predictionCommand?: (command: ActorCommand, sourceTimeMilliseconds: number) => UserCommand,
-    private readonly levelShot?: () => void) {
+    private readonly levelShot?: () => void,
+  ) {
     const client = initial.clients.find(client => client.actor.equals(currentActor));
     if (client === undefined) throw new Error("Q3 presentation seat has no source player");
-    this.clientNumber = client.slot; this.product = initial.product;
-    for (const entry of initial.configstrings) { this.strings[entry.index] = entry.value; this.appliedStrings[entry.index] = entry.value; }
+    this.clientNumber = client.slot;
+    this.product = initial.product;
+    for (const entry of initial.configstrings) {
+      this.strings[entry.index] = entry.value;
+      this.appliedStrings[entry.index] = entry.value;
+    }
     this.receive(initial, [], []);
   }
-  get actor(): ActorId { return this.currentActor; }
+  get actor(): ActorId {
+    return this.currentActor;
+  }
   assertCanRestartRound(): void {
     if (this.pendingRoundTime !== null) throw new Error("Local Q3 round restart is already pending");
   }
   beginRoundRestart(bit: 0 | 4, source: Q3SourcePresentationState): void {
     this.assertCanRestartRound();
-    if (bit === this.snapshotServerBit || source.product !== this.product || source.time < this.time)
-      throw new Error("Invalid local Q3 restart epoch");
+    if (bit === this.snapshotServerBit || source.product !== this.product || source.time < this.time) throw new Error("Invalid local Q3 restart epoch");
     this.configstrings(source);
     this.command(["map_restart"]);
-    this.snapshotServerBit = bit; this.pendingRoundTime = source.time; this.actors.clear();
+    this.snapshotServerBit = bit;
+    this.pendingRoundTime = source.time;
+    this.actors.clear();
   }
   validateRoundActor(actor: ActorId, source: Q3SourcePresentationState): void {
-    if (this.pendingRoundTime === null || actor.session !== this.actor.session || actor.equals(this.actor)
-      || source.product !== this.product || source.time < this.pendingRoundTime
-      || !source.clients.some(client => client.slot === this.clientNumber && client.actor.equals(actor)))
+    if (
+      this.pendingRoundTime === null ||
+      actor.session !== this.actor.session ||
+      actor.equals(this.actor) ||
+      source.product !== this.product ||
+      source.time < this.pendingRoundTime ||
+      !source.clients.some(client => client.slot === this.clientNumber && client.actor.equals(actor))
+    )
       throw new Error("Invalid local Q3 round actor binding");
   }
   rebindRound(actor: ActorId, source: Q3SourcePresentationState): void {
     this.validateRoundActor(actor, source);
-    this.currentActor = actor; this.pendingRoundTime = null;
+    this.currentActor = actor;
+    this.pendingRoundTime = null;
   }
   private readonly configstringScratch: string[] = new Array<string>(1024).fill("");
   private configstrings(source: Q3SourcePresentationState): void {
@@ -77,12 +103,19 @@ export class ApplicationQ3Source implements SnapshotSource {
     for (const entry of source.configstrings) strings[entry.index] = entry.value;
     for (const [index, value] of strings.entries()) {
       if (this.strings[index] === value) continue;
-      this.strings[index] = value; this.command(["cs", String(index), value]);
+      this.strings[index] = value;
+      this.command(["cs", String(index), value]);
     }
   }
-  current(): { readonly number: number; readonly serverTime: number } { return { number: this.number, serverTime: this.time }; }
-  read(number: number): Snapshot | null { return this.snapshots.get(number) ?? null; }
-  getGameState(): readonly string[] { return this.appliedStrings.slice(); }
+  current(): { readonly number: number; readonly serverTime: number } {
+    return { number: this.number, serverTime: this.time };
+  }
+  read(number: number): Snapshot | null {
+    return this.snapshots.get(number) ?? null;
+  }
+  getGameState(): readonly string[] {
+    return this.appliedStrings.slice();
+  }
   getServerCommand(sequence: number): readonly string[] | null {
     const command = this.serverCommands.get(sequence) ?? null;
     if (command?.[0] === "clientLevelShot" && sequence > this.levelShotSequence) {
@@ -90,7 +123,8 @@ export class ApplicationQ3Source implements SnapshotSource {
       this.levelShot?.();
     }
     if (command?.[0] === "cs") {
-      const index = Number(command[1]), value = command[2];
+      const index = Number(command[1]),
+        value = command[2];
       if (!Number.isInteger(index) || index < 0 || index >= 1024 || value === undefined) throw new Error("Invalid local source configstring command");
       this.appliedStrings[index] = value;
     }
@@ -116,7 +150,8 @@ export class ApplicationQ3Source implements SnapshotSource {
       if (event.sequence <= this.sequence) continue;
       this.sequence = event.sequence;
       if (event.kind !== "q3-source") continue;
-      if (event.event.kind === "server-command" && (event.event.client < 0 || event.event.client === this.clientNumber)) this.command(tokenizeCommand(event.event.text, "q3").argv);
+      if (event.event.kind === "server-command" && (event.event.client < 0 || event.event.client === this.clientNumber))
+        this.command(tokenizeCommand(event.event.text, "q3").argv);
     }
   }
   receive(source: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void {
@@ -133,18 +168,36 @@ export class ApplicationQ3Source implements SnapshotSource {
       this.commandSequence = input.sequence;
       const command = input.command;
       if (this.predictionCommand !== undefined) this.commands.append(this.predictionCommand(input, source.time));
-      else if (command.kind === "q3") this.commands.append({ serverTime: command.serverTimeMilliseconds, angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] },
-        buttons: command.buttons, weapon: command.weapon, forwardmove: command.forwardMove, rightmove: command.rightMove, upmove: command.upMove });
+      else if (command.kind === "q3")
+        this.commands.append({
+          serverTime: command.serverTimeMilliseconds,
+          angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] },
+          buttons: command.buttons,
+          weapon: command.weapon,
+          forwardmove: command.forwardMove,
+          rightmove: command.rightMove,
+          upmove: command.upMove,
+        });
       else throw new Error("Selected foreign movement requires its private cgame prediction command adapter");
     }
     if (this.number > 0 && source.time === this.time) return;
     this.time = source.time;
-    const playerState = transportPlayer(player.state), visible = this.select(playerState, source);
-    const areaMask = new Uint8Array(32); areaMask.set(visible.areaMask);
+    const playerState = transportPlayer(player.state),
+      visible = this.select(playerState, source);
+    const areaMask = new Uint8Array(32);
+    areaMask.set(visible.areaMask);
     const previous = this.number++;
-    this.snapshots.set(this.number, { messageNumber: this.number, serverTime: source.time, deltaNumber: previous === 0 ? -1 : previous,
-      flags: this.snapshotServerBit, serverCommandNumber: this.reliable, parseEntitiesNumber: 0, areaMask,
-      playerState, entities: visible.entities });
+    this.snapshots.set(this.number, {
+      messageNumber: this.number,
+      serverTime: source.time,
+      deltaNumber: previous === 0 ? -1 : previous,
+      flags: this.snapshotServerBit,
+      serverCommandNumber: this.reliable,
+      parseEntitiesNumber: 0,
+      areaMask,
+      playerState,
+      entities: visible.entities,
+    });
     this.snapshots.delete(this.number - 32);
   }
 }

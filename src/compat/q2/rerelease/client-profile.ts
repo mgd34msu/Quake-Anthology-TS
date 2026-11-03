@@ -11,7 +11,9 @@ export interface RereleaseClientProfile {
 }
 export const sourceRereleaseClientProfile: RereleaseClientProfile = {
   authority: { kind: "source", headerDigest: "sha256:3257c79f07d9e8ef333342b9a0be0bde7dd514d9de1b9b36173aad157601aecf" },
-  layout: privateClientPrefixLayout, inventoryCount: 82, ammoCount: 12,
+  layout: privateClientPrefixLayout,
+  inventoryCount: 82,
+  ammoCount: 12,
 };
 /** Sparse retail fields, independently observed rather than shifting the source struct.
  * Bot_SetWeapon RVA11c060: inventory0xa80, weapon0xbe8, newweapon0x1898,
@@ -25,19 +27,27 @@ export const sourceRereleaseClientProfile: RereleaseClientProfile = {
  */
 export const retailRereleaseClientProfile: RereleaseClientProfile = {
   authority: { kind: "artifact", digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd" },
-  inventoryCount: 84, ammoCount: 12,
-  layout: { id: "q2-rerelease-retail:observed-client-fields", byteLength: 7344, alignment: 8, pointerBytes: 8, byteOrder: "little-endian", fields: [
-    ...clientLayout.fields.map(field => ({ ...field, name: `shared.${field.name}` })),
-    // Retail G_SetStats RVAe3c08 and scoreboard RVAe13f7 read resp.score; PutClientInServer RVAda977 reads ctf_team.
-    { name: "resp.score", byteOffset: 0x17c8, storage: "int32", count: 1 },
-    { name: "resp.ctf_team", byteOffset: 0x17dc, storage: "int32", count: 1 },
-    { name: "pers.selected_item", byteOffset: 2672, storage: "int32", count: 1 },
-    { name: "pers.inventory", byteOffset: 2688, storage: "int32", count: 84 },
-    { name: "pers.max_ammo", byteOffset: 3024, storage: "int16", count: 12 },
-    { name: "pers.weapon", byteOffset: 3048, storage: "pointer", count: 1 },
-    { name: "newweapon", byteOffset: 6296, storage: "pointer", count: 1 },
-    { name: "v_angle", byteOffset: 6552, storage: "float32", count: 3 },
-    { name: "invincible_time", byteOffset: 6672, storage: "int64", count: 1 },
-    { name: "no_weapon_chains", byteOffset: 7016, storage: "uint8", count: 1 },
-  ] },
+  inventoryCount: 84,
+  ammoCount: 12,
+  layout: {
+    id: "q2-rerelease-retail:observed-client-fields",
+    byteLength: 7344,
+    alignment: 8,
+    pointerBytes: 8,
+    byteOrder: "little-endian",
+    fields: [
+      ...clientLayout.fields.map(field => ({ ...field, name: `shared.${field.name}` })),
+      // Retail G_SetStats RVAe3c08 and scoreboard RVAe13f7 read resp.score; PutClientInServer RVAda977 reads ctf_team.
+      { name: "resp.score", byteOffset: 0x17c8, storage: "int32", count: 1 },
+      { name: "resp.ctf_team", byteOffset: 0x17dc, storage: "int32", count: 1 },
+      { name: "pers.selected_item", byteOffset: 2672, storage: "int32", count: 1 },
+      { name: "pers.inventory", byteOffset: 2688, storage: "int32", count: 84 },
+      { name: "pers.max_ammo", byteOffset: 3024, storage: "int16", count: 12 },
+      { name: "pers.weapon", byteOffset: 3048, storage: "pointer", count: 1 },
+      { name: "newweapon", byteOffset: 6296, storage: "pointer", count: 1 },
+      { name: "v_angle", byteOffset: 6552, storage: "float32", count: 3 },
+      { name: "invincible_time", byteOffset: 6672, storage: "int64", count: 1 },
+      { name: "no_weapon_chains", byteOffset: 7016, storage: "uint8", count: 1 },
+    ],
+  },
 };

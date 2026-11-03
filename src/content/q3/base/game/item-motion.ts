@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_items.c: G_BounceItem, G_RunItem,
 // LaunchItem, and Drop_Item. Copyright (C) 1999-2005 Id Software, Inc.
 // GPL-2.0-or-later.
@@ -96,11 +97,7 @@ export function bounceItem(entity: GameEntity, trace: ActorTraceResult, frame: I
   entity.s.pos = { ...entity.s.pos, delta };
 
   if (normal.z > 0 && delta.z < 40) {
-    const stopped = vec3(
-      qvmFloatToInt(trace.end.x),
-      qvmFloatToInt(trace.end.y),
-      qvmFloatToInt(Math.fround(trace.end.z + 1)),
-    );
+    const stopped = vec3(qvmFloatToInt(trace.end.x), qvmFloatToInt(trace.end.y), qvmFloatToInt(Math.fround(trace.end.z + 1)));
     setOrigin(entity, stopped);
     traceGround(entity, trace.hit, frame.entities);
     return;
@@ -211,5 +208,7 @@ export function dropItem(context: DropItemContext, entity: GameEntity, item: Ite
 export function bindLaunchSaveCallbacks(context: LaunchItemContext): void {
   context.entities.callbacks.touch.intern("q3.item.touch", context.touchItem);
   context.entities.callbacks.think.intern("q3.item.droppedFlag", context.droppedFlagThink);
-  context.entities.callbacks.think.intern("q3.base.game.item-motion.launchItem.think", self => { context.entities.free(self); });
+  context.entities.callbacks.think.intern("q3.base.game.item-motion.launchItem.think", self => {
+    context.entities.free(self);
+  });
 }

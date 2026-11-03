@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Ordered Q3 stage evaluation adapted from tr_shade.c and tr_shade_calc.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec2, Vec3, Vec4 } from "../contracts/math.ts";
@@ -52,35 +53,62 @@ function textureBinding(bundle: Extract<FinishedIteratorStage, { readonly active
 }
 
 function coordinates(bundle: FinishedIteratorStage, vertex: MaterialVertex, time: number, context: MaterialDrawContext): Vec2 {
-  let generator = bundle.stage.tcGen, input = vertex.texCoord;
+  let generator = bundle.stage.tcGen,
+    input = vertex.texCoord;
   switch (bundle.tcGen) {
-    case SourceTexCoordGenerator.Bad: throw new Error("Uninitialized source texture coordinates need retained tess storage");
-    case SourceTexCoordGenerator.Identity: input = { x: 0, y: 0 }; generator = { kind: "texture" }; break;
-    case SourceTexCoordGenerator.Texture: generator = { kind: "texture" }; break;
-    case SourceTexCoordGenerator.Lightmap: generator = { kind: "lightmap" }; break;
-    case SourceTexCoordGenerator.EnvironmentMapped: generator = { kind: "environment" }; break;
+    case SourceTexCoordGenerator.Bad:
+      throw new Error("Uninitialized source texture coordinates need retained tess storage");
+    case SourceTexCoordGenerator.Identity:
+      input = { x: 0, y: 0 };
+      generator = { kind: "texture" };
+      break;
+    case SourceTexCoordGenerator.Texture:
+      generator = { kind: "texture" };
+      break;
+    case SourceTexCoordGenerator.Lightmap:
+      generator = { kind: "lightmap" };
+      break;
+    case SourceTexCoordGenerator.EnvironmentMapped:
+      generator = { kind: "environment" };
+      break;
     case SourceTexCoordGenerator.Fog:
       if (context.fog === null) throw new Error("Fog texture coordinates require the current volume");
-      input = context.fog.coordinates(vertex.position); generator = { kind: "texture" }; break;
+      input = context.fog.coordinates(vertex.position);
+      generator = { kind: "texture" };
+      break;
     case SourceTexCoordGenerator.Vector:
       if (generator.kind !== "vector") throw new Error("Vector texture coordinates lost source projection vectors");
       break;
   }
-  return evaluateTexCoords({ ...bundle.stage, tcGen: generator }, input, vertex.position, vertex.normal, time,
-    { lightmap: vertex.lightmapCoord, viewOrigin: context.localViewOrigin, shaderTexCoord: context.shaderTexCoord });
+  return evaluateTexCoords({ ...bundle.stage, tcGen: generator }, input, vertex.position, vertex.normal, time, {
+    lightmap: vertex.lightmapCoord,
+    viewOrigin: context.localViewOrigin,
+    shaderTexCoord: context.shaderTexCoord,
+  });
 }
 
 function retainedState(bits: number, initial: RenderState): RenderState {
   let result = initial;
   for (const change of sourceStateChanges(null, bits)) {
     switch (change.kind) {
-      case "depth-function": result = { ...result, depthTest: change.value }; break;
-      case "blend": result = { ...result, blend: change.enabled
-        ? { source: change.source, destination: change.destination } : { source: "one", destination: "zero" } }; break;
-      case "depth-write": result = { ...result, depthWrite: change.value }; break;
-      case "depth-test": if (!change.enabled) result = { ...result, depthTest: "always", depthWrite: false }; break;
-      case "alpha-test": result = { ...result, alphaTest: change.value }; break;
-      case "polygon-mode": if (change.value === "line") throw new Error("Material polygon-line state requires explicit line geometry"); break;
+      case "depth-function":
+        result = { ...result, depthTest: change.value };
+        break;
+      case "blend":
+        result = { ...result, blend: change.enabled ? { source: change.source, destination: change.destination } : { source: "one", destination: "zero" } };
+        break;
+      case "depth-write":
+        result = { ...result, depthWrite: change.value };
+        break;
+      case "depth-test":
+        if (!change.enabled) result = { ...result, depthTest: "always", depthWrite: false };
+        break;
+      case "alpha-test":
+        result = { ...result, alphaTest: change.value };
+        break;
+      case "polygon-mode":
+        if (change.value === "line") throw new Error("Material polygon-line state requires explicit line geometry");
+        break;
     }
   }
   return result;
@@ -103,20 +131,39 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
   const batches: DrawBatch[] = [];
   const previousColors: Vec4[] = geometry.vertices.map(() => ({ x: 0, y: 0, z: 0, w: 0 }));
   const lightmapLighting = context.lightmapLighting !== undefined && compiled.finished.hasLightmapStage ? context.lightmapLighting(geometry) : null;
-  const modelLighting = context.modelLighting !== undefined && compiled.finished.sourceStages.some(stage => stage.rgbGen === SourceColorGenerator.LightingDiffuse) ? context.modelLighting(geometry) : null;
-  const iterator = lightmapLighting === null && modelLighting === null ? compiled.finished.iterator : sourceMaterialIterator({ stages: compiled.finished.sourceStages,
-    sky: definition.sky !== null, polygonOffset: definition.polygonOffset, deformCount: definition.deforms.length },
-    { ignoreFastPath: true, multitexture: false, textureEnvAdd: false, driver: "generic" });
+  const modelLighting =
+    context.modelLighting !== undefined && compiled.finished.sourceStages.some(stage => stage.rgbGen === SourceColorGenerator.LightingDiffuse)
+      ? context.modelLighting(geometry)
+      : null;
+  const iterator =
+    lightmapLighting === null && modelLighting === null
+      ? compiled.finished.iterator
+      : sourceMaterialIterator(
+          {
+            stages: compiled.finished.sourceStages,
+            sky: definition.sky !== null,
+            polygonOffset: definition.polygonOffset,
+            deformCount: definition.deforms.length,
+          },
+          { ignoreFastPath: true, multitexture: false, textureEnvAdd: false, driver: "generic" },
+        );
   let firstVertices: DrawBatch["vertices"] | null = null;
   for (const pass of iterator.passes) {
-    const first = pass.bundles[0], second = pass.bundles[1];
+    const first = pass.bundles[0],
+      second = pass.bundles[1];
     if (!first.active) continue;
-    const renderState = retainedState(pass.stateBits, { ...stageState(pass.stage, definition.cull), depthRange: context.depthRange,
-      polygonOffset: definition.polygonOffset ? context.polygonOffset : null });
+    const renderState = retainedState(pass.stateBits, {
+      ...stageState(pass.stage, definition.cull),
+      depthRange: context.depthRange,
+      polygonOffset: definition.polygonOffset ? context.polygonOffset : null,
+    });
     const texture = textureBinding(first, time);
     const adjustment: FogAdjustment = pass.fogAdjustment;
     const q1Fog = context.q1Fog;
-    const fragmentFog = q1Fog === undefined || q1Fog.density <= 0 ? {} : { fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: adjustment } satisfies BatchFog };
+    const fragmentFog =
+      q1Fog === undefined || q1Fog.density <= 0
+        ? {}
+        : { fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: adjustment } satisfies BatchFog };
     const vertices = geometry.vertices.map((vertex, index) => {
       const previousColor = previousColors[index] ?? { x: 0, y: 0, z: 0, w: 0 };
       let color = evaluateStageColor(pass.stage, vertex, { ...context, time, previousColor }, pass.alphaGen === "skip", pass.rgbGen);
@@ -126,9 +173,21 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
     });
     firstVertices ??= vertices;
     if (second === undefined) {
-      batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" }
-        : pass.rgbGen === SourceColorGenerator.LightingDiffuse && modelLighting !== null ? modelLighting : { kind: "vertex" },
-        ...fragmentFog, primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
+      batches.push({
+        lighting:
+          first.isLightmap && lightmapLighting !== null
+            ? { ...lightmapLighting, pass: "material-lightmap" }
+            : pass.rgbGen === SourceColorGenerator.LightingDiffuse && modelLighting !== null
+              ? modelLighting
+              : { kind: "vertex" },
+        ...fragmentFog,
+        primitive: "triangles",
+        texturing: "single",
+        state: renderState,
+        texture,
+        indices: geometry.indices,
+        vertices,
+      });
     } else {
       if (!second.active) throw new Error("Collapsed stage lost its second registered texture");
       const secondTexture = textureBinding(second, time);
@@ -137,9 +196,17 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
         if (source === undefined) throw new Error("Material vertex indexing escaped the source geometry");
         return { ...vertex, texCoord2: coordinates(second, source, time, context) };
       });
-      batches.push({ ...fragmentFog, lighting: { kind: "vertex" }, primitive: "triangles", texturing: "pair", state: renderState, texture, indices: geometry.indices,
-        vertices: paired, secondTexture: { binding: secondTexture,
-          environment: iterator.multitextureEnv === "add" ? "add" : "modulate" } });
+      batches.push({
+        ...fragmentFog,
+        lighting: { kind: "vertex" },
+        primitive: "triangles",
+        texturing: "pair",
+        state: renderState,
+        texture,
+        indices: geometry.indices,
+        vertices: paired,
+        secondTexture: { binding: secondTexture, environment: iterator.multitextureEnv === "add" ? "add" : "modulate" },
+      });
     }
   }
   if (context.dynamicLightBatches !== undefined && receivesProjectedDlights(compiled)) {
@@ -147,28 +214,53 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
   } else if (context.dynamicLights !== undefined && receivesProjectedDlights(compiled)) {
     const dynamic = context.dynamicLights;
     for (const batch of projectDlightTexture(geometry, dynamic.mask, dynamic.lights, dynamic.image, context.project, definition.cull))
-      batches.push({ ...batch, state: { ...batch.state, depthRange: context.depthRange,
-        polygonOffset: definition.polygonOffset ? context.polygonOffset : null } });
+      batches.push({
+        ...batch,
+        state: { ...batch.state, depthRange: context.depthRange, polygonOffset: definition.polygonOffset ? context.polygonOffset : null },
+      });
   }
   const fog = context.fog;
   if (fog !== null && compiled.finished.fogPass !== "none") {
-    batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", texture: fog.texture, indices: geometry.indices,
-      state: { ...fogPassState(compiled.finished.fogPass, definition.cull), depthRange: context.depthRange,
-        polygonOffset: definition.polygonOffset ? context.polygonOffset : null },
-      vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: fog.coordinates(vertex.position), color: fog.color })) });
+    batches.push({
+      lighting: { kind: "vertex" },
+      primitive: "triangles",
+      texturing: "single",
+      texture: fog.texture,
+      indices: geometry.indices,
+      state: {
+        ...fogPassState(compiled.finished.fogPass, definition.cull),
+        depthRange: context.depthRange,
+        polygonOffset: definition.polygonOffset ? context.polygonOffset : null,
+      },
+      vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: fog.coordinates(vertex.position), color: fog.color })),
+    });
   }
   const q1Fog = context.q1Fog;
   if (q1Fog !== undefined && q1Fog.density > 0) {
     for (let index = 0; index < batches.length; index++) {
       const batch = batches[index];
-      if (batch !== undefined && batch.fog === undefined) batches[index] = { ...batch, fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "none" } };
+      if (batch !== undefined && batch.fog === undefined)
+        batches[index] = { ...batch, fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "none" } };
     }
-    if (compiled.finished.fogPass !== "none") batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
-      texture: q1Fog.texture, indices: geometry.indices,
-      fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "overlay" },
-      state: { ...fogPassState(compiled.finished.fogPass, definition.cull), depthRange: context.depthRange,
-        polygonOffset: definition.polygonOffset ? context.polygonOffset : null },
-      vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } })) });
+    if (compiled.finished.fogPass !== "none")
+      batches.push({
+        lighting: { kind: "vertex" },
+        primitive: "triangles",
+        texturing: "single",
+        texture: q1Fog.texture,
+        indices: geometry.indices,
+        fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "overlay" },
+        state: {
+          ...fogPassState(compiled.finished.fogPass, definition.cull),
+          depthRange: context.depthRange,
+          polygonOffset: definition.polygonOffset ? context.polygonOffset : null,
+        },
+        vertices: geometry.vertices.map(vertex => ({
+          position: context.project(vertex.position),
+          texCoord: { x: 0, y: 0 },
+          color: { x: 1, y: 1, z: 1, w: 1 },
+        })),
+      });
   }
   return batches;
 }

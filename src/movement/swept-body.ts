@@ -1,8 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../contracts/math.ts";
 import type { TraceResult } from "../contracts/scene.ts";
 
-export interface SweptBodyState { readonly origin: Vec3; readonly velocity: Vec3; }
-export interface SweptBodyTrace { readonly fraction: number; readonly end: Vec3; readonly allSolid: boolean; readonly startSolid: boolean; }
+export interface SweptBodyState {
+  readonly origin: Vec3;
+  readonly velocity: Vec3;
+}
+export interface SweptBodyTrace {
+  readonly fraction: number;
+  readonly end: Vec3;
+  readonly allSolid: boolean;
+  readonly startSolid: boolean;
+}
 export interface SweptBodyServices<Trace extends SweptBodyTrace = TraceResult> {
   read(): SweptBodyState | null;
   writeOrigin(origin: Vec3): void;
@@ -48,27 +57,37 @@ const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export function sweepBody<Trace extends SweptBodyTrace>(services: SweptBodyServices<Trace>, elapsed: number): SweepStop {
   const initial = services.read();
   if (initial === null) return "removed";
-  const math = services.math, primal = initial.velocity, paired = services.planeResponse;
-  const planes: Vec3[] = [...paired?.seeds ?? []];
-  let original = initial.velocity, remaining = elapsed;
+  const math = services.math,
+    primal = initial.velocity,
+    paired = services.planeResponse;
+  const planes: Vec3[] = [...(paired?.seeds ?? [])];
+  let original = initial.velocity,
+    remaining = elapsed;
   for (let bump = 0; bump < 4; bump++) {
     const state = services.read();
     if (state === null) return "removed";
     if (services.stopWhenStill && state.velocity.x === 0 && state.velocity.y === 0 && state.velocity.z === 0) break;
     const trace = services.trace(state.origin, math.advance(state.origin, remaining, state.velocity));
-    if (trace.allSolid || services.collisionPolicy?.stopOnStartSolid === true && trace.startSolid) {
+    if (trace.allSolid || (services.collisionPolicy?.stopOnStartSolid === true && trace.startSolid)) {
       if (services.collisionPolicy?.allSolidVelocity === "zero-z") services.writeVelocity({ ...state.velocity, z: 0 }, "vertical");
       else services.writeVelocity(zero);
       services.solid?.(trace);
       return "solid";
     }
     services.prepareTrace?.(trace);
-    if (trace.fraction > 0) { services.writeOrigin(trace.end); if (services.collisionPolicy?.originalVelocity !== "initial") original = state.velocity; if (paired === undefined) planes.length = 0; }
+    if (trace.fraction > 0) {
+      services.writeOrigin(trace.end);
+      if (services.collisionPolicy?.originalVelocity !== "initial") original = state.velocity;
+      if (paired === undefined) planes.length = 0;
+    }
     if (trace.fraction === 1) break;
     services.touch?.(trace);
     if (paired !== undefined) {
       remaining = math.remaining(remaining, trace.fraction);
-      if (planes.length >= 5) { services.writeVelocity(zero); return "plane-limit"; }
+      if (planes.length >= 5) {
+        services.writeVelocity(zero);
+        return "plane-limit";
+      }
     }
     const normal = services.normal(trace);
     services.impact(trace, normal);
@@ -76,7 +95,10 @@ export function sweepBody<Trace extends SweptBodyTrace>(services: SweptBodyServi
     if (current === null) return "removed";
     if (paired === undefined) {
       remaining = math.remaining(remaining, trace.fraction);
-      if (planes.length >= 5) { services.writeVelocity(zero); return "plane-limit"; }
+      if (planes.length >= 5) {
+        services.writeVelocity(zero);
+        return "plane-limit";
+      }
     }
     const duplicate = services.duplicatePlane;
     if (duplicate !== undefined && planes.some(plane => math.dot(normal, plane) > duplicate.threshold)) {
@@ -112,19 +134,29 @@ export function sweepBody<Trace extends SweptBodyTrace>(services: SweptBodyServi
       }
       const candidate = math.clip(services.collisionPolicy?.candidateVelocity === "sequential" ? lastCandidate : original, plane);
       lastCandidate = candidate;
-      if (planes.every(other => services.samePlane(other, plane) || math.dot(candidate, other) >= 0)) { velocity = candidate; break; }
+      if (planes.every(other => services.samePlane(other, plane) || math.dot(candidate, other) >= 0)) {
+        velocity = candidate;
+        break;
+      }
     }
     if (paired !== undefined) {
       if (velocity !== null) services.writeVelocity(velocity);
       continue;
     }
     if (velocity === null) {
-      const first = planes[0], second = planes[1];
-      if (planes.length !== 2 || first === undefined || second === undefined) { services.writeVelocity(zero); return "crease-blocked"; }
+      const first = planes[0],
+        second = planes[1];
+      if (planes.length !== 2 || first === undefined || second === undefined) {
+        services.writeVelocity(zero);
+        return "crease-blocked";
+      }
       const direction = math.cross(first, second);
       velocity = math.scale(direction, math.dot(direction, services.collisionPolicy?.creaseVelocity === "last-candidate" ? lastCandidate : current.velocity));
     }
-    if (math.dot(velocity, primal) <= 0) { services.writeVelocity(zero); return "reversed"; }
+    if (math.dot(velocity, primal) <= 0) {
+      services.writeVelocity(zero);
+      return "reversed";
+    }
     services.writeVelocity(velocity);
   }
   return "complete";

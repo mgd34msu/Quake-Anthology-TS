@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { serveRenderWorker } from "../../../src/render/worker-transport.ts";
 serveRenderWorker((initialization, request) => {
   const values: unknown[] = [];
@@ -11,8 +12,12 @@ serveRenderWorker((initialization, request) => {
       if (payload === "failure") throw new RangeError("worker failure");
       if (payload === "slow") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);
       if (payload === "values") return values.slice();
-      values.push(payload); return payload;
+      values.push(payload);
+      return payload;
     },
-    close() { if (initialization === "close-fails-once" && closeCalls++ === 0) throw new Error("release failed"); return undefined; },
+    close() {
+      if (initialization === "close-fails-once" && closeCalls++ === 0) throw new Error("release failed");
+      return undefined;
+    },
   };
 });

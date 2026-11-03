@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SaveReader } from "../../persistence/value.ts";
 import type { QvmPickupGrant, QvmPickupProfile } from "./game-pickups.ts";
 import { qvmPlayerStateBytes } from "./player-record.ts";
@@ -17,30 +18,58 @@ export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmMod
     return value;
   };
   const ownerEnd = (owner: number): number => {
-    let end = owner + 1; while (end < instructions.length && instructions[end]?.opcode !== QvmOpcode.OP_ENTER) end++;
+    let end = owner + 1;
+    while (end < instructions.length && instructions[end]?.opcode !== QvmOpcode.OP_ENTER) end++;
     return end;
   };
-  const calls = (at: SaveReader, owner: number): readonly number[] => at.list(value => {
-    const index = value.integer(1), target = instructions[index - 1];
-    if (instructions[index]?.opcode !== QvmOpcode.OP_CALL || target?.opcode !== QvmOpcode.OP_CONST || target.operand !== owner)
-      value.fail("pickup call differs from its declared original target");
+  const calls = (at: SaveReader, owner: number): readonly number[] =>
+    at.list(value => {
+      const index = value.integer(1),
+        target = instructions[index - 1];
+      if (instructions[index]?.opcode !== QvmOpcode.OP_CALL || target?.opcode !== QvmOpcode.OP_CONST || target.operand !== owner)
+        value.fail("pickup call differs from its declared original target");
+      return index;
+    });
+  const functionCalls = (at: SaveReader) => {
+    const target = entry(at.field("entry"));
+    return { entry: target, calls: calls(at.field("calls"), target) };
+  };
+  const argument = (at: SaveReader): number => {
+    const index = at.integer(0);
+    if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) at.fail("pickup argument is outside the source ABI");
     return index;
-  });
-  const functionCalls = (at: SaveReader) => { const target = entry(at.field("entry")); return { entry: target, calls: calls(at.field("calls"), target) }; };
-  const argument = (at: SaveReader): number => { const index = at.integer(0); if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) at.fail("pickup argument is outside the source ABI"); return index; };
-  const gateReader = reader.field("gate"), gate = { ...functionCalls(gateReader), itemArgument: argument(gateReader.field("itemArgument")), playerArgument: argument(gateReader.field("playerArgument")) };
+  };
+  const gateReader = reader.field("gate"),
+    gate = {
+      ...functionCalls(gateReader),
+      itemArgument: argument(gateReader.field("itemArgument")),
+      playerArgument: argument(gateReader.field("playerArgument")),
+    };
   const evaluation = (at: SaveReader, owner: number): QvmRegionEvaluation => {
-    const result = { entry: at.field("entry").integer(0), join: at.field("join").integer(0),
-      inputs: at.field("inputs").list(value => value.integer(8)), result: at.field("result").nullable(value => value.integer(8)) };
-    qualifyQvmRegionEvaluation(instructions, owner, result); return result;
+    const result = {
+      entry: at.field("entry").integer(0),
+      join: at.field("join").integer(0),
+      inputs: at.field("inputs").list(value => value.integer(8)),
+      result: at.field("result").nullable(value => value.integer(8)),
+    };
+    qualifyQvmRegionEvaluation(instructions, owner, result);
+    return result;
   };
   const grants = reader.field("grants").list((at): QvmPickupGrant => {
-    const source = functionCalls(at), op = at.field("operation"), kind = op.field("kind").choice("return", "region");
+    const source = functionCalls(at),
+      op = at.field("operation"),
+      kind = op.field("kind").choice("return", "region");
     let operation: QvmPickupGrant["operation"];
     if (kind === "return") {
-      const acceptedReturn = op.field("acceptedReturn").integer(source.entry + 1), value = instructions[acceptedReturn];
-      if (acceptedReturn + 1 >= ownerEnd(source.entry) || value?.opcode !== QvmOpcode.OP_CONST || value.operand === 0
-        || instructions[acceptedReturn + 1]?.opcode !== QvmOpcode.OP_LEAVE) op.fail("pickup accepted return must be original nonzero CONST/LEAVE in its owning function");
+      const acceptedReturn = op.field("acceptedReturn").integer(source.entry + 1),
+        value = instructions[acceptedReturn];
+      if (
+        acceptedReturn + 1 >= ownerEnd(source.entry) ||
+        value?.opcode !== QvmOpcode.OP_CONST ||
+        value.operand === 0 ||
+        instructions[acceptedReturn + 1]?.opcode !== QvmOpcode.OP_LEAVE
+      )
+        op.fail("pickup accepted return must be original nonzero CONST/LEAVE in its owning function");
       operation = { kind, acceptedReturn };
     } else {
       const region = { entry: op.field("entry").integer(0), join: op.field("join").integer(0), quantity: op.field("quantity").integer(8) };
@@ -48,31 +77,73 @@ export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmMod
       if (region.quantity % 4 !== 0 || region.quantity + 4 > frame) op.fail("pickup quantity is outside the original local frame");
       const weapon = op.field("weapon");
       if (weapon.value !== undefined && weapon.field("storage").value !== undefined) weapon.field("storage").literal("inventory");
-      operation = { kind, ...region, ...(weapon.value === undefined ? {} : { weapon: { ...(weapon.field("storage").value === "inventory" ? { storage: weapon.field("storage").literal("inventory") }
-        : { bitsOffset: weapon.field("bitsOffset").integer(0), ammoOffset: weapon.field("ammoOffset").integer(0) }), quantity: evaluation(weapon.field("quantity"), source.entry) } }) };
+      operation = {
+        kind,
+        ...region,
+        ...(weapon.value === undefined
+          ? {}
+          : {
+              weapon: {
+                ...(weapon.field("storage").value === "inventory"
+                  ? { storage: weapon.field("storage").literal("inventory") }
+                  : { bitsOffset: weapon.field("bitsOffset").integer(0), ammoOffset: weapon.field("ammoOffset").integer(0) }),
+                quantity: evaluation(weapon.field("quantity"), source.entry),
+              },
+            }),
+      };
     }
     const seen = new Set<number>();
-    const branches = at.field("eligibility").field("branches").list(value => {
-      const instructionIndex = value.field("instructionIndex").integer(gate.entry + 1), instruction = instructions[instructionIndex];
-      if (instructionIndex >= ownerEnd(gate.entry) || instruction === undefined || instruction.opcode < QvmOpcode.OP_EQ || instruction.opcode > QvmOpcode.OP_GEF
-        || seen.has(instructionIndex)) value.fail("eligibility override must name a distinct original conditional inside the gate");
-      seen.add(instructionIndex);
-      const taken = value.field("taken").boolean();
-      return { instructionIndex, decide: () => taken };
-    });
-    return { ...source, itemType: at.field("itemType").integer(0), operation, eligible: ({ call }) => {
-      call.branches(branches);
-      const result = call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
-      return typeof result === "number" ? result !== 0 : result.then(value => value !== 0);
-    } };
+    const branches = at
+      .field("eligibility")
+      .field("branches")
+      .list(value => {
+        const instructionIndex = value.field("instructionIndex").integer(gate.entry + 1),
+          instruction = instructions[instructionIndex];
+        if (
+          instructionIndex >= ownerEnd(gate.entry) ||
+          instruction === undefined ||
+          instruction.opcode < QvmOpcode.OP_EQ ||
+          instruction.opcode > QvmOpcode.OP_GEF ||
+          seen.has(instructionIndex)
+        )
+          value.fail("eligibility override must name a distinct original conditional inside the gate");
+        seen.add(instructionIndex);
+        const taken = value.field("taken").boolean();
+        return { instructionIndex, decide: () => taken };
+      });
+    return {
+      ...source,
+      itemType: at.field("itemType").integer(0),
+      operation,
+      eligible: ({ call }) => {
+        call.branches(branches);
+        const result = call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+        return typeof result === "number" ? result !== 0 : result.then(value => value !== 0);
+      },
+    };
   });
-  const entityStride = reader.field("entityStride").integer(qvmSharedEntityBytes(abiProfile)), clientStride = reader.field("clientStride").integer(qvmPlayerStateBytes(abiProfile)), fields = reader.field("fields");
+  const entityStride = reader.field("entityStride").integer(qvmSharedEntityBytes(abiProfile)),
+    clientStride = reader.field("clientStride").integer(qvmPlayerStateBytes(abiProfile)),
+    fields = reader.field("fields");
   if (entityStride % 4 !== 0 || clientStride % 4 !== 0) return reader.fail("source record strides must be aligned");
   const field = (name: string): number => {
-    const value = fields.field(name).integer(0); if (value % 4 !== 0 || value + 4 > entityStride) fields.field(name).fail("pickup field is outside its aligned entity record"); return value;
+    const value = fields.field(name).integer(0);
+    if (value % 4 !== 0 || value + 4 > entityStride) fields.field(name).fail("pickup field is outside its aligned entity record");
+    return value;
   };
-  return { module: artifact.module, abiProfile, entityStride, clientStride,
+  return {
+    module: artifact.module,
+    abiProfile,
+    entityStride,
+    clientStride,
     fields: { inuse: field("inuse"), client: field("client"), health: field("health"), item: field("item"), count: field("count"), flags: field("flags") },
-    droppedFlag: reader.field("droppedFlag").integer(0), items: parseQvmItemLayout(reader.field("items")), touch: entry(reader.field("touch")), gate,
-    targets: functionCalls(reader.field("targets")), free: entry(reader.field("free")), objectiveTypes: reader.field("objectiveTypes").list(at => at.integer(0)), grants };
+    droppedFlag: reader.field("droppedFlag").integer(0),
+    items: parseQvmItemLayout(reader.field("items")),
+    touch: entry(reader.field("touch")),
+    gate,
+    targets: functionCalls(reader.field("targets")),
+    free: entry(reader.field("free")),
+    objectiveTypes: reader.field("objectiveTypes").list(at => at.integer(0)),
+    grants,
+  };
 }

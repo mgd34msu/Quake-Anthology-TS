@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. Shared hand grenade calculation, independent of weapon selection. */
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -54,6 +55,6 @@ export function calculateHandThrow(input: HandThrowInput): HandProjectileSpec {
   const projection = input.project(angles, rerelease ? { x: 2, y: 0, z: -14 } : { x: 8, y: 8, z: -8 });
   const fuse = input.fuseDeadline - input.now;
   const chargedSpeed = 400 + (3 - fuse) * (400 / 3);
-  const speed = Math.trunc(rerelease ? input.alive ? Math.min(800, chargedSpeed) : 400 : chargedSpeed);
+  const speed = Math.trunc(rerelease ? (input.alive ? Math.min(800, chargedSpeed) : 400) : chargedSpeed);
   return { ...projection, damage: 125 * input.damageMultiplier, speed, fuse, radius: 165, held: input.held, gravity: input.gravity };
 }

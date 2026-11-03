@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_active.c authoritative command path.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -80,8 +81,14 @@ function clientFor(entity: GameEntity): GameClient {
 }
 
 function overlap(first: Bounds, second: Bounds): boolean {
-  return first.min.x <= second.max.x && first.min.y <= second.max.y && first.min.z <= second.max.z &&
-    first.max.x >= second.min.x && first.max.y >= second.min.y && first.max.z >= second.min.z;
+  return (
+    first.min.x <= second.max.x &&
+    first.min.y <= second.max.y &&
+    first.min.z <= second.max.z &&
+    first.max.x >= second.min.x &&
+    first.max.y >= second.min.y &&
+    first.max.z >= second.min.z
+  );
 }
 
 export class ClientThinkRuntime {
@@ -108,7 +115,7 @@ export class ClientThinkRuntime {
     for (const actor of contacts) {
       if (seen.some(previous => previous.equals(actor))) continue;
       seen.push(actor);
-      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) this.host.touches.touch(self, actor);
+      if (entity.r.svFlags & ServerEntityFlags.BOT && entity.touch !== null) this.host.touches.touch(self, actor);
       this.host.touches.touch(actor, self);
     }
   }
@@ -125,17 +132,22 @@ export class ClientThinkRuntime {
       const hit = this.host.touches.native(actor);
       if (hit !== null && hit.touch === null && entity.touch === null) continue;
       if (hit === null ? !this.host.touches.isTrigger(actor) : (hit.r.contents & CONTENTS_TRIGGER) === 0) continue;
-      if (client.sess.sessionTeam === Team.TEAM_SPECTATOR && (hit === null || hit.s.eType !== EntityType.ET_TELEPORT_TRIGGER &&
-        !this.host.isDoorTrigger(hit))) continue;
+      if (
+        client.sess.sessionTeam === Team.TEAM_SPECTATOR &&
+        (hit === null || (hit.s.eType !== EntityType.ET_TELEPORT_TRIGGER && !this.host.isDoorTrigger(hit)))
+      )
+        continue;
       if (hit !== null && hit.s.eType === EntityType.ET_ITEM) {
         if (!playerTouchesItem(ps.origin, hit.s.pos, this.host.frame().time)) continue;
       } else if (!this.host.spatial.contactActor(bounds, actor)) continue;
       this.host.touches.touch(actor, self);
-      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) this.host.touches.touch(self, actor);
+      if (entity.r.svFlags & ServerEntityFlags.BOT && entity.touch !== null) this.host.touches.touch(self, actor);
     }
-    if (ps.jumppadFrame !== ps.pmoveFramecount) { ps.jumppadFrame = 0; ps.jumppadEnt = 0; }
+    if (ps.jumppadFrame !== ps.pmoveFramecount) {
+      ps.jumppadFrame = 0;
+      ps.jumppadEnt = 0;
+    }
   }
-
 
   clientThinkReal(entity: GameEntity): void {
     const client = clientFor(entity);
@@ -156,7 +168,10 @@ export class ClientThinkRuntime {
       if (!Number.isInteger(settings.pmoveMsec) || settings.pmoveMsec <= 0) throw new RangeError("Fixed pmove needs a positive cached pmove_msec");
       command.serverTime = Math.imul(Math.trunc(((command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
     }
-    if (frame.intermissionTime !== 0) { this.host.intermissionThink(client); return; }
+    if (frame.intermissionTime !== 0) {
+      this.host.intermissionThink(client);
+      return;
+    }
     if (client.sess.sessionTeam === Team.TEAM_SPECTATOR) {
       if (client.sess.spectatorState !== SpectatorState.SCOREBOARD) this.host.spectatorThink(entity, command);
       return;
@@ -173,15 +188,21 @@ export class ClientThinkRuntime {
       this.host.freeHook(client.hook);
     }
     const oldEventSequence = ps.eventSequence;
-    const gauntletHit = ps.weapon === Weapon.WP_GAUNTLET && !(command.buttons & CommandButtons.TALK) &&
-      (command.buttons & CommandButtons.ATTACK) !== 0 && ps.weaponTime <= 0 ? this.host.checkGauntletAttack(entity) : false;
+    const gauntletHit =
+      ps.weapon === Weapon.WP_GAUNTLET && !(command.buttons & CommandButtons.TALK) && (command.buttons & CommandButtons.ATTACK) !== 0 && ps.weaponTime <= 0
+        ? this.host.checkGauntletAttack(entity)
+        : false;
     if (entity.flags & GameFlags.FORCE_GESTURE) {
       entity.flags &= ~GameFlags.FORCE_GESTURE;
       command.buttons |= CommandButtons.GESTURE;
     }
     expandQ3Invulnerability(this.host.pool, this.host.world, entity);
-    const traceMask = ps.pmType === MoveType.PM_DEAD ? MASK_PLAYERSOLID & ~CONTENTS_BODY :
-      entity.r.svFlags & ServerEntityFlags.BOT ? MASK_PLAYERSOLID | CONTENTS_BOTCLIP : MASK_PLAYERSOLID;
+    const traceMask =
+      ps.pmType === MoveType.PM_DEAD
+        ? MASK_PLAYERSOLID & ~CONTENTS_BODY
+        : entity.r.svFlags & ServerEntityFlags.BOT
+          ? MASK_PLAYERSOLID | CONTENTS_BOTCLIP
+          : MASK_PLAYERSOLID;
     client.oldOrigin = { ...ps.origin };
     const movementCommand: UserCommand = { ...command, angles: { ...command.angles } };
     if (ps.product === "missionpack" && frame.intermissionQueued !== 0 && settings.singlePlayer) {
@@ -197,7 +218,9 @@ export class ClientThinkRuntime {
     }
     const movement = this.host.moveClient(entity, movementCommand, {
       debugLevel: settings.debugMove,
-      traceMask, fixedMsec: fixed ? settings.pmoveMsec : null, gauntletHit,
+      traceMask,
+      fixedMsec: fixed ? settings.pmoveMsec : null,
+      gauntletHit,
       noFootsteps: (settings.dmflags & 32) !== 0,
       ladders: settings.ladders !== false,
     });

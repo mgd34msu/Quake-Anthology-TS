@@ -33,11 +33,19 @@ export interface PeImage extends GuestImage {
 
 export class ImageReader {
   readonly reader: PeReader;
-  constructor(readonly bytes: Uint8Array, readonly pe: PeFile, readonly base: bigint,
-    readonly memory: MappedGuestMemory, readonly module: ModuleIdentity, readonly stage: PeError["stage"]) {
+  constructor(
+    readonly bytes: Uint8Array,
+    readonly pe: PeFile,
+    readonly base: bigint,
+    readonly memory: MappedGuestMemory,
+    readonly module: ModuleIdentity,
+    readonly stage: PeError["stage"],
+  ) {
     this.reader = new PeReader(bytes, stage);
   }
-  forStage(stage: PeError["stage"]): ImageReader { return new ImageReader(this.bytes, this.pe, this.base, this.memory, this.module, stage); }
+  forStage(stage: PeError["stage"]): ImageReader {
+    return new ImageReader(this.bytes, this.pe, this.base, this.memory, this.module, stage);
+  }
   range(rva: number, size: number): void {
     checkedRange(rva, size, this.bytes.length, this.stage);
     if (size === 0) return;
@@ -67,8 +75,14 @@ export class ImageReader {
     if (section === undefined || !section.permissions.includes("execute")) throw new PeError(this.stage, `RVA 0x${rva.toString(16)} is not executable`);
     return this.address(rva);
   }
-  u16(rva: number): number { this.range(rva, 2); return this.reader.u16(rva); }
-  u32(rva: number): number { this.range(rva, 4); return this.reader.u32(rva); }
+  u16(rva: number): number {
+    this.range(rva, 2);
+    return this.reader.u16(rva);
+  }
+  u32(rva: number): number {
+    this.range(rva, 4);
+    return this.reader.u32(rva);
+  }
   pointer(rva: number): bigint {
     this.range(rva, this.pe.abi.pointerBytes);
     return this.pe.abi.pointerBytes === 4 ? BigInt(this.reader.u32(rva)) : this.reader.u64(rva);
@@ -79,5 +93,8 @@ export class ImageReader {
     const bound = Math.min(end, section === undefined ? this.pe.headerSize : section.rva + section.mappedSize);
     return this.reader.text(rva, bound - rva);
   }
-  copy(rva: number, size: number): Uint8Array { this.range(rva, size); return this.bytes.slice(rva, rva + size); }
+  copy(rva: number, size: number): Uint8Array {
+    this.range(rva, size);
+    return this.bytes.slice(rva, rva + size);
+  }
 }

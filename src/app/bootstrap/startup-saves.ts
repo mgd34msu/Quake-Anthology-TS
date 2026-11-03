@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
@@ -34,7 +35,10 @@ export interface StartupSaveRow {
   readonly savedAtMilliseconds: number;
   readonly unavailable: string | null;
 }
-export interface StartupSaveList { readonly rows: readonly StartupSaveRow[]; readonly error: string | null; }
+export interface StartupSaveList {
+  readonly rows: readonly StartupSaveRow[];
+  readonly error: string | null;
+}
 
 /** Files are inspected on browser open/refresh. Drawing only reads this retained list. */
 export class StartupSaves {
@@ -42,10 +46,17 @@ export class StartupSaves {
   private paths = new Map<string, string>();
   /** Parsed row details keyed by file identity; refresh runs on every menu open and save. */
   private readonly rowCache = new Map<string, { readonly mtimeMs: number; readonly size: number; readonly row: StartupSaveRow }>();
-  constructor(private readonly catalog: InstalledCatalog, readonly directory: string, readonly externalDirectories: readonly string[] = []) {}
-  get list(): StartupSaveList { return this.current; }
+  constructor(
+    private readonly catalog: InstalledCatalog,
+    readonly directory: string,
+    readonly externalDirectories: readonly string[] = [],
+  ) {}
+  get list(): StartupSaveList {
+    return this.current;
+  }
   path(id: string): string {
-    const row = this.current.rows.find(row => row.id === id), path = this.paths.get(id);
+    const row = this.current.rows.find(row => row.id === id),
+      path = this.paths.get(id);
     if (row === undefined || path === undefined) throw new Error("This saved game is no longer listed. Refresh the saved games.");
     if (row.unavailable !== null) throw new Error(row.unavailable);
     return path;
@@ -59,7 +70,9 @@ export class StartupSaves {
     return path;
   }
   async refresh(): Promise<void> {
-    const files: { readonly path: string; readonly id: string }[] = [], rows: StartupSaveRow[] = [], paths = new Map<string, string>();
+    const files: { readonly path: string; readonly id: string }[] = [],
+      rows: StartupSaveRow[] = [],
+      paths = new Map<string, string>();
     const seen = new Set<string>();
     let error: string | null = null;
     const scan = async (directory: string, collect: (path: string) => void): Promise<void> => {
@@ -76,45 +89,64 @@ export class StartupSaves {
     };
     await scan(this.directory, path => {
       if (path.toLowerCase().endsWith(".pak.gz") || seen.has(path)) return;
-      seen.add(path); files.push({ path, id: relative(this.directory, path) });
+      seen.add(path);
+      files.push({ path, id: relative(this.directory, path) });
     });
     // Read-only saves from other engines (Nightdive/Steam Saved Games):
     // listed and loadable where the format is supported, never written.
     for (const [index, root] of this.externalDirectories.entries())
       await scan(root, path => {
         if (seen.has(path)) return;
-        seen.add(path); files.push({ path, id: `external/${index}/${relative(root, path)}` });
+        seen.add(path);
+        files.push({ path, id: `external/${index}/${relative(root, path)}` });
       });
     for (const { path, id } of files) {
       const identity = await stat(path).catch(() => null);
       const cached = identity === null ? undefined : this.rowCache.get(path);
       if (cached !== undefined && identity !== null && cached.mtimeMs === identity.mtimeMs && cached.size === identity.size) {
-        paths.set(id, path); rows.push({ ...cached.row, id }); continue;
+        paths.set(id, path);
+        rows.push({ ...cached.row, id });
+        continue;
       }
       const remember = (row: StartupSaveRow): StartupSaveRow => {
         if (identity !== null) this.rowCache.set(path, { mtimeMs: identity.mtimeMs, size: identity.size, row });
         return row;
       };
       if (path.toLowerCase().endsWith(".pak.gz")) {
-        let label = basename(path).replace(/\.pak\.gz$/i, ""), map = "Unknown map", game = "Quake II (rerelease)", savedAtMilliseconds = 0;
+        let label = basename(path).replace(/\.pak\.gz$/i, ""),
+          map = "Unknown map",
+          game = "Quake II (rerelease)",
+          savedAtMilliseconds = 0;
         let unavailable: string | null = "Retail Quake II saves with recorded client or level state cannot be restored by this engine yet.";
         try {
           savedAtMilliseconds = (await stat(path)).mtimeMs;
-          const save = await readKexQ2SaveArchive(path), info = save.info;
+          const save = await readKexQ2SaveArchive(path),
+            info = save.info;
           if (info.comment !== "") label = info.comment;
           map = info.mapCommand;
           if (info.timestamp > 0n && info.timestamp < 253402300800n) savedAtMilliseconds = Number(info.timestamp) * 1000;
-          const product = this.catalog.products.find(candidate => candidate.expectation.family === "q2" && candidate.expectation.edition === "rerelease"
-            && basename(candidate.expectation.contentDirectory).toLowerCase() === (info.gameDirectory ?? "").toLowerCase());
+          const product = this.catalog.products.find(
+            candidate =>
+              candidate.expectation.family === "q2" &&
+              candidate.expectation.edition === "rerelease" &&
+              basename(candidate.expectation.contentDirectory).toLowerCase() === (info.gameDirectory ?? "").toLowerCase(),
+          );
           if (product !== undefined) game = `${product.expectation.title} (${product.expectation.edition})`;
-          if (kexQ2SaveRestorable(save)) unavailable = product === undefined || product.availability.kind !== "installed" ? "Required game content is not installed." : null;
-        } catch (cause) { unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version."; }
-        paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+          if (kexQ2SaveRestorable(save))
+            unavailable = product === undefined || product.availability.kind !== "installed" ? "Required game content is not installed." : null;
+        } catch (cause) {
+          unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
+        }
+        paths.set(id, path);
+        rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
         continue;
       }
       const name = basename(path).replace(/\.sav$/i, "");
       const label = name.toLowerCase() === "autosave" ? "Autosave" : name.toLowerCase() === "quicksave" ? "Quicksave" : name.replaceAll("_", " ");
-      let savedAtMilliseconds = 0, map = "Unknown map", game = "Unknown game", unavailable: string | null = null;
+      let savedAtMilliseconds = 0,
+        map = "Unknown map",
+        game = "Unknown game",
+        unavailable: string | null = null;
       try {
         savedAtMilliseconds = (await stat(path)).mtimeMs;
         const header = await readSaveHeader(path);
@@ -123,12 +155,13 @@ export class StartupSaves {
           map = header.map.replace(/^maps\//, "").replace(/\.bsp$/, "");
           game = `${product.expectation.title} (${product.expectation.edition})`;
           if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
-          paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+          paths.set(id, path);
+          rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
           continue;
         }
         const save = await readSavedGame(path);
-        const product = save.kind === "shared" ? this.catalog.product(save.image.recipe.map.entities.content)
-          : selectQ1SaveProduct(this.catalog, save.data, path);
+        const product =
+          save.kind === "shared" ? this.catalog.product(save.image.recipe.map.entities.content) : selectQ1SaveProduct(this.catalog, save.data, path);
         map = save.kind === "shared" ? save.image.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, "") : save.data.map;
         game = `${product.expectation.title} (${product.expectation.edition})`;
         if (save.kind === "shared") savedSimulationSettings(save.image);
@@ -136,9 +169,11 @@ export class StartupSaves {
       } catch (cause) {
         unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
       }
-      paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+      paths.set(id, path);
+      rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
     }
     rows.sort((left, right) => right.savedAtMilliseconds - left.savedAtMilliseconds || left.id.localeCompare(right.id));
-    this.paths = paths; this.current = { rows, error };
+    this.paths = paths;
+    this.current = { rows, error };
   }
 }

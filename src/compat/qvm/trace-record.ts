@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* trace_t and cplane_t from id Software's code/game/q_shared.h.
  * Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
@@ -14,8 +15,7 @@ export interface QvmTraceRecord extends SourceTraceResult {
 /** Write a resolved allocation. The source trace work starts with zeroed padding. */
 export function writeQvmTrace(view: DataView, value: QvmTraceRecord): void {
   if (view.byteLength < QVM_TRACE_BYTES) {
-    throw new BinaryError("QVM trace_t", 0,
-      `record requires ${QVM_TRACE_BYTES} bytes, received ${view.byteLength}`);
+    throw new BinaryError("QVM trace_t", 0, `record requires ${QVM_TRACE_BYTES} bytes, received ${view.byteLength}`);
   }
   view.setInt32(0, Number(value.allSolid), true);
   view.setInt32(4, Number(value.startSolid), true);

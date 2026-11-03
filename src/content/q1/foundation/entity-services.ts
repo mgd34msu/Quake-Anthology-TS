@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SourceWeaponHandoff } from "../../../contracts/source-items.ts";
 import type { ProjectileRole } from "../../../contracts/weapon-behavior.ts";
 import { q1WaterTransition } from "../../../movement/q1/water-transition.ts";
@@ -18,7 +19,25 @@ import { foreignShamblerDamage } from "./shambler-damage.ts";
 import { Q1PrecacheRegistry } from "./precache.ts";
 import { Q1Actor, sourceAngles, targetnameEpoch } from "./entity.ts";
 import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
-import { Q1_PROVIDER, createPlayerCues, powerupCue, powerupWarning, resetPowerupCue, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
+import {
+  Q1_PROVIDER,
+  createPlayerCues,
+  powerupCue,
+  powerupWarning,
+  resetPowerupCue,
+  ZERO,
+  POINT,
+  vadd,
+  vsub,
+  vscale,
+  dot,
+  length,
+  normalize,
+  WEAPONS,
+  weaponItem,
+  isQ1BaseWeapon,
+  vectors,
+} from "./types.ts";
 import { spawnMapActor } from "./spawns.ts";
 import { fireWeapon, bestWeapon, weaponModel, projectileTouch } from "./weapons.ts";
 import { spawnPickup, registerPickupCallbacks } from "./pickups.ts";
@@ -35,29 +54,44 @@ import type { AuthoredTarget, MonsterMission } from "../../monsters/authored.ts"
 
 /** WinQuake SV_ClientThink / DropPunchAngle, using the source's binary32 operations. */
 export function dropQ1Punch(angles: Vec3, elapsed: number, numeric: NumericOperations): Vec3 {
-  const math = createMutableVectorMath(numeric, "preserve"), direction = { ...angles };
-  const magnitude = math.VectorNormalize(direction), remaining = Math.max(0, numeric.subtract(magnitude, numeric.multiply(10, elapsed)));
-  const punch = { ...ZERO }; math.VectorScale(direction, remaining, punch); return punch;
+  const math = createMutableVectorMath(numeric, "preserve"),
+    direction = { ...angles };
+  const magnitude = math.VectorNormalize(direction),
+    remaining = Math.max(0, numeric.subtract(magnitude, numeric.multiply(10, elapsed)));
+  const punch = { ...ZERO };
+  math.VectorScale(direction, remaining, punch);
+  return punch;
 }
 
 /** Q1 source entity continuations use the session's authoritative bodies, combat and scheduling. */
 export class Q1EntityServices {
   readonly named = new Q1CallbackRegistry(this);
   readonly precaches = new Q1PrecacheRegistry();
-  get usesId1Precaches(): boolean { return this.options.precacheProgram === "id1"; }
-  precacheModel(path: string): string { return this.precaches.model(path); }
-  precacheSound(path: string): string { return this.precaches.sound(path); }
+  get usesId1Precaches(): boolean {
+    return this.options.precacheProgram === "id1";
+  }
+  precacheModel(path: string): string {
+    return this.precaches.model(path);
+  }
+  precacheSound(path: string): string {
+    return this.precaches.sound(path);
+  }
   private baseTeamHealth = true;
   private readonly pathTouches = new Map<string, (corner: Q1Actor, mover: Q1Actor) => boolean>();
   private readonly sourceDamageEffects = new Map<string, Q1DamageSourceEffects>();
   readonly damageSourceEffects: Q1DamageSourceEffects = {
     beforeQuad: (request, amount, target, attacker) => this.prepareSourceDamage("beforeQuad", request, amount, target, attacker),
     afterQuad: (request, amount, target, attacker) => this.prepareSourceDamage("afterQuad", request, amount, target, attacker),
-    armorAllowed: (request, amount, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.armorAllowed?.(request, amount, target, attacker) ?? true),
-    protectionApplies: (request, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.protectionApplies?.(request, target, attacker) ?? true),
-    beforeHealth: (request, amount, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.beforeHealth?.(request, amount, target, attacker) ?? true),
+    armorAllowed: (request, amount, target, attacker) =>
+      [...this.sourceDamageEffects.values()].every(effects => effects.armorAllowed?.(request, amount, target, attacker) ?? true),
+    protectionApplies: (request, target, attacker) =>
+      [...this.sourceDamageEffects.values()].every(effects => effects.protectionApplies?.(request, target, attacker) ?? true),
+    beforeHealth: (request, amount, target, attacker) =>
+      [...this.sourceDamageEffects.values()].every(effects => effects.beforeHealth?.(request, amount, target, attacker) ?? true),
     afterArmor: (request, take, target, attacker) => {
-      let amount = take; for (const effects of this.sourceDamageEffects.values()) amount = effects.afterArmor?.(request, amount, target, attacker) ?? amount; return amount;
+      let amount = take;
+      for (const effects of this.sourceDamageEffects.values()) amount = effects.afterArmor?.(request, amount, target, attacker) ?? amount;
+      return amount;
     },
     lethalHealth: (request, proposed, target, attacker) => {
       let result: { readonly health: number; readonly reaction: "none" | "death" } = { health: proposed, reaction: "death" };
@@ -85,12 +119,20 @@ export class Q1EntityServices {
   readonly entities = new Map<OwnedActor, Q1Actor>();
   readonly authoredTargets = new Map<ActorId, AuthoredTarget>();
   readonly monsterMissions = new Map<ActorId, MonsterMission>();
-  authoredPathFollower: ((mover: ActorId) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null) | null = null;
+  authoredPathFollower:
+    | ((
+        mover: ActorId,
+      ) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null)
+    | null = null;
   readonly players = new Map<OwnedActor, Q1PlayerState>();
   #time = 0;
   /** QC time is a float; deadlines stored fround'ed must compare against fround'ed time. */
-  get time(): number { return this.#time; }
-  set time(value: number) { this.#time = Math.fround(value); }
+  get time(): number {
+    return this.#time;
+  }
+  set time(value: number) {
+    this.#time = Math.fround(value);
+  }
   frameSeconds = 0;
   forceRetouch = 0;
   basis: Q1Basis = { forward: ZERO, right: ZERO, up: ZERO };
@@ -126,28 +168,63 @@ export class Q1EntityServices {
   intermission: { readonly map: string; readonly cause: ActorId | null; readonly exitAfter: number } | null = null;
   private readonly configuredOptions: Q1FoundationOptions;
   private spawnOptions: Q1FoundationOptions | null = null;
-  get provider() { return this.configuredOptions.provider ?? Q1_PROVIDER; }
-  get options(): Q1FoundationOptions { return this.spawnOptions ?? this.configuredOptions; }
+  get provider() {
+    return this.configuredOptions.provider ?? Q1_PROVIDER;
+  }
+  get options(): Q1FoundationOptions {
+    return this.spawnOptions ?? this.configuredOptions;
+  }
   private sequence = 0;
   protected nextDynamicSlot = 1;
   private readonly spawners = new Map<string, (game: Q1EntityServices, entity: Q1Actor) => undefined>();
 
-  constructor(readonly host: Q1FoundationHost, options: Q1FoundationOptions) {
+  constructor(
+    readonly host: Q1FoundationHost,
+    options: Q1FoundationOptions,
+  ) {
     this.configuredOptions = options;
     this.nextDynamicSlot = (options.maxClients ?? 0) + 1;
     this.named.register("SUB_Remove", { action: (game, entity) => game.remove(entity), touch: (game, entity) => game.remove(entity) });
-    this.named.register("base:explosion_frame", { action: (game, entity) => { entity.frame++; return entity.frame >= 6 ? game.remove(entity) : game.schedule(entity, 0.1, game.named.action(entity, "base:explosion_frame")); } });
+    this.named.register("base:explosion_frame", {
+      action: (game, entity) => {
+        entity.frame++;
+        return entity.frame >= 6 ? game.remove(entity) : game.schedule(entity, 0.1, game.named.action(entity, "base:explosion_frame"));
+      },
+    });
     this.named.register("SUB_Null", { action: () => undefined });
-    this.named.register("DelayThink", { action: (game, entity) => { game.useTargets(entity, entity.activator); return game.remove(entity); } });
-    registerMoverCallbacks(this); registerSpawnCallbacks(this); registerPickupCallbacks(this); registerWeaponCallbacks(this);
-    host.actors.onRelease(actor => { this.entities.delete(actor); this.entityEpoch++; this.authoredTargets.delete(actor.id); this.monsterMissions.delete(actor.id); this.players.delete(actor); host.cancelThink(actor); return undefined; });
+    this.named.register("DelayThink", {
+      action: (game, entity) => {
+        game.useTargets(entity, entity.activator);
+        return game.remove(entity);
+      },
+    });
+    registerMoverCallbacks(this);
+    registerSpawnCallbacks(this);
+    registerPickupCallbacks(this);
+    registerWeaponCallbacks(this);
+    host.actors.onRelease(actor => {
+      this.entities.delete(actor);
+      this.entityEpoch++;
+      this.authoredTargets.delete(actor.id);
+      this.monsterMissions.delete(actor.id);
+      this.players.delete(actor);
+      host.cancelThink(actor);
+      return undefined;
+    });
   }
 
   registerDamageSourceEffects(id: string, effects: Q1DamageSourceEffects): undefined {
     if (this.sourceDamageEffects.has(id)) throw new Error(`Duplicate Q1 damage source effects: ${id}`);
-    this.sourceDamageEffects.set(id, effects); return undefined;
+    this.sourceDamageEffects.set(id, effects);
+    return undefined;
   }
-  private prepareSourceDamage(phase: "beforeQuad" | "afterQuad", request: DamageRequest, initial: number, target: CombatState, attacker: CombatState | null): DamagePreparation {
+  private prepareSourceDamage(
+    phase: "beforeQuad" | "afterQuad",
+    request: DamageRequest,
+    initial: number,
+    target: CombatState,
+    attacker: CombatState | null,
+  ): DamagePreparation {
     let amount = initial;
     for (const effects of this.sourceDamageEffects.values()) {
       const result = effects[phase]?.(request, amount, target, attacker);
@@ -165,51 +242,74 @@ export class Q1EntityServices {
     return this.host.controlPlayer(actor, control);
   }
   /** Rogue combat.qc replaces the ordinary teamplay==1 gate with TeamHealthDam. */
-  setBaseTeamHealth(enabled: boolean): undefined { this.baseTeamHealth = enabled; return undefined; }
-  registerPathTouch(id: string, callback: (corner: Q1Actor, mover: Q1Actor) => boolean): undefined {
-    if (this.pathTouches.has(id)) throw new Error(`Duplicate Q1 source path touch ${id}`); this.pathTouches.set(id, callback); return undefined;
+  setBaseTeamHealth(enabled: boolean): undefined {
+    this.baseTeamHealth = enabled;
+    return undefined;
   }
-  sourcePathTouch(corner: Q1Actor, mover: Q1Actor): boolean { for (const callback of this.pathTouches.values()) if (callback(corner, mover)) return true; return false; }
+  registerPathTouch(id: string, callback: (corner: Q1Actor, mover: Q1Actor) => boolean): undefined {
+    if (this.pathTouches.has(id)) throw new Error(`Duplicate Q1 source path touch ${id}`);
+    this.pathTouches.set(id, callback);
+    return undefined;
+  }
+  sourcePathTouch(corner: Q1Actor, mover: Q1Actor): boolean {
+    for (const callback of this.pathTouches.values()) if (callback(corner, mover)) return true;
+    return false;
+  }
   registerWeaponRules(rules: Q1WeaponRules): undefined {
     if (this.weaponRules.has(rules.id)) throw new Error(`Duplicate Q1 weapon rules: ${rules.id}`);
-    if (rules.consumeAmmo !== undefined && [...this.weaponRules.values()].some(rule => rule.consumeAmmo !== undefined)) throw new Error("Q1 source ammunition consumption already registered");
-    this.weaponRules.set(rules.id, rules); return undefined;
+    if (rules.consumeAmmo !== undefined && [...this.weaponRules.values()].some(rule => rule.consumeAmmo !== undefined))
+      throw new Error("Q1 source ammunition consumption already registered");
+    this.weaponRules.set(rules.id, rules);
+    return undefined;
   }
   consumeWeaponAmmo(player: Q1PlayerState, item: ItemId, amount: number): boolean {
     for (const rules of this.weaponRules.values()) if (rules.consumeAmmo !== undefined) return rules.consumeAmmo(this, player, item, amount);
     return this.host.inventory.consume(player.actor, item, amount);
   }
   weaponBeforeFire(player: Q1PlayerState): undefined {
-    for (const rules of this.weaponRules.values()) rules.beforeFire?.(this, player); return undefined;
+    for (const rules of this.weaponRules.values()) rules.beforeFire?.(this, player);
+    return undefined;
   }
   weaponAttackDelay(player: Q1PlayerState, initial: number): number {
-    let delay = initial; for (const rules of this.weaponRules.values()) delay = rules.attackDelay?.(this, player, delay) ?? delay; return delay;
+    let delay = initial;
+    for (const rules of this.weaponRules.values()) delay = rules.attackDelay?.(this, player, delay) ?? delay;
+    return delay;
   }
   weaponFrameDelay(player: Q1PlayerState, initial: number): number {
-    let delay = initial; for (const rules of this.weaponRules.values()) delay = rules.frameDelay?.(this, player, delay) ?? delay; return delay;
+    let delay = initial;
+    for (const rules of this.weaponRules.values()) delay = rules.frameDelay?.(this, player, delay) ?? delay;
+    return delay;
   }
   nailSpeed(player: Q1PlayerState, initial: number): number {
-    let speed = initial; for (const rules of this.weaponRules.values()) speed = rules.nailSpeed?.(this, player, speed) ?? speed; return speed;
+    let speed = initial;
+    for (const rules of this.weaponRules.values()) speed = rules.nailSpeed?.(this, player, speed) ?? speed;
+    return speed;
   }
   registerPickupRules(rules: Q1PickupRules): undefined {
     if (this.pickupRules !== null) throw new Error(`Q1 pickup rules already owned by ${this.pickupRules.id}`);
-    this.pickupRules = rules; return undefined;
+    this.pickupRules = rules;
+    return undefined;
   }
   registerWeapon(definition: Q1WeaponDefinition): undefined {
     if (isQ1BaseWeapon(definition.id) || this.registeredWeapons.has(definition.id)) throw new Error(`Q1 weapon already registered: ${definition.id}`);
-    this.registeredWeapons.set(definition.id, definition); return undefined;
+    this.registeredWeapons.set(definition.id, definition);
+    return undefined;
   }
   replaceWeapon(definition: Q1WeaponDefinition): undefined {
     if (!isQ1BaseWeapon(definition.id) && !this.registeredWeapons.has(definition.id)) throw new Error(`No Q1 weapon to replace: ${definition.id}`);
-    this.registeredWeapons.set(definition.id, definition); return undefined;
+    this.registeredWeapons.set(definition.id, definition);
+    return undefined;
   }
   registerWeaponOrder(id: string, order: readonly Q1Weapon[]): undefined {
     if (this.weaponOrderOwner !== null) throw new Error(`Q1 weapon fallback already owned by ${this.weaponOrderOwner}`);
-    this.weaponOrderOwner = id; this.weaponOrder = [...order]; return undefined;
+    this.weaponOrderOwner = id;
+    this.weaponOrder = [...order];
+    return undefined;
   }
   registerPlayerExtension(extension: Q1PlayerExtension): undefined {
     if (this.playerExtensions.has(extension.id)) throw new Error(`Duplicate Q1 player extension: ${extension.id}`);
-    this.playerExtensions.set(extension.id, extension); return undefined;
+    this.playerExtensions.set(extension.id, extension);
+    return undefined;
   }
   inventoryCapacity(actor: ActorId, item: ItemId): number | undefined {
     const player = this.player(actor);
@@ -228,16 +328,27 @@ export class Q1EntityServices {
     if (player !== undefined && definition?.modelFor !== undefined) return definition.modelFor(this, player);
     return definition?.model ?? weaponModel(weapon);
   }
-  weaponItem(weapon: Q1Weapon): ItemId { return this.registeredWeapons.get(weapon)?.item ?? weaponItem(weapon); }
-  weaponAmmo(weapon: Q1Weapon): ItemId | null { const extension = this.registeredWeapons.get(weapon); return extension === undefined ? ammoItem(weapon) : extension.ammo; }
-  weaponAvailable(player: Q1PlayerState, weapon: Q1Weapon, purpose: "best" | "fire" = "best", ammoCount: (item: ItemId) => number = item => this.host.inventory.count(player.actor.id, item)): boolean {
+  weaponItem(weapon: Q1Weapon): ItemId {
+    return this.registeredWeapons.get(weapon)?.item ?? weaponItem(weapon);
+  }
+  weaponAmmo(weapon: Q1Weapon): ItemId | null {
+    const extension = this.registeredWeapons.get(weapon);
+    return extension === undefined ? ammoItem(weapon) : extension.ammo;
+  }
+  weaponAvailable(
+    player: Q1PlayerState,
+    weapon: Q1Weapon,
+    purpose: "best" | "fire" = "best",
+    ammoCount: (item: ItemId) => number = item => this.host.inventory.count(player.actor.id, item),
+  ): boolean {
     if (this.host.inventory.count(player.actor.id, this.weaponItem(weapon)) === 0) return false;
     const extension = this.registeredWeapons.get(weapon);
     if (!isQ1BaseWeapon(weapon) && extension === undefined) return false;
     if (extension?.available !== undefined && !extension.available(this, player)) return false;
     if (purpose === "best" && extension?.bestAvailable !== undefined && !extension.bestAvailable(this, player)) return false;
     if (purpose === "best" && weapon === "lightning" && player.waterLevel > 1) return false;
-    const ammo = this.weaponAmmo(weapon), needed = extension?.ammoPerShot ?? (purpose === "best" && (weapon === "supernailgun" || weapon === "supershotgun") ? 2 : 1);
+    const ammo = this.weaponAmmo(weapon),
+      needed = extension?.ammoPerShot ?? (purpose === "best" && (weapon === "supernailgun" || weapon === "supershotgun") ? 2 : 1);
     return ammo === null || ammoCount(ammo) >= needed;
   }
   fireRegisteredWeapon(player: Q1PlayerState): boolean {
@@ -245,57 +356,94 @@ export class Q1EntityServices {
     const definition = this.registeredWeapons.get(player.weapon);
     if (definition === undefined) throw new Error(`Q1 weapon source not registered: ${player.weapon}`);
     if (this.health(player.actor.id) <= 0 || this.time < (player.continuousFiring ? player.nextWeaponFrame : player.attackFinished)) return false;
-    if (!this.weaponAvailable(player, player.weapon, "fire")) { this.selectWeapon(player.actor, this.chooseBest(player.actor)); return false; }
-    this.weaponBeforeFire(player); return definition.fire(this, player);
+    if (!this.weaponAvailable(player, player.weapon, "fire")) {
+      this.selectWeapon(player.actor, this.chooseBest(player.actor));
+      return false;
+    }
+    this.weaponBeforeFire(player);
+    return definition.fire(this, player);
   }
-  capture(): Q1FoundationCheckpoint { return captureFoundation(this, this.sequence, this.nextDynamicSlot); }
+  capture(): Q1FoundationCheckpoint {
+    return captureFoundation(this, this.sequence, this.nextDynamicSlot);
+  }
   restore(checkpoint: Q1FoundationCheckpoint, options: { readonly scheduleThinks?: boolean } = {}): undefined {
-    restoreFoundation(this, checkpoint); this.sequence = checkpoint.sequence; this.nextDynamicSlot = checkpoint.nextDynamicSlot;
-    if (options.scheduleThinks ?? true) this.resumeThinks(); return undefined;
+    restoreFoundation(this, checkpoint);
+    this.sequence = checkpoint.sequence;
+    this.nextDynamicSlot = checkpoint.nextDynamicSlot;
+    if (options.scheduleThinks ?? true) this.resumeThinks();
+    return undefined;
   }
   resumeThinks(): undefined {
-    for (const entity of this.entities.values()) if (entity.movement !== "push" && entity.think !== null && entity.nextThink >= 0) this.host.scheduleThink(entity.actor, entity.nextThink);
+    for (const entity of this.entities.values())
+      if (entity.movement !== "push" && entity.think !== null && entity.nextThink >= 0) this.host.scheduleThink(entity.actor, entity.nextThink);
     return undefined;
   }
   registerStateExtension(extension: Q1StateExtension): undefined {
     if (this.stateExtensions.has(extension.id)) throw new Error(`Duplicate Q1 state extension: ${extension.id}`);
-    this.stateExtensions.set(extension.id, extension); return undefined;
+    this.stateExtensions.set(extension.id, extension);
+    return undefined;
   }
   spawnEntity(entity: Q1Actor, context: { readonly deathmatch?: number } = {}): undefined {
     const previous = this.spawnOptions;
     if (context.deathmatch !== undefined) this.spawnOptions = { ...this.options, deathmatch: context.deathmatch };
     try {
       const extension = this.spawners.get(entity.classname);
-      if (extension === undefined) spawnMapActor(this, entity); else extension(this, entity);
-      if (this.live(entity)) this.link(entity); return undefined;
-    } finally { this.spawnOptions = previous; }
+      if (extension === undefined) spawnMapActor(this, entity);
+      else extension(this, entity);
+      if (this.live(entity)) this.link(entity);
+      return undefined;
+    } finally {
+      this.spawnOptions = previous;
+    }
   }
   private keepingOwnedSpawns = false;
   /** Runs `register` so the spawn handlers it adds never displace handlers the selected program already owns. */
   adjoin<T>(register: () => T): T {
-    const previous = this.keepingOwnedSpawns; this.keepingOwnedSpawns = true;
-    try { return register(); } finally { this.keepingOwnedSpawns = previous; }
+    const previous = this.keepingOwnedSpawns;
+    this.keepingOwnedSpawns = true;
+    try {
+      return register();
+    } finally {
+      this.keepingOwnedSpawns = previous;
+    }
   }
   registerSpawn(classname: string, handler: (game: Q1EntityServices, entity: Q1Actor) => undefined): undefined {
     if (this.spawners.has(classname)) {
       if (this.keepingOwnedSpawns) return undefined;
       throw new Error(`Q1 spawn handler already registered: ${classname}`);
     }
-    this.spawners.set(classname, handler); return undefined;
+    this.spawners.set(classname, handler);
+    return undefined;
   }
 
-  hasSpawn(classname: string): boolean { return this.spawners.has(classname); }
+  hasSpawn(classname: string): boolean {
+    return this.spawners.has(classname);
+  }
   replaceSpawn(classname: string, handler: (game: Q1EntityServices, entity: Q1Actor) => undefined): undefined {
     if (!this.spawners.has(classname)) throw new Error(`No registered Q1 spawn to replace: ${classname}`);
-    this.spawners.set(classname, handler); return undefined;
+    this.spawners.set(classname, handler);
+    return undefined;
   }
 
   create(classname: string, source?: Q1Entity, sourceOrdinal: number | null = null): Q1Actor {
     const slot = sourceOrdinal === null ? this.nextDynamicSlot++ : sourceOrdinal === 0 ? 0 : sourceOrdinal + (this.options.maxClients ?? 0);
     const owner = this.host.actors.allocateAtSource(this.provider, slot, `q1:${classname}`);
     const entity = new Q1Actor(owner, classname, sourceOrdinal, this.host.combat, source);
-    this.host.bodies.create(owner, { origin: source === undefined ? ZERO : entity.vector("origin"), angles: source === undefined ? ZERO : sourceAngles(source), velocity: ZERO, bounds: POINT, ground: null });
-    this.host.combat.create(owner, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
+    this.host.bodies.create(owner, {
+      origin: source === undefined ? ZERO : entity.vector("origin"),
+      angles: source === undefined ? ZERO : sourceAngles(source),
+      velocity: ZERO,
+      bounds: POINT,
+      ground: null,
+    });
+    this.host.combat.create(owner, {
+      health: entity.maxHealth,
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+      mass: 100,
+      canTakeDamage: false,
+      invulnerable: false,
+      team: null,
+    });
     return this.admitEntity(entity);
   }
   /** Attaches source continuation to existing shared state without running a spawn function. */
@@ -305,8 +453,10 @@ export class Q1EntityServices {
   private admitEntity(entity: Q1Actor): Q1Actor {
     this.host.actors.assertOwned(entity.actor);
     if (this.entities.has(entity.actor)) throw new Error("Q1 actor already attached");
-    if (this.host.bodies.read(entity.actor.id) === null || this.host.combat.read(entity.actor.id) === null) throw new Error("Attach Q1 behavior after shared body and combat admission");
-    this.entities.set(entity.actor, entity); this.entityEpoch++;
+    if (this.host.bodies.read(entity.actor.id) === null || this.host.combat.read(entity.actor.id) === null)
+      throw new Error("Attach Q1 behavior after shared body and combat admission");
+    this.entities.set(entity.actor, entity);
+    this.entityEpoch++;
     this.host.combat.bindDamageAdjustment(entity.actor, request => foreignShamblerDamage(entity.monster?.species, request));
     this.bindActorCallbacks(entity);
     this.host.registerEntity?.(entity, this);
@@ -314,20 +464,36 @@ export class Q1EntityServices {
   }
   cloneEntity(source: Q1Actor): Q1Actor {
     this.host.actors.assertOwned(source.actor);
-    const callbacks = { think: callbackName(source.think), use: callbackName(source.use), touch: callbackName(source.touch),
-      pain: callbackName(source.pain), die: callbackName(source.die), blocked: callbackName(source.blocked), pathEnd: callbackName(source.pathEnd) };
+    const callbacks = {
+      think: callbackName(source.think),
+      use: callbackName(source.use),
+      touch: callbackName(source.touch),
+      pain: callbackName(source.pain),
+      die: callbackName(source.die),
+      blocked: callbackName(source.blocked),
+      pathEnd: callbackName(source.pathEnd),
+    };
     const done = source.move === null ? null : callbackName(source.move.done);
     const target = this.create(source.classname);
     Object.assign(target, captureEntitySourceState(source));
     for (const [key, value] of source.fields) target.fields.set(key, value);
     for (const [key, actor] of source.references) target.references.set(key, actor);
-    target.owner = source.owner; target.activator = source.activator; target.doorGroup = [...source.doorGroup];
+    target.owner = source.owner;
+    target.activator = source.activator;
+    target.doorGroup = [...source.doorGroup];
     target.monster = source.monster === null ? null : { ...source.monster };
     this.host.bodies.write(target.actor, this.body(source));
-    const combat = this.host.combat.read(source.actor.id); if (combat === null) throw new Error("Source clone has no combat state");
-    this.host.combat.setHealth(target.actor, combat.health); this.host.combat.setArmor(target.actor, combat.armor);
-    this.host.combat.setTraits(target.actor, { canTakeDamage: combat.canTakeDamage, mass: combat.mass, invulnerable: combat.invulnerable, team: combat.team,
-      ...(combat.noKnockback === undefined ? {} : { noKnockback: combat.noKnockback }) });
+    const combat = this.host.combat.read(source.actor.id);
+    if (combat === null) throw new Error("Source clone has no combat state");
+    this.host.combat.setHealth(target.actor, combat.health);
+    this.host.combat.setArmor(target.actor, combat.armor);
+    this.host.combat.setTraits(target.actor, {
+      canTakeDamage: combat.canTakeDamage,
+      mass: combat.mass,
+      invulnerable: combat.invulnerable,
+      team: combat.team,
+      ...(combat.noKnockback === undefined ? {} : { noKnockback: combat.noKnockback }),
+    });
     if (this.host.inventory.has(source.actor.id)) this.host.inventory.create(target.actor, this.host.inventory.entries(source.actor.id));
     target.think = callbacks.think === null ? null : this.named.action(target, callbacks.think);
     target.use = callbacks.use === null ? null : this.named.use(target, callbacks.use);
@@ -336,7 +502,8 @@ export class Q1EntityServices {
     target.die = callbacks.die === null ? null : this.named.die(target, callbacks.die);
     target.blocked = callbacks.blocked === null ? null : this.named.blocked(target, callbacks.blocked);
     target.pathEnd = callbacks.pathEnd === null ? null : this.named.action(target, callbacks.pathEnd);
-    target.move = source.move === null || done === null ? null : { ...source.move, destination: { ...source.move.destination }, done: this.named.action(target, done) };
+    target.move =
+      source.move === null || done === null ? null : { ...source.move, destination: { ...source.move.destination }, done: this.named.action(target, done) };
     for (const extension of this.stateExtensions.values()) extension.clone?.(source, target);
     if (target.movement !== "push" && target.think !== null && target.nextThink >= 0) this.host.scheduleThink(target.actor, target.nextThink);
     return target;
@@ -347,8 +514,11 @@ export class Q1EntityServices {
       think: (_self, frame) => {
         this.time = frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000;
         this.frameSeconds = frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000;
-        const callback = entity.think; entity.think = null; entity.nextThink = -1;
-        if (callback !== null) callback(); return undefined;
+        const callback = entity.think;
+        entity.think = null;
+        entity.nextThink = -1;
+        if (callback !== null) callback();
+        return undefined;
       },
       touch: contact => entity.touch?.(contact.other, contact.plane?.normal ?? null, contact.surface),
       use: (_self, other, activator) => entity.use?.(other, activator),
@@ -365,50 +535,128 @@ export class Q1EntityServices {
 
   initializeWeaponInventory(actor: OwnedActor): undefined {
     const entries = WEAPONS.map(weapon => ({ item: weaponItem(weapon), count: weapon === "axe" || weapon === "shotgun" ? 1 : 0, capacity: 1 }));
-    entries.push({ item: "q1:ammo/shells", count: 25, capacity: 100 }, { item: "q1:ammo/nails", count: 0, capacity: 200 },
-      { item: "q1:ammo/rockets", count: 0, capacity: 100 }, { item: "q1:ammo/cells", count: 0, capacity: 100 });
+    entries.push(
+      { item: "q1:ammo/shells", count: 25, capacity: 100 },
+      { item: "q1:ammo/nails", count: 0, capacity: 200 },
+      { item: "q1:ammo/rockets", count: 0, capacity: 100 },
+      { item: "q1:ammo/cells", count: 0, capacity: 100 },
+    );
     if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, entries);
     else for (const entry of entries) this.host.inventory.configure(actor, entry);
     return undefined;
   }
 
-  attachPlayer(actor: OwnedActor, options: { readonly weapon?: Q1Weapon; readonly initializeInventory?: boolean; readonly maxHealth?: number } = {}): Q1PlayerState {
+  attachPlayer(
+    actor: OwnedActor,
+    options: { readonly weapon?: Q1Weapon; readonly initializeInventory?: boolean; readonly maxHealth?: number } = {},
+  ): Q1PlayerState {
     this.host.actors.assertOwned(actor);
-    const existing = this.players.get(actor); if (existing !== undefined) return existing;
+    const existing = this.players.get(actor);
+    if (existing !== undefined) return existing;
     if (options.initializeInventory ?? true) {
       this.initializeWeaponInventory(actor);
       for (const item of ["q1:key/silver", "q1:key/gold"] satisfies readonly ItemId[]) this.host.inventory.configure(actor, { item, count: 0, capacity: 1 });
     }
-    const state: Q1PlayerState = { actor, alpha: 0, scale: 0, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
-      continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, punchAngles: ZERO, nailSide: 1,
-      maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
-      waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>(), cues: createPlayerCues() };
+    const state: Q1PlayerState = {
+      actor,
+      alpha: 0,
+      scale: 0,
+      weapon: options.weapon ?? "shotgun",
+      primaryHolstered: false,
+      attackFinished: 0,
+      attackHeld: false,
+      jumpHeld: false,
+      teleportUntil: 0,
+      weaponFrame: 0,
+      weaponAnimationAt: -1,
+      weaponAnimationBase: 1,
+      continuousFiring: false,
+      nextWeaponFrame: 0,
+      lightningSoundAt: 0,
+      punchAngles: ZERO,
+      nailSide: 1,
+      maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100),
+      megaRotAt: -1,
+      hostileUntil: 0,
+      viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
+      waterLevel: 0,
+      airFinished: this.time + 12,
+      drownDamage: 2,
+      drownAt: 0,
+      hazardAt: 0,
+      autoSwitch: "always",
+      powerups: new Map<Q1Powerup, number>(),
+      cues: createPlayerCues(),
+    };
     this.players.set(actor, state);
     for (const extension of this.playerExtensions.values()) extension.attach?.(this, state);
-    this.host.emit({ kind: "weapon", player: actor.id, weapon: state.weapon, viewModel: this.weaponModel(state.weapon, state), frame: state.weaponFrame, punch: 0 });
+    this.host.emit({
+      kind: "weapon",
+      player: actor.id,
+      weapon: state.weapon,
+      viewModel: this.weaponModel(state.weapon, state),
+      frame: state.weaponFrame,
+      punch: 0,
+    });
     return state;
   }
 
-  player(actor: ActorId): Q1PlayerState | null { const owner = this.host.actors.resolveOwned(actor); return owner === null ? null : this.players.get(owner) ?? null; }
-  entity(actor: ActorId | null): Q1Actor | null { if (actor === null) return null; const owner = this.host.actors.resolveOwned(actor); return owner === null ? null : this.entities.get(owner) ?? null; }
-  isPlayer(actor: ActorId | null): boolean { return actor !== null && (this.player(actor) !== null || this.host.players().some(candidate => sameActor(actor, candidate))); }
-  live(entity: Q1Actor): boolean { return this.host.actors.isLive(entity.actor.id); }
-  health(actor: ActorId): number { return this.host.combat.read(actor)?.health ?? 0; }
-  body(entity: Q1Actor): BodyState { const body = this.host.bodies.read(entity.actor.id); if (body === null) throw new Error("Missing Q1 body"); return body; }
-  setBody(entity: Q1Actor, patch: Partial<BodyState>): undefined { this.host.bodies.write(entity.actor, { ...this.body(entity), ...patch }); return undefined; }
-  link(entity: Q1Actor): undefined { return this.host.bodies.link(entity.actor); }
-  setOrigin(entity: Q1Actor, origin: Vec3): undefined { this.setBody(entity, { origin }); return this.link(entity); }
-  setBounds(entity: Q1Actor, bounds: Bounds): undefined { this.setBody(entity, { bounds }); return this.link(entity); }
-  remove(entity: Q1Actor): undefined { if (this.live(entity)) this.host.actors.release(entity.actor); return undefined; }
+  player(actor: ActorId): Q1PlayerState | null {
+    const owner = this.host.actors.resolveOwned(actor);
+    return owner === null ? null : (this.players.get(owner) ?? null);
+  }
+  entity(actor: ActorId | null): Q1Actor | null {
+    if (actor === null) return null;
+    const owner = this.host.actors.resolveOwned(actor);
+    return owner === null ? null : (this.entities.get(owner) ?? null);
+  }
+  isPlayer(actor: ActorId | null): boolean {
+    return actor !== null && (this.player(actor) !== null || this.host.players().some(candidate => sameActor(actor, candidate)));
+  }
+  live(entity: Q1Actor): boolean {
+    return this.host.actors.isLive(entity.actor.id);
+  }
+  health(actor: ActorId): number {
+    return this.host.combat.read(actor)?.health ?? 0;
+  }
+  body(entity: Q1Actor): BodyState {
+    const body = this.host.bodies.read(entity.actor.id);
+    if (body === null) throw new Error("Missing Q1 body");
+    return body;
+  }
+  setBody(entity: Q1Actor, patch: Partial<BodyState>): undefined {
+    this.host.bodies.write(entity.actor, { ...this.body(entity), ...patch });
+    return undefined;
+  }
+  link(entity: Q1Actor): undefined {
+    return this.host.bodies.link(entity.actor);
+  }
+  setOrigin(entity: Q1Actor, origin: Vec3): undefined {
+    this.setBody(entity, { origin });
+    return this.link(entity);
+  }
+  setBounds(entity: Q1Actor, bounds: Bounds): undefined {
+    this.setBody(entity, { bounds });
+    return this.link(entity);
+  }
+  remove(entity: Q1Actor): undefined {
+    if (this.live(entity)) this.host.actors.release(entity.actor);
+    return undefined;
+  }
   schedule(entity: Q1Actor, delay: number, callback: () => undefined): undefined {
     return this.scheduleAt(entity, Math.fround(this.time + delay), callback);
   }
   scheduleAt(entity: Q1Actor, dueSeconds: number, callback: () => undefined): undefined {
-    entity.nextThink = Math.fround(dueSeconds); entity.think = callback;
+    entity.nextThink = Math.fround(dueSeconds);
+    entity.think = callback;
     if (entity.movement === "push") return this.host.cancelThink(entity.actor);
     return this.host.scheduleThink(entity.actor, entity.nextThink);
   }
-  cancel(entity: Q1Actor): undefined { entity.nextThink = -1; entity.think = null; return this.host.cancelThink(entity.actor); }
+  cancel(entity: Q1Actor): undefined {
+    entity.nextThink = -1;
+    entity.think = null;
+    return this.host.cancelThink(entity.actor);
+  }
   sound(entity: Q1Actor | OwnedActor, path: string, channel: Q1SoundChannel = "voice", attenuation = 1, volume = 1): undefined {
     const actor = entity instanceof Q1Actor ? entity.actor.id : entity.id;
     const body = this.host.bodies.read(actor);
@@ -417,7 +665,9 @@ export class Q1EntityServices {
     return this.host.emit({ kind: "sound", actor, origin, path, channel, volume, attenuation });
   }
   message(player: ActorId | null, text: string, center = true, args: readonly (string | number)[] = []): undefined {
-    if (player !== null && this.isPlayer(player) && text !== "") this.host.emit({ kind: "message", player, text, center, ...(args.length === 0 ? {} : { args: [...args] }) }); return undefined;
+    if (player !== null && this.isPlayer(player) && text !== "")
+      this.host.emit({ kind: "message", player, text, center, ...(args.length === 0 ? {} : { args: [...args] }) });
+    return undefined;
   }
   effect(effect: Extract<import("./types.ts").Q1Event, { kind: "effect" }>["effect"], origin: Vec3, actor: ActorId | null = null, amount = 1): undefined {
     return this.host.emit({ kind: "effect", effect, origin, actor, amount });
@@ -430,8 +680,14 @@ export class Q1EntityServices {
     if (targetname === "") return [];
     if (this.nameIndexEpoch !== this.entityEpoch || this.nameIndexRenames !== targetnameEpoch.value) {
       this.nameIndex = new Map();
-      for (const entity of this.entities.values()) if (entity.targetname !== "") { const bucket = this.nameIndex.get(entity.targetname); if (bucket === undefined) this.nameIndex.set(entity.targetname, [entity]); else bucket.push(entity); }
-      this.nameIndexEpoch = this.entityEpoch; this.nameIndexRenames = targetnameEpoch.value;
+      for (const entity of this.entities.values())
+        if (entity.targetname !== "") {
+          const bucket = this.nameIndex.get(entity.targetname);
+          if (bucket === undefined) this.nameIndex.set(entity.targetname, [entity]);
+          else bucket.push(entity);
+        }
+      this.nameIndexEpoch = this.entityEpoch;
+      this.nameIndexRenames = targetnameEpoch.value;
     }
     return this.nameIndex.get(targetname) ?? [];
   }
@@ -448,35 +704,75 @@ export class Q1EntityServices {
   }
   useTargets(entity: AuthoredTarget, activator: ActorId | null): undefined {
     if (entity.delay !== 0) {
-      const delayed = this.create("DelayedUse"); delayed.target = entity.target; delayed.killtarget = entity.killtarget; delayed.message = entity.message;
-      delayed.activator = activator; delayed.spawnflags = entity instanceof Q1Actor ? entity.spawnflags & 8388608 : 0;
+      const delayed = this.create("DelayedUse");
+      delayed.target = entity.target;
+      delayed.killtarget = entity.killtarget;
+      delayed.message = entity.message;
+      delayed.activator = activator;
+      delayed.spawnflags = entity instanceof Q1Actor ? entity.spawnflags & 8388608 : 0;
       return this.schedule(delayed, entity.delay, this.named.action(delayed, "DelayThink"));
     }
     const everyone = this.sourceMessageAllPlayers && entity instanceof Q1Actor && (entity.spawnflags & 8388608) !== 0 && entity.message !== "";
-    if (everyone) { for (const player of this.host.players()) this.message(player, entity.message); } else this.message(activator, entity.message);
+    if (everyone) {
+      for (const player of this.host.players()) this.message(player, entity.message);
+    } else this.message(activator, entity.message);
     if (entity.message !== "" && activator !== null && this.isPlayer(activator) && !(entity instanceof Q1Actor && entity.text("noise") !== "")) {
-      const owner = this.host.actors.resolveOwned(activator); if (owner !== null) this.sound(owner, "misc/talk.wav");
+      const owner = this.host.actors.resolveOwned(activator);
+      if (owner !== null) this.sound(owner, "misc/talk.wav");
     }
     for (const victim of this.targetActors(entity.killtarget)) if (this.host.actors.isLive(victim.actor.id)) this.host.actors.release(victim.actor);
     // Each use executes synchronously; targets removed by a nested call are not invoked afterward.
-    for (const target of this.targetActors(entity.target)) if (this.host.actors.isLive(target.actor.id)) this.host.callbacks.use(target.actor, entity.actor.id, activator);
+    for (const target of this.targetActors(entity.target))
+      if (this.host.actors.isLive(target.actor.id)) this.host.callbacks.use(target.actor, entity.actor.id, activator);
     return undefined;
   }
 
-  damage(target: ActorId, inflictor: ActorId, attacker: ActorId | null, amount: number, weapon: Q1Weapon | null = null, delivery: "direct" | "radius" = "direct", deathType = "", armorEffect?: "bypass" | "half-effectiveness"): DamageOutcome {
-    const targetBody = this.host.bodies.read(target); const source = this.host.bodies.read(inflictor);
+  damage(
+    target: ActorId,
+    inflictor: ActorId,
+    attacker: ActorId | null,
+    amount: number,
+    weapon: Q1Weapon | null = null,
+    delivery: "direct" | "radius" = "direct",
+    deathType = "",
+    armorEffect?: "bypass" | "half-effectiveness",
+  ): DamageOutcome {
+    const targetBody = this.host.bodies.read(target);
+    const source = this.host.bodies.read(inflictor);
     const protectedPlayer = this.player(target);
     if (protectedPlayer !== null && (protectedPlayer.powerups.get("invulnerability") ?? 0) >= this.time && protectedPlayer.cues.protectSoundAt < this.time) {
-      protectedPlayer.cues.protectSoundAt = this.time + 2; this.sound(protectedPlayer.actor, "items/protect3.wav", "item");
+      protectedPlayer.cues.protectSoundAt = this.time + 2;
+      this.sound(protectedPlayer.actor, "items/protect3.wav", "item");
     }
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
-    const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : this.host.sourceDamageMultiplier?.(attacker) ?? 1));
-    const request = applySourceDamageModifier({ target, amount: scaled, knockback: scaled, direction, point, normal: ZERO, delivery,
-      attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
-        ...(this.host.sourceDamagePowerupOwner === undefined ? {} : { damagePowerupOwner: this.host.sourceDamagePowerupOwner }),
-        weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: this.provider, combatProvider: this.options.combatProvider,
-        inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } }, this.host.sourceDamageModifier, actor => this.host.actors.isLive(actor));
+    const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : (this.host.sourceDamageMultiplier?.(attacker) ?? 1)));
+    const request = applySourceDamageModifier(
+      {
+        target,
+        amount: scaled,
+        knockback: scaled,
+        direction,
+        point,
+        normal: ZERO,
+        delivery,
+        attack: {
+          sequence: this.sequence++,
+          time: { kind: "seconds", value: this.time },
+          attacker,
+          inflictor,
+          ...(this.host.sourceDamagePowerupOwner === undefined ? {} : { damagePowerupOwner: this.host.sourceDamagePowerupOwner }),
+          weapon: weapon === null ? null : this.weaponItem(weapon),
+          weaponProvider: this.provider,
+          combatProvider: this.options.combatProvider,
+          inventoryProvider: this.options.inventoryProvider,
+          movementProvider: this.options.movementProvider,
+          cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) },
+        },
+      },
+      this.host.sourceDamageModifier,
+      actor => this.host.actors.isLive(actor),
+    );
     return this.host.combat.apply({ ...request, knockback: request.amount });
   }
   powerupExpires(actor: ActorId, powerup: Q1Powerup): number {
@@ -484,45 +780,79 @@ export class Q1EntityServices {
   }
   combatContext(request: DamageRequest): Q1CombatContext {
     const projectile = request.attack.originatingProjectile === undefined ? null : this.host.bodies.read(request.attack.originatingProjectile);
-    const inflictor = request.attack.inflictor === null || this.world?.actor.id.equals(request.attack.inflictor) === true
-      ? null : this.host.bodies.linked(request.attack.inflictor);
+    const inflictor =
+      request.attack.inflictor === null || this.world?.actor.id.equals(request.attack.inflictor) === true
+        ? null
+        : this.host.bodies.linked(request.attack.inflictor);
     // A source may report world as the damage inflictor while retaining the actual projectile.
-    const origin = projectile !== null ? vadd(projectile.origin, vscale(vadd(projectile.bounds.min, projectile.bounds.max), 0.5))
-      : inflictor === null ? null : vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5);
+    const origin =
+      projectile !== null
+        ? vadd(projectile.origin, vscale(vadd(projectile.bounds.min, projectile.bounds.max), 0.5))
+        : inflictor === null
+          ? null
+          : vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5);
     const target = this.host.bodies.read(request.target);
-    return { arithmetic: "binary32", quad: request.attack.damagePowerupOwner === undefined && request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
-      teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || origin === null ? null :
-        normalize(vsub(target.origin, origin)) };
+    return {
+      arithmetic: "binary32",
+      quad:
+        request.attack.damagePowerupOwner === undefined && request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
+      teamplay: this.options.teamplay ?? 0,
+      baseTeamHealth: this.baseTeamHealth,
+      walk: this.isPlayer(request.target),
+      momentumDirection: target === null || origin === null ? null : normalize(vsub(target.origin, origin)),
+    };
   }
   sourceTarget(actor: ActorId) {
     const observed = this.host.sourceTarget?.(actor);
     if (observed !== undefined) return observed;
     const entity = this.entity(actor);
-    return { aimedDamage: entity?.aimedDamage ?? false, push: entity?.movement === "push", player: this.isPlayer(actor), slidebox: entity?.solid === "slidebox" };
+    return {
+      aimedDamage: entity?.aimedDamage ?? false,
+      push: entity?.movement === "push",
+      player: this.isPlayer(actor),
+      slidebox: entity?.solid === "slidebox",
+    };
   }
   monsterTarget(actor: ActorId) {
     if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);
-    const entity = this.entity(actor), player = this.player(actor);
+    const entity = this.entity(actor),
+      player = this.player(actor);
     if (entity === null && player === null) return null;
-    return { viewHeight: player === null ? 25 : 22, notarget: ((entity?.movementFlags ?? 0) & 128) !== 0,
-      invisible: (player?.powerups.get("invisibility") ?? 0) > this.time, lightLevel: null, hostileUntil: player?.hostileUntil ?? null };
+    return {
+      viewHeight: player === null ? 25 : 22,
+      notarget: ((entity?.movementFlags ?? 0) & 128) !== 0,
+      invisible: (player?.powerups.get("invisibility") ?? 0) > this.time,
+      lightLevel: null,
+      hostileUntil: player?.hostileUntil ?? null,
+    };
   }
   canDamage(target: ActorId, inflictor: ActorId): boolean {
-    const targetBody = this.host.bodies.read(target), source = this.host.bodies.read(inflictor); if (targetBody === null || source === null) return false;
+    const targetBody = this.host.bodies.read(target),
+      source = this.host.bodies.read(inflictor);
+    if (targetBody === null || source === null) return false;
     const push = this.sourceTarget(target).push;
     const destination = push ? vadd(targetBody.origin, vscale(vadd(targetBody.bounds.min, targetBody.bounds.max), 0.5)) : targetBody.origin;
     const offsets = push ? [ZERO] : [ZERO, { x: 15, y: 15, z: 0 }, { x: -15, y: -15, z: 0 }, { x: -15, y: 15, z: 0 }, { x: 15, y: -15, z: 0 }];
-    return offsets.some(offset => { const trace = this.host.trace({ start: source.origin, end: vadd(destination, offset), bounds: POINT, ignore: inflictor, monsters: false }); return trace.fraction === 1 || trace.actor !== null && sameActor(trace.actor, target); });
+    return offsets.some(offset => {
+      const trace = this.host.trace({ start: source.origin, end: vadd(destination, offset), bounds: POINT, ignore: inflictor, monsters: false });
+      return trace.fraction === 1 || (trace.actor !== null && sameActor(trace.actor, target));
+    });
   }
   radiusDamage(inflictor: ActorId, attacker: ActorId | null, amount: number, ignore: ActorId | null, weapon: Q1Weapon | null, deathType = ""): undefined {
-    const source = this.host.bodies.read(inflictor); if (source === null) return undefined;
+    const source = this.host.bodies.read(inflictor);
+    if (source === null) return undefined;
     // findradius prepends to its chain, so the highest edict is damaged first, and it skips SOLID_NOT (a downed zombie).
     for (const observation of [...this.host.actors.observations()].reverse()) {
-      const target = observation.id; const combat = this.host.combat.read(target), body = this.host.bodies.read(target);
-      if (combat === null || !combat.canTakeDamage || body === null || ignore !== null && sameActor(ignore, target) || this.entity(target)?.solid === "none") continue;
+      const target = observation.id;
+      const combat = this.host.combat.read(target),
+        body = this.host.bodies.read(target);
+      if (combat === null || !combat.canTakeDamage || body === null || (ignore !== null && sameActor(ignore, target)) || this.entity(target)?.solid === "none")
+        continue;
       const center = vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5));
-      const distance = length(vsub(center, source.origin)); if (distance > amount + 40) continue;
-      let points = Math.fround(amount - 0.5 * distance); if (attacker !== null && sameActor(target, attacker)) points *= 0.5;
+      const distance = length(vsub(center, source.origin));
+      if (distance > amount + 40) continue;
+      let points = Math.fround(amount - 0.5 * distance);
+      if (attacker !== null && sameActor(target, attacker)) points *= 0.5;
       if (this.host.classname(target) === "monster_shambler") points *= 0.5;
       if (points > 0 && this.canDamage(target, inflictor)) this.damage(target, inflictor, attacker, points, weapon, "radius", deathType);
     }
@@ -531,7 +861,8 @@ export class Q1EntityServices {
 
   calcMove(entity: Q1Actor, destination: Vec3, speed: number, done: () => undefined): undefined {
     if (!(speed > 0)) throw new RangeError("Q1 mover speed must be positive");
-    this.cancel(entity); const delta = vsub(destination, this.body(entity).origin);
+    this.cancel(entity);
+    const delta = vsub(destination, this.body(entity).origin);
     const travel = Math.fround(length(delta) / speed);
     entity.move = { destination, done };
     this.setBody(entity, { velocity: travel < 0.1 ? ZERO : vscale(delta, Math.fround(1 / travel)) });
@@ -546,39 +877,71 @@ export class Q1EntityServices {
   }
   launchProjectileBehavior(entity: Q1Actor, shooter: ActorId, weapon: Q1Weapon, role: ProjectileRole): void {
     if (!this.isPlayer(shooter)) return;
-    const update = this.host.weaponBehavior?.launch({ projectile: entity.actor, shooter, weapon: this.weaponItem(weapon), role,
-      timeSeconds: this.time, body: this.body(entity) });
-    if (update !== undefined && update !== null) { this.named.projectTrajectory(entity, update); this.setBody(entity, update); this.link(entity); }
+    const update = this.host.weaponBehavior?.launch({
+      projectile: entity.actor,
+      shooter,
+      weapon: this.weaponItem(weapon),
+      role,
+      timeSeconds: this.time,
+      body: this.body(entity),
+    });
+    if (update !== undefined && update !== null) {
+      this.named.projectTrajectory(entity, update);
+      this.setBody(entity, update);
+      this.link(entity);
+    }
   }
 
   applyProjectileBehavior(actor: OwnedActor, seconds: number): void {
     const entity = this.entities.get(actor);
     if (entity === undefined || !this.live(entity)) return;
     const update = this.host.weaponBehavior?.step(actor, this.body(entity), seconds);
-    if (update !== undefined && update !== null) { this.named.projectTrajectory(entity, update); this.setBody(entity, update); this.link(entity); }
+    if (update !== undefined && update !== null) {
+      this.named.projectTrajectory(entity, update);
+      this.setBody(entity, update);
+      this.link(entity);
+    }
   }
 
   physicsEntity(actor: OwnedActor, seconds: number, elapsedSeconds: number): undefined {
-    this.time = seconds; this.frameSeconds = elapsedSeconds; const entity = this.entities.get(actor);
+    this.time = seconds;
+    this.frameSeconds = elapsedSeconds;
+    const entity = this.entities.get(actor);
     if (entity === undefined || !this.live(entity)) return undefined;
     this.applyProjectileBehavior(actor, seconds);
     if (entity.movement === "push") {
       stepQ1Pusher({ actor: actor.id, elapsedSeconds, movement: "translate" }, this.host.pusherServices(this));
-    } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "gib" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
+    } else if (
+      entity.movement === "toss" ||
+      entity.movement === "bounce" ||
+      entity.movement === "gib" ||
+      entity.movement === "fly" ||
+      entity.movement === "flymissile"
+    )
+      this.projectilePhysics(entity, elapsedSeconds);
     return undefined;
   }
 
   /** Weapon/powerup/environment state; jumping belongs to the independently selected movement provider. */
   private powerupWarnings(actor: OwnedActor, player: Q1PlayerState, seconds: number): undefined {
     for (const [powerup, expires] of player.powerups) {
-      const warning = powerupWarning(powerup), cue = powerupCue(player.cues, powerup);
+      const warning = powerupWarning(powerup),
+        cue = powerupCue(player.cues, powerup);
       if (warning === null || cue === null || expires <= seconds) continue;
-      if (powerup === "invisibility" && cue.hum < seconds) { this.sound(actor, "items/inv3.wav", "auto", 3, 0.5); cue.hum = seconds + (this.host.random() * 3 + 1); }
-      if (expires >= seconds + 3) { cue.warned = false; continue; }
+      if (powerup === "invisibility" && cue.hum < seconds) {
+        this.sound(actor, "items/inv3.wav", "auto", 3, 0.5);
+        cue.hum = seconds + (this.host.random() * 3 + 1);
+      }
+      if (expires >= seconds + 3) {
+        cue.warned = false;
+        continue;
+      }
       const origin = this.host.bodies.read(actor.id)?.origin;
       if (!cue.warned) {
-        cue.warned = true; cue.flashAt = seconds + 1;
-        this.message(actor.id, warning[0], false); this.sound(actor, warning[1], "auto");
+        cue.warned = true;
+        cue.flashAt = seconds + 1;
+        this.message(actor.id, warning[0], false);
+        this.sound(actor, warning[1], "auto");
         if (origin !== undefined) this.effect("pickup", origin, actor.id);
       } else if (cue.flashAt < seconds) {
         cue.flashAt = seconds + 1;
@@ -590,21 +953,27 @@ export class Q1EntityServices {
   /** FL_INWATER, rebuilt from the first frame after a restore. */
   private readonly waterborne = new WeakSet<Q1PlayerState>();
   playerFrame(actor: OwnedActor, seconds: number, waterLevel?: number): undefined {
-    this.time = seconds; const player = this.players.get(actor);
+    this.time = seconds;
+    const player = this.players.get(actor);
     if (player === undefined) return undefined;
     if (waterLevel !== undefined) player.waterLevel = waterLevel;
     for (const extension of this.playerExtensions.values()) extension.frame?.(this, player, seconds);
     this.weaponFrame(actor, seconds);
     if (player.megaRotAt >= 0 && player.megaRotAt <= seconds) {
       const health = this.health(actor.id);
-      if (health > player.maxHealth) { this.host.combat.setHealth(actor, health - 1); player.megaRotAt = seconds + 1; }
-      else player.megaRotAt = -1;
+      if (health > player.maxHealth) {
+        this.host.combat.setHealth(actor, health - 1);
+        player.megaRotAt = seconds + 1;
+      } else player.megaRotAt = -1;
     }
     this.powerupWarnings(actor, player, seconds);
-    for (const [powerup, expires] of player.powerups) if (expires <= seconds) {
-      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); resetPowerupCue(player.cues, powerup);
-      if (powerup === "q3:flight" && this.host.setGravity !== undefined) this.setGravity(actor.id, 1);
-    }
+    for (const [powerup, expires] of player.powerups)
+      if (expires <= seconds) {
+        player.powerups.delete(powerup);
+        this.host.powerup(actor, powerup, 0);
+        resetPowerupCue(player.cues, powerup);
+        if (powerup === "q3:flight" && this.host.setGravity !== undefined) this.setGravity(actor.id, 1);
+      }
     // Foreign Q3 powerups granted by Q3-authored items on this primary.
     if ((player.powerups.get("q3:regen") ?? 0) > seconds && this.frameSeconds > 0) {
       const health = this.health(actor.id);
@@ -617,12 +986,17 @@ export class Q1EntityServices {
     const suit = (player.powerups.get("suit") ?? 0) > seconds;
     const lavaSuit = (player.powerups.get("mg3:lavasuit") ?? 0) > seconds;
     if (player.waterLevel !== 3) {
-      if (player.airFinished < seconds) this.sound(actor, "player/gasp2.wav", "voice"); else if (player.airFinished < seconds + 9) this.sound(actor, "player/gasp1.wav", "voice");
+      if (player.airFinished < seconds) this.sound(actor, "player/gasp2.wav", "voice");
+      else if (player.airFinished < seconds + 9) this.sound(actor, "player/gasp1.wav", "voice");
     }
-    if (player.waterLevel !== 3 || suit || lavaSuit) { player.airFinished = seconds + 12; player.drownDamage = 2; }
-    else if (player.airFinished < seconds && player.drownAt < seconds) {
-      player.drownDamage += 2; if (player.drownDamage > 15) player.drownDamage = 10;
-      this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, player.drownDamage, null, "direct", "drown"); player.drownAt = seconds + 1;
+    if (player.waterLevel !== 3 || suit || lavaSuit) {
+      player.airFinished = seconds + 12;
+      player.drownDamage = 2;
+    } else if (player.airFinished < seconds && player.drownAt < seconds) {
+      player.drownDamage += 2;
+      if (player.drownDamage > 15) player.drownDamage = 10;
+      this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, player.drownDamage, null, "direct", "drown");
+      player.drownAt = seconds + 1;
     }
     if (player.waterLevel === 0) {
       if (this.waterborne.delete(player)) this.sound(actor, "misc/outwater.wav", "body");
@@ -633,9 +1007,11 @@ export class Q1EntityServices {
     const contents = this.host.contents(vadd(body.origin, { x: 0, y: 0, z: body.bounds.min.z + 1 }));
     if (player.hazardAt < seconds) {
       if (contents === "lava" && !lavaSuit) {
-        player.hazardAt = seconds + (suit ? 1 : 0.2); this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 10 * player.waterLevel, null, "direct", "lava");
+        player.hazardAt = seconds + (suit ? 1 : 0.2);
+        this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 10 * player.waterLevel, null, "direct", "lava");
       } else if (contents === "slime" && !suit && !lavaSuit) {
-        player.hazardAt = seconds + 1; this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 4 * player.waterLevel, null, "direct", "slime");
+        player.hazardAt = seconds + 1;
+        this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 4 * player.waterLevel, null, "direct", "slime");
       }
     }
     if (!this.waterborne.has(player)) {
@@ -655,13 +1031,16 @@ export class Q1EntityServices {
     return undefined;
   }
   advancePunch(actor: ActorId, elapsed: number, numeric: NumericOperations): Vec3 | null {
-    const player = this.player(actor); if (player === null) return null;
+    const player = this.player(actor);
+    if (player === null) return null;
     const punch = dropQ1Punch(this.host.punchAngles?.read(actor) ?? player.punchAngles, elapsed, numeric);
-    if (this.host.punchAngles === undefined) player.punchAngles = punch; else this.host.punchAngles.write(actor, punch);
+    if (this.host.punchAngles === undefined) player.punchAngles = punch;
+    else this.host.punchAngles.write(actor, punch);
     return punch;
   }
   weaponFrame(actor: OwnedActor, seconds: number): undefined {
-    this.time = seconds; const player = this.players.get(actor);
+    this.time = seconds;
+    const player = this.players.get(actor);
     if (player === undefined) return undefined;
     const weaponExtension = this.registeredWeapons.get(player.weapon);
     weaponExtension?.animate?.(this, player, seconds);
@@ -670,14 +1049,17 @@ export class Q1EntityServices {
       const count = player.weapon === "axe" ? 4 : 6;
       const next = frame >= count ? 0 : player.weaponAnimationBase + frame;
       if (next !== player.weaponFrame) {
-        player.weaponFrame = next; this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: this.weaponModel(player.weapon, player), frame: next, punch: 0 });
+        player.weaponFrame = next;
+        this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: this.weaponModel(player.weapon, player), frame: next, punch: 0 });
       }
       if (frame >= count) player.weaponAnimationAt = -1;
     }
     return undefined;
   }
   playerAfterPhysics(actor: OwnedActor, seconds: number): undefined {
-    this.time = seconds; const player = this.players.get(actor); if (player === undefined) return undefined;
+    this.time = seconds;
+    const player = this.players.get(actor);
+    if (player === undefined) return undefined;
     for (const extension of this.playerExtensions.values()) extension.afterPhysics?.(this, player, seconds);
     return undefined;
   }
@@ -688,10 +1070,17 @@ export class Q1EntityServices {
     const spots = [...this.entities.values()].filter(entity => entity.classname === "info_intermission");
     let selected = spots[0];
     if (selected !== undefined) {
-      let cycle = Math.fround(this.host.random() * 4), index = 0;
-      while (cycle > 1) { index = (index + 1) % spots.length; cycle = Math.fround(cycle - 1); }
+      let cycle = Math.fround(this.host.random() * 4),
+        index = 0;
+      while (cycle > 1) {
+        index = (index + 1) % spots.length;
+        cycle = Math.fround(cycle - 1);
+      }
       selected = spots[index];
-    } else selected = [...this.entities.values()].find(entity => entity.classname === "info_player_start") ?? [...this.entities.values()].find(entity => entity.classname === "testplayerstart");
+    } else
+      selected =
+        [...this.entities.values()].find(entity => entity.classname === "info_player_start") ??
+        [...this.entities.values()].find(entity => entity.classname === "testplayerstart");
     if (selected === undefined) throw new Error("FindIntermission: no spot");
     const body = this.body(selected);
     const exitAfter = this.time + (this.options.deathmatch !== 0 ? 5 : 2);
@@ -702,38 +1091,66 @@ export class Q1EntityServices {
   requestIntermissionExit(seconds: number, pressed: boolean): boolean {
     const pending = this.intermission;
     if (pending === null || seconds < pending.exitAfter || !pressed) return false;
-    this.time = seconds; this.intermission = null; this.travel(pending.map, pending.cause); return true;
+    this.time = seconds;
+    this.intermission = null;
+    this.travel(pending.map, pending.cause);
+    return true;
   }
 
-  makeVectors(angles: Vec3): Q1Basis { this.basis = vectors(angles); return this.basis; }
+  makeVectors(angles: Vec3): Q1Basis {
+    this.basis = vectors(angles);
+    return this.basis;
+  }
   beginFrame(seconds: number, elapsedSeconds: number): undefined {
-    this.time = seconds; this.frameSeconds = elapsedSeconds; return undefined;
+    this.time = seconds;
+    this.frameSeconds = elapsedSeconds;
+    return undefined;
   }
   playerInput(actor: OwnedActor, input: { readonly attack: boolean; readonly jump: boolean; readonly teleportUntil?: number }): undefined {
-    const player = this.players.get(actor); if (player === undefined) return undefined;
-    player.attackHeld = input.attack; player.jumpHeld = input.jump;
+    const player = this.players.get(actor);
+    if (player === undefined) return undefined;
+    player.attackHeld = input.attack;
+    player.jumpHeld = input.jump;
     if (input.teleportUntil !== undefined) player.teleportUntil = input.teleportUntil;
     return undefined;
   }
   attack(actor: OwnedActor, viewAngles: Vec3, seconds: number, waterLevel = 0): boolean {
-    this.time = seconds; const player = this.players.get(actor); if (player === undefined) throw new Error("Player has no Q1 weapon state");
-    player.viewAngles = viewAngles; player.waterLevel = waterLevel; return fireWeapon(this, player);
+    this.time = seconds;
+    const player = this.players.get(actor);
+    if (player === undefined) throw new Error("Player has no Q1 weapon state");
+    player.viewAngles = viewAngles;
+    player.waterLevel = waterLevel;
+    return fireWeapon(this, player);
   }
   weaponInput(actor: OwnedActor, pressed: boolean, viewAngles: Vec3, seconds: number, waterLevel = 0): boolean {
-    const player = this.players.get(actor); if (player === undefined) throw new Error("Player has no Q1 weapon state");
-    this.time = seconds; player.viewAngles = viewAngles; player.waterLevel = waterLevel; player.attackHeld = pressed;
+    const player = this.players.get(actor);
+    if (player === undefined) throw new Error("Player has no Q1 weapon state");
+    this.time = seconds;
+    player.viewAngles = viewAngles;
+    player.waterLevel = waterLevel;
+    player.attackHeld = pressed;
     if (!pressed) {
-      if (player.continuousFiring) { player.continuousFiring = false; player.weaponAnimationAt = -1; player.weaponFrame = 0; }
+      if (player.continuousFiring) {
+        player.continuousFiring = false;
+        player.weaponAnimationAt = -1;
+        player.weaponFrame = 0;
+      }
       return false;
     }
     return this.attack(actor, viewAngles, seconds, waterLevel);
   }
   selectWeapon(actor: OwnedActor, weapon: Q1Weapon): boolean {
-    const player = this.players.get(actor); if (player === undefined || this.host.inventory.count(actor.id, this.weaponItem(weapon)) === 0) return false;
+    const player = this.players.get(actor);
+    if (player === undefined || this.host.inventory.count(actor.id, this.weaponItem(weapon)) === 0) return false;
     if (!isQ1BaseWeapon(weapon) && !this.registeredWeapons.has(weapon)) return false;
-    const definition = this.registeredWeapons.get(weapon); if (definition?.available !== undefined && !definition.available(this, player)) return false;
-    player.weapon = weapon; player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
-    this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: this.weaponModel(weapon, player), frame: 0, punch: 0 }); return true;
+    const definition = this.registeredWeapons.get(weapon);
+    if (definition?.available !== undefined && !definition.available(this, player)) return false;
+    player.weapon = weapon;
+    player.weaponFrame = 0;
+    player.continuousFiring = false;
+    player.weaponAnimationAt = -1;
+    this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: this.weaponModel(weapon, player), frame: 0, punch: 0 });
+    return true;
   }
   primaryWeaponHandoff(actor: OwnedActor): SourceWeaponHandoff {
     const player = this.players.get(actor);
@@ -742,7 +1159,8 @@ export class Q1EntityServices {
       const weapon = [...WEAPONS, ...this.registeredWeapons.keys()].find(candidate => this.weaponItem(candidate) === item);
       return weapon !== undefined && this.weaponAvailable(player, weapon) ? weapon : null;
     };
-    return { kind: "immediate",
+    return {
+      kind: "immediate",
       provider: this.provider,
       accepts: (item: ItemId): boolean => resolve(item) !== null,
       select: (item: ItemId): boolean => {
@@ -752,7 +1170,9 @@ export class Q1EntityServices {
       holster: (): void => {
         if (player.primaryHolstered) return;
         player.primaryHolstered = true;
-        player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
+        player.weaponFrame = 0;
+        player.continuousFiring = false;
+        player.weaponAnimationAt = -1;
       },
       isHolstered: (): boolean => player.primaryHolstered,
       resume: (item: ItemId | null): boolean => {
@@ -764,16 +1184,37 @@ export class Q1EntityServices {
       },
     };
   }
-  chooseBest(actor: OwnedActor, ammoCount?: (item: ItemId) => number): Q1Weapon { return bestWeapon(this, actor, ammoCount); }
+  chooseBest(actor: OwnedActor, ammoCount?: (item: ItemId) => number): Q1Weapon {
+    return bestWeapon(this, actor, ammoCount);
+  }
   givePowerup(player: Q1PlayerState, powerup: Q1Powerup, duration = 30): undefined {
-    const expires = Math.fround(this.time + duration); player.powerups.set(powerup, expires); this.host.powerup(player.actor, powerup, expires);
+    const expires = Math.fround(this.time + duration);
+    player.powerups.set(powerup, expires);
+    this.host.powerup(player.actor, powerup, expires);
     return this.host.emit({ kind: "powerup", player: player.actor.id, powerup, expires });
   }
   dropShells(origin: Vec3): undefined {
-    const backpack = this.create("item_backpack"); this.setOrigin(backpack, vadd(origin, { x: 0, y: 0, z: -24 })); backpack.fields.set("shells", "5");
-    spawnPickup(this, backpack); this.schedule(backpack, 120, this.named.action(backpack, "SUB_Remove")); return undefined;
+    const backpack = this.create("item_backpack");
+    this.setOrigin(backpack, vadd(origin, { x: 0, y: 0, z: -24 }));
+    backpack.fields.set("shells", "5");
+    spawnPickup(this, backpack);
+    this.schedule(backpack, 120, this.named.action(backpack, "SUB_Remove"));
+    return undefined;
   }
-  presentations(): readonly Q1Presentation[] { return [...this.entities.values()].map(entity => ({ actor: entity.actor.id, classname: entity.classname, model: entity.model, frame: entity.frame, skin: entity.skin, effects: entity.effects, solid: entity.solid, movement: entity.movement, targetname: entity.targetname, sourceOrdinal: entity.sourceOrdinal })); }
+  presentations(): readonly Q1Presentation[] {
+    return [...this.entities.values()].map(entity => ({
+      actor: entity.actor.id,
+      classname: entity.classname,
+      model: entity.model,
+      frame: entity.frame,
+      skin: entity.skin,
+      effects: entity.effects,
+      solid: entity.solid,
+      movement: entity.movement,
+      targetname: entity.targetname,
+      sourceOrdinal: entity.sourceOrdinal,
+    }));
+  }
   private projectilePhysics(entity: Q1Actor, elapsed: number): undefined {
     const gib = entity.movement === "gib";
     if (gib && (this.options.physicsEdition ?? this.options.edition) !== "rerelease") throw new Error("Gib movement requires the rerelease physics profile");
@@ -782,9 +1223,16 @@ export class Q1EntityServices {
     if (body.ground !== null) return undefined;
     let velocity = body.velocity;
     if (entity.movement !== "flymissile" && entity.movement !== "fly") velocity = { ...velocity, z: Math.fround(velocity.z - gravity * elapsed) };
-    const trace = this.host.trace({ start: body.origin, end: vadd(body.origin, vscale(velocity, elapsed)), bounds: body.bounds, ignore: entity.actor.id,
-      monsters: entity.solid !== "none" && entity.solid !== "trigger", missile: entity.movement === "flymissile" });
-    this.setBody(entity, { origin: trace.end, velocity, angles: vadd(body.angles, vscale(entity.angularVelocity, elapsed)) }); this.link(entity);
+    const trace = this.host.trace({
+      start: body.origin,
+      end: vadd(body.origin, vscale(velocity, elapsed)),
+      bounds: body.bounds,
+      ignore: entity.actor.id,
+      monsters: entity.solid !== "none" && entity.solid !== "trigger",
+      missile: entity.movement === "flymissile",
+    });
+    this.setBody(entity, { origin: trace.end, velocity, angles: vadd(body.angles, vscale(entity.angularVelocity, elapsed)) });
+    this.link(entity);
     if (trace.fraction === 1) return undefined;
     if (trace.sky && entity.projectile !== null && entity.projectile !== "grenade") return this.remove(entity);
     if (entity.projectile !== null) projectileTouch(this, entity, trace.actor, trace.normal);
@@ -794,10 +1242,13 @@ export class Q1EntityServices {
     }
     if (!this.live(entity)) return undefined;
     body = this.body(entity);
-    const bounces = entity.movement === "bounce" || entity.movement === "gib" && (this.options.physicsEdition ?? this.options.edition) === "rerelease";
+    const bounces = entity.movement === "bounce" || (entity.movement === "gib" && (this.options.physicsEdition ?? this.options.edition) === "rerelease");
     const overbounce = bounces ? 1.5 : 1;
     velocity = vsub(body.velocity, vscale(trace.normal, dot(body.velocity, trace.normal) * overbounce));
-    if (trace.normal.z > 0.7 && (velocity.z < 60 || !bounces)) { velocity = ZERO; entity.angularVelocity = ZERO; }
+    if (trace.normal.z > 0.7 && (velocity.z < 60 || !bounces)) {
+      velocity = ZERO;
+      entity.angularVelocity = ZERO;
+    }
     this.setBody(entity, { velocity, ground: velocity === ZERO ? trace.actor : null });
     return this.checkWaterTransition(entity);
   }
@@ -807,7 +1258,8 @@ export class Q1EntityServices {
     const value = contents === "solid" ? -2 : contents === "water" ? -3 : contents === "slime" ? -4 : contents === "lava" ? -5 : contents === "sky" ? -6 : -1;
     const transition = q1WaterTransition(entity.waterType, value);
     if (transition.splash) this.sound(entity, "misc/h2ohit1.wav", "auto");
-    entity.waterType = transition.waterType; entity.waterLevel = transition.waterLevel;
+    entity.waterType = transition.waterType;
+    entity.waterLevel = transition.waterLevel;
     return undefined;
   }
 }
@@ -815,10 +1267,18 @@ export class Q1EntityServices {
 /** Ammunition of the id1 weapons; weapons that other programs add register their own through registerWeapon. */
 export function ammoItem(weapon: Q1Weapon): ItemId | null {
   switch (weapon) {
-    case "shotgun": case "supershotgun": return "q1:ammo/shells";
-    case "nailgun": case "supernailgun": return "q1:ammo/nails";
-    case "grenadelauncher": case "rocketlauncher": return "q1:ammo/rockets";
-    case "lightning": return "q1:ammo/cells";
-    default: return null;
+    case "shotgun":
+    case "supershotgun":
+      return "q1:ammo/shells";
+    case "nailgun":
+    case "supernailgun":
+      return "q1:ammo/nails";
+    case "grenadelauncher":
+    case "rocketlauncher":
+      return "q1:ammo/rockets";
+    case "lightning":
+      return "q1:ammo/cells";
+    default:
+      return null;
   }
 }

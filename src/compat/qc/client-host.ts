@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../contracts/identity.ts";
 import { aimQ1 } from "../../world/gameplay/q1-aim.ts";
 import { Q1ClientVisibility } from "../../world/gameplay/q1-client-visibility.ts";
@@ -14,7 +15,8 @@ export class QcClientHost {
   readonly visibility: Q1ClientVisibility;
   constructor(world: QcWorldHost, services: { readonly scene: Q1ClientVisibilityScene; readonly maxClients: number; readonly serverTime: () => number }) {
     const { program, entities, actors, slots } = world.options;
-    if (!Number.isSafeInteger(services.maxClients) || services.maxClients < 1 || services.maxClients >= entities.count) throw new QcProgramError("invalid reserved QC client range");
+    if (!Number.isSafeInteger(services.maxClients) || services.maxClients < 1 || services.maxClients >= entities.count)
+      throw new QcProgramError("invalid reserved QC client range");
     for (let slot = 0; slot <= services.maxClients; slot++) {
       if (slots.at(slot) === null) throw new QcProgramError(`missing reserved QC client/world slot ${slot}`);
     }
@@ -23,14 +25,26 @@ export class QcClientHost {
       if (definition === undefined) throw new QcProgramError(`missing entity field ${name}`);
       return definition.offset;
     };
-    const origin = field("origin"), viewOffset = field("view_ofs"), health = field("health"), flags = field("flags");
-    this.visibility = new Q1ClientVisibility({ maxClients: services.maxClients, visibility: services.scene,
+    const origin = field("origin"),
+      viewOffset = field("view_ofs"),
+      health = field("health"),
+      flags = field("flags");
+    this.visibility = new Q1ClientVisibility({
+      maxClients: services.maxClients,
+      visibility: services.scene,
       client: slot => {
-        const words = entities.at(slot), actor = slots.at(slot);
-        return { actor: actor?.id ?? null, free: world.isFreeEntity(slot) || actor === null || !actors.isLive(actor.id),
-          health: words.float(health), notarget: (Math.trunc(words.float(flags)) & 128) !== 0,
-          origin: words.vector(origin), viewOffset: words.vector(viewOffset) };
-      } });
+        const words = entities.at(slot),
+          actor = slots.at(slot);
+        return {
+          actor: actor?.id ?? null,
+          free: world.isFreeEntity(slot) || actor === null || !actors.isLive(actor.id),
+          health: words.float(health),
+          notarget: (Math.trunc(words.float(flags)) & 128) !== 0,
+          origin: words.vector(origin),
+          viewOffset: words.vector(viewOffset),
+        };
+      },
+    });
     const checkclient: QcBuiltin = vm => {
       if (vm.program !== program || vm.entities !== entities) return vm.fail("client builtin belongs to another QC machine");
       const self = entities.at(entities.slot(vm.globals.int(vm.globalOffset("self"))));
@@ -42,34 +56,60 @@ export class QcClientHost {
 }
 
 /** PF_aim reads speed but never uses it; all collision and selection uses the shared Q1 policy. */
-export function createQcAimBinding(world: Pick<QcWorldHost, "actor"> & {
-  readonly options: Pick<QcWorldHostOptions, "program" | "entities" | "bodies" | "scene" | "numeric">;
-}, services: {
-  readonly aimThreshold: () => number;
-  readonly teamplay: () => number;
-  /** Projected references are in native source-slot order, independent of their owning game. */
-  readonly targets: () => readonly { readonly actor: ActorId; readonly reference: number }[];
-  readonly noAim?: (actor: ActorId) => boolean;
-}): QcBuiltin {
+export function createQcAimBinding(
+  world: Pick<QcWorldHost, "actor"> & {
+    readonly options: Pick<QcWorldHostOptions, "program" | "entities" | "bodies" | "scene" | "numeric">;
+  },
+  services: {
+    readonly aimThreshold: () => number;
+    readonly teamplay: () => number;
+    /** Projected references are in native source-slot order, independent of their owning game. */
+    readonly targets: () => readonly { readonly actor: ActorId; readonly reference: number }[];
+    readonly noAim?: (actor: ActorId) => boolean;
+  },
+): QcBuiltin {
   const { program, entities, bodies, scene, numeric } = world.options;
   return vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("aim builtin belongs to another QC machine");
-    const reference = vm.argInt(0), actor = world.actor(entities.slot(reference)), forward = vm.globals.vector(vm.globalOffset("v_forward"));
-    if (services.noAim?.(actor.id) === true) { vm.returnVector(forward); return; }
+    const reference = vm.argInt(0),
+      actor = world.actor(entities.slot(reference)),
+      forward = vm.globals.vector(vm.globalOffset("v_forward"));
+    if (services.noAim?.(actor.id) === true) {
+      vm.returnVector(forward);
+      return;
+    }
     for (const field of ["team", "takedamage"]) if (program.fieldsByName.get(field)?.type !== "float") return vm.fail(`Missing QC aim float field ${field}`);
     const body = bodies.read(actor.id);
     if (body === null) return vm.fail("QC aim actor has no body");
-    const targets = services.targets(), references = new Map(targets.map(target => [target.actor.slot, target]));
-    vm.returnVector(aimQ1(body.origin, forward, services.aimThreshold(), {
-      targets: targets.map(target => target.actor), body: target => bodies.read(target), eligible: target => {
-        const projected = references.get(target.slot);
-        if (projected === undefined || !projected.actor.equals(target) || target.equals(actor.id) || vm.entityFloat(projected.reference, "takedamage") !== 2) return false;
-        return services.teamplay() === 0 || vm.entityFloat(reference, "team") <= 0 || vm.entityFloat(reference, "team") !== vm.entityFloat(projected.reference, "team");
-      }, trace: (start, end) => {
-        const trace = scene.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" },
-          policy: { kind: "q1", move: "normal", hull: null }, numeric, passActor: actor.id });
-        return trace.hit.kind === "actor" ? trace.hit.actor : null;
-      },
-    }));
+    const targets = services.targets(),
+      references = new Map(targets.map(target => [target.actor.slot, target]));
+    vm.returnVector(
+      aimQ1(body.origin, forward, services.aimThreshold(), {
+        targets: targets.map(target => target.actor),
+        body: target => bodies.read(target),
+        eligible: target => {
+          const projected = references.get(target.slot);
+          if (projected === undefined || !projected.actor.equals(target) || target.equals(actor.id) || vm.entityFloat(projected.reference, "takedamage") !== 2)
+            return false;
+          return (
+            services.teamplay() === 0 ||
+            vm.entityFloat(reference, "team") <= 0 ||
+            vm.entityFloat(reference, "team") !== vm.entityFloat(projected.reference, "team")
+          );
+        },
+        trace: (start, end) => {
+          const trace = scene.trace({
+            start,
+            end,
+            shape: { kind: "point" },
+            target: { kind: "world" },
+            policy: { kind: "q1", move: "normal", hull: null },
+            numeric,
+            passActor: actor.id,
+          });
+          return trace.hit.kind === "actor" ? trace.hit.actor : null;
+        },
+      }),
+    );
   };
 }

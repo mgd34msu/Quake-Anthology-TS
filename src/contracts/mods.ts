@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentDigest, ProviderReference } from "./content.ts";
 import type { GuestCheckpoint, ModuleIdentity } from "./execution.ts";
 import type { ProviderId } from "./identity.ts";
@@ -63,8 +64,7 @@ export interface ModTravelCheckpoint {
 }
 
 export function modSelectionKey(selection: ModSelection): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(selection.product)
-    || !/^[a-zA-Z0-9][a-zA-Z0-9._+:/-]*$/.test(selection.id)) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(selection.product) || !/^[a-zA-Z0-9][a-zA-Z0-9._+:/-]*$/.test(selection.id)) {
     throw new Error("Mod selection requires a package and an authored component ID");
   }
   return `${selection.product}/${selection.id}`;
@@ -78,12 +78,26 @@ export function readModSelection(value: string): ModSelection {
 }
 
 export function sameModIdentity(left: ModIdentity, right: ModIdentity): boolean {
-  return modSelectionKey(left.selection) === modSelectionKey(right.selection)
-    && left.source.provider === right.source.provider && left.source.content === right.source.content
-    && left.declarationDigest === right.declarationDigest && left.modules.length === right.modules.length
-    && left.modules.every((module, index) => { const other = right.modules[index]; return other !== undefined && module.id === other.id && module.artifactPath === other.artifactPath && module.digest === other.digest && module.revision === other.revision; })
-    && left.providers.length === right.providers.length && left.providers.every((provider, index) => {
+  return (
+    modSelectionKey(left.selection) === modSelectionKey(right.selection) &&
+    left.source.provider === right.source.provider &&
+    left.source.content === right.source.content &&
+    left.declarationDigest === right.declarationDigest &&
+    left.modules.length === right.modules.length &&
+    left.modules.every((module, index) => {
+      const other = right.modules[index];
+      return (
+        other !== undefined &&
+        module.id === other.id &&
+        module.artifactPath === other.artifactPath &&
+        module.digest === other.digest &&
+        module.revision === other.revision
+      );
+    }) &&
+    left.providers.length === right.providers.length &&
+    left.providers.every((provider, index) => {
       const other = right.providers[index];
       return other !== undefined && provider.provider === other.provider && provider.schema === other.schema && provider.version === other.version;
-    });
+    })
+  );
 }

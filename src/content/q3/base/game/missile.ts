@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponBehaviorProjectilePort } from "../../../../contracts/weapon-behavior.ts";
 import { q3ProjectileBehavior } from "../../foundation/weapon-behavior.ts";
 import { SaveReader } from "../../../../persistence/value.ts";
@@ -32,23 +33,34 @@ import type { EntityTouch, GameClient } from "./state.ts";
 import { GameEntity } from "./state.ts";
 
 const MASK_SHOT = 1 | 0x2000000 | 0x4000000;
-const EF_BOUNCE_HALF = 0x20, EF_NODRAW = 0x80, EF_TICKING = 2;
+const EF_BOUNCE_HALF = 0x20,
+  EF_NODRAW = 0x80,
+  EF_TICKING = 2;
 const SURF_METALSTEPS = 0x1000;
 
 /** Source fire_* normalizes this argument in place. */
-export interface MissileDirection { x: number; y: number; z: number }
+export interface MissileDirection {
+  x: number;
+  y: number;
+  z: number;
+}
 
 export interface MissionpackMissileServices {
   readonly proxMineTimeout: number;
   readonly random: Pick<GameRandom, "random" | "crandom">;
   soundIndex(path: string): number;
   /** G_InvulnerabilityEffect publishes the impact effect and supplies its sphere normal. */
-  invulnerabilityImpact(target: GameEntity, direction: Vec3, point: Vec3):
-    { readonly kind: "miss" } | { readonly kind: "hit"; readonly bounceDirection: Vec3 };
+  invulnerabilityImpact(target: GameEntity, direction: Vec3, point: Vec3): { readonly kind: "miss" } | { readonly kind: "hit"; readonly bounceDirection: Vec3 };
 }
 
 /** Time and cvar properties must be live across scheduled think/touch callbacks. */
-export type MissileHost = { readonly weaponBehavior?: WeaponBehaviorProjectilePort; readonly actors: Pick<SessionActorRegistry, "onRelease">; readonly world: ServerWorld; readonly bodies: SharedBodyTable; readonly previousTime: number } & (
+export type MissileHost = {
+  readonly weaponBehavior?: WeaponBehaviorProjectilePort;
+  readonly actors: Pick<SessionActorRegistry, "onRelease">;
+  readonly world: ServerWorld;
+  readonly bodies: SharedBodyTable;
+  readonly previousTime: number;
+} & (
   | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
   | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: MissionpackMissileServices }
 );
@@ -79,7 +91,9 @@ export function snapVectorTowards(value: Vec3, toward: Vec3): Vec3 {
 
 function normalizeDirection(direction: MissileDirection): Vec3 {
   const normalized = normalize3(vec3(direction.x, direction.y, direction.z));
-  direction.x = normalized.x; direction.y = normalized.y; direction.z = normalized.z;
+  direction.x = normalized.x;
+  direction.y = normalized.y;
+  direction.z = normalized.z;
   return normalized;
 }
 
@@ -94,9 +108,14 @@ interface NativeProjectile extends Q3Projectile {
 
 export class MissileRuntime {
   captureSaveState() {
-    return [...this.projectiles].map(([entity, projectile]) => ({ entity: entity.slot, actor: savedActorId(projectile.actor.id), owner: savedActorId(projectile.owner),
-      pass: projectile.pass === null ? null : savedActorId(projectile.pass), trigger: projectile.trigger === null ? null : savedActorId(projectile.trigger),
-      attachment: projectile.attachment.kind === "none" ? { kind: "none" } : { kind: "player", actor: savedActorId(projectile.attachment.actor) } }));
+    return [...this.projectiles].map(([entity, projectile]) => ({
+      entity: entity.slot,
+      actor: savedActorId(projectile.actor.id),
+      owner: savedActorId(projectile.owner),
+      pass: projectile.pass === null ? null : savedActorId(projectile.pass),
+      trigger: projectile.trigger === null ? null : savedActorId(projectile.trigger),
+      attachment: projectile.attachment.kind === "none" ? { kind: "none" } : { kind: "player", actor: savedActorId(projectile.attachment.actor) },
+    }));
   }
 
   restoreSaveState(value: unknown, resolveActor: (saved: SavedActorId) => ActorId): void {
@@ -109,8 +128,10 @@ export class MissileRuntime {
       const pass = entry.field("pass").nullable(saved => resolveActor(readSavedActor(saved)));
       const trigger = entry.field("trigger").nullable(saved => resolveActor(readSavedActor(saved)));
       const attachmentReader = entry.field("attachment");
-      const attachment: NativeProjectile["attachment"] = attachmentReader.field("kind").choice("none", "player") === "none"
-        ? { kind: "none" } : { kind: "player", actor: resolveActor(readSavedActor(attachmentReader.field("actor"))) };
+      const attachment: NativeProjectile["attachment"] =
+        attachmentReader.field("kind").choice("none", "player") === "none"
+          ? { kind: "none" }
+          : { kind: "player", actor: resolveActor(readSavedActor(attachmentReader.field("actor"))) };
       return { entity, projectile: this.bindProjectile(entity, owner, pass, attachment, trigger) };
     });
     if (new Set(entries.map(entry => entry.entity)).size !== entries.length) reader.fail("duplicate native projectile");
@@ -118,29 +139,76 @@ export class MissileRuntime {
     for (const entry of entries) this.projectiles.set(entry.entity, entry.projectile);
   }
 
-  private bindProjectile(bolt: GameEntity, owner: ActorId, pass: ActorId | null, attachment: NativeProjectile["attachment"], trigger: ActorId | null): NativeProjectile {
+  private bindProjectile(
+    bolt: GameEntity,
+    owner: ActorId,
+    pass: ActorId | null,
+    attachment: NativeProjectile["attachment"],
+    trigger: ActorId | null,
+  ): NativeProjectile {
     const actor = bolt.actor;
     return {
-      actor, owner, attachment, trigger, get weapon() { return bolt.s.weapon; }, get direct() { return bolt.damage; }, get splash() { return bolt.splashDamage; },
-      get radius() { return bolt.splashRadius; }, get method() { return bolt.methodOfDeath; }, get splashMethod() { return bolt.splashMethodOfDeath; },
-      get damagePoint() { return bolt.s.origin; },
-      get trajectory() { return bolt.s.pos; }, set trajectory(value) { bolt.s.pos = value; },
-      get flags() { return bolt.s.eFlags; }, set flags(value) { bolt.s.eFlags = value; }, pass
+      actor,
+      owner,
+      attachment,
+      trigger,
+      get weapon() {
+        return bolt.s.weapon;
+      },
+      get direct() {
+        return bolt.damage;
+      },
+      get splash() {
+        return bolt.splashDamage;
+      },
+      get radius() {
+        return bolt.splashRadius;
+      },
+      get method() {
+        return bolt.methodOfDeath;
+      },
+      get splashMethod() {
+        return bolt.splashMethodOfDeath;
+      },
+      get damagePoint() {
+        return bolt.s.origin;
+      },
+      get trajectory() {
+        return bolt.s.pos;
+      },
+      set trajectory(value) {
+        bolt.s.pos = value;
+      },
+      get flags() {
+        return bolt.s.eFlags;
+      },
+      set flags(value) {
+        bolt.s.eFlags = value;
+      },
+      pass,
     };
   }
 
   private readonly unobserve: () => undefined;
   private readonly projectiles = new Map<GameEntity, NativeProjectile>();
-  private readonly proximityTouch: EntityTouch = (self, other) => { if (other instanceof GameEntity) this.proximityTrigger(self, other); };
+  private readonly proximityTouch: EntityTouch = (self, other) => {
+    if (other instanceof GameEntity) this.proximityTrigger(self, other);
+  };
 
   constructor(readonly host: MissileHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Missile product does not match its entity pool");
-    this.unobserve = host.actors.onRelease(actor => { this.released(actor.id); return undefined; });
+    this.unobserve = host.actors.onRelease(actor => {
+      this.released(actor.id);
+      return undefined;
+    });
 
     this.bindSaveCallbacks();
   }
 
-  close(): void { this.unobserve(); this.projectiles.clear(); }
+  close(): void {
+    this.unobserve();
+    this.projectiles.clear();
+  }
 
   ownerOf(actor: ActorId): ActorId | null {
     const entity = this.host.combat.entities.options.records.nativeByActor(actor);
@@ -158,22 +226,35 @@ export class MissileRuntime {
   }
 
   private released(actor: ActorId): void {
-    const pool = this.host.combat.entities, records = pool.options.records;
+    const pool = this.host.combat.entities,
+      records = pool.options.records;
     for (const [entity, projectile] of [...this.projectiles]) {
       if (this.projectiles.get(entity) !== projectile) continue;
       if (projectile.actor.id.equals(actor)) {
         this.projectiles.delete(entity);
         if (projectile.weapon === Weapon.WP_GRAPPLING_HOOK) {
           const client = this.ownerClient(projectile);
-          if (client?.hook === entity) { client.hook = null; client.ps.pmFlags &= ~MoveFlags.GRAPPLE_PULL; }
+          if (client?.hook === entity) {
+            client.hook = null;
+            client.ps.pmFlags &= ~MoveFlags.GRAPPLE_PULL;
+          }
         }
         if (projectile.attachment.kind === "player" && projectile.weapon === Weapon.WP_PROX_LAUNCHER) {
           const target = records.nativeByActor(projectile.attachment.actor);
-          if (target?.client != null && target.activator === entity) { target.client.ps.eFlags &= ~EF_TICKING; target.activator = null; }
+          if (target?.client != null && target.activator === entity) {
+            target.client.ps.eFlags &= ~EF_TICKING;
+            target.activator = null;
+          }
         }
-        if (projectile.trigger !== null) { const trigger = records.nativeByActor(projectile.trigger); if (trigger !== null) pool.free(trigger); }
-      } else if (projectile.weapon === Weapon.WP_GRAPPLING_HOOK && projectile.owner.equals(actor)
-        || projectile.attachment.kind === "player" && projectile.attachment.actor.equals(actor)) this.releaseProjectile(projectile);
+        if (projectile.trigger !== null) {
+          const trigger = records.nativeByActor(projectile.trigger);
+          if (trigger !== null) pool.free(trigger);
+        }
+      } else if (
+        (projectile.weapon === Weapon.WP_GRAPPLING_HOOK && projectile.owner.equals(actor)) ||
+        (projectile.attachment.kind === "player" && projectile.attachment.actor.equals(actor))
+      )
+        this.releaseProjectile(projectile);
       else if (projectile.trigger?.equals(actor) === true) {
         projectile.trigger = null;
         if (records.nativeByActor(projectile.actor.id) === entity) entity.activator = null;
@@ -195,7 +276,10 @@ export class MissileRuntime {
     return this.host.missionpack;
   }
 
-  private accuracy(owner: GameEntity): void { const client = clientOf(owner); client.accuracyHits = (client.accuracyHits + 1) | 0; }
+  private accuracy(owner: GameEntity): void {
+    const client = clientOf(owner);
+    client.accuracyHits = (client.accuracyHits + 1) | 0;
+  }
 
   private projectile(entity: GameEntity): NativeProjectile {
     const projectile = this.projectiles.get(entity);
@@ -205,63 +289,166 @@ export class MissileRuntime {
   }
 
   private projectileHost(entity: GameEntity, projectile: Q3Projectile): Q3ProjectileHost {
-    const runtime = this, combat = this.host.combat, pool = combat.entities, records = pool.options.records;
+    const runtime = this,
+      combat = this.host.combat,
+      pool = combat.entities,
+      records = pool.options.records;
     const owner = () => records.nativeByActor(projectile.owner);
     const live = () => records.nativeByActor(projectile.actor.id) === entity;
-    const special = entity.classname === "hook" || entity.s.weapon === Weapon.WP_PROX_LAUNCHER ? {
-      impact: (trace: ActorTraceResult, target: ActorId): boolean => this.specialImpact(entity, trace, target),
-      afterMove: (): void => {
-        if (this.host.missionpack !== null && entity.s.weapon === Weapon.WP_PROX_LAUNCHER && entity.count === 0) {
-          const trace = combat.spatial.traceActor({ start: entity.r.currentOrigin, end: entity.r.currentOrigin,
-            shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passActor: null, mask: entity.clipmask });
-          if (trace.solidity === "clear" || trace.hit.kind !== "actor" || !trace.hit.actor.equals(projectile.owner)) { entity.count = 1; projectile.pass = null; }
-        }
-      },
-      noImpact: (): void => { const client = owner()?.client; if (client != null && client.hook === entity) client.hook = null; }
-    } : null;
+    const special =
+      entity.classname === "hook" || entity.s.weapon === Weapon.WP_PROX_LAUNCHER
+        ? {
+            impact: (trace: ActorTraceResult, target: ActorId): boolean => this.specialImpact(entity, trace, target),
+            afterMove: (): void => {
+              if (this.host.missionpack !== null && entity.s.weapon === Weapon.WP_PROX_LAUNCHER && entity.count === 0) {
+                const trace = combat.spatial.traceActor({
+                  start: entity.r.currentOrigin,
+                  end: entity.r.currentOrigin,
+                  shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
+                  passActor: null,
+                  mask: entity.clipmask,
+                });
+                if (trace.solidity === "clear" || trace.hit.kind !== "actor" || !trace.hit.actor.equals(projectile.owner)) {
+                  entity.count = 1;
+                  projectile.pass = null;
+                }
+              }
+            },
+            noImpact: (): void => {
+              const client = owner()?.client;
+              if (client != null && client.hook === entity) client.hook = null;
+            },
+          }
+        : null;
     return {
-      get time() { return combat.time; }, get previousTime() { return runtime.host.previousTime; }, live,
-      phase: () => entity.freeAfterEvent ? "event" : entity.s.eType === EntityType.ET_MISSILE ? "flight" : "attached",
-      eventTime: () => entity.eventTime, clearEvent: () => { entity.s.event = 0; }, origin: () => entity.r.currentOrigin,
-      move: (origin, velocity) => { const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, origin, velocity,
-        // Native cgame derives missile orientation from velocity (CG_Missile);
-        // the unified body must carry it for foreign-family presentation.
-        // Grenades and prox mines tumble on their angle trajectory instead.
-        angles: entity.s.weapon === Weapon.WP_GRENADE_LAUNCHER || entity.s.weapon === Weapon.WP_PROX_LAUNCHER ? body.angles : vectorToAngles(velocity) });
+      get time() {
+        return combat.time;
+      },
+      get previousTime() {
+        return runtime.host.previousTime;
+      },
+      live,
+      phase: () => (entity.freeAfterEvent ? "event" : entity.s.eType === EntityType.ET_MISSILE ? "flight" : "attached"),
+      eventTime: () => entity.eventTime,
+      clearEvent: () => {
+        entity.s.event = 0;
+      },
+      origin: () => entity.r.currentOrigin,
+      move: (origin, velocity) => {
+        const body = runtime.host.bodies.read(projectile.actor.id);
+        if (body !== null)
+          runtime.host.bodies.write(projectile.actor, {
+            ...body,
+            origin,
+            velocity,
+            // Native cgame derives missile orientation from velocity (CG_Missile);
+            // the unified body must carry it for foreign-family presentation.
+            // Grenades and prox mines tumble on their angle trajectory instead.
+            angles: entity.s.weapon === Weapon.WP_GRENADE_LAUNCHER || entity.s.weapon === Weapon.WP_PROX_LAUNCHER ? body.angles : vectorToAngles(velocity),
+          });
         if (entity.s.weapon !== Weapon.WP_GRENADE_LAUNCHER && entity.s.weapon !== Weapon.WP_PROX_LAUNCHER)
-          entity.s.apos = { ...entity.s.apos, type: TrajectoryType.TR_STATIONARY, base: vectorToAngles(velocity), delta: vec3(0, 0, 0) }; },
-      setOrigin: origin => { setOrigin(entity, origin); const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, velocity: vec3(0, 0, 0) }); }, link: () => { runtime.host.world.link(entity); },
-      release: () => { pool.free(entity); },
-      trace: (start, end, passActor) => combat.spatial.traceActor({ start, end, passActor,
-        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, mask: entity.clipmask }),
+          entity.s.apos = { ...entity.s.apos, type: TrajectoryType.TR_STATIONARY, base: vectorToAngles(velocity), delta: vec3(0, 0, 0) };
+      },
+      setOrigin: origin => {
+        setOrigin(entity, origin);
+        const body = runtime.host.bodies.read(projectile.actor.id);
+        if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, velocity: vec3(0, 0, 0) });
+      },
+      link: () => {
+        runtime.host.world.link(entity);
+      },
+      release: () => {
+        pool.free(entity);
+      },
+      trace: (start, end, passActor) =>
+        combat.spatial.traceActor({ start, end, passActor, shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, mask: entity.clipmask }),
       worldActor: () => pool.at(1022).actor.id,
       target: actor => {
-        const state = combat.authority.read(actor); if (state === null) return null;
-        const native = records.nativeByActor(actor), attacker = combat.authority.read(projectile.owner);
-        return { damageable: state.canTakeDamage, player: combat.actors.isPlayer(actor),
+        const state = combat.authority.read(actor);
+        if (state === null) return null;
+        const native = records.nativeByActor(actor),
+          attacker = combat.authority.read(projectile.owner);
+        return {
+          damageable: state.canTakeDamage,
+          player: combat.actors.isPlayer(actor),
           invulnerable: native?.client !== null && native?.client !== undefined && native.client.invulnerabilityTime > combat.time,
-          accuracyEligible: q3AccuracyHit(combat.gameType >= GameType.GT_TEAM,
+          accuracyEligible: q3AccuracyHit(
+            combat.gameType >= GameType.GT_TEAM,
             { actor, damageable: state.canTakeDamage, player: combat.actors.isPlayer(actor), health: state.health, team: state.team },
-            { actor: projectile.owner, damageable: attacker?.canTakeDamage ?? false, player: owner()?.client != null, health: attacker?.health ?? 0, team: attacker?.team ?? null }) };
+            {
+              actor: projectile.owner,
+              damageable: attacker?.canTakeDamage ?? false,
+              player: owner()?.client != null,
+              health: attacker?.health ?? 0,
+              team: attacker?.team ?? null,
+            },
+          ),
+        };
       },
       emit: event => {
-        if (event.kind === "bounce") { pool.addEvent(entity, EntityEvent.EV_GRENADE_BOUNCE); return; }
+        if (event.kind === "bounce") {
+          pool.addEvent(entity, EntityEvent.EV_GRENADE_BOUNCE);
+          return;
+        }
         if (event.flesh && event.target !== null) {
-          const target = records.nativeByActor(event.target); if (target?.client == null) throw new Error("Q3 admitted player has no native hit-event client");
-          pool.addEvent(entity, EntityEvent.EV_MISSILE_HIT, directionToByte(event.normal)); entity.s.otherEntityNum = target.s.number;
-        } else pool.addEvent(entity, event.surfaceFlags & SURF_METALSTEPS ? EntityEvent.EV_MISSILE_MISS_METAL : EntityEvent.EV_MISSILE_MISS, directionToByte(event.normal));
+          const target = records.nativeByActor(event.target);
+          if (target?.client == null) throw new Error("Q3 admitted player has no native hit-event client");
+          pool.addEvent(entity, EntityEvent.EV_MISSILE_HIT, directionToByte(event.normal));
+          entity.s.otherEntityNum = target.s.number;
+        } else
+          pool.addEvent(
+            entity,
+            event.surfaceFlags & SURF_METALSTEPS ? EntityEvent.EV_MISSILE_MISS_METAL : EntityEvent.EV_MISSILE_MISS,
+            directionToByte(event.normal),
+          );
       },
-      retain: () => { entity.freeAfterEvent = true; entity.s.eType = EntityType.ET_GENERAL; },
-      damage: (target, direction, point) => damage(combat, combat.actors.participant(target), entity, combat.actors.participant(projectile.owner),
-        direction, point, entity.damage, 0, entity.methodOfDeath, projectile.actor.id),
-      radius: (origin, ignore) => radiusDamage(combat, origin, combat.actors.participant(projectile.owner), entity.splashDamage,
-        entity.splashRadius, ignore === null ? null : combat.actors.participant(ignore), entity.splashMethodOfDeath, projectile.actor.id),
-      accuracy: () => { const current = owner(); if (current?.client != null) this.accuracy(current); },
-      think: () => { runThink(entity, combat.time); }, moved: () => {}, special,
-      reflection: this.host.missionpack === null ? null : { impact: (target, direction, point) => {
-        const current = records.nativeByActor(target); if (current?.client == null) throw new Error("Invulnerable Q3 player lost its native client");
-        return this.missionpack().invulnerabilityImpact(current, direction, point);
-      } }
+      retain: () => {
+        entity.freeAfterEvent = true;
+        entity.s.eType = EntityType.ET_GENERAL;
+      },
+      damage: (target, direction, point) =>
+        damage(
+          combat,
+          combat.actors.participant(target),
+          entity,
+          combat.actors.participant(projectile.owner),
+          direction,
+          point,
+          entity.damage,
+          0,
+          entity.methodOfDeath,
+          projectile.actor.id,
+        ),
+      radius: (origin, ignore) =>
+        radiusDamage(
+          combat,
+          origin,
+          combat.actors.participant(projectile.owner),
+          entity.splashDamage,
+          entity.splashRadius,
+          ignore === null ? null : combat.actors.participant(ignore),
+          entity.splashMethodOfDeath,
+          projectile.actor.id,
+        ),
+      accuracy: () => {
+        const current = owner();
+        if (current?.client != null) this.accuracy(current);
+      },
+      think: () => {
+        runThink(entity, combat.time);
+      },
+      moved: () => {},
+      special,
+      reflection:
+        this.host.missionpack === null
+          ? null
+          : {
+              impact: (target, direction, point) => {
+                const current = records.nativeByActor(target);
+                if (current?.client == null) throw new Error("Invulnerable Q3 player lost its native client");
+                return this.missionpack().invulnerabilityImpact(current, direction, point);
+              },
+            },
     };
   }
 
@@ -270,19 +457,27 @@ export class MissileRuntime {
     if (entity === null) return false;
     const projectile = this.projectiles.get(entity);
     if (projectile === undefined || !projectile.actor.id.equals(actor.id)) return false;
-    this.step(entity, projectile); return true;
+    this.step(entity, projectile);
+    return true;
   }
 
   bounce(entity: GameEntity, trace: ServerTraceResult): void {
-    const projectile = this.projectile(entity), target = this.host.combat.entities.at(trace.entityNum);
+    const projectile = this.projectile(entity),
+      target = this.host.combat.entities.at(trace.entityNum);
     q3BounceProjectile(projectile, this.projectileHost(entity, projectile), { ...trace, hit: { kind: "actor", actor: target.actor.id } });
   }
-  explode(entity: GameEntity): void { const projectile = this.projectile(entity); q3ExplodeProjectile(projectile, this.projectileHost(entity, projectile)); }
+  explode(entity: GameEntity): void {
+    const projectile = this.projectile(entity);
+    q3ExplodeProjectile(projectile, this.projectileHost(entity, projectile));
+  }
   impact(entity: GameEntity, trace: ServerTraceResult): void {
-    const projectile = this.projectile(entity), target = this.host.combat.entities.at(trace.entityNum);
+    const projectile = this.projectile(entity),
+      target = this.host.combat.entities.at(trace.entityNum);
     q3ImpactProjectile(projectile, this.projectileHost(entity, projectile), { ...trace, hit: { kind: "actor", actor: target.actor.id } });
   }
-  run(entity: GameEntity): void { this.step(entity, this.projectile(entity)); }
+  run(entity: GameEntity): void {
+    this.step(entity, this.projectile(entity));
+  }
   private step(entity: GameEntity, projectile: NativeProjectile): void {
     if (entity.s.eType === EntityType.ET_MISSILE && !entity.freeAfterEvent) {
       const body = this.host.bodies.read(projectile.actor.id);
@@ -299,35 +494,63 @@ export class MissileRuntime {
   }
 
   private specialImpact(entity: GameEntity, trace: ActorTraceResult, actor: ActorId): boolean {
-    const combat = this.host.combat, pool = combat.entities, other = pool.options.records.nativeByActor(actor), normal = normalOf(trace);
+    const combat = this.host.combat,
+      pool = combat.entities,
+      other = pool.options.records.nativeByActor(actor),
+      normal = normalOf(trace);
     if (other === null && combat.actors.isPlayer(actor)) throw new Error("Admitted Q3 map player has no native client behavior record");
     if (this.host.missionpack !== null && entity.s.weapon === Weapon.WP_PROX_LAUNCHER) {
       if (entity.s.pos.type !== TrajectoryType.TR_GRAVITY) return true;
-      if (other !== null && other.s.eType === EntityType.ET_PLAYER && other.health > 0) { this.proximityPlayer(entity, other); return true; }
+      if (other !== null && other.s.eType === EntityType.ET_PLAYER && other.health > 0) {
+        this.proximityPlayer(entity, other);
+        return true;
+      }
       setOrigin(entity, snapVectorTowards(trace.end, entity.s.pos.base));
       pool.addEvent(entity, EntityEvent.EV_PROXIMITY_MINE_STICK, trace.surfaceFlags);
-      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.specialImpact.think"); entity.nextthink = (combat.time + 2000) | 0;
-      const angles = vectorToAngles(normal); entity.s.angles = vec3(angles.x + 90, angles.y, angles.z);
-      entity.enemy = other; entity.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die"); entity.movedir = { ...normal };
-      entity.r.mins = vec3(-4, -4, -4); entity.r.maxs = vec3(4, 4, 4);
-      this.host.world.link(entity); return true;
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.specialImpact.think");
+      entity.nextthink = (combat.time + 2000) | 0;
+      const angles = vectorToAngles(normal);
+      entity.s.angles = vec3(angles.x + 90, angles.y, angles.z);
+      entity.enemy = other;
+      entity.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die");
+      entity.movedir = { ...normal };
+      entity.r.mins = vec3(-4, -4, -4);
+      entity.r.maxs = vec3(4, 4, 4);
+      this.host.world.link(entity);
+      return true;
     }
     if (entity.classname === "hook") {
       const event = pool.spawn();
       let position: Vec3;
       if (other !== null && other.takedamage && other.client !== null) {
-        pool.addEvent(event, EntityEvent.EV_MISSILE_HIT, directionToByte(normal)); event.s.otherEntityNum = other.s.number;
-        this.projectile(entity).attachment = { kind: "player", actor: other.actor.id }; position = snapVectorTowards(center(other), entity.s.pos.base);
+        pool.addEvent(event, EntityEvent.EV_MISSILE_HIT, directionToByte(normal));
+        event.s.otherEntityNum = other.s.number;
+        this.projectile(entity).attachment = { kind: "player", actor: other.actor.id };
+        position = snapVectorTowards(center(other), entity.s.pos.base);
       } else {
-        position = trace.end; pool.addEvent(event, EntityEvent.EV_MISSILE_MISS, directionToByte(normal)); entity.enemy = null;
+        position = trace.end;
+        pool.addEvent(event, EntityEvent.EV_MISSILE_MISS, directionToByte(normal));
+        entity.enemy = null;
       }
       position = snapVectorTowards(position, entity.s.pos.base);
-      event.freeAfterEvent = true; event.s.eType = EntityType.ET_GENERAL; entity.s.eType = EntityType.ET_GRAPPLE;
-      setOrigin(entity, position); setOrigin(event, position);
-      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.hookThink"); entity.nextthink = (combat.time + Q3_GRAPPLE_THINK_INTERVAL) | 0;
-      const client = this.ownerClient(this.projectile(entity)); if (client === null) { pool.free(entity); pool.free(event); return true; } client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
+      event.freeAfterEvent = true;
+      event.s.eType = EntityType.ET_GENERAL;
+      entity.s.eType = EntityType.ET_GRAPPLE;
+      setOrigin(entity, position);
+      setOrigin(event, position);
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.hookThink");
+      entity.nextthink = (combat.time + Q3_GRAPPLE_THINK_INTERVAL) | 0;
+      const client = this.ownerClient(this.projectile(entity));
+      if (client === null) {
+        pool.free(entity);
+        pool.free(event);
+        return true;
+      }
+      client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
       client.ps.grapplePoint = { ...entity.r.currentOrigin };
-      this.host.world.link(entity); this.host.world.link(event); return true;
+      this.host.world.link(entity);
+      this.host.world.link(event);
+      return true;
     }
     return false;
   }
@@ -338,101 +561,174 @@ export class MissileRuntime {
   }
 
   hookThink(entity: GameEntity): void {
-    const projectile = this.projectile(entity), client = this.ownerClient(projectile);
-    if (client === null) { this.releaseProjectile(projectile); return; }
+    const projectile = this.projectile(entity),
+      client = this.ownerClient(projectile);
+    if (client === null) {
+      this.releaseProjectile(projectile);
+      return;
+    }
     if (projectile.attachment.kind === "player") {
       const target = this.host.combat.entities.options.records.nativeByActor(projectile.attachment.actor);
-      if (target === null) { this.releaseProjectile(projectile); return; }
+      if (target === null) {
+        this.releaseProjectile(projectile);
+        return;
+      }
       setOrigin(entity, snapVectorTowards(center(target), entity.r.currentOrigin));
     }
     client.ps.grapplePoint = { ...entity.r.currentOrigin };
   }
 
   private proximityExplode(mine: GameEntity): void {
-    const projectile = this.projectile(mine), trigger = projectile.trigger;
+    const projectile = this.projectile(mine),
+      trigger = projectile.trigger;
     this.explode(mine);
-    if (trigger !== null) { const entity = this.host.combat.entities.options.records.nativeByActor(trigger); if (entity !== null) this.host.combat.entities.free(entity); }
+    if (trigger !== null) {
+      const entity = this.host.combat.entities.options.records.nativeByActor(trigger);
+      if (entity !== null) this.host.combat.entities.free(entity);
+    }
   }
 
   private proximityDie(mine: GameEntity): void {
-    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think"); mine.nextthink = (this.host.combat.time + 1) | 0;
+    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think");
+    mine.nextthink = (this.host.combat.time + 1) | 0;
   }
 
   private proximityTrigger(trigger: GameEntity, other: GameEntity): void {
     if (other.client === null) return;
-    const mine = parentOf(trigger), combat = this.host.combat;
+    const mine = parentOf(trigger),
+      combat = this.host.combat;
     if (length3(sub3(trigger.s.pos.base, other.s.pos.base)) > mine.splashRadius) return;
     if (combat.gameType >= GameType.GT_TEAM && mine.s.generic1 === other.client.sess.sessionTeam) return;
     if (!canDamage(combat, other, trigger.s.pos.base)) return;
-    mine.s.loopSound = 0; combat.entities.addEvent(mine, EntityEvent.EV_PROXIMITY_MINE_TRIGGER);
-    mine.nextthink = (combat.time + 500) | 0; combat.entities.free(trigger);
+    mine.s.loopSound = 0;
+    combat.entities.addEvent(mine, EntityEvent.EV_PROXIMITY_MINE_TRIGGER);
+    mine.nextthink = (combat.time + 500) | 0;
+    combat.entities.free(trigger);
   }
 
   private proximityActivate(mine: GameEntity): void {
-    const services = this.missionpack(), combat = this.host.combat;
-    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think"); mine.nextthink = (combat.time + services.proxMineTimeout) | 0;
-    mine.takedamage = true; mine.health = 1; mine.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die");
+    const services = this.missionpack(),
+      combat = this.host.combat;
+    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think");
+    mine.nextthink = (combat.time + services.proxMineTimeout) | 0;
+    mine.takedamage = true;
+    mine.health = 1;
+    mine.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die");
     mine.s.loopSound = services.soundIndex("sound/weapons/proxmine/wstbtick.wav");
-    const trigger = combat.entities.spawn(), radius = Math.fround(mine.splashRadius);
-    trigger.classname = "proxmine_trigger"; trigger.r.mins = vec3(-radius, -radius, -radius); trigger.r.maxs = vec3(radius, radius, radius);
-    setOrigin(trigger, mine.s.pos.base); trigger.parent = mine; trigger.r.contents = 0x40000000;
+    const trigger = combat.entities.spawn(),
+      radius = Math.fround(mine.splashRadius);
+    trigger.classname = "proxmine_trigger";
+    trigger.r.mins = vec3(-radius, -radius, -radius);
+    trigger.r.maxs = vec3(radius, radius, radius);
+    setOrigin(trigger, mine.s.pos.base);
+    trigger.parent = mine;
+    trigger.r.contents = 0x40000000;
     trigger.touch = this.host.combat.entities.callbacks.touch.resolve("q3.base.game.missile.proximityActivate.touch");
-    this.host.world.link(trigger); mine.activator = trigger; this.projectile(mine).trigger = trigger.actor.id;
+    this.host.world.link(trigger);
+    mine.activator = trigger;
+    this.projectile(mine).trigger = trigger.actor.id;
   }
 
   private proximityExplodeOnPlayer(mine: GameEntity): void {
     const projectile = this.projectile(mine);
     if (projectile.attachment.kind !== "player") throw new Error("Attached proximity mine requires its player lifetime");
     const player = this.host.combat.entities.options.records.nativeByActor(projectile.attachment.actor);
-    if (player === null) { this.releaseProjectile(projectile); return; }
-    const client = clientOf(player), combat = this.host.combat;
+    if (player === null) {
+      this.releaseProjectile(projectile);
+      return;
+    }
+    const client = clientOf(player),
+      combat = this.host.combat;
     client.ps.eFlags &= ~EF_TICKING;
     if (client.invulnerabilityTime > combat.time) {
       const owner = combat.actors.participant(projectile.owner);
       damage(combat, player, owner, owner, vec3(0, 0, 0), mine.s.origin, 1000, DamageFlags.NO_KNOCKBACK, 27, projectile.actor.id);
       if (combat.entities.options.records.nativeByActor(projectile.attachment.actor) !== player) return;
-      client.invulnerabilityTime = 0; combat.entities.tempEntity(client.ps.origin, EntityEvent.EV_JUICED);
+      client.invulnerabilityTime = 0;
+      combat.entities.tempEntity(client.ps.origin, EntityEvent.EV_JUICED);
     } else {
-      setOrigin(mine, player.s.pos.base); mine.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
-      mine.splashMethodOfDeath = 25; this.explode(mine);
+      setOrigin(mine, player.s.pos.base);
+      mine.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
+      mine.splashMethodOfDeath = 25;
+      this.explode(mine);
     }
   }
 
   private proximityPlayer(mine: GameEntity, player: GameEntity): void {
     if (mine.s.eFlags & EF_NODRAW) return;
-    const combat = this.host.combat; combat.entities.addEvent(mine, EntityEvent.EV_PROXIMITY_MINE_STICK);
+    const combat = this.host.combat;
+    combat.entities.addEvent(mine, EntityEvent.EV_PROXIMITY_MINE_STICK);
     if (player.s.eFlags & EF_TICKING) {
       if (player.activator === null) throw new Error("Ticking player requires its proximity mine");
       player.activator.splashDamage = (player.activator.splashDamage + mine.splashDamage) | 0;
       player.activator.splashRadius = Math.fround(player.activator.splashRadius * Math.fround(1.5));
-      mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityPlayer.think"); mine.nextthink = combat.time; return;
+      mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityPlayer.think");
+      mine.nextthink = combat.time;
+      return;
     }
-    const client = clientOf(player); client.ps.eFlags |= EF_TICKING; player.activator = mine;
-    mine.s.eFlags |= EF_NODRAW; mine.r.svFlags |= ServerEntityFlags.NOCLIENT;
+    const client = clientOf(player);
+    client.ps.eFlags |= EF_TICKING;
+    player.activator = mine;
+    mine.s.eFlags |= EF_NODRAW;
+    mine.r.svFlags |= ServerEntityFlags.NOCLIENT;
     mine.s.pos = { ...mine.s.pos, type: TrajectoryType.TR_LINEAR, delta: vec3(0, 0, 0) };
-    this.projectile(mine).attachment = { kind: "player", actor: player.actor.id }; mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityExplodeOnPlayer");
+    this.projectile(mine).attachment = { kind: "player", actor: player.actor.id };
+    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityExplodeOnPlayer");
     mine.nextthink = (combat.time + (client.invulnerabilityTime > combat.time ? 2000 : 10000)) | 0;
   }
 
-  private launch(self: GameEntity, start: Vec3, direction: Vec3, weapon: Weapon, classname: string, speed: number,
-    duration: number, gravity: boolean, direct: number, splash: number, radius: number, method: number, splashMethod: number): GameEntity {
+  private launch(
+    self: GameEntity,
+    start: Vec3,
+    direction: Vec3,
+    weapon: Weapon,
+    classname: string,
+    speed: number,
+    duration: number,
+    gravity: boolean,
+    direct: number,
+    splash: number,
+    radius: number,
+    method: number,
+    splashMethod: number,
+  ): GameEntity {
     this.owned(self);
-    const owner = self.actor.id, time = this.host.combat.time, bolt = this.host.combat.entities.spawn();
+    const owner = self.actor.id,
+      time = this.host.combat.time,
+      bolt = this.host.combat.entities.spawn();
     const launch = q3LaunchProjectile(start, direction, speed, gravity, duration, time);
-    bolt.classname = classname; bolt.nextthink = launch.expires; bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.launch.think");
-    bolt.s.eType = EntityType.ET_MISSILE; bolt.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN; bolt.s.weapon = weapon;
-    bolt.r.ownerNum = self.s.number; bolt.parent = weapon === Weapon.WP_GRAPPLING_HOOK || weapon === Weapon.WP_PROX_LAUNCHER ? self : null; bolt.damage = direct; bolt.splashDamage = splash; bolt.splashRadius = radius;
-    bolt.methodOfDeath = method; bolt.splashMethodOfDeath = splashMethod; bolt.clipmask = MASK_SHOT; bolt.targetEnt = null;
+    bolt.classname = classname;
+    bolt.nextthink = launch.expires;
+    bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.launch.think");
+    bolt.s.eType = EntityType.ET_MISSILE;
+    bolt.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN;
+    bolt.s.weapon = weapon;
+    bolt.r.ownerNum = self.s.number;
+    bolt.parent = weapon === Weapon.WP_GRAPPLING_HOOK || weapon === Weapon.WP_PROX_LAUNCHER ? self : null;
+    bolt.damage = direct;
+    bolt.splashDamage = splash;
+    bolt.splashRadius = radius;
+    bolt.methodOfDeath = method;
+    bolt.splashMethodOfDeath = splashMethod;
+    bolt.clipmask = MASK_SHOT;
+    bolt.targetEnt = null;
     bolt.s.pos = launch.trajectory;
     // Foreign-family presentation orients models from apos (q3PoolModels);
     // native cgame derives missile orientation from velocity, so mirror
     // that into apos for every non-tumbling projectile.
-    if (weapon !== Weapon.WP_GRENADE_LAUNCHER && weapon !== Weapon.WP_PROX_LAUNCHER
-      && (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0))
+    if (
+      weapon !== Weapon.WP_GRENADE_LAUNCHER &&
+      weapon !== Weapon.WP_PROX_LAUNCHER &&
+      (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0)
+    )
       bolt.s.apos = { ...bolt.s.apos, type: TrajectoryType.TR_STATIONARY, base: vectorToAngles(launch.trajectory.delta), delta: vec3(0, 0, 0), time };
     bolt.r.currentOrigin = vec3(start.x, start.y, start.z);
     this.projectiles.set(bolt, this.bindProjectile(bolt, owner, owner, { kind: "none" }, null));
-    if (weapon !== Weapon.WP_GRENADE_LAUNCHER && weapon !== Weapon.WP_PROX_LAUNCHER && (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0)) {
+    if (
+      weapon !== Weapon.WP_GRENADE_LAUNCHER &&
+      weapon !== Weapon.WP_PROX_LAUNCHER &&
+      (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0)
+    ) {
       const body = this.host.bodies.read(bolt.actor.id);
       if (body !== null) this.host.bodies.write(bolt.actor, { ...body, angles: vectorToAngles(launch.trajectory.delta) });
     }
@@ -440,9 +736,16 @@ export class MissileRuntime {
     return bolt;
   }
   private applyBehaviorLaunch(bolt: GameEntity, owner: ActorId): void {
-    const body = this.host.bodies.read(bolt.actor.id), time = this.host.combat.time;
+    const body = this.host.bodies.read(bolt.actor.id),
+      time = this.host.combat.time;
     if (body === null) throw new Error("Launched Q3 missile lost its body");
-    const behavior = this.host.weaponBehavior?.launch({ projectile: bolt.actor, shooter: owner, ...q3ProjectileBehavior(bolt.s.weapon), timeSeconds: time / 1000, body: { ...body, velocity: bolt.s.pos.delta } });
+    const behavior = this.host.weaponBehavior?.launch({
+      projectile: bolt.actor,
+      shooter: owner,
+      ...q3ProjectileBehavior(bolt.s.weapon),
+      timeSeconds: time / 1000,
+      body: { ...body, velocity: bolt.s.pos.delta },
+    });
     if (behavior !== undefined && behavior !== null) {
       this.host.bodies.write(bolt.actor, { ...body, ...behavior });
       bolt.s.pos = { ...bolt.s.pos, base: behavior.origin, delta: behavior.velocity, time };
@@ -452,30 +755,104 @@ export class MissileRuntime {
 
   firePlasma(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const spec = q3MissileParameters(Weapon.WP_PLASMAGUN);
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_PLASMAGUN, "plasma", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
+    return this.launch(
+      self,
+      start,
+      normalizeDirection(direction),
+      Weapon.WP_PLASMAGUN,
+      "plasma",
+      spec.speed,
+      spec.duration,
+      spec.gravity,
+      spec.direct,
+      spec.splash,
+      spec.radius,
+      spec.method,
+      spec.splashMethod,
+    );
   }
   fireGrenade(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const spec = q3MissileParameters(Weapon.WP_GRENADE_LAUNCHER);
-    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRENADE_LAUNCHER, "grenade", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
-    bolt.s.eFlags = EF_BOUNCE_HALF; return bolt;
+    const bolt = this.launch(
+      self,
+      start,
+      normalizeDirection(direction),
+      Weapon.WP_GRENADE_LAUNCHER,
+      "grenade",
+      spec.speed,
+      spec.duration,
+      spec.gravity,
+      spec.direct,
+      spec.splash,
+      spec.radius,
+      spec.method,
+      spec.splashMethod,
+    );
+    bolt.s.eFlags = EF_BOUNCE_HALF;
+    return bolt;
   }
   fireRocket(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const spec = q3MissileParameters(Weapon.WP_ROCKET_LAUNCHER);
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_ROCKET_LAUNCHER, "rocket", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
+    return this.launch(
+      self,
+      start,
+      normalizeDirection(direction),
+      Weapon.WP_ROCKET_LAUNCHER,
+      "rocket",
+      spec.speed,
+      spec.duration,
+      spec.gravity,
+      spec.direct,
+      spec.splash,
+      spec.radius,
+      spec.method,
+      spec.splashMethod,
+    );
   }
   fireBfg(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const spec = q3MissileParameters(Weapon.WP_BFG);
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_BFG, "bfg", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
+    return this.launch(
+      self,
+      start,
+      normalizeDirection(direction),
+      Weapon.WP_BFG,
+      "bfg",
+      spec.speed,
+      spec.duration,
+      spec.gravity,
+      spec.direct,
+      spec.splash,
+      spec.radius,
+      spec.method,
+      spec.splashMethod,
+    );
   }
   fireGrapple(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRAPPLING_HOOK, "hook", Q3_GRAPPLE_SPEED, Q3_GRAPPLE_LIFETIME, false, 0, 0, 0,
-      this.host.combat.product === "baseq3" ? 23 : 28, 0);
-    bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.fireGrapple.think"); bolt.s.otherEntityNum = self.s.number; clientOf(self).hook = bolt; return bolt;
+    const bolt = this.launch(
+      self,
+      start,
+      normalizeDirection(direction),
+      Weapon.WP_GRAPPLING_HOOK,
+      "hook",
+      Q3_GRAPPLE_SPEED,
+      Q3_GRAPPLE_LIFETIME,
+      false,
+      0,
+      0,
+      0,
+      this.host.combat.product === "baseq3" ? 23 : 28,
+      0,
+    );
+    bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.fireGrapple.think");
+    bolt.s.otherEntityNum = self.s.number;
+    clientOf(self).hook = bolt;
+    return bolt;
   }
   fireProx(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     this.missionpack();
     const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_PROX_LAUNCHER, "prox mine", 700, 3000, true, 0, 100, 150, 25, 25);
-    bolt.s.generic1 = clientOf(self).sess.sessionTeam; return bolt;
+    bolt.s.generic1 = clientOf(self).sess.sessionTeam;
+    return bolt;
   }
   fireNail(self: GameEntity, start: Vec3, forward: Vec3, right: Vec3, up: Vec3): GameEntity {
     const random = this.missionpack().random;
@@ -487,14 +864,30 @@ export class MissileRuntime {
   }
 
   bindSaveCallbacks(): void {
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.specialImpact.think", self => { this.proximityActivate(self); });
-    this.host.combat.entities.callbacks.die.intern("q3.base.game.missile.specialImpact.die", self => { this.proximityDie(self); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.hookThink", self => { this.hookThink(self); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityDie.think", self => { this.proximityExplode(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.specialImpact.think", self => {
+      this.proximityActivate(self);
+    });
+    this.host.combat.entities.callbacks.die.intern("q3.base.game.missile.specialImpact.die", self => {
+      this.proximityDie(self);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.hookThink", self => {
+      this.hookThink(self);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityDie.think", self => {
+      this.proximityExplode(self);
+    });
     this.host.combat.entities.callbacks.touch.intern("q3.base.game.missile.proximityActivate.touch", this.proximityTouch);
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityPlayer.think", self => { this.host.combat.entities.free(self); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityExplodeOnPlayer", self => { this.proximityExplodeOnPlayer(self); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.launch.think", entity => { this.explode(entity); });
-    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.fireGrapple.think", entity => { this.hookFree(entity); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityPlayer.think", self => {
+      this.host.combat.entities.free(self);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityExplodeOnPlayer", self => {
+      this.proximityExplodeOnPlayer(self);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.launch.think", entity => {
+      this.explode(entity);
+    });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.fireGrapple.think", entity => {
+      this.hookFree(entity);
+    });
   }
 }

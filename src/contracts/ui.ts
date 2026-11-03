@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId, ProviderReference, ResourceRequest } from "./content.ts";
 import type { ItemId } from "./gameplay.ts";
 /* Client module calls follow Q2 rerelease game.h and Q3 cg_public.h/ui_public.h.
@@ -12,16 +13,29 @@ import type { SourceTime } from "./time.ts";
 
 export type UiControlId = `ui:${string}:${string}`;
 export type UiMenuId = `menu:${string}:${string}`;
-export type InputAction = "attack" | "jump" | "forward" | "back" | "move-left" | "move-right" | "move-up" | "move-down" | "use" | "crouch" | "walk" | "scores" | "next-weapon" | "previous-weapon" | "menu";
+export type InputAction =
+  | "attack"
+  | "jump"
+  | "forward"
+  | "back"
+  | "move-left"
+  | "move-right"
+  | "move-up"
+  | "move-down"
+  | "use"
+  | "crouch"
+  | "walk"
+  | "scores"
+  | "next-weapon"
+  | "previous-weapon"
+  | "menu";
 export type ControllerAxis = "left-x" | "left-y" | "right-x" | "right-y" | "left-trigger" | "right-trigger";
 export type PhysicalInput =
   | { readonly kind: "key"; readonly code: number }
   | { readonly kind: "mouse-button"; readonly button: number }
   | { readonly kind: "controller-button"; readonly device: number; readonly button: number }
   | { readonly kind: "controller-axis"; readonly device: number; readonly axis: ControllerAxis; readonly direction: "positive" | "negative" };
-export type InputBindingTarget =
-  | { readonly kind: "action"; readonly action: InputAction }
-  | { readonly kind: "command"; readonly text: string };
+export type InputBindingTarget = { readonly kind: "action"; readonly action: InputAction } | { readonly kind: "command"; readonly text: string };
 export interface InputBinding {
   readonly input: PhysicalInput;
   readonly target: InputBindingTarget;
@@ -76,7 +90,16 @@ export interface SeatPresentationBinding {
 export type UiDrawCommand =
   | { readonly kind: "fill"; readonly rect: Rect; readonly color: Vec4 }
   | { readonly kind: "image"; readonly rect: Rect; readonly resource: ResourceId; readonly texCoords: readonly [Vec2, Vec2]; readonly color: Vec4 }
-  | { readonly kind: "text"; readonly origin: Vec2; readonly text: string; readonly font: ResourceId; readonly scale: number; readonly color: Vec4; readonly align: "left" | "center" | "right"; readonly shadow: boolean }
+  | {
+      readonly kind: "text";
+      readonly origin: Vec2;
+      readonly text: string;
+      readonly font: ResourceId;
+      readonly scale: number;
+      readonly color: Vec4;
+      readonly align: "left" | "center" | "right";
+      readonly shadow: boolean;
+    }
   | { readonly kind: "clip"; readonly rect: Rect | null };
 export interface UiDrawContext {
   readonly binding: SeatPresentationBinding;
@@ -89,7 +112,10 @@ interface UiControlBase {
   readonly enabled: boolean;
   readonly visible: boolean;
 }
-export interface UiChoice { readonly id: string; readonly label: string; }
+export interface UiChoice {
+  readonly id: string;
+  readonly label: string;
+}
 export interface UiListRow {
   readonly action?: { readonly label: string; readonly activate: (seat: SeatId) => undefined };
   readonly id: string;
@@ -98,15 +124,50 @@ export interface UiListRow {
   readonly enabled: boolean;
 }
 /** Original owner draws and feeders retain callable behavior alongside native controls. */
-export type UiControl = UiControlBase & (
-  | { readonly kind: "button"; readonly activate: (seat: SeatId) => undefined }
-  | { readonly kind: "toggle"; readonly checked: boolean; readonly change: (seat: SeatId, checked: boolean) => undefined }
-  | { readonly kind: "slider"; readonly minimum: number; readonly maximum: number; readonly step: number; readonly value: number; readonly valueLabel?: string; readonly change: (seat: SeatId, value: number) => undefined }
-  | { readonly kind: "text-entry"; readonly masked?: boolean; readonly text: string; readonly maximumLength: number; readonly change: (seat: SeatId, text: string) => undefined; readonly submit: (seat: SeatId, text: string) => undefined }
-  | { readonly kind: "choice"; readonly choices: readonly UiChoice[]; readonly selected: string | null; readonly select: (seat: SeatId, choice: string) => undefined }
-  | { readonly kind: "list"; readonly rowHeight?: number; readonly columnWidths?: readonly number[]; readonly activate?: (seat: SeatId, row: string) => undefined; readonly rows: readonly UiListRow[]; readonly selected: string | null; readonly select: (seat: SeatId, row: string) => undefined }
-  | { readonly kind: "owner-draw"; readonly owner: ProviderId; readonly sourceId: number; readonly draw: (context: UiDrawContext) => readonly UiDrawCommand[]; readonly key: (seat: SeatId, code: number, down: boolean) => boolean }
-);
+export type UiControl = UiControlBase &
+  (
+    | { readonly kind: "button"; readonly activate: (seat: SeatId) => undefined }
+    | { readonly kind: "toggle"; readonly checked: boolean; readonly change: (seat: SeatId, checked: boolean) => undefined }
+    | {
+        readonly kind: "slider";
+        readonly minimum: number;
+        readonly maximum: number;
+        readonly step: number;
+        readonly value: number;
+        readonly valueLabel?: string;
+        readonly change: (seat: SeatId, value: number) => undefined;
+      }
+    | {
+        readonly kind: "text-entry";
+        readonly masked?: boolean;
+        readonly text: string;
+        readonly maximumLength: number;
+        readonly change: (seat: SeatId, text: string) => undefined;
+        readonly submit: (seat: SeatId, text: string) => undefined;
+      }
+    | {
+        readonly kind: "choice";
+        readonly choices: readonly UiChoice[];
+        readonly selected: string | null;
+        readonly select: (seat: SeatId, choice: string) => undefined;
+      }
+    | {
+        readonly kind: "list";
+        readonly rowHeight?: number;
+        readonly columnWidths?: readonly number[];
+        readonly activate?: (seat: SeatId, row: string) => undefined;
+        readonly rows: readonly UiListRow[];
+        readonly selected: string | null;
+        readonly select: (seat: SeatId, row: string) => undefined;
+      }
+    | {
+        readonly kind: "owner-draw";
+        readonly owner: ProviderId;
+        readonly sourceId: number;
+        readonly draw: (context: UiDrawContext) => readonly UiDrawCommand[];
+        readonly key: (seat: SeatId, code: number, down: boolean) => boolean;
+      }
+  );
 export interface UiMenu {
   readonly scroll?: { readonly rect: Rect; readonly contentHeight: number; readonly controls: readonly UiControlId[] };
   readonly id: UiMenuId;
@@ -172,13 +233,15 @@ export interface WeaponHudStatus {
   readonly source: ProviderReference;
   readonly item: ItemId;
   readonly label: string;
-  readonly ammo: { readonly kind: "unmetered" } | {
-    readonly kind: "finite";
-    readonly item: ItemId;
-    readonly count: number;
-    readonly hasAmmoToStart: boolean;
-    readonly low: boolean;
-  };
+  readonly ammo:
+    | { readonly kind: "unmetered" }
+    | {
+        readonly kind: "finite";
+        readonly item: ItemId;
+        readonly count: number;
+        readonly hasAmmoToStart: boolean;
+        readonly low: boolean;
+      };
 }
 
 export type WeaponHudIcon =

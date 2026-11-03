@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 /*
  * Shader remap state translated from code/game/g_utils.c AddRemap and
@@ -54,11 +55,21 @@ function storedTimeOffset(value: number): number {
 }
 
 export class ShaderRemapRegistry {
-  captureSaveState() { return this.remaps.map(remap => ({ oldName: remap.oldName, newName: remap.newName, timeOffset: remap.timeOffset })); }
+  captureSaveState() {
+    return this.remaps.map(remap => ({ oldName: remap.oldName, newName: remap.newName, timeOffset: remap.timeOffset }));
+  }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.remaps");
-    const remaps = reader.list(entry => ({ oldName: quakePath(entry.field("oldName").string()), newName: quakePath(entry.field("newName").string()), timeOffset: storedTimeOffset(entry.field("timeOffset").number()) }));
-    if (remaps.length > MAX_SHADER_REMAPS || remaps.some((entry, index) => remaps.slice(0, index).some(previous => quakePathEqual(previous.oldName, entry.oldName)))) reader.fail("invalid shader remap table");
+    const remaps = reader.list(entry => ({
+      oldName: quakePath(entry.field("oldName").string()),
+      newName: quakePath(entry.field("newName").string()),
+      timeOffset: storedTimeOffset(entry.field("timeOffset").number()),
+    }));
+    if (
+      remaps.length > MAX_SHADER_REMAPS ||
+      remaps.some((entry, index) => remaps.slice(0, index).some(previous => quakePathEqual(previous.oldName, entry.oldName)))
+    )
+      reader.fail("invalid shader remap table");
     this.remaps.splice(0, this.remaps.length, ...remaps);
   }
 
@@ -85,15 +96,9 @@ export class ShaderRemapRegistry {
   buildShaderStateConfig(): string {
     let state = "";
     for (const remap of this.remaps) {
-      const formatted = gameFormat(
-        "%s=%s:%5.2f@",
-        [remap.oldName, remap.newName, remap.timeOffset],
-      );
+      const formatted = gameFormat("%s=%s:%5.2f@", [remap.oldName, remap.newName, remap.timeOffset]);
       if (formatted.length >= ENTRY_BUFFER_BYTES) {
-        this.print(gameFormat(
-          "Com_sprintf: overflow of %i in %i\n",
-          [formatted.length, ENTRY_BUFFER_BYTES],
-        ));
+        this.print(gameFormat("Com_sprintf: overflow of %i in %i\n", [formatted.length, ENTRY_BUFFER_BYTES]));
       }
       const entry = formatted.slice(0, ENTRY_BUFFER_BYTES - 1);
       const writableBytes = STATE_BUFFER_BYTES - state.length - 1;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,13 +15,28 @@ test("stock Q3 guest plays with the Quake arsenal as a black box", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-q3-blackbox-"));
   let app: Application | null = null;
   try {
-    const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--mode", "deathmatch",
-      "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
+    const parsed = parseApplicationCommand([
+      "--game",
+      "q3-baseq3",
+      "--map",
+      "q3dm1",
+      "--mode",
+      "deathmatch",
+      "--renderer",
+      "cpu",
+      "--hidden",
+      "--width",
+      "320",
+      "--height",
+      "240",
+      "--user-content-root",
+      root,
+    ]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
     const selection = await createStartupSelection(parsed.options);
     selection.select("weapons", "q1-classic-id1");
     const launch = await selection.resolve();
-    const application = app = await Application.open(launch.options, { saveDirectory: join(root, "saves"), print: () => undefined }, launch.recipe);
+    const application = (app = await Application.open(launch.options, { saveDirectory: join(root, "saves"), print: () => undefined }, launch.recipe));
     for (let frame = 0; frame < 40; frame++) await application.step(25);
     const local = application.localPlayers[0];
     if (local === undefined) throw new Error("Missing local player");
@@ -38,5 +54,11 @@ test("stock Q3 guest plays with the Quake arsenal as a black box", async () => {
     expect(before).toBeGreaterThan(0);
     expect(shells()).toBeLessThan(before);
     expect(ui().health).toBeGreaterThan(0);
-  } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
+  } finally {
+    try {
+      await app?.close();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
 }, 180000);

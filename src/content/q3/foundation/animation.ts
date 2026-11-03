@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Player lerp-frame timing translated from Quake III Arena's
  * cgame/cg_players.c CG_SetLerpFrameAnimation, CG_RunLerpFrame and

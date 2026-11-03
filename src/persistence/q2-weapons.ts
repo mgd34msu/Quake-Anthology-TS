@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q2WeaponsCheckpoint } from "../content/q2/foundation/weapons/checkpoint.ts";
 import type { Q2HandReservation, Q2WeaponInput, Q2WeaponState } from "../content/q2/foundation/weapons/types.ts";
 import { readSavedActor } from "./save-image.ts";
@@ -5,9 +6,30 @@ import { readVector } from "./shared.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "./value.ts";
 
 export function readQ2WeaponInput(reader: SaveReader): Q2WeaponInput {
-  const n = (key: string): number => reader.field(key).number(), b = (key: string): boolean => reader.field(key).boolean();
-  return { attack: b("attack"), latchedAttack: b("latchedAttack"), holster: b("holster"), angles: readVector(reader.field("angles")), ducked: b("ducked"), spectator: b("spectator"), notarget: b("notarget"), hand: reader.field("hand").choice("right", "left", "center"),
-    animatePlayer: b("animatePlayer"), quadUntil: n("quadUntil"), doubleUntil: n("doubleUntil"), quadFireUntil: n("quadFireUntil"), haste: b("haste"), noStackDouble: b("noStackDouble"), instantSwitch: b("instantSwitch"), quickSwitch: b("quickSwitch"), infiniteAmmo: b("infiniteAmmo"), playersCollide: b("playersCollide"), gravity: n("gravity"), weaponThunk: b("weaponThunk") };
+  const n = (key: string): number => reader.field(key).number(),
+    b = (key: string): boolean => reader.field(key).boolean();
+  return {
+    attack: b("attack"),
+    latchedAttack: b("latchedAttack"),
+    holster: b("holster"),
+    angles: readVector(reader.field("angles")),
+    ducked: b("ducked"),
+    spectator: b("spectator"),
+    notarget: b("notarget"),
+    hand: reader.field("hand").choice("right", "left", "center"),
+    animatePlayer: b("animatePlayer"),
+    quadUntil: n("quadUntil"),
+    doubleUntil: n("doubleUntil"),
+    quadFireUntil: n("quadFireUntil"),
+    haste: b("haste"),
+    noStackDouble: b("noStackDouble"),
+    instantSwitch: b("instantSwitch"),
+    quickSwitch: b("quickSwitch"),
+    infiniteAmmo: b("infiniteAmmo"),
+    playersCollide: b("playersCollide"),
+    gravity: n("gravity"),
+    weaponThunk: b("weaponThunk"),
+  };
 }
 function handReservation(reader: SaveReader, weapon: string | null, phase: Q2WeaponState["phase"]): Q2HandReservation {
   if (reader.value === undefined) {
@@ -19,18 +41,63 @@ function handReservation(reader: SaveReader, weapon: string | null, phase: Q2Wea
   return { kind };
 }
 export function readQ2WeaponState(reader: SaveReader): Readonly<Q2WeaponState> {
-  const n = (key: string): number => reader.field(key).number(), b = (key: string): boolean => reader.field(key).boolean(), name = (key: string): string | null => reader.field(key).nullable(value => value.string());
-  const weapon = name("weapon"), phase = reader.field("phase").choice("activating", "ready", "firing", "dropping");
-  return { primaryHandoff: reader.field("primaryHandoff").value === undefined ? "active" : reader.field("primaryHandoff").choice("active", "holstering", "holstered"), handReservation: handReservation(reader.field("handReservation"), weapon, phase), sourceFiring: b("sourceFiring"), weapon, lastWeapon: name("lastWeapon"), pending: name("pending"), phase, frame: n("frame"), thinkTime: n("thinkTime"), fireFinished: n("fireFinished"), fireBuffered: b("fireBuffered"), latchedAttack: b("latchedAttack"),
-    machinegunShots: n("machinegunShots"), emptySoundTime: n("emptySoundTime"), grenadeTime: n("grenadeTime"), grenadeFinished: n("grenadeFinished"), grenadeBlewUp: b("grenadeBlewUp"), kickOrigin: readVector(reader.field("kickOrigin")), kickAngles: readVector(reader.field("kickAngles")), kickTime: reader.field("kickTime").value === undefined ? n("kickUntil") - n("kickDuration") : n("kickTime"), kickUntil: n("kickUntil"), kickDuration: n("kickDuration"), loopSound: reader.field("loopSound").string(), viewModel: name("viewModel"), viewSkin: n("viewSkin"), lastFiringTime: n("lastFiringTime"), gunRate: n("gunRate") };
+  const n = (key: string): number => reader.field(key).number(),
+    b = (key: string): boolean => reader.field(key).boolean(),
+    name = (key: string): string | null => reader.field(key).nullable(value => value.string());
+  const weapon = name("weapon"),
+    phase = reader.field("phase").choice("activating", "ready", "firing", "dropping");
+  return {
+    primaryHandoff: reader.field("primaryHandoff").value === undefined ? "active" : reader.field("primaryHandoff").choice("active", "holstering", "holstered"),
+    handReservation: handReservation(reader.field("handReservation"), weapon, phase),
+    sourceFiring: b("sourceFiring"),
+    weapon,
+    lastWeapon: name("lastWeapon"),
+    pending: name("pending"),
+    phase,
+    frame: n("frame"),
+    thinkTime: n("thinkTime"),
+    fireFinished: n("fireFinished"),
+    fireBuffered: b("fireBuffered"),
+    latchedAttack: b("latchedAttack"),
+    machinegunShots: n("machinegunShots"),
+    emptySoundTime: n("emptySoundTime"),
+    grenadeTime: n("grenadeTime"),
+    grenadeFinished: n("grenadeFinished"),
+    grenadeBlewUp: b("grenadeBlewUp"),
+    kickOrigin: readVector(reader.field("kickOrigin")),
+    kickAngles: readVector(reader.field("kickAngles")),
+    kickTime: reader.field("kickTime").value === undefined ? n("kickUntil") - n("kickDuration") : n("kickTime"),
+    kickUntil: n("kickUntil"),
+    kickDuration: n("kickDuration"),
+    loopSound: reader.field("loopSound").string(),
+    viewModel: name("viewModel"),
+    viewSkin: n("viewSkin"),
+    lastFiringTime: n("lastFiringTime"),
+    gunRate: n("gunRate"),
+  };
 }
 export function readQ2WeaponsCheckpoint(reader: SaveReader): Q2WeaponsCheckpoint {
   // Version 2 also carried per-actor noise records and the two global sound entities, which nothing read; they are ignored.
   const version = reader.field("formatVersion").integer();
   if (version !== 2 && version !== 3) reader.fail("unsupported Q2 weapon checkpoint format");
-  return { formatVersion: 3, silencerCharges: reader.field("silencerCharges").list(value => ({ actor: readSavedActor(value.field("actor")), charges: value.field("charges").integer() })), sourceRules: reader.field("sourceRules").choice("base", "ctf", "lmctf"), registered: reader.field("registered").list(value => value.string()), fallbackOrder: reader.field("fallbackOrder").nullable(value => value.list(name => name.string())),
-    states: reader.field("states").list(value => ({ actor: readSavedActor(value.field("actor")), state: readQ2WeaponState(value.field("state")) })), inputs: reader.field("inputs").list(value => ({ actor: readSavedActor(value.field("actor")), input: readQ2WeaponInput(value.field("input")) })),
-    blasterCauses: reader.field("blasterCauses").list(value => ({ actor: readSavedActor(value.field("actor")), meansOfDeath: value.field("meansOfDeath").integer() })) };
+  return {
+    formatVersion: 3,
+    silencerCharges: reader
+      .field("silencerCharges")
+      .list(value => ({ actor: readSavedActor(value.field("actor")), charges: value.field("charges").integer() })),
+    sourceRules: reader.field("sourceRules").choice("base", "ctf", "lmctf"),
+    registered: reader.field("registered").list(value => value.string()),
+    fallbackOrder: reader.field("fallbackOrder").nullable(value => value.list(name => name.string())),
+    states: reader.field("states").list(value => ({ actor: readSavedActor(value.field("actor")), state: readQ2WeaponState(value.field("state")) })),
+    inputs: reader.field("inputs").list(value => ({ actor: readSavedActor(value.field("actor")), input: readQ2WeaponInput(value.field("input")) })),
+    blasterCauses: reader
+      .field("blasterCauses")
+      .list(value => ({ actor: readSavedActor(value.field("actor")), meansOfDeath: value.field("meansOfDeath").integer() })),
+  };
 }
-export function encodeQ2WeaponsCheckpoint(checkpoint: Q2WeaponsCheckpoint): Uint8Array { return encodeCheckpointValue(checkpoint); }
-export function decodeQ2WeaponsCheckpoint(bytes: Uint8Array): Q2WeaponsCheckpoint { return readQ2WeaponsCheckpoint(new SaveReader(decodeCheckpointValue(bytes), "q2-weapons")); }
+export function encodeQ2WeaponsCheckpoint(checkpoint: Q2WeaponsCheckpoint): Uint8Array {
+  return encodeCheckpointValue(checkpoint);
+}
+export function decodeQ2WeaponsCheckpoint(bytes: Uint8Array): Q2WeaponsCheckpoint {
+  return readQ2WeaponsCheckpoint(new SaveReader(decodeCheckpointValue(bytes), "q2-weapons"));
+}

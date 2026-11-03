@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * One-shot cleanup callbacks retained by an owner until close, unifying the
  * removal-list pattern formerly open-coded across compat bindings. Running
@@ -11,7 +12,9 @@ export type Cleanup = () => void;
 export class CleanupStack {
   private entries: Cleanup[] = [];
 
-  get length(): number { return this.entries.length; }
+  get length(): number {
+    return this.entries.length;
+  }
 
   add(...cleanups: Cleanup[]): void {
     this.entries.push(...cleanups);

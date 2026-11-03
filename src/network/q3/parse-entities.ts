@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // clientActive_t parseEntities storage from id Software's client/client.h,
 // cl_parse.c and cl_main.c. Copyright (C) 1999-2005 Id Software, Inc.
 // GPL-2.0-or-later.
@@ -17,7 +18,9 @@ export class SourceParseEntities {
     return cell;
   }
 
-  advance(): void { this.number = (this.number + 1) | 0; }
+  advance(): void {
+    this.number = (this.number + 1) | 0;
+  }
 
   clear(): void {
     const zero = new EntityStateRecord<number>(0);

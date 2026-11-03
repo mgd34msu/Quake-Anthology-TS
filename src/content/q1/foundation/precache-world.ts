@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Quake progs106 weapons.qc W_Precache and world.qc worldspawn. GPL-2.0-or-later. */
-import type { Q1EntityServices } from './entity-services.ts';
+import type { Q1EntityServices } from "./entity-services.ts";
 
 /** Runtime worldspawn declarations, in source order. main() is compiler packaging, not a spawn call. */
 export function precacheQ1World(game: Pick<Q1EntityServices, "precacheSound" | "precacheModel">): void {

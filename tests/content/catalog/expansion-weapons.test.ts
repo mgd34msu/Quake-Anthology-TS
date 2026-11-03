@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
@@ -17,17 +18,36 @@ test("expansion menu arsenals resolve retail resources and distinct same-family 
   if (command.kind !== "run") throw new Error("Missing launch");
   const menu = new StartupSelectionModel(catalog, command.options);
   await menu.prepareMaps();
-  for (const product of ["q1-classic-rogue", "q1-rerelease-rogue", "q1-rerelease-mg3", "q2-classic-xatrix", "q2-classic-rogue", "q2-rerelease-xatrix", "q2-rerelease-rogue", "q2-rerelease-mg2", "q3-missionpack"]) {
+  for (const product of [
+    "q1-classic-rogue",
+    "q1-rerelease-rogue",
+    "q1-rerelease-mg3",
+    "q2-classic-xatrix",
+    "q2-classic-rogue",
+    "q2-rerelease-xatrix",
+    "q2-rerelease-rogue",
+    "q2-rerelease-mg2",
+    "q3-missionpack",
+  ]) {
     menu.select("weapons", product);
     const selected = catalog.require(product);
     const { recipe } = await menu.resolve();
     expect(recipe.weapons.some(reference => reference.content === selected.id)).toBe(true);
     for (const weapon of recipe.weapons) expect(recipe.timing.some(timing => timing.provider === weapon.provider)).toBe(true);
-    expect(recipe.resources.some(resource => resource.requestedPath.startsWith(product.startsWith("q1") ? "progs/v_" : product.startsWith("q2") ? "models/weapons/" : "icons/"))).toBe(true);
+    expect(
+      recipe.resources.some(resource =>
+        resource.requestedPath.startsWith(product.startsWith("q1") ? "progs/v_" : product.startsWith("q2") ? "models/weapons/" : "icons/"),
+      ),
+    ).toBe(true);
   }
   menu.select("mode", "deathmatch");
-  for (const pair of [{ world: "q3-missionpack", map: "maps/mpteam1.bsp", arsenal: "q3-baseq3" }, { world: "q3-baseq3", map: "maps/q3dm1.bsp", arsenal: "q3-missionpack" }]) {
-    menu.select("product", pair.world); menu.select("map", pair.map); menu.select("weapons", pair.arsenal);
+  for (const pair of [
+    { world: "q3-missionpack", map: "maps/mpteam1.bsp", arsenal: "q3-baseq3" },
+    { world: "q3-baseq3", map: "maps/q3dm1.bsp", arsenal: "q3-missionpack" },
+  ]) {
+    menu.select("product", pair.world);
+    menu.select("map", pair.map);
+    menu.select("weapons", pair.arsenal);
     const { recipe } = await menu.resolve();
     const weapon = recipe.weapons[0];
     if (weapon === undefined) throw new Error("Missing selected arsenal");
@@ -41,7 +61,8 @@ test("expansion menu arsenals resolve retail resources and distinct same-family 
 test("Q1 and Q3 supply exposes every selected Q2 expansion weapon and its ammunition", () => {
   for (const base of [Q1_Q2_SUPPLY_PROFILE, Q3_Q2_SUPPLY_PROFILE]) {
     const expanded = expansionSupply(base, ["q2-xatrix", "q2-rogue"]);
-    const weapons = expanded.weapons.flatMap(row => row.destinations), ammo = expanded.ammo.flatMap(row => row.destinations);
+    const weapons = expanded.weapons.flatMap(row => row.destinations),
+      ammo = expanded.ammo.flatMap(row => row.destinations);
     for (const definition of [...xatrixWeaponDefinitions, ...rogueWeaponDefinitions]) {
       expect((definition.item === definition.ammo ? ammo : weapons).includes(definition.item)).toBe(true);
       if (definition.ammo !== null) expect(ammo.includes(definition.ammo)).toBe(true);
@@ -56,10 +77,23 @@ test("every MG3 selected creature resolves its source precaches from the retail 
   const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
-  const preset = applicationPreset(catalog, parsed.options), reference = { provider: source.provider, content: catalog.require("q1-rerelease-mg3").id };
-  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: {
-    kind: "replace", default: { kind: "map-defined" }, byClassname: Object.fromEntries(Object.keys(source.creatures).map(classname => [classname, { source: reference, classname }])),
-  } } } });
+  const preset = applicationPreset(catalog, parsed.options),
+    reference = { provider: source.provider, content: catalog.require("q1-rerelease-mg3").id };
+  const recipe = await resolveLaunch({
+    catalog,
+    preset,
+    choice: {
+      ...presetChoice(preset.id),
+      enemies: {
+        kind: "selected",
+        value: {
+          kind: "replace",
+          default: { kind: "map-defined" },
+          byClassname: Object.fromEntries(Object.keys(source.creatures).map(classname => [classname, { source: reference, classname }])),
+        },
+      },
+    },
+  });
   expect(recipe.resources.some(resource => resource.requestedPath === "progs/dog_explosive.mdl")).toBe(true);
   expect(Object.keys(source.creatures).length).toBeGreaterThan(25);
 });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // NET_OutOfBandPrint/Data, CL_CheckForResend and client/server connectionless reads.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { BinaryError } from "../../core/binary/index.ts";
@@ -70,14 +71,21 @@ function commandWhitespace(line: string): string {
     const character = line.charAt(i);
     if (mode === "comment") {
       normalized += character;
-      if (line.startsWith("*/", i)) { normalized += "/"; i++; mode = "regular"; }
+      if (line.startsWith("*/", i)) {
+        normalized += "/";
+        i++;
+        mode = "regular";
+      }
     } else if (mode === "quoted") {
       normalized += character;
       if (character === '"') mode = "regular";
     } else {
       if (line.startsWith("//", i)) return normalized + line.slice(i);
-      if (line.startsWith("/*", i)) { normalized += "/*"; i++; mode = "comment"; }
-      else {
+      if (line.startsWith("/*", i)) {
+        normalized += "/*";
+        i++;
+        mode = "comment";
+      } else {
         normalized += character.charCodeAt(0) > 127 ? " " : character;
         if (character === '"') mode = "quoted";
       }
@@ -110,9 +118,18 @@ export function decodeConnectionless(packet: Uint8Array, receiver: "client" | "s
   let lineEnding: ConnectionlessPacket["lineEnding"] = "limit";
   while (line.length < MAX_LINE_LENGTH) {
     const byte = data[offset++];
-    if (byte === undefined) { lineEnding = "end"; break; }
-    if (byte === 0) { lineEnding = "nul"; break; }
-    if (byte === 10) { lineEnding = "newline"; break; }
+    if (byte === undefined) {
+      lineEnding = "end";
+      break;
+    }
+    if (byte === 0) {
+      lineEnding = "nul";
+      break;
+    }
+    if (byte === 10) {
+      lineEnding = "newline";
+      break;
+    }
     line += String.fromCharCode(byte === 37 ? 46 : byte);
   }
   const tokens = tokenizeCommand(commandWhitespace(line), "q3").argv;

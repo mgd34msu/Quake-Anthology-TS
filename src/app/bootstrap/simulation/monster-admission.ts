@@ -13,18 +13,21 @@ import type { SelectedMonsterBehavior, SelectedMonsterSource } from "./monster-r
 
 /** What a creature source family contributes to monster admission: its trace rules, medium contents and route control. */
 interface MonsterSourceStrategy {
-  tracePolicy(): { readonly kind: "q1"; readonly move: "normal"; readonly hull: null } | { readonly kind: "q2"; readonly contentsMask: number; readonly leafContents: "merged" };
+  tracePolicy():
+    | { readonly kind: "q1"; readonly move: "normal"; readonly hull: null }
+    | { readonly kind: "q2"; readonly contentsMask: number; readonly leafContents: "merged" };
   /** Liquid class bits of the contents at an origin: Q2 CONTENTS_WATER/SLIME/LAVA mask, or the Q1 equivalent mapped to the same bits. */
   medium(origin: Vec3): number;
   setRoute(actor: ActorId, goal: ActorId | null, pauseUntil: number): undefined;
 }
 
 function monsterSourceStrategy(source: SelectedMonsterSource): MonsterSourceStrategy {
-  if (source.kind === "q2") return {
-    tracePolicy: () => ({ kind: "q2", contentsMask: 1, leafContents: "merged" }),
-    medium: origin => source.game.host.pointContents(origin) & 56,
-    setRoute: (actor, goal, pauseUntil) => source.monsters.setRoute(actor, goal, pauseUntil),
-  };
+  if (source.kind === "q2")
+    return {
+      tracePolicy: () => ({ kind: "q2", contentsMask: 1, leafContents: "merged" }),
+      medium: origin => source.game.host.pointContents(origin) & 56,
+      setRoute: (actor, goal, pauseUntil) => source.monsters.setRoute(actor, goal, pauseUntil),
+    };
   return {
     tracePolicy: () => ({ kind: "q1", move: "normal", hull: null }),
     medium: origin => {
@@ -47,26 +50,32 @@ interface MonsterExecutionStrategy {
 }
 
 function monsterExecutionStrategy(actor: ActorId, entry: ActorExecution | undefined, isLive: (actor: ActorId) => boolean): MonsterExecutionStrategy {
-  if (entry?.kind === "q1") return {
-    resume: activator => {
-      const start = entry.entity.think; entry.services.cancel(entry.entity);
-      start?.();
-      if (isLive(actor) && activator !== null) entry.entity.use?.(null, activator);
-    },
-    enemy: () => entry.entity.monster?.enemy ?? null,
-    oldEnemy: () => entry.entity.monster?.oldEnemy ?? null,
-  };
-  if (entry?.kind === "q2") return {
-    resume: activator => {
-      const start = entry.entity.think; entry.services.cancel(entry.entity);
-      start?.(entry.entity, entry.services);
-      if (isLive(actor) && activator !== null) entry.entity.use?.(entry.entity, entry.services, null, activator);
-    },
-    enemy: () => entry.entity.enemy,
-    oldEnemy: () => entry.readMonster()?.oldEnemy ?? null,
-  };
+  if (entry?.kind === "q1")
+    return {
+      resume: activator => {
+        const start = entry.entity.think;
+        entry.services.cancel(entry.entity);
+        start?.();
+        if (isLive(actor) && activator !== null) entry.entity.use?.(null, activator);
+      },
+      enemy: () => entry.entity.monster?.enemy ?? null,
+      oldEnemy: () => entry.entity.monster?.oldEnemy ?? null,
+    };
+  if (entry?.kind === "q2")
+    return {
+      resume: activator => {
+        const start = entry.entity.think;
+        entry.services.cancel(entry.entity);
+        start?.(entry.entity, entry.services);
+        if (isLive(actor) && activator !== null) entry.entity.use?.(entry.entity, entry.services, null, activator);
+      },
+      enemy: () => entry.entity.enemy,
+      oldEnemy: () => entry.readMonster()?.oldEnemy ?? null,
+    };
   return {
-    resume: () => { throw new Error("Activated monster has no creature source continuation"); },
+    resume: () => {
+      throw new Error("Activated monster has no creature source continuation");
+    },
     enemy: () => null,
     oldEnemy: () => null,
   };
@@ -92,24 +101,44 @@ export class MonsterAdmission implements Pick<SelectedMonsterBehavior, "enemy" |
   }
 
   /** The shared body of a started monster and whether it begins embedded in solid world. */
-  probe(entry: AuthoredMonster, definition: MonsterDefinitionReference): { readonly body: NonNullable<ReturnType<SharedPhysics["bodies"]["read"]>>;
-    readonly strategy: MonsterSourceStrategy & { readonly source: SelectedMonsterSource }; readonly solid: boolean } {
+  probe(
+    entry: AuthoredMonster,
+    definition: MonsterDefinitionReference,
+  ): {
+    readonly body: NonNullable<ReturnType<SharedPhysics["bodies"]["read"]>>;
+    readonly strategy: MonsterSourceStrategy & { readonly source: SelectedMonsterSource };
+    readonly solid: boolean;
+  } {
     const { recipe, scene, physics } = this.services;
     const body = physics.bodies.read(entry.actor.id);
     if (body === null) throw new Error("Started selected monster has no shared body");
     const strategy = this.strategy(definition);
-    const trace = scene.geometryTrace({ start: body.origin, end: body.origin, shape: { kind: "box", bounds: body.bounds },
-      target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(recipe, definition.source.provider).numeric, policy: strategy.tracePolicy() });
+    const trace = scene.geometryTrace({
+      start: body.origin,
+      end: body.origin,
+      shape: { kind: "box", bounds: body.bounds },
+      target: { kind: "world" },
+      passActor: entry.actor.id,
+      numeric: providerTiming(recipe, definition.source.provider).numeric,
+      policy: strategy.tracePolicy(),
+    });
     return { body, strategy, solid: trace.startSolid || trace.allSolid };
   }
 
   /** The query a relocation search runs with for this monster's source. */
   query(entry: AuthoredMonster, definition: MonsterDefinitionReference, strategy: MonsterSourceStrategy) {
-    return { target: { kind: "world" as const }, passActor: entry.actor.id, numeric: providerTiming(this.services.recipe, definition.source.provider).numeric, policy: strategy.tracePolicy() };
+    return {
+      target: { kind: "world" as const },
+      passActor: entry.actor.id,
+      numeric: providerTiming(this.services.recipe, definition.source.provider).numeric,
+      policy: strategy.tracePolicy(),
+    };
   }
 
   obstructed(entry: AuthoredMonster, definition: MonsterDefinitionReference): Error {
-    return new Error(`Selected monster placement obstructed in ${this.services.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+    return new Error(
+      `Selected monster placement obstructed in ${this.services.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`,
+    );
   }
 
   resume = (actor: ActorId, activator: ActorId | null): undefined => {

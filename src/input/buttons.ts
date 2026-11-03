@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Quake cl_input.c kbutton state, with Q2/Q3 millisecond sampling.
 // Copyright (C) id Software. GPL-2.0-or-later.
 export type ButtonTiming = "q1" | "q2" | "q3";
@@ -8,8 +9,12 @@ export class InputButton {
   private milliseconds = 0;
   private impulseDown = false;
   private impulseUp = false;
-  get active(): boolean { return this.sources.size !== 0; }
-  get pressed(): boolean { return this.impulseDown; }
+  get active(): boolean {
+    return this.sources.size !== 0;
+  }
+  get pressed(): boolean {
+    return this.impulseDown;
+  }
 
   down(source: string, timeMilliseconds: number): void {
     if (this.sources.has(source)) return;
@@ -30,8 +35,7 @@ export class InputButton {
   sample(timing: ButtonTiming, nowMilliseconds: number, frameMilliseconds: number): number {
     let result: number;
     if (timing === "q1") {
-      result = this.impulseDown && this.impulseUp ? this.active ? 0.75 : 0.25
-        : this.impulseDown ? this.active ? 0.5 : 0 : this.active ? 1 : 0;
+      result = this.impulseDown && this.impulseUp ? (this.active ? 0.75 : 0.25) : this.impulseDown ? (this.active ? 0.5 : 0) : this.active ? 1 : 0;
     } else {
       if (this.active) {
         this.milliseconds += this.downTime === 0 ? nowMilliseconds : Math.max(0, nowMilliseconds - this.downTime);
@@ -46,7 +50,10 @@ export class InputButton {
     return result;
   }
   clear(): void {
-    this.sources.clear(); this.milliseconds = 0; this.downTime = 0;
-    this.impulseDown = false; this.impulseUp = false;
+    this.sources.clear();
+    this.milliseconds = 0;
+    this.downTime = 0;
+    this.impulseDown = false;
+    this.impulseUp = false;
   }
 }

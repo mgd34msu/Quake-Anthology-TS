@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Official mission pack world entities over the shared Q1 source runtime. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -43,28 +44,91 @@ export class Q1MissionpackWorld {
   private readonly runes: RogueRunes | null;
   private readonly teams: RogueTeams | null;
   private readonly tag: RogueTag | null;
-  constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack, readonly hooks: MissionpackWorldHooks = {}) {
+  constructor(
+    readonly game: Q1EntityServices,
+    readonly pack: Q1MissionPack,
+    readonly hooks: MissionpackWorldHooks = {},
+  ) {
     registerMissionShooters(game, pack);
     registerMissionCampaign(game, pack, hooks);
     if (pack === "hipnotic") {
-      registerHipnoticTriggers(game); registerHipnoticTrain(game); registerHipnoticRotation(game); registerHipnoticMisc(game); registerHipnoticParticles(game); registerHipnoticSpawn(game, hooks); registerHipnoticHazards(game); registerHipnoticBulletHoles(game); this.runes = null; this.teams = null; this.tag = null;
-    } else { registerRogueMisc(game); registerRogueTime(game); registerRogueEnding(game); registerRoguePendulum(game); registerRoguePlats(game); registerRogueHazards(game); this.runes = new RogueRunes(game, hooks.gamecfg ?? (() => 0)); this.teams = new RogueTeams(game, hooks); this.tag = new RogueTag(game, hooks); }
+      registerHipnoticTriggers(game);
+      registerHipnoticTrain(game);
+      registerHipnoticRotation(game);
+      registerHipnoticMisc(game);
+      registerHipnoticParticles(game);
+      registerHipnoticSpawn(game, hooks);
+      registerHipnoticHazards(game);
+      registerHipnoticBulletHoles(game);
+      this.runes = null;
+      this.teams = null;
+      this.tag = null;
+    } else {
+      registerRogueMisc(game);
+      registerRogueTime(game);
+      registerRogueEnding(game);
+      registerRoguePendulum(game);
+      registerRoguePlats(game);
+      registerRogueHazards(game);
+      this.runes = new RogueRunes(game, hooks.gamecfg ?? (() => 0));
+      this.teams = new RogueTeams(game, hooks);
+      this.tag = new RogueTag(game, hooks);
+    }
   }
-  afterPhysics(actor: ActorId, _seconds: number): undefined { if (this.pack === "hipnotic") return earthquakeAfterPhysics(this.game, actor); if (this.game.world?.number("rogue:earthquake_active") === 1) rogueEarthquake(this.game, actor, this.game.world.number("rogue:earthquake_intensity")); this.teams?.frame(actor); this.runes?.frame(actor); return startRogueEnding(this.game, actor, this.hooks); }
-  playerSpawned(actor: ActorId): undefined { return this.teams?.playerSpawned(actor); }
-  dropCarriedFlag(actor: ActorId): undefined { return this.teams?.dropCarriedFlag(actor); }
-  impulse(actor: ActorId, impulse: number): boolean { return this.teams?.impulse(actor, impulse) ?? false; }
-  suicide(actor: ActorId): boolean { return this.teams?.suicide(actor) ?? true; }
-  savedTeam(actor: ActorId): number { return this.teams?.team(actor) ?? 0; }
-  selectSpawn(actor: ActorId): Q1Actor | undefined { return this.teams?.selectSpawn(actor); }
-  tagScore(victim: ActorId, attacker: ActorId): number { return this.tag?.score(victim, attacker) ?? 1; }
-  confirmedDamage(target: ActorId, attacker: ActorId | null): undefined { return this.teams?.confirmedDamage(target, attacker); }
-  playerDied(actor: ActorId, attacker: ActorId | null = null): undefined { this.teams?.playerDied(actor, attacker); return this.runes?.drop(actor); }
-  runeAttackDelay(actor: ActorId, delay: number): number { return this.runes?.attackDelay(actor, delay) ?? delay; }
-  runeAttackSound(actor: ActorId): undefined { return this.runes?.attackSound(actor); }
-  runeDamage(actor: ActorId, amount: number): number { return this.runes?.damage(actor, amount) ?? amount; }
-  runeResistance(actor: ActorId, amount: number): number { return this.runes?.resistance(actor, amount) ?? amount; }
-  hasRegenerationRune(actor: ActorId): boolean { return this.runes?.hasRegeneration(actor) ?? false; }
-  crashTimeMachine(): undefined { return crashTimeMachine(this.game); }
+  afterPhysics(actor: ActorId, _seconds: number): undefined {
+    if (this.pack === "hipnotic") return earthquakeAfterPhysics(this.game, actor);
+    if (this.game.world?.number("rogue:earthquake_active") === 1) rogueEarthquake(this.game, actor, this.game.world.number("rogue:earthquake_intensity"));
+    this.teams?.frame(actor);
+    this.runes?.frame(actor);
+    return startRogueEnding(this.game, actor, this.hooks);
+  }
+  playerSpawned(actor: ActorId): undefined {
+    return this.teams?.playerSpawned(actor);
+  }
+  dropCarriedFlag(actor: ActorId): undefined {
+    return this.teams?.dropCarriedFlag(actor);
+  }
+  impulse(actor: ActorId, impulse: number): boolean {
+    return this.teams?.impulse(actor, impulse) ?? false;
+  }
+  suicide(actor: ActorId): boolean {
+    return this.teams?.suicide(actor) ?? true;
+  }
+  savedTeam(actor: ActorId): number {
+    return this.teams?.team(actor) ?? 0;
+  }
+  selectSpawn(actor: ActorId): Q1Actor | undefined {
+    return this.teams?.selectSpawn(actor);
+  }
+  tagScore(victim: ActorId, attacker: ActorId): number {
+    return this.tag?.score(victim, attacker) ?? 1;
+  }
+  confirmedDamage(target: ActorId, attacker: ActorId | null): undefined {
+    return this.teams?.confirmedDamage(target, attacker);
+  }
+  playerDied(actor: ActorId, attacker: ActorId | null = null): undefined {
+    this.teams?.playerDied(actor, attacker);
+    return this.runes?.drop(actor);
+  }
+  runeAttackDelay(actor: ActorId, delay: number): number {
+    return this.runes?.attackDelay(actor, delay) ?? delay;
+  }
+  runeAttackSound(actor: ActorId): undefined {
+    return this.runes?.attackSound(actor);
+  }
+  runeDamage(actor: ActorId, amount: number): number {
+    return this.runes?.damage(actor, amount) ?? amount;
+  }
+  runeResistance(actor: ActorId, amount: number): number {
+    return this.runes?.resistance(actor, amount) ?? amount;
+  }
+  hasRegenerationRune(actor: ActorId): boolean {
+    return this.runes?.hasRegeneration(actor) ?? false;
+  }
+  crashTimeMachine(): undefined {
+    return crashTimeMachine(this.game);
+  }
 }
-export function registerMissionpackWorld(game: Q1EntityServices, pack: Q1MissionPack, hooks: MissionpackWorldHooks = {}): Q1MissionpackWorld { return new Q1MissionpackWorld(game, pack, hooks); }
+export function registerMissionpackWorld(game: Q1EntityServices, pack: Q1MissionPack, hooks: MissionpackWorldHooks = {}): Q1MissionpackWorld {
+  return new Q1MissionpackWorld(game, pack, hooks);
+}

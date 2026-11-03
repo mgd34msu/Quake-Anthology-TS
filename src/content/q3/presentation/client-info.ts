@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Source clientInfo_t from id Software's code/cgame/cg_local.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Animation, AnimationCell, PlayerAnimationTarget, PlayerFootsteps, PlayerGender } from "../foundation/animation-config.ts";
@@ -62,7 +63,8 @@ export class ClientInfo implements PlayerAnimationTarget {
   setAnimations(animations: readonly (Animation | null)[]): void {
     if (animations.length !== this.animations.length) throw new RangeError("Client animation table has the wrong length");
     for (let index = 0; index < animations.length; index++) {
-      const source = animations[index], target = this.animations[index];
+      const source = animations[index],
+        target = this.animations[index];
       if (source === null && index === PlayerAnimation.TORSO_NEGATIVE + 1) continue;
       if (source === undefined || source === null || target === undefined) throw new RangeError(`Missing client animation cell ${index}`);
       Object.assign(target, source);

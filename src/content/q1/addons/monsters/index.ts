@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Q1AddonContext } from "../context.ts";
 import { registerOrdinaryAddonMonsters } from "./ordinary/index.ts";
 import { registerMg3PathTargets } from "./ai/targets.ts";
@@ -15,8 +16,16 @@ import { registerFinalBoss } from "./bosses/final.ts";
 export function registerAddonMonsters(context: Q1AddonContext): undefined {
   registerOrdinaryAddonMonsters(context);
   if (context.program === "mg3") {
-    registerMg3PathTargets(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context);
-    registerSacrifice(context); registerGhost(context); registerOrb(context); registerShubZombie(context); registerOldnew(context); registerFinalBoss(context);
+    registerMg3PathTargets(context);
+    registerMg3Demodog(context);
+    registerMg3Infected(context);
+    registerMg3Heavy(context);
+    registerSacrifice(context);
+    registerGhost(context);
+    registerOrb(context);
+    registerShubZombie(context);
+    registerOldnew(context);
+    registerFinalBoss(context);
   }
   return undefined;
 }

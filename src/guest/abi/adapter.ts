@@ -3,15 +3,29 @@ import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, N
 import type { GuestAbiAdapter, GuestCallSignature, GuestCpu, MappedGuestMemory } from "../core/contracts.ts";
 import { readX87Return, writeX87Return } from "../floating-point/index.ts";
 import { planGuestCall, type AbiArgument, type AbiCallPlan, type AbiLocation } from "./classify.ts";
-import { alignDown, argumentBytes, decodeValue, encodeArgumentValue, encodeIntegerValue, encodeValue, inferredLayout, valueAlignment, valueBytes } from "./values.ts";
+import {
+  alignDown,
+  argumentBytes,
+  decodeValue,
+  encodeArgumentValue,
+  encodeIntegerValue,
+  encodeValue,
+  inferredLayout,
+  valueAlignment,
+  valueBytes,
+} from "./values.ts";
 
 export function guestPointer(memory: MappedGuestMemory, raw: bigint): GuestAddress {
   const address = memory.pointer(raw);
   if (address === null) throw new RangeError("ABI address cannot be null");
   return address;
 }
-function registerWidth(cpu: GuestCpu): 32 | 64 { return cpu.state.architecture === "i386" ? 32 : 64; }
-function stackPointer(cpu: GuestCpu): bigint { return cpu.state.registers.read("rsp", registerWidth(cpu)); }
+function registerWidth(cpu: GuestCpu): 32 | 64 {
+  return cpu.state.architecture === "i386" ? 32 : 64;
+}
+function stackPointer(cpu: GuestCpu): bigint {
+  return cpu.state.registers.read("rsp", registerWidth(cpu));
+}
 
 function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: number): Uint8Array {
   const output = new Uint8Array(size);
@@ -22,11 +36,20 @@ function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: n
       const value = cpu.state.registers.read(location.register, registerWidth(cpu));
       view ??= new DataView(output.buffer, output.byteOffset, output.byteLength);
       switch (location.bytes) {
-        case 8: view.setBigUint64(location.offset, value, true); break;
-        case 4: view.setUint32(location.offset, Number(BigInt.asUintN(32, value)), true); break;
-        case 2: view.setUint16(location.offset, Number(BigInt.asUintN(16, value)), true); break;
-        case 1: view.setUint8(location.offset, Number(BigInt.asUintN(8, value))); break;
-        default: for (let index = 0; index < location.bytes; index++) output[location.offset + index] = Number(value >> BigInt(index * 8) & 255n);
+        case 8:
+          view.setBigUint64(location.offset, value, true);
+          break;
+        case 4:
+          view.setUint32(location.offset, Number(BigInt.asUintN(32, value)), true);
+          break;
+        case 2:
+          view.setUint16(location.offset, Number(BigInt.asUintN(16, value)), true);
+          break;
+        case 1:
+          view.setUint8(location.offset, Number(BigInt.asUintN(8, value)));
+          break;
+        default:
+          for (let index = 0; index < location.bytes; index++) output[location.offset + index] = Number((value >> BigInt(index * 8)) & 255n);
       }
     } else if (location.kind === "sse") {
       const start = location.register * 16;
@@ -45,11 +68,20 @@ function writeLocations(cpu: GuestCpu, locations: readonly AbiLocation[], bytes:
       view ??= new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       let raw = 0n;
       switch (location.bytes) {
-        case 8: raw = view.getBigUint64(location.offset, true); break;
-        case 4: raw = BigInt(view.getUint32(location.offset, true)); break;
-        case 2: raw = BigInt(view.getUint16(location.offset, true)); break;
-        case 1: raw = BigInt(view.getUint8(location.offset)); break;
-        default: for (const [index, byte] of part.entries()) raw |= BigInt(byte) << BigInt(index * 8);
+        case 8:
+          raw = view.getBigUint64(location.offset, true);
+          break;
+        case 4:
+          raw = BigInt(view.getUint32(location.offset, true));
+          break;
+        case 2:
+          raw = BigInt(view.getUint16(location.offset, true));
+          break;
+        case 1:
+          raw = BigInt(view.getUint8(location.offset));
+          break;
+        default:
+          for (const [index, byte] of part.entries()) raw |= BigInt(byte) << BigInt(index * 8);
       }
       cpu.state.registers.write(location.register, registerWidth(cpu), raw);
     } else if (location.kind === "sse") {
@@ -70,7 +102,8 @@ function readScalar(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly
       const address = guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset));
       value = layout.storage === "float32" ? cpu.memory.readFloat32(address) : cpu.memory.readFloat64(address);
     } else if (location.kind === "sse") {
-      const registers = cpu.state.simd.xmm, start = location.register * 16;
+      const registers = cpu.state.simd.xmm,
+        start = location.register * 16;
       if (start + location.bytes > registers.length) throw new RangeError("ABI XMM register is unavailable");
       const view = cpu.state.simd.scratch.scalar.view;
       value = layout.storage === "float32" ? view.getFloat32(start, true) : view.getFloat64(start, true);
@@ -82,19 +115,30 @@ function readScalar(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly
   if (location.kind === "integer") raw = cpu.state.registers.read(location.register, registerWidth(cpu));
   else {
     const address = guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset));
-    raw = location.bytes === 8 ? cpu.memory.readUint64(address) : BigInt(location.bytes === 4 ? cpu.memory.readUint32(address)
-      : location.bytes === 2 ? cpu.memory.readUint16(address) : cpu.memory.readUint8(address));
+    raw =
+      location.bytes === 8
+        ? cpu.memory.readUint64(address)
+        : BigInt(location.bytes === 4 ? cpu.memory.readUint32(address) : location.bytes === 2 ? cpu.memory.readUint16(address) : cpu.memory.readUint8(address));
   }
   switch (layout.storage) {
-    case "int8": return { kind: "int32", value: Number(BigInt.asIntN(8, raw)) };
-    case "uint8": return { kind: "uint32", value: Number(BigInt.asUintN(8, raw)) };
-    case "int16": return { kind: "int32", value: Number(BigInt.asIntN(16, raw)) };
-    case "uint16": return { kind: "uint32", value: Number(BigInt.asUintN(16, raw)) };
-    case "int32": return { kind: "int32", value: Number(BigInt.asIntN(32, raw)) };
-    case "uint32": return { kind: "uint32", value: Number(BigInt.asUintN(32, raw)) };
-    case "int64": return { kind: "int64", value: BigInt.asIntN(64, raw) };
-    case "uint64": return { kind: "uint64", value: BigInt.asUintN(64, raw) };
-    case "pointer": return { kind: "pointer", value: cpu.memory.pointer(BigInt.asUintN(cpu.memory.pointerBytes * 8, raw)) };
+    case "int8":
+      return { kind: "int32", value: Number(BigInt.asIntN(8, raw)) };
+    case "uint8":
+      return { kind: "uint32", value: Number(BigInt.asUintN(8, raw)) };
+    case "int16":
+      return { kind: "int32", value: Number(BigInt.asIntN(16, raw)) };
+    case "uint16":
+      return { kind: "uint32", value: Number(BigInt.asUintN(16, raw)) };
+    case "int32":
+      return { kind: "int32", value: Number(BigInt.asIntN(32, raw)) };
+    case "uint32":
+      return { kind: "uint32", value: Number(BigInt.asUintN(32, raw)) };
+    case "int64":
+      return { kind: "int64", value: BigInt.asIntN(64, raw) };
+    case "uint64":
+      return { kind: "uint64", value: BigInt.asUintN(64, raw) };
+    case "pointer":
+      return { kind: "pointer", value: cpu.memory.pointer(BigInt.asUintN(cpu.memory.pointerBytes * 8, raw)) };
   }
 }
 function readArgument(cpu: GuestCpu, argument: AbiArgument): GuestCallValue {
@@ -106,12 +150,12 @@ function readArgument(cpu: GuestCpu, argument: AbiArgument): GuestCallValue {
     return decodeValue(argument.layout, bytes.subarray(0, valueBytes(argument.layout, cpu.memory.pointerBytes)), cpu.memory);
   }
   const pointerLayout: GuestValueLayout = { kind: "scalar", storage: "pointer" };
-  const pointer = readScalar(cpu, pointerLayout, argument.locations)
-    ?? decodeValue(pointerLayout, readLocations(cpu, argument.locations, cpu.memory.pointerBytes), cpu.memory);
+  const pointer =
+    readScalar(cpu, pointerLayout, argument.locations) ??
+    decodeValue(pointerLayout, readLocations(cpu, argument.locations, cpu.memory.pointerBytes), cpu.memory);
   if (pointer.kind !== "pointer" || pointer.value === null) throw new RangeError("Indirect aggregate has a null guest address");
   const bytes = cpu.memory.copy(pointer.value, valueBytes(argument.layout, cpu.memory.pointerBytes));
-  return argument.layout.kind === "aggregate" ? { kind: "aggregate", layout: argument.layout.layout, bytes }
-    : decodeValue(argument.layout, bytes, cpu.memory);
+  return argument.layout.kind === "aggregate" ? { kind: "aggregate", layout: argument.layout.layout, bytes } : decodeValue(argument.layout, bytes, cpu.memory);
 }
 function returnBuffer(cpu: GuestCpu, plan: AbiCallPlan): GuestAddress {
   if (plan.result.kind !== "memory") throw new TypeError("Call does not return an aggregate in memory");
@@ -124,26 +168,40 @@ export class X86AbiAdapter implements GuestAbiAdapter {
   constructor(readonly abi: NativeCallAbi) {}
 
   #check(cpu: GuestCpu, signature: GuestCallSignature): void {
-    if (signature.abi.kind !== this.abi.kind || signature.abi.call !== this.abi.call || cpu.memory.pointerBytes !== this.abi.pointerBytes
-      || (cpu.state.architecture === "i386") !== (this.abi.pointerBytes === 4)) throw new TypeError("ABI, signature, processor, and memory architecture disagree");
+    if (
+      signature.abi.kind !== this.abi.kind ||
+      signature.abi.call !== this.abi.call ||
+      cpu.memory.pointerBytes !== this.abi.pointerBytes ||
+      (cpu.state.architecture === "i386") !== (this.abi.pointerBytes === 4)
+    )
+      throw new TypeError("ABI, signature, processor, and memory architecture disagree");
   }
 
   enter(cpu: GuestCpu, target: GuestAddress, signature: GuestCallSignature, arguments_: readonly GuestCallValue[], returnAddress: GuestAddress): undefined {
     this.#check(cpu, signature);
     cpu.memory.check(target, 1, "execute");
     cpu.memory.check(returnAddress, 1, "execute");
-    const layouts = arguments_.length === signature.parameters.length ? signature.parameters
-      : arguments_.map((value, index) => signature.parameters[index] ?? inferredLayout(value, signature.variadic));
-    const plan = planGuestCall(signature, layouts), word = this.abi.pointerBytes;
+    const layouts =
+      arguments_.length === signature.parameters.length
+        ? signature.parameters
+        : arguments_.map((value, index) => signature.parameters[index] ?? inferredLayout(value, signature.variadic));
+    const plan = planGuestCall(signature, layouts),
+      word = this.abi.pointerBytes;
     const encoded = arguments_.map((value, index): bigint | Uint8Array => {
       const layout = layouts[index];
       if (layout === undefined) throw new RangeError("Argument layout missing");
-      const argument = plan.arguments[index], location = argument?.locations.length === 1 ? argument.locations[0] : undefined;
-      if (argument?.indirect === false && location?.kind === "integer" && location.offset === 0 && layout.kind === "scalar"
-        && layout.storage !== "float32" && layout.storage !== "float64") {
+      const argument = plan.arguments[index],
+        location = argument?.locations.length === 1 ? argument.locations[0] : undefined;
+      if (
+        argument?.indirect === false &&
+        location?.kind === "integer" &&
+        location.offset === 0 &&
+        layout.kind === "scalar" &&
+        layout.storage !== "float32" &&
+        layout.storage !== "float64"
+      ) {
         const raw = encodeIntegerValue(layout.storage, value, cpu.memory);
-        return layout.storage === "int8" || layout.storage === "int16"
-          ? BigInt.asUintN(32, BigInt.asIntN(layout.storage === "int8" ? 8 : 16, raw)) : raw;
+        return layout.storage === "int8" || layout.storage === "int16" ? BigInt.asUintN(32, BigInt.asIntN(layout.storage === "int8" ? 8 : 16, raw)) : raw;
       }
       return encodeArgumentValue(layout, value, cpu.memory);
     });
@@ -154,7 +212,7 @@ export class X86AbiAdapter implements GuestAbiAdapter {
       return guestPointer(cpu.memory, temporaryTop);
     };
     const output = plan.result.kind === "memory" ? reserve(valueBytes(plan.result.layout, word), Math.max(16, valueAlignment(plan.result.layout, word))) : null;
-    const indirect = plan.arguments.map(argument => argument.indirect ? reserve(valueBytes(argument.layout, word), 16) : null);
+    const indirect = plan.arguments.map(argument => (argument.indirect ? reserve(valueBytes(argument.layout, word), 16) : null));
     const entryStack = alignDown(temporaryTop - BigInt(plan.stackBytes - word), plan.stackAlignment) - BigInt(word);
     const frameSize = Number(callerStack - entryStack);
     if (!Number.isSafeInteger(frameSize) || frameSize < 0) throw new RangeError("Guest call frame exceeds safe bounds");
@@ -166,7 +224,8 @@ export class X86AbiAdapter implements GuestAbiAdapter {
       writeLocations(cpu, plan.result.pointer.locations, encodeValue({ kind: "scalar", storage: "pointer" }, { kind: "pointer", value: output }, cpu.memory));
     }
     for (const [index, argument] of plan.arguments.entries()) {
-      const bytes = encoded[index], temporary = indirect[index];
+      const bytes = encoded[index],
+        temporary = indirect[index];
       if (bytes === undefined || temporary === undefined) throw new RangeError("Argument allocation missing");
       if (typeof bytes === "bigint") {
         const location = argument.locations[0];
@@ -204,25 +263,28 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     this.#check(cpu, signature);
     const plan = planGuestCall(signature);
     switch (plan.result.kind) {
-      case "void": return { kind: "void" };
+      case "void":
+        return { kind: "void" };
       case "registers": {
         const value = readScalar(cpu, plan.result.layout, plan.result.locations);
         if (value !== null) return value;
         const bytes = readLocations(cpu, plan.result.locations, valueBytes(plan.result.layout, this.abi.pointerBytes));
-        return plan.result.layout.kind === "aggregate" ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
+        return plan.result.layout.kind === "aggregate"
+          ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
           : decodeValue(plan.result.layout, bytes, cpu.memory);
       }
       case "memory": {
         const address = guestPointer(cpu.memory, cpu.state.registers.read("rax", registerWidth(cpu)));
         const bytes = cpu.memory.copy(address, valueBytes(plan.result.layout, this.abi.pointerBytes));
-        return plan.result.layout.kind === "aggregate" ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
+        return plan.result.layout.kind === "aggregate"
+          ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
           : decodeValue(plan.result.layout, bytes, cpu.memory);
       }
       case "x87": {
         const value = readX87Return(cpu.state.x87, plan.result.storage);
-        const top = cpu.state.x87.statusWord >>> 11 & 7;
-        cpu.state.x87.tagWord |= 3 << top * 2;
-        cpu.state.x87.statusWord = cpu.state.x87.statusWord & ~0x3800 | (top + 1 & 7) << 11;
+        const top = (cpu.state.x87.statusWord >>> 11) & 7;
+        cpu.state.x87.tagWord |= 3 << (top * 2);
+        cpu.state.x87.statusWord = (cpu.state.x87.statusWord & ~0x3800) | (((top + 1) & 7) << 11);
         return { kind: plan.result.storage, value };
       }
     }
@@ -231,7 +293,9 @@ export class X86AbiAdapter implements GuestAbiAdapter {
   /** Called at a trapped host function's entry, before any guest prologue. */
   leave(cpu: GuestCpu, signature: GuestCallSignature, result: GuestCallResult): undefined {
     this.#check(cpu, signature);
-    const plan = planGuestCall(signature), word = this.abi.pointerBytes, entryStack = stackPointer(cpu);
+    const plan = planGuestCall(signature),
+      word = this.abi.pointerBytes,
+      entryStack = stackPointer(cpu);
     const stackAddress = guestPointer(cpu.memory, entryStack);
     const address = word === 8 ? cpu.memory.readUint64(stackAddress) : BigInt(cpu.memory.readUint32(stackAddress));
     if (address === 0n) throw new RangeError("Guest return address is null");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
@@ -70,24 +71,38 @@ function configError(message: string, location: SourceLocation, diagnostics: rea
 
 class ItemConfigTokens {
   private unreadToken: ScriptToken | undefined;
-  constructor(private readonly source: ScriptSourceReader, private readonly callbackAborted: () => boolean) {}
-  get diagnostics(): readonly ScriptDiagnostic[] { return this.source.diagnostics; }
-  get diagnosticCallbackAborted(): boolean { return this.callbackAborted(); }
+  constructor(
+    private readonly source: ScriptSourceReader,
+    private readonly callbackAborted: () => boolean,
+  ) {}
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return this.source.diagnostics;
+  }
+  get diagnosticCallbackAborted(): boolean {
+    return this.callbackAborted();
+  }
   next(): ScriptToken | undefined {
     if (this.unreadToken !== undefined) {
       const token = this.unreadToken;
       this.unreadToken = undefined;
       return token;
     }
-    try { return this.source.next()?.token; }
-    catch (error) {
+    try {
+      return this.source.next()?.token;
+    } catch (error) {
       if (!this.source.isSourceFailure(error)) throw error;
       return undefined;
     }
   }
-  unread(token: ScriptToken): void { this.unreadToken = token; }
-  dispose(): void { this.source.dispose(); }
-  disposeRecordOnly(): void { this.source.disposeRecordOnly(); }
+  unread(token: ScriptToken): void {
+    this.unreadToken = token;
+  }
+  dispose(): void {
+    this.source.dispose();
+  }
+  disposeRecordOnly(): void {
+    this.source.disposeRecordOnly();
+  }
 }
 
 class ItemClassnameError extends ScriptLanguageError {}
@@ -105,7 +120,10 @@ const ITEM_CONFIG_BYTES = 8;
 const ITEM_INFO_BYTES = 236;
 
 class ItemConfigCell {
-  constructor(private readonly allocation: BotMemoryAllocation, private readonly offset: number) {}
+  constructor(
+    private readonly allocation: BotMemoryAllocation,
+    private readonly offset: number,
+  ) {}
   private get view(): DataView {
     const bytes = this.allocation.bytes;
     return new DataView(bytes.buffer, bytes.byteOffset + this.offset, ITEM_INFO_BYTES);
@@ -113,7 +131,10 @@ class ItemConfigCell {
   private text(offset: number, length: number): string {
     const bytes = this.allocation.bytes.subarray(this.offset + offset, this.offset + offset + length);
     let result = "";
-    for (const byte of bytes) { if (byte === 0) break; result += String.fromCharCode(byte); }
+    for (const byte of bytes) {
+      if (byte === 0) break;
+      result += String.fromCharCode(byte);
+    }
     return result;
   }
   private writeText(offset: number, length: number, value: string): void {
@@ -136,41 +157,131 @@ class ItemConfigCell {
     view.setFloat32(offset + 4, value.y, true);
     view.setFloat32(offset + 8, value.z, true);
   }
-  get classname(): string { return this.text(0, 32); }
-  set classname(value: string) { this.writeText(0, 32, value); }
-  get name(): string { return this.text(32, 80); }
-  set name(value: string) { this.writeText(32, 80, value); }
-  get model(): string { return this.text(112, 80); }
-  set model(value: string) { this.writeText(112, 80, value); }
-  get modelIndex(): number { return this.view.getInt32(192, true); }
-  set modelIndex(value: number) { this.view.setInt32(192, value, true); }
-  get type(): number { return this.view.getInt32(196, true); }
-  set type(value: number) { this.view.setInt32(196, value, true); }
-  get index(): number { return this.view.getInt32(200, true); }
-  set index(value: number) { this.view.setInt32(200, value, true); }
-  get respawnTime(): number { return this.view.getFloat32(204, true); }
-  set respawnTime(value: number) { this.view.setFloat32(204, value, true); }
-  get mins(): Vec3 { return this.readVector(208); }
-  set mins(value: Vec3) { this.writeVector(208, value); }
-  get maxs(): Vec3 { return this.readVector(220); }
-  set maxs(value: Vec3) { this.writeVector(220, value); }
-  get number(): number { return this.view.getInt32(232, true); }
-  set number(value: number) { this.view.setInt32(232, value, true); }
+  get classname(): string {
+    return this.text(0, 32);
+  }
+  set classname(value: string) {
+    this.writeText(0, 32, value);
+  }
+  get name(): string {
+    return this.text(32, 80);
+  }
+  set name(value: string) {
+    this.writeText(32, 80, value);
+  }
+  get model(): string {
+    return this.text(112, 80);
+  }
+  set model(value: string) {
+    this.writeText(112, 80, value);
+  }
+  get modelIndex(): number {
+    return this.view.getInt32(192, true);
+  }
+  set modelIndex(value: number) {
+    this.view.setInt32(192, value, true);
+  }
+  get type(): number {
+    return this.view.getInt32(196, true);
+  }
+  set type(value: number) {
+    this.view.setInt32(196, value, true);
+  }
+  get index(): number {
+    return this.view.getInt32(200, true);
+  }
+  set index(value: number) {
+    this.view.setInt32(200, value, true);
+  }
+  get respawnTime(): number {
+    return this.view.getFloat32(204, true);
+  }
+  set respawnTime(value: number) {
+    this.view.setFloat32(204, value, true);
+  }
+  get mins(): Vec3 {
+    return this.readVector(208);
+  }
+  set mins(value: Vec3) {
+    this.writeVector(208, value);
+  }
+  get maxs(): Vec3 {
+    return this.readVector(220);
+  }
+  set maxs(value: Vec3) {
+    this.writeVector(220, value);
+  }
+  get number(): number {
+    return this.view.getInt32(232, true);
+  }
+  set number(value: number) {
+    this.view.setInt32(232, value, true);
+  }
 }
 
 function itemConfigView(allocation: BotMemoryAllocation, offset: number) {
   const cell = new ItemConfigCell(allocation, offset);
   return {
-    get classname(): string { return cell.classname; }, set classname(value: string) { cell.classname = value; },
-    get name(): string { return cell.name; }, set name(value: string) { cell.name = value; },
-    get model(): string { return cell.model; }, set model(value: string) { cell.model = value; },
-    get modelIndex(): number { return cell.modelIndex; }, set modelIndex(value: number) { cell.modelIndex = value; },
-    get type(): number { return cell.type; }, set type(value: number) { cell.type = value; },
-    get index(): number { return cell.index; }, set index(value: number) { cell.index = value; },
-    get respawnTime(): number { return cell.respawnTime; }, set respawnTime(value: number) { cell.respawnTime = value; },
-    get mins(): Vec3 { return cell.mins; }, set mins(value: Vec3) { cell.mins = value; },
-    get maxs(): Vec3 { return cell.maxs; }, set maxs(value: Vec3) { cell.maxs = value; },
-    get number(): number { return cell.number; }, set number(value: number) { cell.number = value; },
+    get classname(): string {
+      return cell.classname;
+    },
+    set classname(value: string) {
+      cell.classname = value;
+    },
+    get name(): string {
+      return cell.name;
+    },
+    set name(value: string) {
+      cell.name = value;
+    },
+    get model(): string {
+      return cell.model;
+    },
+    set model(value: string) {
+      cell.model = value;
+    },
+    get modelIndex(): number {
+      return cell.modelIndex;
+    },
+    set modelIndex(value: number) {
+      cell.modelIndex = value;
+    },
+    get type(): number {
+      return cell.type;
+    },
+    set type(value: number) {
+      cell.type = value;
+    },
+    get index(): number {
+      return cell.index;
+    },
+    set index(value: number) {
+      cell.index = value;
+    },
+    get respawnTime(): number {
+      return cell.respawnTime;
+    },
+    set respawnTime(value: number) {
+      cell.respawnTime = value;
+    },
+    get mins(): Vec3 {
+      return cell.mins;
+    },
+    set mins(value: Vec3) {
+      cell.mins = value;
+    },
+    get maxs(): Vec3 {
+      return cell.maxs;
+    },
+    set maxs(value: Vec3) {
+      cell.maxs = value;
+    },
+    get number(): number {
+      return cell.number;
+    },
+    set number(value: number) {
+      cell.number = value;
+    },
   };
 }
 
@@ -195,21 +306,34 @@ export function loadItemConfig(resolver: BotScriptReader, path: string, options:
   };
   let preprocessor: ItemConfigTokens;
   try {
-    preprocessor = new ItemConfigTokens(ScriptSourceReader.open(root, resolver, {
-      ...options.preprocessor,
-      globals: resolver.globals,
-      ...(resolver.debugEval === undefined ? {} : { debugEval: (text: string) => {
-        try { resolver.debugEval?.(text); }
-        catch (error) { diagnosticCallbackAborted = true; throw error; }
-      } }),
-      report: diagnostic => {
-        try {
-          options.preprocessor?.report?.(diagnostic);
-          reportDiagnostics([diagnostic]);
-        }
-        catch (error) { diagnosticCallbackAborted = true; throw error; }
-      },
-    }), () => diagnosticCallbackAborted);
+    preprocessor = new ItemConfigTokens(
+      ScriptSourceReader.open(root, resolver, {
+        ...options.preprocessor,
+        globals: resolver.globals,
+        ...(resolver.debugEval === undefined
+          ? {}
+          : {
+              debugEval: (text: string) => {
+                try {
+                  resolver.debugEval?.(text);
+                } catch (error) {
+                  diagnosticCallbackAborted = true;
+                  throw error;
+                }
+              },
+            }),
+        report: diagnostic => {
+          try {
+            options.preprocessor?.report?.(diagnostic);
+            reportDiagnostics([diagnostic]);
+          } catch (error) {
+            diagnosticCallbackAborted = true;
+            throw error;
+          }
+        },
+      }),
+      () => diagnosticCallbackAborted,
+    );
   } catch (error) {
     if (diagnosticCallbackAborted || !(error instanceof ScriptLanguageError)) throw error;
     reportDiagnostics(error.diagnostics);
@@ -232,8 +356,13 @@ function reportScriptDiagnostic(options: ItemConfigOptions, diagnostic: ScriptDi
   options.report?.({ severity: diagnostic.severity, message: `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n` });
 }
 
-function readItemConfig(preprocessor: ItemConfigTokens, path: string, maximum: number, memory: BotMemory,
-  reportError: (error: ScriptLanguageError) => boolean): ItemConfig {
+function readItemConfig(
+  preprocessor: ItemConfigTokens,
+  path: string,
+  maximum: number,
+  memory: BotMemory,
+  reportError: (error: ScriptLanguageError) => boolean,
+): ItemConfig {
   const allocation = memory.allocate(ITEM_CONFIG_BYTES + maximum * ITEM_INFO_BYTES, "hunk", true);
   // Pointer slots contain allocation-relative offsets in the managed 32-bit layout.
   const bytes = allocation.bytes;
@@ -272,15 +401,32 @@ function parseItemConfig(preprocessor: ItemConfigTokens, path: string, maximum: 
     reader.begin();
     for (let field = reader.nextField(); field !== undefined; field = reader.nextField()) {
       switch (field.name) {
-        case "name": item.name = reader.readString(); break;
-        case "model": item.model = reader.readString(); break;
-        case "modelindex": item.modelIndex = reader.readInt(); break;
-        case "type": item.type = reader.readInt(); break;
-        case "index": item.index = reader.readInt(); break;
-        case "respawntime": item.respawnTime = reader.readFloat(); break;
-        case "mins": item.mins = overlay(item.mins, reader.readFloatArray(3)); break;
-        case "maxs": item.maxs = overlay(item.maxs, reader.readFloatArray(3)); break;
-        default: configError(`unknown structure field ${field.name}`, field.location, reader.diagnostics);
+        case "name":
+          item.name = reader.readString();
+          break;
+        case "model":
+          item.model = reader.readString();
+          break;
+        case "modelindex":
+          item.modelIndex = reader.readInt();
+          break;
+        case "type":
+          item.type = reader.readInt();
+          break;
+        case "index":
+          item.index = reader.readInt();
+          break;
+        case "respawntime":
+          item.respawnTime = reader.readFloat();
+          break;
+        case "mins":
+          item.mins = overlay(item.mins, reader.readFloatArray(3));
+          break;
+        case "maxs":
+          item.maxs = overlay(item.maxs, reader.readFloatArray(3));
+          break;
+        default:
+          configError(`unknown structure field ${field.name}`, field.location, reader.diagnostics);
       }
     }
     item.number = count;
@@ -336,8 +482,12 @@ export interface GoalNavigation {
   dropToFloor(origin: Vec3, bounds: Bounds): { readonly origin: Vec3; readonly success: boolean };
   bestReachableArea(origin: Vec3, bounds: Bounds): { readonly area: number; readonly origin: Vec3 };
   reachabilityArea(origin: Vec3, client: number): number;
-  route(request: { readonly area: number; readonly origin: Vec3; readonly goalArea: number; readonly travelFlags: number }):
-    { readonly kind: "found"; readonly travelTime: number } | { readonly kind: "unreachable" };
+  route(request: {
+    readonly area: number;
+    readonly origin: Vec3;
+    readonly goalArea: number;
+    readonly travelFlags: number;
+  }): { readonly kind: "found"; readonly travelTime: number } | { readonly kind: "unreachable" };
 }
 
 export const SOURCE_GOAL_NUMBER_MIN = 0x40000000;
@@ -358,9 +508,12 @@ export interface SourcePickupGoals {
   candidates(client: number): readonly SourcePickupGoal[];
   inspect(client: number, actor: ActorId): SourcePickupGoal | null;
 }
-interface SourceGoalBinding { readonly actor: ActorId; name: string; goal: BotGoal; }
-type ItemCandidate = { readonly kind: "native"; readonly item: LevelItem }
-  | { readonly kind: "source"; readonly goal: BotGoal; readonly utility: number };
+interface SourceGoalBinding {
+  readonly actor: ActorId;
+  name: string;
+  goal: BotGoal;
+}
+type ItemCandidate = { readonly kind: "native"; readonly item: LevelItem } | { readonly kind: "source"; readonly goal: BotGoal; readonly utility: number };
 
 export interface GoalWorld {
   readonly sourcePickups?: SourcePickupGoals;
@@ -375,7 +528,11 @@ const MAP_LOCATION_BYTES = 148;
 const CAMP_SPOT_BYTES = 164;
 
 class GoalMapCell {
-  constructor(readonly allocation: BotMemoryAllocation, private readonly offset: number, private readonly size: number) {}
+  constructor(
+    readonly allocation: BotMemoryAllocation,
+    private readonly offset: number,
+    private readonly size: number,
+  ) {}
   protected get view(): DataView {
     const bytes = this.allocation.bytes;
     return new DataView(bytes.buffer, bytes.byteOffset + this.offset, this.size);
@@ -386,69 +543,162 @@ class GoalMapCell {
   }
   protected writeVector(offset: number, value: Vec3): void {
     const view = this.view;
-    view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true);
+    view.setFloat32(offset, value.x, true);
+    view.setFloat32(offset + 4, value.y, true);
+    view.setFloat32(offset + 8, value.z, true);
   }
 }
 
 class LevelItem extends GoalMapCell {
-  constructor(allocation: BotMemoryAllocation, readonly pointer: number, private readonly itemInfo: (index: number) => ItemInfo) {
+  constructor(
+    allocation: BotMemoryAllocation,
+    readonly pointer: number,
+    private readonly itemInfo: (index: number) => ItemInfo,
+  ) {
     super(allocation, (pointer - 1) * LEVEL_ITEM_BYTES, LEVEL_ITEM_BYTES);
   }
-  clear(): void { this.allocation.bytes.fill(0, (this.pointer - 1) * LEVEL_ITEM_BYTES, this.pointer * LEVEL_ITEM_BYTES); }
-  get number(): number { return this.view.getInt32(0, true); }
-  set number(value: number) { this.view.setInt32(0, value, true); }
-  get infoIndex(): number { return this.view.getInt32(4, true); }
-  set infoIndex(value: number) { this.view.setInt32(4, value, true); }
-  get info(): ItemInfo { return this.itemInfo(this.infoIndex); }
-  get flags(): number { return this.view.getInt32(8, true); }
-  set flags(value: number) { this.view.setInt32(8, value, true); }
-  get weight(): number { return this.view.getFloat32(12, true); }
-  set weight(value: number) { this.view.setFloat32(12, value, true); }
-  get origin(): Vec3 { return this.readVector(16); }
-  set origin(value: Vec3) { this.writeVector(16, value); }
-  get goalArea(): number { return this.view.getInt32(28, true); }
-  set goalArea(value: number) { this.view.setInt32(28, value, true); }
-  get goalOrigin(): Vec3 { return this.readVector(32); }
-  set goalOrigin(value: Vec3) { this.writeVector(32, value); }
-  get entity(): number { return this.view.getInt32(44, true); }
-  set entity(value: number) { this.view.setInt32(44, value, true); }
-  get timeout(): number { return this.view.getFloat32(48, true); }
-  set timeout(value: number) { this.view.setFloat32(48, value, true); }
-  get prev(): number { return this.view.getUint32(52, true); }
-  set prev(value: number) { this.view.setUint32(52, value, true); }
-  get next(): number { return this.view.getUint32(56, true); }
-  set next(value: number) { this.view.setUint32(56, value, true); }
+  clear(): void {
+    this.allocation.bytes.fill(0, (this.pointer - 1) * LEVEL_ITEM_BYTES, this.pointer * LEVEL_ITEM_BYTES);
+  }
+  get number(): number {
+    return this.view.getInt32(0, true);
+  }
+  set number(value: number) {
+    this.view.setInt32(0, value, true);
+  }
+  get infoIndex(): number {
+    return this.view.getInt32(4, true);
+  }
+  set infoIndex(value: number) {
+    this.view.setInt32(4, value, true);
+  }
+  get info(): ItemInfo {
+    return this.itemInfo(this.infoIndex);
+  }
+  get flags(): number {
+    return this.view.getInt32(8, true);
+  }
+  set flags(value: number) {
+    this.view.setInt32(8, value, true);
+  }
+  get weight(): number {
+    return this.view.getFloat32(12, true);
+  }
+  set weight(value: number) {
+    this.view.setFloat32(12, value, true);
+  }
+  get origin(): Vec3 {
+    return this.readVector(16);
+  }
+  set origin(value: Vec3) {
+    this.writeVector(16, value);
+  }
+  get goalArea(): number {
+    return this.view.getInt32(28, true);
+  }
+  set goalArea(value: number) {
+    this.view.setInt32(28, value, true);
+  }
+  get goalOrigin(): Vec3 {
+    return this.readVector(32);
+  }
+  set goalOrigin(value: Vec3) {
+    this.writeVector(32, value);
+  }
+  get entity(): number {
+    return this.view.getInt32(44, true);
+  }
+  set entity(value: number) {
+    this.view.setInt32(44, value, true);
+  }
+  get timeout(): number {
+    return this.view.getFloat32(48, true);
+  }
+  set timeout(value: number) {
+    this.view.setFloat32(48, value, true);
+  }
+  get prev(): number {
+    return this.view.getUint32(52, true);
+  }
+  set prev(value: number) {
+    this.view.setUint32(52, value, true);
+  }
+  get next(): number {
+    return this.view.getUint32(56, true);
+  }
+  set next(value: number) {
+    this.view.setUint32(56, value, true);
+  }
 }
 
 class MapLocation extends GoalMapCell {
-  constructor(allocation: BotMemoryAllocation, readonly pointer: number, private readonly nextOffset = 144) {
+  constructor(
+    allocation: BotMemoryAllocation,
+    readonly pointer: number,
+    private readonly nextOffset = 144,
+  ) {
     super(allocation, 0, nextOffset + 4);
   }
-  get origin(): Vec3 { return this.readVector(0); }
-  set origin(value: Vec3) { this.writeVector(0, value); }
-  get area(): number { return this.view.getInt32(12, true); }
-  set area(value: number) { this.view.setInt32(12, value, true); }
+  get origin(): Vec3 {
+    return this.readVector(0);
+  }
+  set origin(value: Vec3) {
+    this.writeVector(0, value);
+  }
+  get area(): number {
+    return this.view.getInt32(12, true);
+  }
+  set area(value: number) {
+    this.view.setInt32(12, value, true);
+  }
   get name(): string {
     const bytes = this.allocation.bytes.subarray(16, 144);
     let text = "";
-    for (const byte of bytes) { if (byte === 0) break; text += String.fromCharCode(byte); }
+    for (const byte of bytes) {
+      if (byte === 0) break;
+      text += String.fromCharCode(byte);
+    }
     return text;
   }
-  readName(bsp: AasBspEntities, entity: number): void { bsp.value(entity, "message", this.allocation.bytes.subarray(16, 144)); }
-  get next(): number { return this.view.getUint32(this.nextOffset, true); }
-  set next(value: number) { this.view.setUint32(this.nextOffset, value, true); }
+  readName(bsp: AasBspEntities, entity: number): void {
+    bsp.value(entity, "message", this.allocation.bytes.subarray(16, 144));
+  }
+  get next(): number {
+    return this.view.getUint32(this.nextOffset, true);
+  }
+  set next(value: number) {
+    this.view.setUint32(this.nextOffset, value, true);
+  }
 }
 
 class CampSpot extends MapLocation {
-  constructor(allocation: BotMemoryAllocation, pointer: number) { super(allocation, pointer, 160); }
-  get range(): number { return this.view.getFloat32(144, true); }
-  set range(value: number) { this.view.setFloat32(144, value, true); }
-  get weight(): number { return this.view.getFloat32(148, true); }
-  set weight(value: number) { this.view.setFloat32(148, value, true); }
-  get wait(): number { return this.view.getFloat32(152, true); }
-  set wait(value: number) { this.view.setFloat32(152, value, true); }
-  get random(): number { return this.view.getFloat32(156, true); }
-  set random(value: number) { this.view.setFloat32(156, value, true); }
+  constructor(allocation: BotMemoryAllocation, pointer: number) {
+    super(allocation, pointer, 160);
+  }
+  get range(): number {
+    return this.view.getFloat32(144, true);
+  }
+  set range(value: number) {
+    this.view.setFloat32(144, value, true);
+  }
+  get weight(): number {
+    return this.view.getFloat32(148, true);
+  }
+  set weight(value: number) {
+    this.view.setFloat32(148, value, true);
+  }
+  get wait(): number {
+    return this.view.getFloat32(152, true);
+  }
+  set wait(value: number) {
+    this.view.setFloat32(152, value, true);
+  }
+  get random(): number {
+    return this.view.getFloat32(156, true);
+  }
+  set random(value: number) {
+    this.view.setFloat32(156, value, true);
+  }
 }
 
 function bspString(entities: AasBspEntities, entity: number, key: string): string | null {
@@ -461,9 +711,12 @@ function bspString(entities: AasBspEntities, entity: number, key: string): strin
   }
   return text;
 }
-function sameVector(first: Vec3, second: Vec3): boolean { return first.x === second.x && first.y === second.y && first.z === second.z; }
+function sameVector(first: Vec3, second: Vec3): boolean {
+  return first.x === second.x && first.y === second.y && first.z === second.z;
+}
 function goalNameKey(text: string): string {
-  const terminator = text.indexOf("\0"), length = terminator < 0 ? text.length : terminator;
+  const terminator = text.indexOf("\0"),
+    length = terminator < 0 ? text.length : terminator;
   return text.slice(0, Math.min(length, 99999)).replace(/[a-z]/g, character => character.toUpperCase());
 }
 function goalNameMatches(query: string | ((candidate: string) => boolean), candidate: string): boolean {
@@ -472,12 +725,14 @@ function goalNameMatches(query: string | ((candidate: string) => boolean), candi
 }
 // Log_Write promotes the stored float to double; %f rounds decimal ties to even.
 function goalFloatText(value: number, digits: number): string {
-  const bits = float32ToBits(value), exponent = (bits >>> 23) & 255;
-  const negative = (bits >>> 31) !== 0;
+  const bits = float32ToBits(value),
+    exponent = (bits >>> 23) & 255;
+  const negative = bits >>> 31 !== 0;
   if (exponent === 255) return Number.isNaN(value) ? "nan" : negative ? "-inf" : "inf";
   const mantissa = BigInt((bits & 0x7fffff) | (exponent === 0 ? 0 : 0x800000));
   const shift = exponent === 0 ? -149 : exponent - 150;
-  let numerator = mantissa * 10n ** BigInt(digits), denominator = 1n;
+  let numerator = mantissa * 10n ** BigInt(digits),
+    denominator = 1n;
   if (shift >= 0) numerator <<= BigInt(shift);
   else denominator <<= BigInt(-shift);
   let rounded = numerator / denominator;
@@ -486,9 +741,15 @@ function goalFloatText(value: number, digits: number): string {
   const text = rounded.toString().padStart(digits + 1, "0");
   return `${negative ? "-" : ""}${text.slice(0, -digits)}.${text.slice(-digits)}`;
 }
-function itemBounds(info: ItemInfo): Bounds { return { min: info.mins, max: info.maxs }; }
-function defaultAvoidTime(info: ItemInfo): number { return Math.max(10, info.respawnTime === 0 ? 30 : info.respawnTime); }
-function blankGoal(): BotGoal { return { origin: vector(), area: 0, mins: vector(), maxs: vector(), entity: 0, number: 0, flags: 0, itemInfo: 0 }; }
+function itemBounds(info: ItemInfo): Bounds {
+  return { min: info.mins, max: info.maxs };
+}
+function defaultAvoidTime(info: ItemInfo): number {
+  return Math.max(10, info.respawnTime === 0 ? 30 : info.respawnTime);
+}
+function blankGoal(): BotGoal {
+  return { origin: vector(), area: 0, mins: vector(), maxs: vector(), entity: 0, number: 0, flags: 0, itemInfo: 0 };
+}
 
 export function touchingGoal(origin: Vec3, goal: BotGoal): boolean {
   const player = { min: vector(-15, -15, -24), max: vector(15, 15, 32) };
@@ -500,7 +761,10 @@ export function touchingGoal(origin: Vec3, goal: BotGoal): boolean {
   return true;
 }
 
-interface AvoidGoal { number: number; expires: number }
+interface AvoidGoal {
+  number: number;
+  expires: number;
+}
 // be_ai_goal.c bot_goalstate_t, using the source 32-bit pointer layout.
 const GOAL_BYTES = 56;
 const GOAL_STACK_OFFSET = 16;
@@ -518,22 +782,47 @@ interface GoalReferences {
 
 class GoalState {
   readonly avoid: readonly AvoidGoal[];
-  constructor(readonly allocation: BotMemoryAllocation, private readonly references: GoalReferences) {
+  constructor(
+    readonly allocation: BotMemoryAllocation,
+    private readonly references: GoalReferences,
+  ) {
     const state = this;
     this.avoid = Array.from({ length: MAX_AVOID_GOALS }, (_, index) => ({
-      get number(): number { return state.view.getInt32(AVOID_GOALS_OFFSET + index * 4, true); },
-      set number(value: number) { state.view.setInt32(AVOID_GOALS_OFFSET + index * 4, value, true); },
-      get expires(): number { return state.view.getFloat32(AVOID_TIMES_OFFSET + index * 4, true); },
-      set expires(value: number) { state.view.setFloat32(AVOID_TIMES_OFFSET + index * 4, value, true); },
+      get number(): number {
+        return state.view.getInt32(AVOID_GOALS_OFFSET + index * 4, true);
+      },
+      set number(value: number) {
+        state.view.setInt32(AVOID_GOALS_OFFSET + index * 4, value, true);
+      },
+      get expires(): number {
+        return state.view.getFloat32(AVOID_TIMES_OFFSET + index * 4, true);
+      },
+      set expires(value: number) {
+        state.view.setFloat32(AVOID_TIMES_OFFSET + index * 4, value, true);
+      },
     }));
   }
-  private get view(): DataView { return allocationView(this.allocation); }
-  get client(): number { return this.view.getInt32(8, true); }
-  set client(value: number) { this.view.setInt32(8, value, true); }
-  get lastReachabilityArea(): number { return this.view.getInt32(12, true); }
-  set lastReachabilityArea(value: number) { this.view.setInt32(12, value, true); }
-  get stackTop(): number { return this.view.getInt32(GOAL_STACK_TOP_OFFSET, true); }
-  set stackTop(value: number) { this.view.setInt32(GOAL_STACK_TOP_OFFSET, value, true); }
+  private get view(): DataView {
+    return allocationView(this.allocation);
+  }
+  get client(): number {
+    return this.view.getInt32(8, true);
+  }
+  set client(value: number) {
+    this.view.setInt32(8, value, true);
+  }
+  get lastReachabilityArea(): number {
+    return this.view.getInt32(12, true);
+  }
+  set lastReachabilityArea(value: number) {
+    this.view.setInt32(12, value, true);
+  }
+  get stackTop(): number {
+    return this.view.getInt32(GOAL_STACK_TOP_OFFSET, true);
+  }
+  set stackTop(value: number) {
+    this.view.setInt32(GOAL_STACK_TOP_OFFSET, value, true);
+  }
   get weightConfig(): WeightConfig | null {
     const id = this.view.getUint32(0, true);
     if (id === 0) return null;
@@ -542,7 +831,10 @@ class GoalState {
     return config;
   }
   set weightConfig(config: WeightConfig | null) {
-    if (config === null) { this.view.setUint32(0, 0, true); return; }
+    if (config === null) {
+      this.view.setUint32(0, 0, true);
+      return;
+    }
     let id = this.references.configIds.get(config);
     if (id === undefined) {
       id = this.nextReference();
@@ -574,11 +866,19 @@ class GoalState {
     return this.references.nextId++;
   }
   readGoal(index: number): BotGoal {
-    const offset = this.goalOffset(index), view = this.view;
+    const offset = this.goalOffset(index),
+      view = this.view;
     const readVector = (start: number): Vec3 => vector(view.getFloat32(start, true), view.getFloat32(start + 4, true), view.getFloat32(start + 8, true));
-    return Object.freeze({ origin: readVector(offset), area: view.getInt32(offset + 12, true),
-      mins: readVector(offset + 16), maxs: readVector(offset + 28), entity: view.getInt32(offset + 40, true),
-      number: view.getInt32(offset + 44, true), flags: view.getInt32(offset + 48, true), itemInfo: view.getInt32(offset + 52, true) });
+    return Object.freeze({
+      origin: readVector(offset),
+      area: view.getInt32(offset + 12, true),
+      mins: readVector(offset + 16),
+      maxs: readVector(offset + 28),
+      entity: view.getInt32(offset + 40, true),
+      number: view.getInt32(offset + 44, true),
+      flags: view.getInt32(offset + 48, true),
+      itemInfo: view.getInt32(offset + 52, true),
+    });
   }
   goalBytes(index: number): Uint8Array {
     const offset = this.goalOffset(index);
@@ -590,26 +890,43 @@ class GoalState {
       this.goalBytes(index).set(goal.subarray(0, GOAL_BYTES));
       return;
     }
-    const offset = this.goalOffset(index), view = this.view;
+    const offset = this.goalOffset(index),
+      view = this.view;
     const writeVector = (start: number, value: Vec3): void => {
-      view.setFloat32(start, value.x, true); view.setFloat32(start + 4, value.y, true); view.setFloat32(start + 8, value.z, true);
+      view.setFloat32(start, value.x, true);
+      view.setFloat32(start + 4, value.y, true);
+      view.setFloat32(start + 8, value.z, true);
     };
-    writeVector(offset, goal.origin); view.setInt32(offset + 12, goal.area, true);
-    writeVector(offset + 16, goal.mins); writeVector(offset + 28, goal.maxs);
-    view.setInt32(offset + 40, goal.entity, true); view.setInt32(offset + 44, goal.number, true);
-    view.setInt32(offset + 48, goal.flags, true); view.setInt32(offset + 52, goal.itemInfo, true);
+    writeVector(offset, goal.origin);
+    view.setInt32(offset + 12, goal.area, true);
+    writeVector(offset + 16, goal.mins);
+    writeVector(offset + 28, goal.maxs);
+    view.setInt32(offset + 40, goal.entity, true);
+    view.setInt32(offset + 44, goal.number, true);
+    view.setInt32(offset + 48, goal.flags, true);
+    view.setInt32(offset + 52, goal.itemInfo, true);
   }
-  clearStack(): void { this.allocation.bytes.fill(0, GOAL_STACK_OFFSET, GOAL_STACK_TOP_OFFSET + 4); }
+  clearStack(): void {
+    this.allocation.bytes.fill(0, GOAL_STACK_OFFSET, GOAL_STACK_TOP_OFFSET + 4);
+  }
   private goalOffset(index: number): number {
     if (!Number.isInteger(index) || index < 0 || index >= MAX_GOAL_STACK) throw new RangeError("goal stack index exceeds its allocation");
     return GOAL_STACK_OFFSET + index * GOAL_BYTES;
   }
 }
 
-export interface AvoidGoalDump { readonly number: number; readonly remaining: number }
+export interface AvoidGoalDump {
+  readonly number: number;
+  readonly remaining: number;
+}
 
 function copyGoal(goal: BotGoal): BotGoal {
-  return Object.freeze({ ...goal, origin: vector(goal.origin.x, goal.origin.y, goal.origin.z), mins: vector(goal.mins.x, goal.mins.y, goal.mins.z), maxs: vector(goal.maxs.x, goal.maxs.y, goal.maxs.z) });
+  return Object.freeze({
+    ...goal,
+    origin: vector(goal.origin.x, goal.origin.y, goal.origin.z),
+    mins: vector(goal.mins.x, goal.mins.y, goal.mins.z),
+    maxs: vector(goal.maxs.x, goal.maxs.y, goal.maxs.z),
+  });
 }
 
 function finiteFloat(value: number, name: string): number {
@@ -623,8 +940,12 @@ class RetiredGoalSetup extends Error {}
 export class BotGoalLibrary {
   private readonly options: GoalLibraryOptions;
   private readonly memory: BotMemory;
-  private readonly references: GoalReferences = { nextId: 1, configs: new Map<number, WeightConfig>(),
-    configIds: new WeakMap<WeightConfig, number>(), indexes: new Map<number, BotMemoryAllocation>() };
+  private readonly references: GoalReferences = {
+    nextId: 1,
+    configs: new Map<number, WeightConfig>(),
+    configIds: new WeakMap<WeightConfig, number>(),
+    indexes: new Map<number, BotMemoryAllocation>(),
+  };
   private readonly states = new Map<number, GoalState>();
   private readonly reported: GoalDiagnostic[] = [];
   private generation = 0;
@@ -644,68 +965,143 @@ export class BotGoalLibrary {
   private nextInfoPointer = 1;
 
   checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
-    return { generation: this.generation, setupRevision: this.setupRevision, mapRevision: this.mapRevision,
-      configuredGameType: this.configuredGameType, hasWorld: this.world !== null, reported: structuredClone(this.reported),
-      nextId: this.references.nextId, configs: [...this.references.configs].map(([pointer, config]) => ({ pointer, config: this.options.weightStore.reference(config) })),
+    return {
+      generation: this.generation,
+      setupRevision: this.setupRevision,
+      mapRevision: this.mapRevision,
+      configuredGameType: this.configuredGameType,
+      hasWorld: this.world !== null,
+      reported: structuredClone(this.reported),
+      nextId: this.references.nextId,
+      configs: [...this.references.configs].map(([pointer, config]) => ({ pointer, config: this.options.weightStore.reference(config) })),
       indexes: [...this.references.indexes].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })),
       states: [...this.states].map(([handle, state]) => ({ handle, allocation: memory.reference(state.allocation) })),
-      config: this.config === null ? null : { allocation: memory.reference(this.config.allocation), path: this.config.path, diagnostics: structuredClone(this.config.diagnostics) },
-      nextSourceGoal: this.nextSourceGoal, sourceGoals: [...this.sourceGoals].map(([number, binding]) => ({ number,
-        actor: { slot: binding.actor.slot, generation: binding.actor.generation }, name: binding.name, goal: copyGoal(binding.goal) })),
-      levelItemHeap: this.levelItemHeap === null ? null : memory.reference(this.levelItemHeap), mapWords: [...new Uint8Array(this.mapWords.buffer)],
-      nextInfoPointer: this.nextInfoPointer, infoEntities: [...this.infoEntities].map(([pointer, entity]) => ({ pointer,
-        allocation: memory.reference(entity.allocation), kind: entity instanceof CampSpot ? "camp" : "location" })) };
+      config:
+        this.config === null
+          ? null
+          : { allocation: memory.reference(this.config.allocation), path: this.config.path, diagnostics: structuredClone(this.config.diagnostics) },
+      nextSourceGoal: this.nextSourceGoal,
+      sourceGoals: [...this.sourceGoals].map(([number, binding]) => ({
+        number,
+        actor: { slot: binding.actor.slot, generation: binding.actor.generation },
+        name: binding.name,
+        goal: copyGoal(binding.goal),
+      })),
+      levelItemHeap: this.levelItemHeap === null ? null : memory.reference(this.levelItemHeap),
+      mapWords: [...new Uint8Array(this.mapWords.buffer)],
+      nextInfoPointer: this.nextInfoPointer,
+      infoEntities: [...this.infoEntities].map(([pointer, entity]) => ({
+        pointer,
+        allocation: memory.reference(entity.allocation),
+        kind: entity instanceof CampSpot ? "camp" : "location",
+      })),
+    };
   }
-  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore,
-    world: GoalWorld | null, actor: (saved: import("../../../contracts/session.ts").SavedActorId) => ActorId): void {
+  restore(
+    value: unknown,
+    memory: import("./memory.ts").BotMemoryRestore,
+    world: GoalWorld | null,
+    actor: (saved: import("../../../contracts/session.ts").SavedActorId) => ActorId,
+  ): void {
     const reader = new SaveReader(value, "bot.goals");
     const vector = (reader: SaveReader) => ({ x: reader.field("x").number(), y: reader.field("y").number(), z: reader.field("z").number() });
-    const image = { generation: reader.field("generation").integer(0), setupRevision: reader.field("setupRevision").integer(0), mapRevision: reader.field("mapRevision").integer(0),
-      configuredGameType: reader.field("configuredGameType").integer(), hasWorld: reader.field("hasWorld").boolean(),
-      reported: reader.field("reported").list(entry => ({ severity: entry.field("severity").choice("message", "warning", "error", "fatal"), message: entry.field("message").string() })),
-      nextId: reader.field("nextId").integer(1), configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })),
+    const image = {
+      generation: reader.field("generation").integer(0),
+      setupRevision: reader.field("setupRevision").integer(0),
+      mapRevision: reader.field("mapRevision").integer(0),
+      configuredGameType: reader.field("configuredGameType").integer(),
+      hasWorld: reader.field("hasWorld").boolean(),
+      reported: reader
+        .field("reported")
+        .list(entry => ({ severity: entry.field("severity").choice("message", "warning", "error", "fatal"), message: entry.field("message").string() })),
+      nextId: reader.field("nextId").integer(1),
+      configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })),
       indexes: reader.field("indexes").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
       states: reader.field("states").list(entry => ({ handle: entry.field("handle").integer(1), allocation: entry.field("allocation").integer(0) })),
-      config: reader.field("config").nullable(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), diagnostics: entry.field("diagnostics").list(readScriptDiagnostic) })),
-      nextSourceGoal: reader.field("nextSourceGoal").integer(0), sourceGoals: reader.field("sourceGoals").list(entry => {
+      config: reader.field("config").nullable(entry => ({
+        allocation: entry.field("allocation").integer(0),
+        path: entry.field("path").string(),
+        diagnostics: entry.field("diagnostics").list(readScriptDiagnostic),
+      })),
+      nextSourceGoal: reader.field("nextSourceGoal").integer(0),
+      sourceGoals: reader.field("sourceGoals").list(entry => {
         const goal = entry.field("goal");
-        return { number: entry.field("number").integer(), actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, name: entry.field("name").string(),
-          goal: { origin: vector(goal.field("origin")), mins: vector(goal.field("mins")), maxs: vector(goal.field("maxs")), area: goal.field("area").integer(), entity: goal.field("entity").integer(),
-            number: goal.field("number").integer(), flags: goal.field("flags").integer(), itemInfo: goal.field("itemInfo").integer() } };
-      }), levelItemHeap: reader.field("levelItemHeap").nullable(entry => entry.integer(0)), mapWords: reader.field("mapWords").list(entry => entry.integer(0)),
-      nextInfoPointer: reader.field("nextInfoPointer").integer(1), infoEntities: reader.field("infoEntities").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0), kind: entry.field("kind").choice("camp", "location") })) };
-    if (this.states.size !== 0 || this.config !== null || this.world !== null || image.hasWorld !== (world !== null)
-      || image.mapWords.length !== 20 || image.mapWords.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)
-      || ![image.generation, image.setupRevision, image.mapRevision].every(value => Number.isSafeInteger(value) && value >= 0)
-      || ![image.nextId, image.nextInfoPointer].every(value => Number.isSafeInteger(value) && value >= 1 && value <= 0x100000000)) throw new Error("Invalid goal library restoration");
+        return {
+          number: entry.field("number").integer(),
+          actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) },
+          name: entry.field("name").string(),
+          goal: {
+            origin: vector(goal.field("origin")),
+            mins: vector(goal.field("mins")),
+            maxs: vector(goal.field("maxs")),
+            area: goal.field("area").integer(),
+            entity: goal.field("entity").integer(),
+            number: goal.field("number").integer(),
+            flags: goal.field("flags").integer(),
+            itemInfo: goal.field("itemInfo").integer(),
+          },
+        };
+      }),
+      levelItemHeap: reader.field("levelItemHeap").nullable(entry => entry.integer(0)),
+      mapWords: reader.field("mapWords").list(entry => entry.integer(0)),
+      nextInfoPointer: reader.field("nextInfoPointer").integer(1),
+      infoEntities: reader.field("infoEntities").list(entry => ({
+        pointer: entry.field("pointer").integer(1),
+        allocation: entry.field("allocation").integer(0),
+        kind: entry.field("kind").choice("camp", "location"),
+      })),
+    };
+    if (
+      this.states.size !== 0 ||
+      this.config !== null ||
+      this.world !== null ||
+      image.hasWorld !== (world !== null) ||
+      image.mapWords.length !== 20 ||
+      image.mapWords.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255) ||
+      ![image.generation, image.setupRevision, image.mapRevision].every(value => Number.isSafeInteger(value) && value >= 0) ||
+      ![image.nextId, image.nextInfoPointer].every(value => Number.isSafeInteger(value) && value >= 1 && value <= 0x100000000)
+    )
+      throw new Error("Invalid goal library restoration");
     const pointers = new Set<number>();
     const admit = (pointer: number): void => {
       if (!Number.isSafeInteger(pointer) || pointer < 1 || pointer >= image.nextId || pointers.has(pointer)) throw new Error("Invalid saved goal pointer");
       pointers.add(pointer);
     };
     for (const entry of image.configs) {
-      admit(entry.pointer); const config = this.options.weightStore.resolve(entry.config);
+      admit(entry.pointer);
+      const config = this.options.weightStore.resolve(entry.config);
       if (this.references.configIds.has(config)) throw new Error("Duplicate saved goal weight identity");
-      this.references.configs.set(entry.pointer, config); this.references.configIds.set(config, entry.pointer);
+      this.references.configs.set(entry.pointer, config);
+      this.references.configIds.set(config, entry.pointer);
     }
-    for (const entry of image.indexes) { admit(entry.pointer); this.references.indexes.set(entry.pointer, memory.allocation(entry.allocation)); }
+    for (const entry of image.indexes) {
+      admit(entry.pointer);
+      this.references.indexes.set(entry.pointer, memory.allocation(entry.allocation));
+    }
     for (const entry of image.states) {
-      if (!Number.isSafeInteger(entry.handle) || entry.handle < 1 || entry.handle > MAX_GOAL_STATES || this.states.has(entry.handle)) throw new Error("Invalid saved goal state handle");
+      if (!Number.isSafeInteger(entry.handle) || entry.handle < 1 || entry.handle > MAX_GOAL_STATES || this.states.has(entry.handle))
+        throw new Error("Invalid saved goal state handle");
       const allocation = memory.allocation(entry.allocation);
       if (allocation.bytes.length !== GOAL_STATE_BYTES) throw new Error("Saved goal state allocation size mismatch");
       const state = new GoalState(allocation, this.references);
-      void state.weightConfig; void state.weightIndexes;
+      void state.weightConfig;
+      void state.weightIndexes;
       if (state.stackTop < 0 || state.stackTop > MAX_GOAL_STACK) throw new Error("Saved goal stack exceeds capacity");
       this.states.set(entry.handle, state);
     }
     if (image.config !== null) {
-      const allocation = memory.allocation(image.config.allocation), bytes = allocation.bytes;
+      const allocation = memory.allocation(image.config.allocation),
+        bytes = allocation.bytes;
       if (bytes.length < ITEM_CONFIG_BYTES) throw new Error("Saved item configuration is truncated");
       const count = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(0, true);
       if (count < 0 || ITEM_CONFIG_BYTES + count * ITEM_INFO_BYTES > bytes.length) throw new Error("Saved item count exceeds allocation");
-      this.config = { allocation, path: image.config.path,
+      this.config = {
+        allocation,
+        path: image.config.path,
         items: Array.from({ length: count }, (_, index) => new ItemConfigCell(allocation, ITEM_CONFIG_BYTES + index * ITEM_INFO_BYTES)),
-        diagnostics: structuredClone(image.config.diagnostics), free: () => this.memory.free(allocation) };
+        diagnostics: structuredClone(image.config.diagnostics),
+        free: () => this.memory.free(allocation),
+      };
     }
     for (const entry of image.sourceGoals) {
       if (!isSourceGoalNumber(entry.number) || this.sourceGoals.has(entry.number)) throw new Error("Invalid saved source pickup goal identity");
@@ -714,15 +1110,23 @@ export class BotGoalLibrary {
     this.levelItemHeap = image.levelItemHeap === null ? null : memory.allocation(image.levelItemHeap);
     if (this.levelItemHeap !== null && this.levelItemHeap.bytes.length % LEVEL_ITEM_BYTES !== 0) throw new Error("Saved level item heap size mismatch");
     for (const entry of image.infoEntities) {
-      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextInfoPointer || this.infoEntities.has(entry.pointer)) throw new Error("Invalid saved goal info pointer");
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextInfoPointer || this.infoEntities.has(entry.pointer))
+        throw new Error("Invalid saved goal info pointer");
       const allocation = memory.allocation(entry.allocation);
-      if (entry.kind !== "camp" && entry.kind !== "location" || allocation.bytes.length !== (entry.kind === "camp" ? CAMP_SPOT_BYTES : MAP_LOCATION_BYTES)) throw new Error("Saved goal info allocation size mismatch");
+      if ((entry.kind !== "camp" && entry.kind !== "location") || allocation.bytes.length !== (entry.kind === "camp" ? CAMP_SPOT_BYTES : MAP_LOCATION_BYTES))
+        throw new Error("Saved goal info allocation size mismatch");
       this.infoEntities.set(entry.pointer, entry.kind === "camp" ? new CampSpot(allocation, entry.pointer) : new MapLocation(allocation, entry.pointer));
     }
     new Uint8Array(this.mapWords.buffer).set(image.mapWords);
-    this.references.nextId = image.nextId; this.nextInfoPointer = image.nextInfoPointer; this.nextSourceGoal = image.nextSourceGoal;
-    this.generation = image.generation; this.setupRevision = image.setupRevision; this.mapRevision = image.mapRevision;
-    this.configuredGameType = image.configuredGameType; this.world = world; this.reported.push(...structuredClone(image.reported));
+    this.references.nextId = image.nextId;
+    this.nextInfoPointer = image.nextInfoPointer;
+    this.nextSourceGoal = image.nextSourceGoal;
+    this.generation = image.generation;
+    this.setupRevision = image.setupRevision;
+    this.mapRevision = image.mapRevision;
+    this.configuredGameType = image.configuredGameType;
+    this.world = world;
+    this.reported.push(...structuredClone(image.reported));
     const visit = (start: number, next: (pointer: number) => number): void => {
       const seen = new Set<number>();
       for (let pointer = start; pointer !== 0; pointer = next(pointer)) {
@@ -730,28 +1134,60 @@ export class BotGoalLibrary {
         seen.add(pointer);
       }
     };
-    visit(this.levelHead, pointer => this.levelItem(pointer).next); visit(this.freeLevelHead, pointer => this.levelItem(pointer).next);
-    visit(this.locationHead, pointer => this.infoEntity(pointer).next); visit(this.campHead, pointer => this.infoEntity(pointer).next);
+    visit(this.levelHead, pointer => this.levelItem(pointer).next);
+    visit(this.freeLevelHead, pointer => this.levelItem(pointer).next);
+    visit(this.locationHead, pointer => this.infoEntity(pointer).next);
+    visit(this.campHead, pointer => this.infoEntity(pointer).next);
   }
 
-  private get levelHead(): number { return this.mapWords.getUint32(0, true); }
-  private set levelHead(value: number) { this.mapWords.setUint32(0, value, true); }
-  private get freeLevelHead(): number { return this.mapWords.getUint32(4, true); }
-  private set freeLevelHead(value: number) { this.mapWords.setUint32(4, value, true); }
-  private get initialItemCount(): number { return this.mapWords.getInt32(8, true); }
-  private set initialItemCount(value: number) { this.mapWords.setInt32(8, value, true); }
-  private get locationHead(): number { return this.mapWords.getUint32(12, true); }
-  private set locationHead(value: number) { this.mapWords.setUint32(12, value, true); }
-  private get campHead(): number { return this.mapWords.getUint32(16, true); }
-  private set campHead(value: number) { this.mapWords.setUint32(16, value, true); }
+  private get levelHead(): number {
+    return this.mapWords.getUint32(0, true);
+  }
+  private set levelHead(value: number) {
+    this.mapWords.setUint32(0, value, true);
+  }
+  private get freeLevelHead(): number {
+    return this.mapWords.getUint32(4, true);
+  }
+  private set freeLevelHead(value: number) {
+    this.mapWords.setUint32(4, value, true);
+  }
+  private get initialItemCount(): number {
+    return this.mapWords.getInt32(8, true);
+  }
+  private set initialItemCount(value: number) {
+    this.mapWords.setInt32(8, value, true);
+  }
+  private get locationHead(): number {
+    return this.mapWords.getUint32(12, true);
+  }
+  private set locationHead(value: number) {
+    this.mapWords.setUint32(12, value, true);
+  }
+  private get campHead(): number {
+    return this.mapWords.getUint32(16, true);
+  }
+  private set campHead(value: number) {
+    this.mapWords.setUint32(16, value, true);
+  }
 
-  constructor(options: GoalLibraryOptions) { this.options = options; this.memory = options.memory ?? new BotMemory(); }
-  get diagnostics(): readonly GoalDiagnostic[] { return Object.freeze([...this.reported]); }
-  get itemConfig(): ItemConfig | null { return this.config; }
-  get gameType(): number { return this.configuredGameType; }
+  constructor(options: GoalLibraryOptions) {
+    this.options = options;
+    this.memory = options.memory ?? new BotMemory();
+  }
+  get diagnostics(): readonly GoalDiagnostic[] {
+    return Object.freeze([...this.reported]);
+  }
+  get itemConfig(): ItemConfig | null {
+    return this.config;
+  }
+  get gameType(): number {
+    return this.configuredGameType;
+  }
 
   setup(path = "items.c"): number {
-    const generation = this.generation, revision = ++this.setupRevision;
+    const generation = this.generation,
+      revision = ++this.setupRevision;
     const checkCurrent = (): undefined => {
       if (generation !== this.generation || revision !== this.setupRevision) throw new RetiredGoalSetup();
       return undefined;
@@ -873,25 +1309,31 @@ export class BotGoalLibrary {
   }
 
   interbreedGoalFuzzyLogic(parent1: number, parent2: number, child: number): readonly string[] {
-    const first = this.state(parent1), second = this.state(parent2), output = this.state(child);
+    const first = this.state(parent1),
+      second = this.state(parent2),
+      output = this.state(child);
     if (first === undefined || second === undefined || output === undefined) return [];
     if (first.weightConfig === null || second.weightConfig === null || output.weightConfig === null) {
       this.report("fatal", "goal fuzzy interbreeding requires loaded item weights");
       return [];
     }
-    return output.weightConfig.interbreedFrom(first.weightConfig, second.weightConfig,
-      message => this.report("error", `${message}\n`));
+    return output.weightConfig.interbreedFrom(first.weightConfig, second.weightConfig, message => this.report("error", `${message}\n`));
   }
 
   mutateGoalFuzzyLogic(handle: number, _range?: number): void {
     const state = this.state(handle);
     if (state === undefined) return;
-    if (state.weightConfig === null) { this.report("fatal", "goal fuzzy mutation requires loaded item weights"); return; }
+    if (state.weightConfig === null) {
+      this.report("fatal", "goal fuzzy mutation requires loaded item weights");
+      return;
+    }
     state.weightConfig.evolve(this.options.random);
   }
 
   // be_ai_goal.c:239-246 deliberately never calls WriteWeightConfig.
-  saveGoalFuzzyLogic(handle: number, _filename?: string): void { this.state(handle); }
+  saveGoalFuzzyLogic(handle: number, _filename?: string): void {
+    this.state(handle);
+  }
 
   pushGoal(handle: number, goal: BotGoal | Uint8Array | (() => BotGoal | Uint8Array)): void {
     const state = this.state(handle);
@@ -905,14 +1347,33 @@ export class BotGoalLibrary {
     const input = typeof goal === "function" ? goal() : goal;
     state.writeGoal(state.stackTop, input);
   }
-  popGoal(handle: number): void { const state = this.state(handle); if (state !== undefined && state.stackTop > 0) state.stackTop--; }
-  emptyGoalStack(handle: number): void { const state = this.state(handle); if (state !== undefined) state.stackTop = 0; }
-  getTopGoal(handle: number): BotGoal | null { const state = this.state(handle); return state === undefined || state.stackTop === 0 ? null : state.readGoal(state.stackTop); }
-  getSecondGoal(handle: number): BotGoal | null { const state = this.state(handle); return state === undefined || state.stackTop <= 1 ? null : state.readGoal(state.stackTop - 1); }
-  getTopGoalBytes(handle: number): Uint8Array | null { const state = this.state(handle); return state === undefined || state.stackTop === 0 ? null : state.goalBytes(state.stackTop); }
-  getSecondGoalBytes(handle: number): Uint8Array | null { const state = this.state(handle); return state === undefined || state.stackTop <= 1 ? null : state.goalBytes(state.stackTop - 1); }
+  popGoal(handle: number): void {
+    const state = this.state(handle);
+    if (state !== undefined && state.stackTop > 0) state.stackTop--;
+  }
+  emptyGoalStack(handle: number): void {
+    const state = this.state(handle);
+    if (state !== undefined) state.stackTop = 0;
+  }
+  getTopGoal(handle: number): BotGoal | null {
+    const state = this.state(handle);
+    return state === undefined || state.stackTop === 0 ? null : state.readGoal(state.stackTop);
+  }
+  getSecondGoal(handle: number): BotGoal | null {
+    const state = this.state(handle);
+    return state === undefined || state.stackTop <= 1 ? null : state.readGoal(state.stackTop - 1);
+  }
+  getTopGoalBytes(handle: number): Uint8Array | null {
+    const state = this.state(handle);
+    return state === undefined || state.stackTop === 0 ? null : state.goalBytes(state.stackTop);
+  }
+  getSecondGoalBytes(handle: number): Uint8Array | null {
+    const state = this.state(handle);
+    return state === undefined || state.stackTop <= 1 ? null : state.goalBytes(state.stackTop - 1);
+  }
   dumpGoalStack(handle: number): readonly BotGoal[] {
-    const state = this.state(handle), result: BotGoal[] = [];
+    const state = this.state(handle),
+      result: BotGoal[] = [];
     if (state === undefined) return result;
     for (let index = 1; index <= state.stackTop; index++) {
       const goal = state.readGoal(index);
@@ -924,13 +1385,20 @@ export class BotGoalLibrary {
 
   resetAvoidGoals(handle: number): void {
     const state = this.state(handle);
-    if (state !== undefined) for (const goal of state.avoid) { goal.number = 0; goal.expires = 0; }
+    if (state !== undefined)
+      for (const goal of state.avoid) {
+        goal.number = 0;
+        goal.expires = 0;
+      }
   }
   resetGoalState(handle: number): void {
     const state = this.state(handle);
     if (state === undefined) return;
     state.clearStack();
-    for (const goal of state.avoid) { goal.number = 0; goal.expires = 0; }
+    for (const goal of state.avoid) {
+      goal.number = 0;
+      goal.expires = 0;
+    }
   }
   setAvoidGoalTime(handle: number, number: number, duration: number): void {
     const state = this.state(handle);
@@ -987,14 +1455,14 @@ export class BotGoalLibrary {
 
   freeInfoEntities(): void {
     this.mapRevision++;
-    for (let pointer = this.locationHead; pointer !== 0;) {
+    for (let pointer = this.locationHead; pointer !== 0; ) {
       const location = this.infoEntity(pointer);
       pointer = location.next;
       this.memory.free(location.allocation);
       this.infoEntities.delete(location.pointer);
     }
     this.locationHead = 0;
-    for (let pointer = this.campHead; pointer !== 0;) {
+    for (let pointer = this.campHead; pointer !== 0; ) {
       const camp = this.infoEntity(pointer);
       pointer = camp.next;
       this.memory.free(camp.allocation);
@@ -1005,8 +1473,10 @@ export class BotGoalLibrary {
 
   initInfoEntities(world: GoalWorld): void {
     this.freeInfoEntities();
-    const revision = this.mapRevision, bsp = world.bspEntities;
-    let locationCount = 0, campCount = 0;
+    const revision = this.mapRevision,
+      bsp = world.bspEntities;
+    let locationCount = 0,
+      campCount = 0;
     for (let entity = bsp.nextEntity(0); entity !== 0; entity = bsp.nextEntity(entity)) {
       const classname = bspString(bsp, entity, "classname");
       if (classname !== "target_location" && classname !== "info_camp") continue;
@@ -1027,8 +1497,10 @@ export class BotGoalLibrary {
         this.infoEntities.set(camp.pointer, camp);
         camp.origin = bsp.vector(entity, "origin").value;
         camp.readName(bsp, entity);
-        camp.range = bsp.float(entity, "range").value; camp.weight = bsp.float(entity, "weight").value;
-        camp.wait = bsp.float(entity, "wait").value; camp.random = bsp.float(entity, "random").value;
+        camp.range = bsp.float(entity, "range").value;
+        camp.weight = bsp.float(entity, "weight").value;
+        camp.wait = bsp.float(entity, "wait").value;
+        camp.random = bsp.float(entity, "random").value;
         const area = world.pointArea(camp.origin);
         if (revision !== this.mapRevision) return;
         camp.area = area;
@@ -1081,7 +1553,9 @@ export class BotGoalLibrary {
     this.freeLevelHead = 1;
     this.levelHead = 0;
     this.initialItemCount = 0;
-    const config = this.config, navigation = world.navigation, bsp = world.bspEntities;
+    const config = this.config,
+      navigation = world.navigation,
+      bsp = world.bspEntities;
     if (config === null || navigation === null) return;
     for (const info of config.items) {
       if (info.modelIndex !== 0) continue;
@@ -1127,12 +1601,17 @@ export class BotGoalLibrary {
       if (item === null) return;
       item.number = ++this.initialItemCount;
       this.validateSourceGoalRange();
-      item.timeout = 0; item.entity = 0; item.flags = 0;
+      item.timeout = 0;
+      item.entity = 0;
+      item.flags = 0;
       if (bsp.int(entity, "notfree").value !== 0) item.flags |= 1;
       if (bsp.int(entity, "notteam").value !== 0) item.flags |= 2;
       if (bsp.int(entity, "notsingle").value !== 0) item.flags |= 4;
       if (bsp.int(entity, "notbot").value !== 0) item.flags |= 8;
-      if (classname === "item_botroam") { item.flags |= 16; item.weight = bsp.float(entity, "weight").value; }
+      if (classname === "item_botroam") {
+        item.flags |= 16;
+        item.weight = bsp.float(entity, "weight").value;
+      }
       if ((spawnFlags & 1) === 0) {
         const dropped = navigation.dropToFloor(origin, bounds);
         if (revision !== this.mapRevision) return;
@@ -1146,9 +1625,13 @@ export class BotGoalLibrary {
       item.origin = origin;
       const position = goalArea === 0 ? navigation.bestReachableArea(origin, bounds) : { area: goalArea, origin };
       if (revision !== this.mapRevision) return;
-      item.goalArea = position.area; item.goalOrigin = position.origin;
+      item.goalArea = position.area;
+      item.goalOrigin = position.origin;
       if (position.area === 0) {
-        this.report("message", `${classname} not reachable for bots at (${goalFloatText(origin.x, 1)} ${goalFloatText(origin.y, 1)} ${goalFloatText(origin.z, 1)})\n`);
+        this.report(
+          "message",
+          `${classname} not reachable for bots at (${goalFloatText(origin.x, 1)} ${goalFloatText(origin.y, 1)} ${goalFloatText(origin.z, 1)})\n`,
+        );
         if (revision !== this.mapRevision) return;
       }
       this.addLevelItem(item);
@@ -1158,12 +1641,14 @@ export class BotGoalLibrary {
 
   goalName(number: number): string {
     if (isSourceGoalNumber(number)) return this.sourceGoals.get(number)?.name ?? "";
-    return this.config === null ? "" : this.findLevelItem(item => item.number === number)?.info.name ?? ""; }
+    return this.config === null ? "" : (this.findLevelItem(item => item.number === number)?.info.name ?? "");
+  }
 
   writeGoalName(number: number, found: (name: string) => undefined, missing: () => undefined): void {
     if (isSourceGoalNumber(number)) {
       const source = this.sourceGoals.get(number);
-      if (source === undefined) missing(); else found(source.name);
+      if (source === undefined) missing();
+      else found(source.name);
       return;
     }
     if (this.config === null) return;
@@ -1182,7 +1667,7 @@ export class BotGoalLibrary {
       if (previous === undefined) return null;
       pointer = previous.next;
     }
-    for (; pointer !== 0;) {
+    for (; pointer !== 0; ) {
       const item = this.levelItem(pointer);
       if (this.allowed(item.flags) && (item.flags & 8) === 0 && goalNameMatches(name, item.info.name)) {
         return copyGoal({ ...prior, ...this.itemGoal(item), itemInfo: prior.itemInfo, flags: GoalFlags.Item | (item.timeout !== 0 ? GoalFlags.Dropped : 0) });
@@ -1194,7 +1679,7 @@ export class BotGoalLibrary {
 
   /** Map and camp queries preserve prior number/flags/itemInfo, or initialize them to zero. */
   getMapLocationGoal(name: string | ((candidate: string) => boolean), prior: BotGoal = blankGoal()): BotGoal | null {
-    for (let pointer = this.locationHead; pointer !== 0;) {
+    for (let pointer = this.locationHead; pointer !== 0; ) {
       const location = this.infoEntity(pointer);
       if (goalNameMatches(name, location.name)) return this.infoGoal(location, prior);
       pointer = location.next;
@@ -1206,7 +1691,7 @@ export class BotGoalLibrary {
     if (!Number.isInteger(index)) throw new RangeError("camp spot index must be an integer");
     const position = Math.max(0, index);
     let remaining = position;
-    for (let pointer = this.campHead; pointer !== 0;) {
+    for (let pointer = this.campHead; pointer !== 0; ) {
       const camp = this.infoEntity(pointer);
       if (--remaining < 0) return { next: position + 1, goal: this.infoGoal(camp, prior) };
       pointer = camp.next;
@@ -1220,17 +1705,27 @@ export class BotGoalLibrary {
     if (item === undefined) return;
     for (const entity of this.entityNumbers(this.world.host)) {
       const info = this.world.host.entityInfo(entity);
-      if (info.modelIndex !== 0 && sameVector(info.origin, info.lastVisibleOrigin) && info.modelIndex === item.info.modelIndex && length3(sub3(item.origin, info.origin)) < 30) item.entity = entity;
+      if (
+        info.modelIndex !== 0 &&
+        sameVector(info.origin, info.lastVisibleOrigin) &&
+        info.modelIndex === item.info.modelIndex &&
+        length3(sub3(item.origin, info.origin)) < 30
+      )
+        item.entity = entity;
     }
   }
 
   updateEntityItems(): void {
-    for (let pointer = this.levelHead; pointer !== 0;) {
+    for (let pointer = this.levelHead; pointer !== 0; ) {
       const item = this.levelItem(pointer);
       pointer = item.next;
-      if (item.timeout !== 0 && item.timeout < this.now()) { this.removeLevelItem(item); this.freeLevelItem(item); }
+      if (item.timeout !== 0 && item.timeout < this.now()) {
+        this.removeLevelItem(item);
+        this.freeLevelItem(item);
+      }
     }
-    const world = this.world, config = this.config;
+    const world = this.world,
+      config = this.config;
     if (world === null || config === null) return;
     const navigation = world.navigation;
     if (navigation === null) return;
@@ -1239,10 +1734,16 @@ export class BotGoalLibrary {
       if (info.type !== 2 || info.modelIndex === 0 || !sameVector(info.origin, info.lastVisibleOrigin)) continue;
       const existing = this.findLevelItem(item => item.entity !== 0 && item.entity === entity);
       if (existing !== undefined) {
-        if (existing.info.modelIndex === info.modelIndex) { this.moveItem(existing, info.origin, navigation); continue; }
-        this.removeLevelItem(existing); this.freeLevelItem(existing);
+        if (existing.info.modelIndex === info.modelIndex) {
+          this.moveItem(existing, info.origin, navigation);
+          continue;
+        }
+        this.removeLevelItem(existing);
+        this.freeLevelItem(existing);
       }
-      const unlinked = this.findLevelItem(item => item.entity === 0 && this.allowed(item.flags) && item.info.modelIndex === info.modelIndex && length3(sub3(item.origin, info.origin)) < 30);
+      const unlinked = this.findLevelItem(
+        item => item.entity === 0 && this.allowed(item.flags) && item.info.modelIndex === info.modelIndex && length3(sub3(item.origin, info.origin)) < 30,
+      );
       if (unlinked !== undefined) {
         unlinked.entity = entity;
         this.moveItem(unlinked, info.origin, navigation);
@@ -1253,13 +1754,19 @@ export class BotGoalLibrary {
       if (itemInfo === undefined) continue;
       const item = this.allocLevelItem();
       if (item === null) continue;
-      item.entity = entity; item.number = this.initialItemCount + entity;
-      item.infoIndex = config.items.indexOf(itemInfo); item.origin = info.origin;
+      item.entity = entity;
+      item.number = this.initialItemCount + entity;
+      item.infoIndex = config.items.indexOf(itemInfo);
+      item.origin = info.origin;
       const goal = navigation.bestReachableArea(item.origin, itemBounds(itemInfo));
-      item.goalArea = goal.area; item.goalOrigin = goal.origin;
+      item.goalArea = goal.area;
+      item.goalOrigin = goal.origin;
       const settings = navigation.area(goal.area);
       if (settings === undefined) throw new RangeError(`invalid item goal area ${goal.area}`);
-      if ((settings.contents & 128) !== 0) { this.freeLevelItem(item); continue; }
+      if ((settings.contents & 128) !== 0) {
+        this.freeLevelItem(item);
+        continue;
+      }
       item.timeout = Math.fround(this.now() + 30);
       this.addLevelItem(item);
     }
@@ -1282,8 +1789,15 @@ export class BotGoalLibrary {
     return this.world.host.entityInfo(goal.entity).lastUpdateTime < this.now() - 0.5;
   }
 
-  private chooseItem(handle: number, origin: Vec3, inventory: WeightInventory, travelFlags: number, choice: { readonly kind: "long" } | { readonly kind: "nearby"; readonly longTermGoal: BotGoal | null; readonly maxTime: number }): boolean {
-    const state = this.state(handle), world = this.world;
+  private chooseItem(
+    handle: number,
+    origin: Vec3,
+    inventory: WeightInventory,
+    travelFlags: number,
+    choice: { readonly kind: "long" } | { readonly kind: "nearby"; readonly longTermGoal: BotGoal | null; readonly maxTime: number },
+  ): boolean {
+    const state = this.state(handle),
+      world = this.world;
     if (state === undefined || state.weightConfig === null || world === null) return false;
     const navigation = world.navigation;
     if (navigation === null) return false;
@@ -1291,23 +1805,28 @@ export class BotGoalLibrary {
     if (area === 0 || navigation.area(area).reachableAreaCount === 0) area = state.lastReachabilityArea;
     state.lastReachabilityArea = area;
     if (area === 0) return false;
-    const longTermTime = choice.kind === "nearby" && choice.longTermGoal !== null ? this.travelTime(navigation, area, origin, choice.longTermGoal.area, travelFlags) : 99999;
+    const longTermTime =
+      choice.kind === "nearby" && choice.longTermGoal !== null ? this.travelTime(navigation, area, origin, choice.longTermGoal.area, travelFlags) : 99999;
     if (this.config === null) return false;
-    let bestWeight = 0, best: ItemCandidate | null = null;
+    let bestWeight = 0,
+      best: ItemCandidate | null = null;
     for (const candidate of this.itemCandidates(state.client)) {
       let weight: number;
       if (candidate.kind === "native") {
         const item = candidate.item;
         if (!this.allowed(item.flags) || (item.flags & 8) !== 0 || item.goalArea === 0 || (item.entity === 0 && (item.flags & 16) === 0)) continue;
         if (world.sourcePickups?.ownsItemGoal !== undefined) {
-          const revision = this.mapRevision, owned = world.sourcePickups.ownsItemGoal(state.client, item.entity);
+          const revision = this.mapRevision,
+            owned = world.sourcePickups.ownsItemGoal(state.client, item.entity);
           if (revision !== this.mapRevision) return false;
           if (owned) continue;
         }
         const indexes = state.weightIndexes;
         if (indexes === null) throw new RangeError("item weight indexes have not been initialized");
-        const indexView = allocationView(indexes), offset = item.info.number * 4;
-        if (!Number.isInteger(offset) || offset < 0 || offset + 4 > indexView.byteLength) throw new RangeError("item weight index is stale for the current item configuration");
+        const indexView = allocationView(indexes),
+          offset = item.info.number * 4;
+        if (!Number.isInteger(offset) || offset < 0 || offset + 4 > indexView.byteLength)
+          throw new RangeError("item weight index is stale for the current item configuration");
         const index = indexView.getInt32(offset, true);
         if (index < 0) continue;
         weight = state.weightConfig.evaluateUndecided(index, inventory, this.options.random);
@@ -1328,7 +1847,8 @@ export class BotGoalLibrary {
         const back = choice.longTermGoal !== null && returnLeg ? this.travelTime(navigation, goalArea, goalOrigin, choice.longTermGoal.area, travelFlags) : 0;
         if (back > longTermTime) continue;
       }
-      best = candidate; bestWeight = weight;
+      best = candidate;
+      bestWeight = weight;
     }
     if (best === null) return false;
     if (best.kind === "native") this.addAvoid(state, best.item.number, best.item.timeout !== 0 ? 10 : defaultAvoidTime(best.item.info));
@@ -1338,10 +1858,17 @@ export class BotGoalLibrary {
 
   sourceGoalStatus(client: number, goal: BotGoal): SourceGoalStatus {
     if (!isSourceGoalNumber(goal.number)) return "native";
-    const binding = this.sourceGoals.get(goal.number), pickups = this.world?.sourcePickups;
+    const binding = this.sourceGoals.get(goal.number),
+      pickups = this.world?.sourcePickups;
     if (binding === undefined || pickups === undefined) return "unavailable";
     const current = pickups.inspect(client, binding.actor);
-    return this.sourceGoals.get(goal.number) === binding && current !== null && current.actor.equals(binding.actor) && current.entity === goal.entity && current.utility > 0 ? "available" : "unavailable";
+    return this.sourceGoals.get(goal.number) === binding &&
+      current !== null &&
+      current.actor.equals(binding.actor) &&
+      current.entity === goal.entity &&
+      current.utility > 0
+      ? "available"
+      : "unavailable";
   }
 
   private validateSourceGoalRange(): void {
@@ -1350,10 +1877,13 @@ export class BotGoalLibrary {
   }
   private *itemCandidates(client: number): Generator<ItemCandidate, void, unknown> {
     for (const item of this.levelItems()) yield { kind: "native", item };
-    const world = this.world, pickups = world?.sourcePickups, navigation = world?.navigation;
+    const world = this.world,
+      pickups = world?.sourcePickups,
+      navigation = world?.navigation;
     if (pickups === undefined || navigation === null || navigation === undefined) return;
     this.validateSourceGoalRange();
-    const revision = this.mapRevision, candidates = pickups.candidates(client);
+    const revision = this.mapRevision,
+      candidates = pickups.candidates(client);
     if (revision !== this.mapRevision) return;
     for (const candidate of candidates) {
       const current = pickups.inspect(client, candidate.actor);
@@ -1365,22 +1895,31 @@ export class BotGoalLibrary {
       }
       let binding = this.sourceGoalsByActor.get(`${current.actor.slot}:${current.actor.generation}`);
       if (binding !== undefined && !binding.actor.equals(current.actor)) binding = undefined;
-      const worldMin = add3(current.origin, current.bounds.min), worldMax = add3(current.origin, current.bounds.max);
+      const worldMin = add3(current.origin, current.bounds.min),
+        worldMax = add3(current.origin, current.bounds.max);
       const center = scale3(add3(worldMin, worldMax), 0.5);
       const position = navigation.bestReachableArea(center, { min: sub3(worldMin, center), max: sub3(worldMax, center) });
       if (revision !== this.mapRevision) return;
       if (position.area === 0) continue;
-      const mins = sub3(worldMin, position.origin), maxs = sub3(worldMax, position.origin);
+      const mins = sub3(worldMin, position.origin),
+        maxs = sub3(worldMax, position.origin);
       if (binding === undefined) {
         if (!isSourceGoalNumber(this.nextSourceGoal)) throw new RangeError("Source pickup goal number range exhausted");
         const number = this.nextSourceGoal--;
         binding = { actor: current.actor, name: current.name, goal: blankGoal() };
         this.sourceGoals.set(number, binding);
         this.sourceGoalsByActor.set(`${current.actor.slot}:${current.actor.generation}`, binding);
-        binding.goal = copyGoal({ origin: position.origin, area: position.area, mins, maxs,
-          entity: current.entity, number, flags: GoalFlags.Item, itemInfo: -1 });
-      } else binding.goal = copyGoal({ ...binding.goal, origin: position.origin, area: position.area,
-        mins, maxs, entity: current.entity });
+        binding.goal = copyGoal({
+          origin: position.origin,
+          area: position.area,
+          mins,
+          maxs,
+          entity: current.entity,
+          number,
+          flags: GoalFlags.Item,
+          itemInfo: -1,
+        });
+      } else binding.goal = copyGoal({ ...binding.goal, origin: position.origin, area: position.area, mins, maxs, entity: current.entity });
       binding.name = current.name;
       yield { kind: "source", goal: binding.goal, utility: current.utility };
     }
@@ -1388,7 +1927,10 @@ export class BotGoalLibrary {
   private nextSourceItemGoal(after: number | null, name: string | ((candidate: string) => boolean), prior: BotGoal): BotGoal | null {
     let next = after === null;
     for (const [number, binding] of this.sourceGoals) {
-      if (!next) { if (number === after) next = true; continue; }
+      if (!next) {
+        if (number === after) next = true;
+        continue;
+      }
       if (goalNameMatches(name, binding.name)) return copyGoal({ ...binding.goal, itemInfo: prior.itemInfo });
     }
     return null;
@@ -1398,7 +1940,9 @@ export class BotGoalLibrary {
     const result = navigation.route({ area, origin, goalArea, travelFlags });
     return result.kind === "found" ? result.travelTime : 0;
   }
-  private allowed(flags: number): boolean { return (flags & (this.configuredGameType === 2 ? 4 : this.configuredGameType >= 3 ? 2 : 1)) === 0; }
+  private allowed(flags: number): boolean {
+    return (flags & (this.configuredGameType === 2 ? 4 : this.configuredGameType >= 3 ? 2 : 1)) === 0;
+  }
   private levelItem(pointer: number): LevelItem {
     const heap = this.levelItemHeap;
     if (heap === null || !Number.isInteger(pointer) || pointer <= 0 || pointer * LEVEL_ITEM_BYTES > heap.bytes.length) {
@@ -1411,7 +1955,7 @@ export class BotGoalLibrary {
     });
   }
   private *levelItems(): Generator<LevelItem, void, unknown> {
-    for (let pointer = this.levelHead; pointer !== 0;) {
+    for (let pointer = this.levelHead; pointer !== 0; ) {
       const item = this.levelItem(pointer);
       yield item;
       pointer = item.next;
@@ -1422,16 +1966,24 @@ export class BotGoalLibrary {
     return undefined;
   }
   private allocLevelItem(): LevelItem | null {
-    if (this.freeLevelHead === 0) { this.report("fatal", "out of level items\n"); return null; }
+    if (this.freeLevelHead === 0) {
+      this.report("fatal", "out of level items\n");
+      return null;
+    }
     const item = this.levelItem(this.freeLevelHead);
     this.freeLevelHead = item.next;
     item.clear();
     return item;
   }
-  private freeLevelItem(item: LevelItem): void { item.next = this.freeLevelHead; this.freeLevelHead = item.pointer; }
+  private freeLevelItem(item: LevelItem): void {
+    item.next = this.freeLevelHead;
+    this.freeLevelHead = item.pointer;
+  }
   private addLevelItem(item: LevelItem): void {
     if (this.levelHead !== 0) this.levelItem(this.levelHead).prev = item.pointer;
-    item.prev = 0; item.next = this.levelHead; this.levelHead = item.pointer;
+    item.prev = 0;
+    item.next = this.levelHead;
+    this.levelHead = item.pointer;
   }
   private removeLevelItem(item: LevelItem): void {
     if (item.prev !== 0) this.levelItem(item.prev).next = item.next;
@@ -1444,19 +1996,32 @@ export class BotGoalLibrary {
     return info;
   }
   private itemGoal(item: LevelItem): BotGoal {
-    return copyGoal({ origin: item.goalOrigin, area: item.goalArea, mins: item.info.mins, maxs: item.info.maxs, entity: item.entity, number: item.number, flags: GoalFlags.Item | (item.timeout !== 0 ? GoalFlags.Dropped : 0) | ((item.flags & 16) !== 0 ? GoalFlags.Roam : 0), itemInfo: item.info.number });
+    return copyGoal({
+      origin: item.goalOrigin,
+      area: item.goalArea,
+      mins: item.info.mins,
+      maxs: item.info.maxs,
+      entity: item.entity,
+      number: item.number,
+      flags: GoalFlags.Item | (item.timeout !== 0 ? GoalFlags.Dropped : 0) | ((item.flags & 16) !== 0 ? GoalFlags.Roam : 0),
+      itemInfo: item.info.number,
+    });
   }
-  private infoGoal(info: MapLocation, prior: BotGoal): BotGoal { return copyGoal({ ...prior, origin: info.origin, area: info.area, entity: 0, mins: vector(-8, -8, -8), maxs: vector(8, 8, 8) }); }
+  private infoGoal(info: MapLocation, prior: BotGoal): BotGoal {
+    return copyGoal({ ...prior, origin: info.origin, area: info.area, entity: 0, mins: vector(-8, -8, -8), maxs: vector(8, 8, 8) });
+  }
   private moveItem(item: LevelItem, origin: Vec3, navigation: GoalNavigation): void {
     if (sameVector(item.origin, origin)) return;
     item.origin = origin;
     const position = navigation.bestReachableArea(item.origin, itemBounds(item.info));
-    item.goalOrigin = position.origin; item.goalArea = position.area;
+    item.goalOrigin = position.origin;
+    item.goalArea = position.area;
   }
   private *entityNumbers(host: GoalWorldHost): Generator<number, void, unknown> {
     let previous = 0;
     for (let entity = host.nextEntity(0); entity !== 0; entity = host.nextEntity(entity)) {
-      if (!Number.isInteger(entity) || entity <= previous || entity > 1_000_000) throw new RangeError("AAS entity enumeration must increase within the configured entity range");
+      if (!Number.isInteger(entity) || entity <= previous || entity > 1_000_000)
+        throw new RangeError("AAS entity enumeration must increase within the configured entity range");
       yield entity;
       previous = entity;
     }
@@ -1465,7 +2030,10 @@ export class BotGoalLibrary {
   private addAvoid(state: GoalState, number: number, duration: number): void {
     // Source lines 751-774: expired slots use strict <, even when every slot is zero at time zero.
     const slot = state.avoid.find(goal => goal.number === number) ?? state.avoid.find(goal => goal.expires < this.now());
-    if (slot !== undefined) { slot.number = number; slot.expires = Math.fround(this.now() + duration); }
+    if (slot !== undefined) {
+      slot.number = number;
+      slot.expires = Math.fround(this.now() + duration);
+    }
   }
   private releaseWeights(state: GoalState): void {
     const config = state.weightConfig;
@@ -1481,14 +2049,19 @@ export class BotGoalLibrary {
       this.references.configIds.delete(config);
     }
   }
-  private now(): number { return finiteFloat(this.options.clock(), "AAS time"); }
+  private now(): number {
+    return finiteFloat(this.options.clock(), "AAS time");
+  }
   private report(severity: GoalDiagnostic["severity"], message: string): void {
     const diagnostic = Object.freeze({ severity, message });
     this.reported.push(diagnostic);
     this.options.report?.(diagnostic);
   }
   private state(handle: number): GoalState | undefined {
-    if (!Number.isInteger(handle) || handle <= 0 || handle > MAX_GOAL_STATES) { this.report("fatal", `goal state handle ${handle} out of range\n`); return undefined; }
+    if (!Number.isInteger(handle) || handle <= 0 || handle > MAX_GOAL_STATES) {
+      this.report("fatal", `goal state handle ${handle} out of range\n`);
+      return undefined;
+    }
     const state = this.states.get(handle);
     if (state === undefined) this.report("fatal", `invalid goal state ${handle}\n`);
     return state;

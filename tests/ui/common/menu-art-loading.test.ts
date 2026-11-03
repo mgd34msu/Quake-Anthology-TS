@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { loadMenuArtImage } from "../../../src/app/bootstrap/menu-art.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -25,7 +26,10 @@ test("menu artwork belongs to each renderer and closing one preserves the other"
   const identity = createIdentityOwner("menu-art-loading");
   const first = new SceneImageRegistry({ identity: Symbol("first"), session: identity.session, generation: 0 });
   const second = new SceneImageRegistry({ identity: Symbol("second"), session: identity.session, generation: 0 });
-  const [a, b] = await Promise.all([loadNativeUiArt("resource:test:font", first, loadMenuArtImage), loadNativeUiArt("resource:test:font", second, loadMenuArtImage)]);
+  const [a, b] = await Promise.all([
+    loadNativeUiArt("resource:test:font", first, loadMenuArtImage),
+    loadNativeUiArt("resource:test:font", second, loadMenuArtImage),
+  ]);
   try {
     const left = a.picture("resource:engine-menu:background").image;
     const right = b.picture("resource:engine-menu:background").image;
@@ -37,7 +41,12 @@ test("menu artwork belongs to each renderer and closing one preserves the other"
     expect(second.isResident(right)).toBe(true);
     expect(first.drainOperations().filter(operation => operation.kind === "release-image")).toHaveLength(5);
     expect(second.drainOperations()).toHaveLength(0);
-  } finally { a.close(); b.close(); first.close(); second.close(); }
+  } finally {
+    a.close();
+    b.close();
+    first.close();
+    second.close();
+  }
 });
 
 test("UI-009 production selections upload only the art they draw", async () => {
@@ -47,5 +56,8 @@ test("UI-009 production selections upload only the art they draw", async () => {
   try {
     expect(images.drainOperations().filter(operation => operation.kind === "create-image")).toHaveLength(1);
     expect([art.skin.background, art.skin.panel, art.skin.focus]).toEqual([null, null, null]);
-  } finally { art.close(); images.close(); }
+  } finally {
+    art.close();
+    images.close();
+  }
 });

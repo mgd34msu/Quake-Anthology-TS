@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
@@ -11,15 +12,30 @@ export function registerQ2ClientCommands(commands: CommandBuffer, dialect: Comma
     for (const definition of q2ClientCommands) {
       const name = definition.name === "help" ? "gamehelp" : definition.name;
       if (commands.exists(name)) continue;
-      const documentation = definition.name === "help"
-        ? { ...definition.documentation, usage: "gamehelp", examples: ["gamehelp"], summary: `${definition.documentation.summary} For console command help, use help <name>.` }
-        : definition.documentation;
-      if (commands.register(name, invocation => {
-        let origin = invocation.source.origin;
-        while (origin.kind === "script") origin = origin.caller;
-        return execute(definition.name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
-      }, documentation)) registered.push(name);
+      const documentation =
+        definition.name === "help"
+          ? {
+              ...definition.documentation,
+              usage: "gamehelp",
+              examples: ["gamehelp"],
+              summary: `${definition.documentation.summary} For console command help, use help <name>.`,
+            }
+          : definition.documentation;
+      if (
+        commands.register(
+          name,
+          invocation => {
+            let origin = invocation.source.origin;
+            while (origin.kind === "script") origin = origin.caller;
+            return execute(definition.name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
+          },
+          documentation,
+        )
+      )
+        registered.push(name);
     }
   }
-  return () => { for (const name of registered) commands.unregister(name); };
+  return () => {
+    for (const name of registered) commands.unregister(name);
+  };
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Genetic bot selection translated from id Software's
  * code/botlib/be_ai_gen.c and code/game/be_ai_gen.h.
@@ -12,22 +13,17 @@ const INT32_MIN = -0x8000_0000;
 
 export type GeneticSelectionResult =
   | {
-    readonly kind: "selected";
-    readonly parent1: number;
-    readonly parent2: number;
-    readonly child: number;
-  }
+      readonly kind: "selected";
+      readonly parent1: number;
+      readonly parent2: number;
+      readonly child: number;
+    }
   | {
-    readonly kind: "error";
-    readonly reason:
-      | "too-many-ranks"
-      | "too-few-valid-ranks"
-      | "undefined-random-index";
-  };
+      readonly kind: "error";
+      readonly reason: "too-many-ranks" | "too-few-valid-ranks" | "undefined-random-index";
+    };
 
-type RankSelectionResult =
-  | { readonly kind: "selected"; readonly index: number }
-  | { readonly kind: "undefined-random-index" };
+type RankSelectionResult = { readonly kind: "selected"; readonly index: number } | { readonly kind: "undefined-random-index" };
 
 export interface GeneticSelectionRequest {
   readonly count: number;
@@ -73,9 +69,7 @@ function selectRank(rankings: readonly number[], random: BotRandom): RankSelecti
     }
   }
 
-  const scaledIndex = Math.fround(
-    sourceUnitRandom(random) * Math.fround(rankings.length),
-  );
+  const scaledIndex = Math.fround(sourceUnitRandom(random) * Math.fround(rankings.length));
   let index = Math.trunc(scaledIndex);
   if (index === rankings.length) {
     return { kind: "undefined-random-index" };
@@ -89,18 +83,12 @@ function selectRank(rankings: readonly number[], random: BotRandom): RankSelecti
   return { kind: "selected", index: 0 };
 }
 
-export function geneticParentsAndChildSelection(
-  ranks: GeneticSelectionInput,
-  random: BotRandom,
-  warning?: (text: string) => void,
-): GeneticSelectionResult {
+export function geneticParentsAndChildSelection(ranks: GeneticSelectionInput, random: BotRandom, warning?: (text: string) => void): GeneticSelectionResult {
   const count = "count" in ranks ? ranks.count : ranks.length;
   if (!Number.isInteger(count) || count < INT32_MIN || count > 0x7fff_ffff) {
     throw new RangeError("genetic rank count must be an int32");
   }
-  const readRank = (index: number): number => Math.fround(
-    "count" in ranks ? ranks.rank(index) : rankAt(ranks, index),
-  );
+  const readRank = (index: number): number => Math.fround("count" in ranks ? ranks.rank(index) : rankAt(ranks, index));
   const write = (target: "parent1" | "parent2" | "child", value: number): void => {
     if ("count" in ranks) ranks.write(target, value);
   };

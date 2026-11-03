@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { hipnoticOverlay, overlayWeapons } from "./hipnotic-overlay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
@@ -34,9 +35,14 @@ export const Q3_Q1_SUPPLY_PROFILE: PickupSupplyProfile = {
   ],
 };
 
-const hipnoticWeapons = hipnoticOverlay([["q3:weapon/plasmagun", ["q1:weapon/hipnotic:laser"]], ["q3:weapon/grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q3:weapon/bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
+const hipnoticWeapons = hipnoticOverlay([
+  ["q3:weapon/plasmagun", ["q1:weapon/hipnotic:laser"]],
+  ["q3:weapon/grenadelauncher", ["q1:weapon/hipnotic:proximity"]],
+  ["q3:weapon/bfg", ["q1:weapon/hipnotic:mjolnir"]],
+]);
 
 export const Q3_HIPNOTIC_SUPPLY_PROFILE: PickupSupplyProfile = {
-  ...Q3_Q1_SUPPLY_PROFILE, id: "composition:q3-hipnotic-supply",
+  ...Q3_Q1_SUPPLY_PROFILE,
+  id: "composition:q3-hipnotic-supply",
   weapons: overlayWeapons(Q3_Q1_SUPPLY_PROFILE.weapons, hipnoticWeapons),
 };

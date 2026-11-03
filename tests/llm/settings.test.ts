@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,9 @@ import { LlmSettingsError, LlmSettingsService } from "../../src/llm/settings.ts"
 import { refreshSubscription, type SubscriptionAuthOptions } from "../../src/llm/auth.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const finish of cleanup.splice(0).reverse()) await finish(); });
+afterEach(async () => {
+  for (const finish of cleanup.splice(0).reverse()) await finish();
+});
 async function fixture(auth: SubscriptionAuthOptions = {}): Promise<{ service: LlmSettingsService; directory: string }> {
   const directory = await mkdtemp(join(tmpdir(), "quake-llm-test-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
@@ -16,7 +19,8 @@ async function fixture(auth: SubscriptionAuthOptions = {}): Promise<{ service: L
   return { service, directory };
 }
 function callbackUrl(authorization: string, stateOverride?: string): URL {
-  const auth = new URL(authorization), redirect = auth.searchParams.get("redirect_uri");
+  const auth = new URL(authorization),
+    redirect = auth.searchParams.get("redirect_uri");
   if (redirect === null) throw new Error("Missing callback URL");
   const url = new URL(redirect);
   url.hostname = "127.0.0.1";
@@ -24,7 +28,16 @@ function callbackUrl(authorization: string, stateOverride?: string): URL {
   url.searchParams.set("code", "test-code");
   return url;
 }
-function tokens(): Response { return Response.json({ access_token: "test-access", refresh_token: "test-refresh", token_type: "Bearer", expires_in: 3600, scope: "openid profile", id_token: "must-not-save" }); }
+function tokens(): Response {
+  return Response.json({
+    access_token: "test-access",
+    refresh_token: "test-refresh",
+    token_type: "Bearer",
+    expires_in: 3600,
+    scope: "openid profile",
+    id_token: "must-not-save",
+  });
+}
 
 describe("LLM settings", () => {
   test("stores independent credentials, models and explicit Other API service in the base directory", async () => {
@@ -43,7 +56,9 @@ describe("LLM settings", () => {
     for (const file of ["chatgpt.key", "other.key", "other.service", "llm.json"]) expect((await stat(join(directory, file))).mode & 0o777).toBe(0o600);
     await service.removeCredential("chatgpt-api");
     expect(service.read().providers["other-api"].configured).toBe(true);
-    await expect(service.saveOtherService({ transport: "openai-chat-completions", baseUrl: "https://key:secret@example.test/v1", model: "" })).rejects.toBeInstanceOf(LlmSettingsError);
+    await expect(
+      service.saveOtherService({ transport: "openai-chat-completions", baseUrl: "https://key:secret@example.test/v1", model: "" }),
+    ).rejects.toBeInstanceOf(LlmSettingsError);
   });
 
   test("preserves malformed files at startup and on unrelated changes", async () => {
@@ -81,7 +96,13 @@ describe("LLM settings", () => {
   });
 
   test("saving an API key after sign-in keeps the subscription and a refresh token edited on disk", async () => {
-    const { service, directory } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => { expect((await fetch(callbackUrl(url))).status).toBe(200); } });
+    const { service, directory } = await fixture({
+      callbackPort: 0,
+      fetch: async () => tokens(),
+      openBrowser: async url => {
+        expect((await fetch(callbackUrl(url))).status).toBe(200);
+      },
+    });
     await service.signInSubscription();
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
     const path = join(directory, "chatgpt.key");
@@ -100,23 +121,38 @@ describe("LLM settings", () => {
 
 describe("subscription OAuth", () => {
   test("real loopback callback verifies PKCE and stores tokens without erasing API key", async () => {
-    let challenge = "", requests = 0;
-    const endpoint = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
-      requests++;
-      const form = new URLSearchParams(await request.text());
-      expect(form.get("client_id")).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
-      expect(form.get("grant_type")).toBe("authorization_code");
-      expect(createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url")).toBe(challenge);
-      return tokens();
-    } });
-    cleanup.push(async () => { await endpoint.stop(true); });
-    const { service, directory } = await fixture({ callbackPort: 0, tokenUrl: `http://127.0.0.1:${endpoint.port}/token`, openBrowser: async url => {
-      const auth = new URL(url);
-      challenge = auth.searchParams.get("code_challenge") ?? "";
-      expect(auth.searchParams.get("scope")).toBe("openid profile email offline_access");
-      expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
-      expect((await fetch(callbackUrl(url))).status).toBe(200);
-    } });
+    let challenge = "",
+      requests = 0;
+    const endpoint = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        requests++;
+        const form = new URLSearchParams(await request.text());
+        expect(form.get("client_id")).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
+        expect(form.get("grant_type")).toBe("authorization_code");
+        expect(
+          createHash("sha256")
+            .update(form.get("code_verifier") ?? "")
+            .digest("base64url"),
+        ).toBe(challenge);
+        return tokens();
+      },
+    });
+    cleanup.push(async () => {
+      await endpoint.stop(true);
+    });
+    const { service, directory } = await fixture({
+      callbackPort: 0,
+      tokenUrl: `http://127.0.0.1:${endpoint.port}/token`,
+      openBrowser: async url => {
+        const auth = new URL(url);
+        challenge = auth.searchParams.get("code_challenge") ?? "";
+        expect(auth.searchParams.get("scope")).toBe("openid profile email offline_access");
+        expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
+        expect((await fetch(callbackUrl(url))).status).toBe(200);
+      },
+    });
     await service.saveApiKey("chatgpt-api", "api-preserved");
     await service.signInSubscription();
     expect(requests).toBe(1);
@@ -132,15 +168,22 @@ describe("subscription OAuth", () => {
 
   test("PLATFORM-015 a wrong-state request gets 400 without requesting tokens or reflecting provider text, and does not abort sign-in", async () => {
     let requests = 0;
-    const { service } = await fixture({ callbackPort: 0, fetch: async () => { requests++; return tokens(); }, openBrowser: async url => {
-      const target = callbackUrl(url, "wrong-state-secret");
-      target.searchParams.set("error", "provider-secret");
-      const response = await fetch(target);
-      expect(response.status).toBe(400);
-      expect(await response.text()).not.toContain("secret");
-      expect(requests).toBe(0);
-      expect((await fetch(callbackUrl(url))).status).toBe(200);
-    } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      fetch: async () => {
+        requests++;
+        return tokens();
+      },
+      openBrowser: async url => {
+        const target = callbackUrl(url, "wrong-state-secret");
+        target.searchParams.set("error", "provider-secret");
+        const response = await fetch(target);
+        expect(response.status).toBe(400);
+        expect(await response.text()).not.toContain("secret");
+        expect(requests).toBe(0);
+        expect((await fetch(callbackUrl(url))).status).toBe(200);
+      },
+    });
     await service.signInSubscription();
     expect(JSON.stringify(service.read())).not.toContain("secret");
     expect(requests).toBe(1);
@@ -149,10 +192,14 @@ describe("subscription OAuth", () => {
   test("cancel settles stalled browser, stops callback and prevents late saves", async () => {
     let callback = "";
     const started = Promise.withResolvers<void>();
-    const { service, directory } = await fixture({ callbackPort: 0, openBrowser: async url => {
-      callback = callbackUrl(url).toString(); started.resolve();
-      await new Promise<void>(() => {});
-    } });
+    const { service, directory } = await fixture({
+      callbackPort: 0,
+      openBrowser: async url => {
+        callback = callbackUrl(url).toString();
+        started.resolve();
+        await new Promise<void>(() => {});
+      },
+    });
     const pending = service.signInSubscription();
     await started.promise;
     service.cancelSignIn();
@@ -163,16 +210,27 @@ describe("subscription OAuth", () => {
   });
 
   test("close aborts token exchange even when injected fetch ignores abort", async () => {
-    const started = Promise.withResolvers<void>(), late = Promise.withResolvers<Response>();
+    const started = Promise.withResolvers<void>(),
+      late = Promise.withResolvers<Response>();
     let fetchSignal: AbortSignal | null = null;
-    const { service, directory } = await fixture({ callbackPort: 0, openBrowser: async url => { await fetch(callbackUrl(url)); }, fetch: async (_url, init) => {
-      fetchSignal = init.signal ?? null; started.resolve(); return await late.promise;
-    } });
+    const { service, directory } = await fixture({
+      callbackPort: 0,
+      openBrowser: async url => {
+        await fetch(callbackUrl(url));
+      },
+      fetch: async (_url, init) => {
+        fetchSignal = init.signal ?? null;
+        started.resolve();
+        return await late.promise;
+      },
+    });
     const pending = service.signInSubscription();
     await started.promise;
     await service.close();
     await pending;
-    function aborted(signal: AbortSignal | null): boolean { return signal?.aborted ?? false; }
+    function aborted(signal: AbortSignal | null): boolean {
+      return signal?.aborted ?? false;
+    }
     expect(aborted(fetchSignal)).toBe(true);
     late.resolve(tokens());
     await new Promise<void>(resolve => setTimeout(resolve, 10));
@@ -180,45 +238,77 @@ describe("subscription OAuth", () => {
   });
 
   test("token body timeout settles", async () => {
-    const { service } = await fixture({ callbackPort: 0, fetchTimeoutMs: 10, openBrowser: async url => { await fetch(callbackUrl(url)); }, fetch: async () => new Response(new ReadableStream<Uint8Array>({ start() {} })) });
+    const { service } = await fixture({
+      callbackPort: 0,
+      fetchTimeoutMs: 10,
+      openBrowser: async url => {
+        await fetch(callbackUrl(url));
+      },
+      fetch: async () => new Response(new ReadableStream<Uint8Array>({ start() {} })),
+    });
     await expect(service.signInSubscription()).rejects.toThrow("token request failed");
     expect(service.read().subscriptionAuth.status).toBe("error");
   });
   test("refresh uses the rotating token form and rejects a missing replacement", async () => {
     const credential = { accessToken: "old-access", refreshToken: "old-refresh", tokenType: "Bearer", expiresAt: 1, scopes: ["openid"] };
-    const refreshed = await refreshSubscription({ fetch: async (_url, init) => {
-      const body: unknown = init.body;
-      if (typeof body !== "string") throw new Error("Expected form body");
-      expect(body).toBe("grant_type=refresh_token&client_id=app_EMoamEEZ73f0CkXaXp7hrann&refresh_token=old-refresh");
-      return tokens();
-    } }, credential, new AbortController().signal);
+    const refreshed = await refreshSubscription(
+      {
+        fetch: async (_url, init) => {
+          const body: unknown = init.body;
+          if (typeof body !== "string") throw new Error("Expected form body");
+          expect(body).toBe("grant_type=refresh_token&client_id=app_EMoamEEZ73f0CkXaXp7hrann&refresh_token=old-refresh");
+          return tokens();
+        },
+      },
+      credential,
+      new AbortController().signal,
+    );
     expect(refreshed.refreshToken).toBe("test-refresh");
     // PLATFORM-014: a refresh response without a new refresh_token keeps the previous one (RFC 6749 section 6).
-    const kept = await refreshSubscription({ fetch: async () => Response.json({ access_token: "new", expires_in: 3600 }) }, credential, new AbortController().signal);
+    const kept = await refreshSubscription(
+      { fetch: async () => Response.json({ access_token: "new", expires_in: 3600 }) },
+      credential,
+      new AbortController().signal,
+    );
     expect(kept.refreshToken).toBe(credential.refreshToken);
   });
 
   test("callback succeeds even when browser launcher stays running", async () => {
-    const { service } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => {
-      await fetch(callbackUrl(url));
-      await new Promise<void>(() => {});
-    } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      fetch: async () => tokens(),
+      openBrowser: async url => {
+        await fetch(callbackUrl(url));
+        await new Promise<void>(() => {});
+      },
+    });
     await service.signInSubscription();
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
   });
 
   test("callback listener answers while the game thread is blocked", async () => {
     let callbackStatus = 0;
-    const { service } = await fixture({ callbackPort: 0, callbackTimeoutMs: 8_000, fetch: async () => tokens(), openBrowser: async url => {
-      const target = callbackUrl(url).toString();
-      const browser = Bun.spawn([process.execPath, "-e", "await Bun.sleep(300); console.log((await fetch(process.argv[1], { signal: AbortSignal.timeout(1000) })).status);", target], { stdout: "pipe", stderr: "pipe" });
-      const answered = (async () => { callbackStatus = Number(await new Response(browser.stdout).text()); await browser.exited; })();
-      const blockedUntil = performance.now() + 2000;
-      let sink = 0;
-      while (performance.now() < blockedUntil) sink += Math.sqrt(sink + 1);
-      if (sink === -1) throw new Error("unreachable");
-      await answered;
-    } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      callbackTimeoutMs: 8_000,
+      fetch: async () => tokens(),
+      openBrowser: async url => {
+        const target = callbackUrl(url).toString();
+        const browser = Bun.spawn(
+          [process.execPath, "-e", "await Bun.sleep(300); console.log((await fetch(process.argv[1], { signal: AbortSignal.timeout(1000) })).status);", target],
+          { stdout: "pipe", stderr: "pipe" },
+        );
+        const answered = (async () => {
+          callbackStatus = Number(await new Response(browser.stdout).text());
+          await browser.exited;
+        })();
+        const blockedUntil = performance.now() + 2000;
+        let sink = 0;
+        while (performance.now() < blockedUntil) sink += Math.sqrt(sink + 1);
+        if (sink === -1) throw new Error("unreachable");
+        await answered;
+      },
+    });
     await service.signInSubscription();
     expect(callbackStatus).toBe(200);
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
@@ -226,11 +316,20 @@ describe("subscription OAuth", () => {
 
   test("successful callback sends the browser its full response before closing the listener", async () => {
     const launched = Promise.withResolvers<string>();
-    const { service } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => { launched.resolve(url); } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      fetch: async () => tokens(),
+      openBrowser: async url => {
+        launched.resolve(url);
+      },
+    });
     const login = service.signInSubscription();
     const target = callbackUrl(await launched.promise);
     target.hostname = "localhost";
-    const browser = fetch(target).then(async response => ({ status: response.status, body: await response.text() }), () => ({ status: 0, body: "connection failed" }));
+    const browser = fetch(target).then(
+      async response => ({ status: response.status, body: await response.text() }),
+      () => ({ status: 0, body: "connection failed" }),
+    );
     await login;
     expect(await browser).toEqual({ status: 200, body: "Authorization received. You can return to the game." });
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
@@ -238,24 +337,43 @@ describe("subscription OAuth", () => {
   });
 
   test("callback timeout and occupied callback port settle with safe errors", async () => {
-    const { service } = await fixture({ callbackPort: 0, callbackTimeoutMs: 10, openBrowser: async () => { await new Promise<void>(() => {}); } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      callbackTimeoutMs: 10,
+      openBrowser: async () => {
+        await new Promise<void>(() => {});
+      },
+    });
     await expect(service.signInSubscription()).rejects.toThrow("timed out");
     const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("test") });
-    cleanup.push(async () => { await listener.stop(true); });
+    cleanup.push(async () => {
+      await listener.stop(true);
+    });
     const port = listener.port;
     if (port === undefined) throw new Error("Missing listener port");
-    const occupied = await fixture({ callbackPort: port, openBrowser: async () => { throw new Error("must not run"); } });
+    const occupied = await fixture({
+      callbackPort: port,
+      openBrowser: async () => {
+        throw new Error("must not run");
+      },
+    });
     await expect(occupied.service.signInSubscription()).rejects.toThrow("local sign-in callback");
   });
 
   test("sign-in restarts immediately after cancellation", async () => {
     const firstStarted = Promise.withResolvers<void>();
     let browsers = 0;
-    const { service } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => {
-      browsers++;
-      if (browsers === 1) { firstStarted.resolve(); await new Promise<void>(() => {}); }
-      else await fetch(callbackUrl(url));
-    } });
+    const { service } = await fixture({
+      callbackPort: 0,
+      fetch: async () => tokens(),
+      openBrowser: async url => {
+        browsers++;
+        if (browsers === 1) {
+          firstStarted.resolve();
+          await new Promise<void>(() => {});
+        } else await fetch(callbackUrl(url));
+      },
+    });
     const first = service.signInSubscription();
     await firstStarted.promise;
     service.cancelSignIn();
@@ -264,5 +382,4 @@ describe("subscription OAuth", () => {
     expect(browsers).toBe(2);
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
   });
-
 });

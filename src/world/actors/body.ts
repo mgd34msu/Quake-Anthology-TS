@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { NumericOperations } from "../../contracts/numeric.ts";
@@ -20,10 +21,20 @@ export interface BodyLinkState {
   readonly linked: { readonly state: BodyState; readonly absoluteBounds: Bounds } | null;
 }
 
-export function copyVector(vector: Vec3): Vec3 { return Object.freeze({ x: vector.x, y: vector.y, z: vector.z }); }
-export function copyBounds(bounds: Bounds): Bounds { return Object.freeze({ min: copyVector(bounds.min), max: copyVector(bounds.max) }); }
+export function copyVector(vector: Vec3): Vec3 {
+  return Object.freeze({ x: vector.x, y: vector.y, z: vector.z });
+}
+export function copyBounds(bounds: Bounds): Bounds {
+  return Object.freeze({ min: copyVector(bounds.min), max: copyVector(bounds.max) });
+}
 export function copyBody(state: BodyState): BodyState {
-  return Object.freeze({ origin: copyVector(state.origin), angles: copyVector(state.angles), velocity: copyVector(state.velocity), bounds: copyBounds(state.bounds), ground: state.ground });
+  return Object.freeze({
+    origin: copyVector(state.origin),
+    angles: copyVector(state.angles),
+    velocity: copyVector(state.velocity),
+    bounds: copyBounds(state.bounds),
+    ground: state.ground,
+  });
 }
 function sameVector(left: Vec3, right: Vec3): boolean {
   return Object.is(left.x, right.x) && Object.is(left.y, right.y) && Object.is(left.z, right.z);
@@ -36,41 +47,67 @@ function updateBodySnapshot(previous: BodyState | null, current: BodyState): Bod
   const min = sameVector(previous.bounds.min, current.bounds.min) ? previous.bounds.min : copyVector(current.bounds.min);
   const max = sameVector(previous.bounds.max, current.bounds.max) ? previous.bounds.max : copyVector(current.bounds.max);
   const bounds = min === previous.bounds.min && max === previous.bounds.max ? previous.bounds : Object.freeze({ min, max });
-  if (origin === previous.origin && angles === previous.angles && velocity === previous.velocity && bounds === previous.bounds && current.ground === previous.ground) return previous;
+  if (
+    origin === previous.origin &&
+    angles === previous.angles &&
+    velocity === previous.velocity &&
+    bounds === previous.bounds &&
+    current.ground === previous.ground
+  )
+    return previous;
   return Object.freeze({ origin, angles, velocity, bounds, ground: current.ground });
 }
 
 /** This is only an untranslated box policy. BSP rotation and family link padding are supplied by the provider. */
 export function translatedBodyBounds(_actor: OwnedActor, state: BodyState): Bounds {
-  return { min: { x: state.origin.x + state.bounds.min.x, y: state.origin.y + state.bounds.min.y, z: state.origin.z + state.bounds.min.z },
-    max: { x: state.origin.x + state.bounds.max.x, y: state.origin.y + state.bounds.max.y, z: state.origin.z + state.bounds.max.z } };
+  return {
+    min: { x: state.origin.x + state.bounds.min.x, y: state.origin.y + state.bounds.min.y, z: state.origin.z + state.bounds.min.z },
+    max: { x: state.origin.x + state.bounds.max.x, y: state.origin.y + state.bounds.max.y, z: state.origin.z + state.bounds.max.z },
+  };
 }
 
-type BodyStorage = { readonly kind: "local"; state: BodyState }
-  | { readonly kind: "external"; readonly binding: BodyStateBinding; snapshot: BodyState | null };
-interface BodyRecord { readonly actor: OwnedActor; readonly storage: BodyStorage; linked: LinkedBody | null; linkCount: number; }
+type BodyStorage = { readonly kind: "local"; state: BodyState } | { readonly kind: "external"; readonly binding: BodyStateBinding; snapshot: BodyState | null };
+interface BodyRecord {
+  readonly actor: OwnedActor;
+  readonly storage: BodyStorage;
+  linked: LinkedBody | null;
+  linkCount: number;
+}
 
 export class SharedBodyTable implements BodyTable {
   private readonly records = new Map<number, BodyRecord>();
   private readonly attachments = new Map<OwnedActor, BodyAttachment>();
 
-  constructor(private readonly actors: SessionActorRegistry, private readonly hooks: BodyLinkHooks) {
+  constructor(
+    private readonly actors: SessionActorRegistry,
+    private readonly hooks: BodyLinkHooks,
+  ) {
     actors.onRelease(actor => {
       this.attachments.delete(actor);
       const children: OwnedActor[] = [];
-      for (const [child, attachment] of this.attachments) if (attachment.anchor.equals(actor.id)) {
-        children.push(child);
-        this.attachments.delete(child);
-      }
+      for (const [child, attachment] of this.attachments)
+        if (attachment.anchor.equals(actor.id)) {
+          children.push(child);
+          this.attachments.delete(child);
+        }
       const record = this.records.get(actor.id.slot);
       if (record?.actor === actor) this.records.delete(actor.id.slot);
       const errors: unknown[] = [];
       if (record?.actor === actor && record.linked !== null) {
-        try { hooks.onUnlink(actor.id); } catch (error) { errors.push(error); }
+        try {
+          hooks.onUnlink(actor.id);
+        } catch (error) {
+          errors.push(error);
+        }
       }
-      for (const child of children) if (actors.isLive(child.id)) {
-        try { actors.release(child); } catch (error) { errors.push(error); }
-      }
+      for (const child of children)
+        if (actors.isLive(child.id)) {
+          try {
+            actors.release(child);
+          } catch (error) {
+            errors.push(error);
+          }
+        }
       if (errors.length > 0) throw new AggregateError(errors, "Attached body release failed");
       return undefined;
     });
@@ -122,14 +159,19 @@ export class SharedBodyTable implements BodyTable {
     if (this.record(actor.id) === null) throw new Error("Cannot attach an actor without a body");
     const anchor = this.record(attachment.anchor);
     if (anchor === null) throw new Error("Cannot attach to a missing anchor body");
-    for (let ancestor: BodyRecord | null = anchor; ancestor !== null;) {
+    for (let ancestor: BodyRecord | null = anchor; ancestor !== null; ) {
       if (ancestor.actor === actor) throw new Error("Body attachment cycle");
       const parent = this.attachments.get(ancestor.actor);
       ancestor = parent === undefined ? null : this.record(parent.anchor);
     }
     const follow = attachment.follow;
-    this.attachments.set(actor, Object.freeze({ anchor: attachment.anchor, follow: Object.freeze(follow.kind === "center"
-      ? { kind: follow.kind } : { kind: follow.kind, offset: copyVector(follow.offset) }) }));
+    this.attachments.set(
+      actor,
+      Object.freeze({
+        anchor: attachment.anchor,
+        follow: Object.freeze(follow.kind === "center" ? { kind: follow.kind } : { kind: follow.kind, offset: copyVector(follow.offset) }),
+      }),
+    );
     return undefined;
   }
 
@@ -141,7 +183,7 @@ export class SharedBodyTable implements BodyTable {
 
   attachment(actor: ActorId): BodyAttachment | null {
     const record = this.record(actor);
-    return record === null ? null : this.attachments.get(record.actor) ?? null;
+    return record === null ? null : (this.attachments.get(record.actor) ?? null);
   }
 
   /** Run at a committed execution boundary; spatial publication never invokes source touches. */
@@ -155,12 +197,17 @@ export class SharedBodyTable implements BodyTable {
       const anchorRecord = this.record(attachment.anchor);
       if (anchorRecord === null) return;
       transport(anchorRecord.actor);
-      const anchor = this.read(attachment.anchor), body = this.read(actor.id);
+      const anchor = this.read(attachment.anchor),
+        body = this.read(actor.id);
       if (anchor === null || body === null) return;
       const follow = attachment.follow;
       const component = (axis: "x" | "y" | "z"): number => {
-        const offset = follow.kind === "center" ? numeric.multiply(numeric.add(anchor.bounds.min[axis], anchor.bounds.max[axis]), 0.5)
-          : follow.kind === "bounds-min" ? numeric.add(anchor.bounds.min[axis], follow.offset[axis]) : follow.offset[axis];
+        const offset =
+          follow.kind === "center"
+            ? numeric.multiply(numeric.add(anchor.bounds.min[axis], anchor.bounds.max[axis]), 0.5)
+            : follow.kind === "bounds-min"
+              ? numeric.add(anchor.bounds.min[axis], follow.offset[axis])
+              : follow.offset[axis];
         return numeric.store(numeric.add(anchor.origin[axis], offset));
       };
       const origin = { x: component("x"), y: component("y"), z: component("z") };
@@ -172,7 +219,9 @@ export class SharedBodyTable implements BodyTable {
     return undefined;
   }
 
-  linked(actor: ActorId): LinkedBody | null { return this.record(actor)?.linked ?? null; }
+  linked(actor: ActorId): LinkedBody | null {
+    return this.record(actor)?.linked ?? null;
+  }
 
   linkState(actor: ActorId): BodyLinkState | null {
     const record = this.record(actor);
@@ -184,9 +233,18 @@ export class SharedBodyTable implements BodyTable {
     this.actors.assertOwned(actor);
     const record = this.record(actor.id);
     if (record === null) throw new Error("Cannot restore links without an actor body");
-    if (!Number.isSafeInteger(saved.linkCount) || saved.linkCount < 0 || (saved.linked !== null && saved.linkCount === 0)) throw new RangeError("Invalid saved body link count");
+    if (!Number.isSafeInteger(saved.linkCount) || saved.linkCount < 0 || (saved.linked !== null && saved.linkCount === 0))
+      throw new RangeError("Invalid saved body link count");
     record.linkCount = saved.linkCount;
-    record.linked = saved.linked === null ? null : Object.freeze({ actor: actor.id, state: copyBody(saved.linked.state), absoluteBounds: copyBounds(saved.linked.absoluteBounds), linkCount: saved.linkCount });
+    record.linked =
+      saved.linked === null
+        ? null
+        : Object.freeze({
+            actor: actor.id,
+            state: copyBody(saved.linked.state),
+            absoluteBounds: copyBounds(saved.linked.absoluteBounds),
+            linkCount: saved.linkCount,
+          });
     if (record.linked === null) return this.hooks.onUnlink(actor.id);
     if (record.storage.kind === "external") record.storage.binding.linked?.(record.linked);
     return this.hooks.onLink(record.linked);
@@ -198,8 +256,12 @@ export class SharedBodyTable implements BodyTable {
     if (record === null) throw new Error("Cannot link an actor without a body");
     const current = record.storage.kind === "local" ? record.storage.state : record.storage.binding.read();
     const state = copyBody(origin === undefined ? current : { ...current, origin });
-    const linked: LinkedBody = Object.freeze({ actor: actor.id, state,
-      absoluteBounds: copyBounds(this.hooks.absoluteBounds(actor, state)), linkCount: ++record.linkCount });
+    const linked: LinkedBody = Object.freeze({
+      actor: actor.id,
+      state,
+      absoluteBounds: copyBounds(this.hooks.absoluteBounds(actor, state)),
+      linkCount: ++record.linkCount,
+    });
     record.linked = linked;
     if (record.storage.kind === "external") record.storage.binding.linked?.(linked);
     return this.hooks.onLink(linked);
@@ -213,5 +275,7 @@ export class SharedBodyTable implements BodyTable {
     return this.hooks.onUnlink(actor.id);
   }
 
-  private record(actor: ActorId): BodyRecord | null { return this.actors.isLive(actor) ? this.records.get(actor.slot) ?? null : null; }
+  private record(actor: ActorId): BodyRecord | null {
+    return this.actors.isLive(actor) ? (this.records.get(actor.slot) ?? null) : null;
+  }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Adapted from the reference port GPL-2.0-or-later.
 import { crc32, deflateSync } from "node:zlib";
 
@@ -12,8 +13,15 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 export function encodePng(width: number, height: number, rgba: Uint8Array): Uint8Array {
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0
-    || width > 16384 || height > 16384 || rgba.length !== width * height * 4) {
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    width > 16384 ||
+    height > 16384 ||
+    rgba.length !== width * height * 4
+  ) {
     throw new RangeError("PNG dimensions do not match the RGBA framebuffer");
   }
   const header = new Uint8Array(13);
@@ -27,10 +35,15 @@ export function encodePng(width: number, height: number, rgba: Uint8Array): Uint
   for (let y = 0; y < height; y++) scanlines.set(rgba.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
   const chunks = [
     new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk("IHDR", header), chunk("IDAT", deflateSync(scanlines)), chunk("IEND", new Uint8Array()),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(scanlines)),
+    chunk("IEND", new Uint8Array()),
   ];
   const output = new Uint8Array(chunks.reduce((total, part) => total + part.length, 0));
   let offset = 0;
-  for (const part of chunks) { output.set(part, offset); offset += part.length; }
+  for (const part of chunks) {
+    output.set(part, offset);
+    offset += part.length;
+  }
   return output;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, spyOn } from "bun:test";
 import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
@@ -14,41 +15,105 @@ import { MAX_RELIABLE_COMMANDS } from "../../../src/network/q3/reliable.ts";
 const test = corpusTest("q3a/missionpack/pak0.pk3");
 
 test("six Team Arena slots retain bot resources and reconnect once after round settling", async () => {
-  const launch = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q3-missionpack", "--map", "mpteam1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);
+  const launch = parseApplicationCommand([
+    "--content-root",
+    `${testCorpusRoot()}`,
+    "--game",
+    "q3-missionpack",
+    "--map",
+    "mpteam1",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--dedicated",
+    "--mode",
+    "deathmatch",
+  ]);
   if (launch.kind !== "run") throw new Error("Missing Team Arena fixture launch");
-  const content = await loadApplicationContent(launch.options), identity = createIdentityOwner("bot-round-restart");
+  const content = await loadApplicationContent(launch.options),
+    identity = createIdentityOwner("bot-round-restart");
   const session = new EngineSession(identity, { kind: "headless" });
-  const simulation = new SharedSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-    mode: "deathmatch", skill: 3, seed: 7, maxClients: 6, dedicated: true });
+  const simulation = new SharedSimulation({
+    identity,
+    recipe: content.recipe,
+    world: content.world,
+    mounts: content.mounts,
+    mode: "deathmatch",
+    skill: 3,
+    seed: 7,
+    maxClients: 6,
+    dedicated: true,
+  });
   session.attachWorld(simulation);
-  const human = session.createClient(0); simulation.admitPlayer(human.id);
+  const human = session.createClient(0);
+  simulation.admitPlayer(human.id);
   const navigation = await createApplicationBotNavigation({ content, simulation });
   const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
-  const bots = new ApplicationBots({ session, simulation, navigation, files, leafCount: content.world.leaves.length,
-    print: () => {}, insertConsoleCommand: () => {}, openLog: () => ({ kind: "failed", error: new Error("No fixture log") }) });
+  const bots = new ApplicationBots({
+    session,
+    simulation,
+    navigation,
+    files,
+    leafCount: content.world.leaves.length,
+    print: () => {},
+    insertConsoleCommand: () => {},
+    openLog: () => ({ kind: "failed", error: new Error("No fixture log") }),
+  });
   try {
     for (const name of ["sarge", "ranger", "visor", "grunt", "major"]) bots.consoleCommand(["addbot", name, "3"]);
-    expect(simulation.clientIdentities()).toHaveLength(6); expect(bots.clients()).toHaveLength(5);
-    const oldSource = bots.source, library = bots.director.library, bsp = bots.director.bspEntities;
-    const oldAi = bots.director.ai, clients = bots.clients(), oldActors = simulation.players();
+    expect(simulation.clientIdentities()).toHaveLength(6);
+    expect(bots.clients()).toHaveLength(5);
+    const oldSource = bots.source,
+      library = bots.director.library,
+      bsp = bots.director.bspEntities;
+    const oldAi = bots.director.ai,
+      clients = bots.clients(),
+      oldActors = simulation.players();
     const oldNavigation = clients.map(client => navigation.forClient?.(client.client.id.slot));
     for (const client of clients) {
       const state = oldAi.context.states.get(client.client.id.slot);
       if (state === undefined || state === null) throw new Error("Missing admitted bot state");
-      state.lastGoalDecisionmaker = 23; state.lastGoalTeammate = 4;
+      state.lastGoalDecisionmaker = 23;
+      state.lastGoalTeammate = 4;
       client.reliable.add("print retained-round-ring");
     }
-    const target = clients[0], recipient = target === undefined ? null : bots.actor(target.client.id);
+    const target = clients[0],
+      recipient = target === undefined ? null : bots.actor(target.client.id);
     if (target === undefined || recipient === null) throw new Error("Missing actual bot recipient");
-    bots.receive([{ kind: "q3-source", content: "q3:classic:component:test", sequence: 0, seconds: simulation.timeSeconds,
-      recipient, event: { kind: "server-command", client: -1, text: "print private-component-message" } }]);
-    expect(clients.map(client => client.reliable.pending().some(command => command.text === "print private-component-message"))).toEqual([true, false, false, false, false]);
+    bots.receive([
+      {
+        kind: "q3-source",
+        content: "q3:classic:component:test",
+        sequence: 0,
+        seconds: simulation.timeSeconds,
+        recipient,
+        event: { kind: "server-command", client: -1, text: "print private-component-message" },
+      },
+    ]);
+    expect(clients.map(client => client.reliable.pending().some(command => command.text === "print private-component-message"))).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
     const rings = clients.map(client => client.reliable.pending());
     let eventSequence = 0;
-    const receive = (client: number, text: string): void => bots.receive([{ kind: "q3-source",
-      content: content.recipe.map.entities.content, sequence: ++eventSequence, seconds: simulation.timeSeconds,
-      event: { kind: "server-command", client, text } }]);
-    const setup = spyOn(library, "setup"), load = spyOn(library, "loadMap"), shutdown = spyOn(library, "shutdown"), dump = spyOn(bsp, "dump");
+    const receive = (client: number, text: string): void =>
+      bots.receive([
+        {
+          kind: "q3-source",
+          content: content.recipe.map.entities.content,
+          sequence: ++eventSequence,
+          seconds: simulation.timeSeconds,
+          event: { kind: "server-command", client, text },
+        },
+      ]);
+    const setup = spyOn(library, "setup"),
+      load = spyOn(library, "loadMap"),
+      shutdown = spyOn(library, "shutdown"),
+      dump = spyOn(bsp, "dump");
     try {
       bots.beginRoundRestart();
       receive(-1, "print detached-init");
@@ -56,8 +121,10 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
       const preserved = simulation.restartSourceRound();
       simulation.beginSourceRoundSettlement();
       bots.bindRestartedRound();
-      expect(bots.source).not.toBe(oldSource); expect(bots.director.ai).not.toBe(oldAi);
-      expect(bots.director.library).toBe(library); expect(bots.director.bspEntities).toBe(bsp);
+      expect(bots.source).not.toBe(oldSource);
+      expect(bots.director.ai).not.toBe(oldAi);
+      expect(bots.director.library).toBe(library);
+      expect(bots.director.bspEntities).toBe(bsp);
       expect(simulation.players()).toHaveLength(0);
       for (const actor of oldActors) expect(simulation.actors.isLive(actor)).toBe(false);
       const connect = spyOn(bots.director.ai, "setupClient");
@@ -85,7 +152,9 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
             receive(client.slot, `print targeted-${client.slot}`);
             if (!bots.reconnectRestartedClient(client)) simulation.admitPlayer(client);
           }
-        } finally { admissionSpy.mockRestore(); }
+        } finally {
+          admissionSpy.mockRestore();
+        }
         expect(connect).toHaveBeenCalledTimes(5);
         expect(simulation.clientIdentities()).toEqual(preserved);
         for (const [index, saved] of clients.entries()) {
@@ -94,12 +163,18 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
           const retained = rings[index];
           if (retained === undefined) throw new Error("Missing retained ring");
           expect(active?.reliable.pending().map(command => command.text)).toEqual([
-            ...retained.map(command => command.text), "print detached-init", "print settle-0", "print settle-1", "print settle-2",
-            `print targeted-${saved.client.id.slot}`, "map_restart\n",
+            ...retained.map(command => command.text),
+            "print detached-init",
+            "print settle-0",
+            "print settle-1",
+            "print settle-2",
+            `print targeted-${saved.client.id.slot}`,
+            "map_restart\n",
           ]);
           expect(saved.client.isClosed).toBe(false);
           const state = bots.director.ai.context.states.get(saved.client.id.slot);
-          expect(state?.lastGoalDecisionmaker).toBe(23); expect(state?.lastGoalTeammate).toBe(4);
+          expect(state?.lastGoalDecisionmaker).toBe(23);
+          expect(state?.lastGoalTeammate).toBe(4);
           expect(navigation.forClient?.(saved.client.id.slot)).not.toBe(oldNavigation[index]);
           expect((bots.source?.pool.at(saved.client.id.slot).r.svFlags ?? 0) & ServerEntityFlags.BOT).not.toBe(0);
           expect(() => bots.reconnectRestartedClient(saved.client.id)).toThrow("already reconnected");
@@ -114,7 +189,8 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
         expect(bots.director.checkpointOrchestration().sequences).toEqual([]);
         expect(connect).toHaveBeenCalledTimes(5);
         if (oldSource === null) throw new Error("Missing retired source round");
-        const retiredTime = oldSource.level.time, retiredObservations = oldAi.context.observations.captureSaveState();
+        const retiredTime = oldSource.level.time,
+          retiredObservations = oldAi.context.observations.captureSaveState();
         const commandedSlots = new Set<number>();
         expect(bots.director.ai.context.game).toBe(bots.game);
         expect(bots.director.ai.context.game).not.toBe(oldAi.context.game);
@@ -144,21 +220,30 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
         expect(oldAi.context.observations.captureSaveState()).toEqual(retiredObservations);
         for (const actor of oldActors) expect(simulation.actors.isLive(actor)).toBe(false);
         expect(connect).toHaveBeenCalledTimes(5);
-      } finally { connect.mockRestore(); }
-      expect(setup).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled();
-      expect(shutdown).not.toHaveBeenCalled(); expect(dump).not.toHaveBeenCalled();
+      } finally {
+        connect.mockRestore();
+      }
+      expect(setup).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+      expect(shutdown).not.toHaveBeenCalled();
+      expect(dump).not.toHaveBeenCalled();
       const [detachedDrop, boundDrop, restartDrop, activeDrop, survivor] = bots.clients();
-      if (detachedDrop === undefined || boundDrop === undefined || restartDrop === undefined || activeDrop === undefined || survivor === undefined) throw new Error("Expected five retained bots");
+      if (detachedDrop === undefined || boundDrop === undefined || restartDrop === undefined || activeDrop === undefined || survivor === undefined)
+        throw new Error("Expected five retained bots");
       const fill = (client: ApplicationBotClient): void => {
         client.reliable.assignAcknowledgement(client.reliable.sequence);
         for (let command = 0; command < MAX_RELIABLE_COMMANDS; command++) expect(client.reliable.add(`print fill-${command}`).kind).toBe("queued");
       };
       bots.beginRoundRestart();
-      fill(detachedDrop); receive(detachedDrop.client.id.slot, "print overflow-detached");
+      fill(detachedDrop);
+      receive(detachedDrop.client.id.slot, "print overflow-detached");
       expect(detachedDrop.client.isClosed).toBe(true);
-      simulation.restartSourceRound(); simulation.beginSourceRoundSettlement(); bots.bindRestartedRound();
+      simulation.restartSourceRound();
+      simulation.beginSourceRoundSettlement();
+      bots.bindRestartedRound();
       for (let settle = 0; settle < 3; settle++) simulation.step({ elapsedMilliseconds: 100, commands: [] });
-      fill(boundDrop); receive(boundDrop.client.id.slot, "print overflow-bound");
+      fill(boundDrop);
+      receive(boundDrop.client.id.slot, "print overflow-bound");
       expect(boundDrop.client.isClosed).toBe(true);
       fill(restartDrop);
       const setupAfterDrop = spyOn(bots.director.ai, "setupClient");
@@ -178,7 +263,8 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
         simulation.step({ elapsedMilliseconds: 100, commands: [] });
         simulation.completeSourceRoundSettlement();
         bots.resumeRoundBots();
-        fill(activeDrop); receive(activeDrop.client.id.slot, "print overflow-active");
+        fill(activeDrop);
+        receive(activeDrop.client.id.slot, "print overflow-active");
         expect(activeDrop.client.isClosed).toBe(true);
         expect(bots.clients().map(client => client.client)).toEqual([survivor.client]);
         expect(simulation.players()).toHaveLength(1);
@@ -186,7 +272,18 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
         receive(-1, "print survivor");
         expect(survivor.reliable.sequence).toBe(survivorSequence + 1);
         expect(survivor.reliable.pending().at(-1)?.text).toBe("print survivor");
-      } finally { setupAfterDrop.mockRestore(); }
-    } finally { setup.mockRestore(); load.mockRestore(); shutdown.mockRestore(); dump.mockRestore(); }
-  } finally { bots.close(); session.close(); await content.close(); }
+      } finally {
+        setupAfterDrop.mockRestore();
+      }
+    } finally {
+      setup.mockRestore();
+      load.mockRestore();
+      shutdown.mockRestore();
+      dump.mockRestore();
+    }
+  } finally {
+    bots.close();
+    session.close();
+    await content.close();
+  }
 }, 115000);

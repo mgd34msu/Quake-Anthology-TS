@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { gzipSync } from "node:zlib";
 import { existsSync } from "node:fs";
@@ -20,35 +21,62 @@ function lengthString(value: string): Uint8Array {
 
 function kexServerSave(comment: string, map: string, gamename: string): Uint8Array {
   const stamp = new Uint8Array(8);
-  const parts = [new TextEncoder().encode("EVAS"), new Uint8Array([1]), lengthString(comment),
-    stamp, lengthString(map), lengthString("gamename"), lengthString(gamename), lengthString("")];
+  const parts = [
+    new TextEncoder().encode("EVAS"),
+    new Uint8Array([1]),
+    lengthString(comment),
+    stamp,
+    lengthString(map),
+    lengthString("gamename"),
+    lengthString(gamename),
+    lengthString(""),
+  ];
   new DataView(stamp.buffer).setUint32(0, 1717012859, true);
-  const total = parts.reduce((sum, part) => sum + part.length, 0), result = new Uint8Array(total);
+  const total = parts.reduce((sum, part) => sum + part.length, 0),
+    result = new Uint8Array(total);
   let offset = 0;
-  for (const part of parts) { result.set(part, offset); offset += part.length; }
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
   return result;
 }
 
 function pakWith(entries: readonly (readonly [string, Uint8Array])[]): Uint8Array {
   let dataOffset = 12;
-  const directory = entries.map(([name, data]) => { const record = { name, data, offset: dataOffset }; dataOffset += data.length; return record; });
-  const bytes = new Uint8Array(dataOffset + entries.length * 64), view = new DataView(bytes.buffer);
+  const directory = entries.map(([name, data]) => {
+    const record = { name, data, offset: dataOffset };
+    dataOffset += data.length;
+    return record;
+  });
+  const bytes = new Uint8Array(dataOffset + entries.length * 64),
+    view = new DataView(bytes.buffer);
   bytes.set(new TextEncoder().encode("PACK"));
-  view.setUint32(4, dataOffset, true); view.setUint32(8, entries.length * 64, true);
+  view.setUint32(4, dataOffset, true);
+  view.setUint32(8, entries.length * 64, true);
   for (const entry of directory) {
     bytes.set(entry.data, entry.offset);
     const at = dataOffset + directory.indexOf(entry) * 64;
     bytes.set(new TextEncoder().encode(entry.name), at);
-    view.setUint32(at + 56, entry.offset, true); view.setUint32(at + 60, entry.data.length, true);
+    view.setUint32(at + 56, entry.offset, true);
+    view.setUint32(at + 60, entry.data.length, true);
   }
   return bytes;
 }
 
 function q1Save(map: string): Q1SaveData {
-  return { format: { version: 6, gameDirectories: "id1" }, comment: "kex_save",
-    spawnParameters: Array.from({ length: 16 }, (_, index) => index), skill: 1, map, time: 12,
-    lightStyles: Array.from({ length: 64 }, () => "m"), globals: [{ key: "serverflags", value: "0" }],
-    entities: [[{ key: "classname", value: "worldspawn" }], [{ key: "health", value: "100" }]], extensionText: "" };
+  return {
+    format: { version: 6, gameDirectories: "id1" },
+    comment: "kex_save",
+    spawnParameters: Array.from({ length: 16 }, (_, index) => index),
+    skill: 1,
+    map,
+    time: 12,
+    lightStyles: Array.from({ length: 64 }, () => "m"),
+    globals: [{ key: "serverflags", value: "0" }],
+    entities: [[{ key: "classname", value: "worldspawn" }], [{ key: "health", value: "100" }]],
+    extensionText: "",
+  };
 }
 
 test("kex q2 server saves decode comment, map and game directory", () => {
@@ -87,14 +115,22 @@ test.skipIf(realQ2Save === undefined || !existsSync(realQ2SavePath))("the instal
 test.skipIf(!corpusHasFile("q1/rerelease/id1/pak0.pak"))("external nightdive saves list beside own saves and resolve by name", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "quake-kex-saves-"));
   try {
-    const own = join(root, "saves"), external = join(root, "steam/Quake");
+    const own = join(root, "saves"),
+      external = join(root, "steam/Quake");
     await mkdir(own, { recursive: true });
     await mkdir(join(root, "steam/Quake", "honey"), { recursive: true });
     await mkdir(join(root, "steam/Quake II/baseq2/save"), { recursive: true });
     await writeFile(join(external, "s1.sav"), encodeQ1Save(q1Save("e1m1")));
     await writeFile(join(external, "honey/s2.sav"), encodeQ1Save(q1Save("e1m2")));
-    await writeFile(join(root, "steam/Quake II/baseq2/save/save0.pak.gz"),
-      gzipSync(pakWith([["server.ssv", kexServerSave("Widow's Lair", "rboss", "baseq2")], ["game.ssv", new TextEncoder().encode("{}")]])));
+    await writeFile(
+      join(root, "steam/Quake II/baseq2/save/save0.pak.gz"),
+      gzipSync(
+        pakWith([
+          ["server.ssv", kexServerSave("Widow's Lair", "rboss", "baseq2")],
+          ["game.ssv", new TextEncoder().encode("{}")],
+        ]),
+      ),
+    );
     const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
     const saves = new StartupSaves(catalog, own, [external, join(root, "steam/Quake II")]);
     await saves.refresh();
@@ -113,5 +149,7 @@ test.skipIf(!corpusHasFile("q1/rerelease/id1/pak0.pak"))("external nightdive sav
     expect(await resolveExternalSavePath([external], "s2")).toBe(join(external, "honey/s2.sav"));
     expect(await resolveExternalSavePath([external], "missing")).toBeNull();
     expect(await resolveExternalSavePath([external], "../s1")).toBeNull();
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

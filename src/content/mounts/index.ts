@@ -1,10 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { defaultUserContentRoot } from "../user-data.ts";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
-import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, MountPlanId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
+import type {
+  ArchiveMount,
+  ContentDigest,
+  ContentMount,
+  LooseMount,
+  MountId,
+  MountPlanId,
+  ResolvedMountPlan,
+  ResolvedResourceReference,
+  ResourceProvenance,
+  ResourceResolution,
+} from "../../contracts/content.ts";
 import { FileSource } from "../archive/source.ts";
 import { openArchiveSource, openArchive, readLooseEntry } from "../archive/index.ts";
 import type { ArchiveHandle } from "../archive/index.ts";
@@ -23,7 +35,13 @@ function singleCaseInsensitive(entries: readonly Dirent[], part: string, memberP
   return matches[0];
 }
 
-interface DigestFingerprint { readonly size: number; readonly mtimeMs: number; readonly ctimeMs: number; readonly ino: number; readonly digest: string; }
+interface DigestFingerprint {
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+  readonly ino: number;
+  readonly digest: string;
+}
 
 /**
  * Archive digests are cached by stat fingerprint (size, mtime, ctime, inode):
@@ -36,7 +54,9 @@ const verifiedDigests = new Map<string, DigestFingerprint>();
 let diskDigests: Promise<Map<string, DigestFingerprint>> | null = null;
 let diskSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
-function digestCacheFile(): string { return resolve(defaultUserContentRoot(), "..", "cache", "archive-digests.json"); }
+function digestCacheFile(): string {
+  return resolve(defaultUserContentRoot(), "..", "cache", "archive-digests.json");
+}
 
 function loadDiskDigests(): Promise<Map<string, DigestFingerprint>> {
   diskDigests ??= (async () => {
@@ -47,13 +67,18 @@ function loadDiskDigests(): Promise<Map<string, DigestFingerprint>> {
         for (const path of Object.keys(parsed)) {
           const value: unknown = Reflect.get(parsed, path);
           if (typeof value !== "object" || value === null) continue;
-          const size: unknown = Reflect.get(value, "size"), mtimeMs: unknown = Reflect.get(value, "mtimeMs"),
-            ctimeMs: unknown = Reflect.get(value, "ctimeMs"), ino: unknown = Reflect.get(value, "ino"), digest: unknown = Reflect.get(value, "digest");
-          if (typeof size === "number" && typeof mtimeMs === "number" && typeof ctimeMs === "number"
-            && typeof ino === "number" && typeof digest === "string") entries.set(path, { size, mtimeMs, ctimeMs, ino, digest });
+          const size: unknown = Reflect.get(value, "size"),
+            mtimeMs: unknown = Reflect.get(value, "mtimeMs"),
+            ctimeMs: unknown = Reflect.get(value, "ctimeMs"),
+            ino: unknown = Reflect.get(value, "ino"),
+            digest: unknown = Reflect.get(value, "digest");
+          if (typeof size === "number" && typeof mtimeMs === "number" && typeof ctimeMs === "number" && typeof ino === "number" && typeof digest === "string")
+            entries.set(path, { size, mtimeMs, ctimeMs, ino, digest });
         }
       }
-    } catch { /* Missing or unreadable cache: start empty. */ }
+    } catch {
+      /* Missing or unreadable cache: start empty. */
+    }
     return entries;
   })();
   return diskDigests;
@@ -68,14 +93,27 @@ function scheduleDiskDigestSave(): void {
         const entries = await loadDiskDigests();
         for (const [path, fingerprint] of verifiedDigests) entries.set(path, fingerprint);
         // Entries for archives that were deleted or moved would otherwise accumulate forever.
-        for (const path of [...entries.keys()]) if (!verifiedDigests.has(path) && !await stat(path).then(() => true, () => false)) entries.delete(path);
-        const file = digestCacheFile(), temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+        for (const path of [...entries.keys()])
+          if (
+            !verifiedDigests.has(path) &&
+            !(await stat(path).then(
+              () => true,
+              () => false,
+            ))
+          )
+            entries.delete(path);
+        const file = digestCacheFile(),
+          temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
         await mkdir(dirname(file), { recursive: true });
         try {
           await writeFile(temporary, JSON.stringify(Object.fromEntries(entries)));
           await rename(temporary, file);
-        } finally { await rm(temporary, { force: true }); }
-      } catch { /* The cache is an optimization only. */ }
+        } finally {
+          await rm(temporary, { force: true });
+        }
+      } catch {
+        /* The cache is an optimization only. */
+      }
     })();
   }, 250);
   diskSaveTimer.unref();
@@ -84,14 +122,20 @@ function scheduleDiskDigestSave(): void {
 export async function digestFile(path: string): Promise<ContentDigest> {
   const info = await stat(path);
   const fingerprint = { size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino };
-  const matches = (entry: DigestFingerprint | undefined): entry is DigestFingerprint => entry !== undefined
-    && entry.size === fingerprint.size && entry.mtimeMs === fingerprint.mtimeMs
-    && entry.ctimeMs === fingerprint.ctimeMs && entry.ino === fingerprint.ino;
+  const matches = (entry: DigestFingerprint | undefined): entry is DigestFingerprint =>
+    entry !== undefined &&
+    entry.size === fingerprint.size &&
+    entry.mtimeMs === fingerprint.mtimeMs &&
+    entry.ctimeMs === fingerprint.ctimeMs &&
+    entry.ino === fingerprint.ino;
   if (digestCacheEnabled) {
     const memory = verifiedDigests.get(path);
     if (matches(memory)) return createContentDigest(memory.digest);
     const disk = (await loadDiskDigests()).get(path);
-    if (matches(disk)) { verifiedDigests.set(path, disk); return createContentDigest(disk.digest); }
+    if (matches(disk)) {
+      verifiedDigests.set(path, disk);
+      return createContentDigest(disk.digest);
+    }
   }
   const hash = createHash("sha256");
   const file = await open(path, "r");
@@ -137,8 +181,15 @@ export interface OpenedResource {
   readonly bytes: Uint8Array;
 }
 
-interface ArchiveSource { readonly kind: "archive"; readonly mount: ArchiveMount; readonly archive: ArchiveHandle; }
-interface LooseSource { readonly kind: "loose"; readonly mount: LooseMount; }
+interface ArchiveSource {
+  readonly kind: "archive";
+  readonly mount: ArchiveMount;
+  readonly archive: ArchiveHandle;
+}
+interface LooseSource {
+  readonly kind: "loose";
+  readonly mount: LooseMount;
+}
 type MountedSource = ArchiveSource | LooseSource;
 
 function validateOrder(order: readonly MountId[], mounts: ReadonlyMap<MountId, ContentMount>): void {
@@ -179,8 +230,11 @@ function resolveOrder(plan: ResolvedMountPlan, mounts: ReadonlyMap<MountId, Cont
     normalizeResourcePath(order.prefix.replace(/\/$/, ""));
     validateOrder(order.mounts, mounts);
   }
-  return { ...plan, defaultOrder: [...pureOrder(plan.defaultOrder, mounts, pure)],
-    prefixOrders: plan.prefixOrders.map(order => ({ ...order, mounts: [...pureOrder(order.mounts, mounts, pure)] })) };
+  return {
+    ...plan,
+    defaultOrder: [...pureOrder(plan.defaultOrder, mounts, pure)],
+    prefixOrders: plan.prefixOrders.map(order => ({ ...order, mounts: [...pureOrder(order.mounts, mounts, pure)] })),
+  };
 }
 
 function resolveMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions): ResolvedMountPlan {
@@ -195,15 +249,16 @@ function resolveMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions): R
     normalizeResourcePath(link.sourcePrefix.replace(/\/$/, ""));
     if (link.targetPrefix) normalizeResourcePath(link.targetPrefix.replace(/\/$/, ""));
   }
-  const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
+  const available = new Set(plan.mounts.flatMap(mount => (mount.kind === "archive" ? [mount.archiveDigest] : [])));
   for (const digest of options.pure?.archives ?? []) if (!available.has(digest)) throw new Error(`Required pure archive is missing: ${digest}`);
   return resolvedPlan;
 }
 
 function sameMount(left: ContentMount, right: ContentMount): boolean {
-  if (left.identity.id !== right.identity.id || left.identity.content !== right.identity.content || left.identity.generation !== right.identity.generation) return false;
-  if (left.kind === "archive") return right.kind === "archive" && left.archivePath === right.archivePath
-    && left.archiveDigest === right.archiveDigest && left.format === right.format;
+  if (left.identity.id !== right.identity.id || left.identity.content !== right.identity.content || left.identity.generation !== right.identity.generation)
+    return false;
+  if (left.kind === "archive")
+    return right.kind === "archive" && left.archivePath === right.archivePath && left.archiveDigest === right.archiveDigest && left.format === right.format;
   return right.kind === "loose" && left.rootPath === right.rootPath;
 }
 
@@ -217,22 +272,37 @@ export class MountedContent {
   #nextOpenedKey = 1;
   #openedKey(mount: MountId, requestedPath: string): number {
     let paths = this.#openedKeys.get(mount);
-    if (paths === undefined) { paths = new Map<string, number>(); this.#openedKeys.set(mount, paths); }
+    if (paths === undefined) {
+      paths = new Map<string, number>();
+      this.#openedKeys.set(mount, paths);
+    }
     let key = paths.get(requestedPath);
-    if (key === undefined) { key = this.#nextOpenedKey++; paths.set(requestedPath, key); }
+    if (key === undefined) {
+      key = this.#nextOpenedKey++;
+      paths.set(requestedPath, key);
+    }
     return key;
   }
   #closed = false;
   #ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly parent: { assertOpen(): void } } = { kind: "owned" };
 
-  constructor(readonly plan: ResolvedMountPlan, sources: readonly MountedSource[], readonly options: OpenMountOptions = {}, owner?: { assertOpen(): void }) {
+  constructor(
+    readonly plan: ResolvedMountPlan,
+    sources: readonly MountedSource[],
+    readonly options: OpenMountOptions = {},
+    owner?: { assertOpen(): void },
+  ) {
     if (owner !== undefined) this.#ownership = { kind: "borrowed", parent: owner };
     for (const source of sources) this.#sources.set(source.mount.identity.id, source);
   }
 
-  get openedResources(): readonly ResolvedResourceReference[] { return [...this.#openedResources.values()]; }
+  get openedResources(): readonly ResolvedResourceReference[] {
+    return [...this.#openedResources.values()];
+  }
 
-  get referencedArchives(): readonly ArchiveMount[] { return [...this.#referenced.values()]; }
+  get referencedArchives(): readonly ArchiveMount[] {
+    return [...this.#referenced.values()];
+  }
 
   assertOpen(): void {
     if (this.#closed) throw new Error("Content mount plan is closed");
@@ -252,16 +322,26 @@ export class MountedContent {
       sources.push(source);
     }
     if ((options.looseComparison ?? "exact") !== (this.options.looseComparison ?? "exact")) return null;
-    const links = options.links ?? [], parentLinks = this.options.links ?? [];
-    if (links.length !== parentLinks.length || links.some((link, index) => {
-      const parent = parentLinks[index];
-      return parent === undefined || link.mount !== parent.mount || link.sourcePrefix !== parent.sourcePrefix || link.targetPrefix !== parent.targetPrefix;
-    })) return null;
-    const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
-    const parentPure = this.options.pure?.archives ?? [], pure = options.pure?.archives ?? [];
+    const links = options.links ?? [],
+      parentLinks = this.options.links ?? [];
+    if (
+      links.length !== parentLinks.length ||
+      links.some((link, index) => {
+        const parent = parentLinks[index];
+        return parent === undefined || link.mount !== parent.mount || link.sourcePrefix !== parent.sourcePrefix || link.targetPrefix !== parent.targetPrefix;
+      })
+    )
+      return null;
+    const available = new Set(plan.mounts.flatMap(mount => (mount.kind === "archive" ? [mount.archiveDigest] : [])));
+    const parentPure = this.options.pure?.archives ?? [],
+      pure = options.pure?.archives ?? [];
     const expectedPure = parentPure.filter(digest => available.has(digest));
-    if (parentPure.length > 0 && expectedPure.length === 0 || pure.length !== expectedPure.length
-      || pure.some((digest, index) => digest !== expectedPure[index])) return null;
+    if (
+      (parentPure.length > 0 && expectedPure.length === 0) ||
+      pure.length !== expectedPure.length ||
+      pure.some((digest, index) => digest !== expectedPure[index])
+    )
+      return null;
     const borrowed = new MountedContent(resolved, sources, options);
     borrowed.#ownership = { kind: "borrowed", parent: this };
     for (const id of this.#userMounts) if (borrowed.#sources.has(id)) borrowed.#userMounts.add(id);
@@ -272,9 +352,12 @@ export class MountedContent {
   borrowWithLooseMount(mount: LooseMount, id: MountPlanId): MountedContent {
     this.assertOpen();
     if (this.#sources.has(mount.identity.id)) throw new Error(`Duplicate user mount: ${mount.identity.id}`);
-    const plan: ResolvedMountPlan = { id, mounts: [mount, ...this.plan.mounts],
+    const plan: ResolvedMountPlan = {
+      id,
+      mounts: [mount, ...this.plan.mounts],
       defaultOrder: [mount.identity.id, ...this.plan.defaultOrder],
-      prefixOrders: this.plan.prefixOrders.map(order => ({ ...order, mounts: [mount.identity.id, ...order.mounts] })) };
+      prefixOrders: this.plan.prefixOrders.map(order => ({ ...order, mounts: [mount.identity.id, ...order.mounts] })),
+    };
     const borrowed = new MountedContent(plan, [{ kind: "loose", mount }, ...this.#sources.values()], this.options, this);
     for (const user of this.#userMounts) borrowed.#userMounts.add(user);
     borrowed.#userMounts.add(mount.identity.id);
@@ -288,13 +371,17 @@ export class MountedContent {
     const plan = resolveOrder({ ...order, mounts: this.plan.mounts }, mounts, this.options.pure);
     const openedResources = new Map<number, ResolvedResourceReference>();
     const open: MountedContentReader["open"] = (path, acceptMount = () => true) => this.#open(plan, path, acceptMount, openedResources);
-    return { plan, open, resolve: async path => (await open(path))?.reference ?? null,
+    return {
+      plan,
+      open,
+      resolve: async path => (await open(path))?.reference ?? null,
       read: async resource => {
         if (typeof resource !== "string") return this.#read(resource, openedResources);
         const opened = await open(resource);
         if (opened === null) throw new Error(`Resource not found: ${resource}`);
         return opened.bytes;
-      } };
+      },
+    };
   }
 
   #allowed(source: MountedSource, path: string): boolean {
@@ -324,13 +411,22 @@ export class MountedContent {
     let path = await findContentPath(source.mount.rootPath, memberPath, this.options.looseComparison, cached);
     if (path === null) path = await findContentPath(source.mount.rootPath, memberPath, this.options.looseComparison);
     if (path === null) return null;
-    try { if (!(await stat(path)).isFile()) return null; }
-    catch (error) { if (isMissingFile(error)) return null; throw error; }
+    try {
+      if (!(await stat(path)).isFile()) return null;
+    } catch (error) {
+      if (isMissingFile(error)) return null;
+      throw error;
+    }
     const actualPath = relative(source.mount.rootPath, path).replaceAll("\\", "/");
     return { bytes: await readLooseEntry(source.mount.rootPath, actualPath), provenance: { kind: "loose", mount: source.mount, memberPath: actualPath } };
   }
 
-  #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution, openedResources: Map<number, ResolvedResourceReference>): OpenedResource {
+  #opened(
+    requestedPath: string,
+    read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance },
+    resolution: ResourceResolution,
+    openedResources: Map<number, ResolvedResourceReference>,
+  ): OpenedResource {
     const resource = { requestedPath, provenance: read.provenance, digest: digestBytes(read.bytes), byteLength: read.bytes.length, resolution };
     if (read.provenance.kind === "archive") this.#referenced.set(read.provenance.mount.identity.id, read.provenance.mount);
     const reference = { ...resource, id: createResourceId(resource) };
@@ -342,20 +438,30 @@ export class MountedContent {
     return this.#open(this.plan, path, acceptMount, this.#openedResources);
   }
 
-  async #open(plan: ResolvedMountPlan, path: string, acceptMount: (mount: ContentMount) => boolean,
-    openedResources: Map<number, ResolvedResourceReference>): Promise<OpenedResource | null> {
+  async #open(
+    plan: ResolvedMountPlan,
+    path: string,
+    acceptMount: (mount: ContentMount) => boolean,
+    openedResources: Map<number, ResolvedResourceReference>,
+  ): Promise<OpenedResource | null> {
     this.assertOpen();
     // Servers, maps and mods supply these names, so one that can't name a resource is a miss rather than a fault.
     let requestedPath: string;
-    try { requestedPath = normalizeResourcePath(path); } catch (error) { if (error instanceof RangeError) return null; throw error; }
-    if (this.#userMounts.size !== 0) for (const [rank, id] of plan.defaultOrder.entries()) {
-      if (!this.#userMounts.has(id)) continue;
-      const source = this.#sources.get(id);
-      if (source === undefined || !acceptMount(source.mount)) continue;
-      const read = await this.#readSource(source, requestedPath);
-      this.assertOpen();
-      if (read !== null) return this.#opened(requestedPath, read, { kind: "default-order", plan: plan.id, rank }, openedResources);
+    try {
+      requestedPath = normalizeResourcePath(path);
+    } catch (error) {
+      if (error instanceof RangeError) return null;
+      throw error;
     }
+    if (this.#userMounts.size !== 0)
+      for (const [rank, id] of plan.defaultOrder.entries()) {
+        if (!this.#userMounts.has(id)) continue;
+        const source = this.#sources.get(id);
+        if (source === undefined || !acceptMount(source.mount)) continue;
+        const read = await this.#readSource(source, requestedPath);
+        this.assertOpen();
+        if (read !== null) return this.#opened(requestedPath, read, { kind: "default-order", plan: plan.id, rank }, openedResources);
+      }
     for (const link of this.options.links ?? []) {
       if (!requestedPath.startsWith(link.sourcePrefix)) continue;
       const source = this.#sources.get(link.mount);
@@ -364,7 +470,9 @@ export class MountedContent {
       const targetPath = normalizeResourcePath(link.targetPrefix + requestedPath.slice(link.sourcePrefix.length));
       const read = await this.#readSource(source, targetPath);
       this.assertOpen();
-      return read === null ? null : this.#opened(requestedPath, read, { kind: "link", plan: plan.id, sourcePrefix: link.sourcePrefix, targetPath }, openedResources);
+      return read === null
+        ? null
+        : this.#opened(requestedPath, read, { kind: "link", plan: plan.id, sourcePrefix: link.sourcePrefix, targetPath }, openedResources);
     }
     const prefix = plan.prefixOrders.find(order => requestedPath.toLowerCase().startsWith(order.prefix.toLowerCase()));
     const order = prefix?.mounts ?? plan.defaultOrder;
@@ -376,16 +484,17 @@ export class MountedContent {
       const read = await this.#readSource(source, requestedPath);
       this.assertOpen();
       if (read !== null) {
-        const resolution: ResourceResolution = prefix === undefined
-          ? { kind: "default-order", plan: plan.id, rank }
-          : { kind: "prefix-order", plan: plan.id, prefix: prefix.prefix, rank };
+        const resolution: ResourceResolution =
+          prefix === undefined ? { kind: "default-order", plan: plan.id, rank } : { kind: "prefix-order", plan: plan.id, prefix: prefix.prefix, rank };
         return this.#opened(requestedPath, read, resolution, openedResources);
       }
     }
     return null;
   }
 
-  async resolve(path: string): Promise<ResolvedResourceReference | null> { return (await this.open(path))?.reference ?? null; }
+  async resolve(path: string): Promise<ResolvedResourceReference | null> {
+    return (await this.open(path))?.reference ?? null;
+  }
 
   // Loose existence probes repeat per directory during bulk checks (download
   // preparation walks hundreds of paths); listings are cached for this
@@ -393,12 +502,17 @@ export class MountedContent {
   // invalidateListings() so a cached listing never hides a new file.
   readonly #listings = new Map<string, Promise<readonly Dirent[] | null>>();
 
-  invalidateListings(): void { this.#listings.clear(); }
+  invalidateListings(): void {
+    this.#listings.clear();
+  }
 
   #listing(directory: string): Promise<readonly Dirent[] | null> {
     let pending = this.#listings.get(directory);
     if (pending === undefined) {
-      pending = readdir(directory, { withFileTypes: true }).catch((error: unknown) => { if (isMissingFile(error)) return null; throw error; });
+      pending = readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+        if (isMissingFile(error)) return null;
+        throw error;
+      });
       this.#listings.set(directory, pending);
     }
     return pending;
@@ -411,12 +525,13 @@ export class MountedContent {
     for (const [index, part] of parts.entries()) {
       const entries = await this.#listing(current);
       if (entries === null) return false;
-      const entry = exact ? entries.find(candidate => candidate.name === part)
-        : entries.find(candidate => candidate.name === part) ?? singleCaseInsensitive(entries, part, memberPath);
+      const entry = exact
+        ? entries.find(candidate => candidate.name === part)
+        : (entries.find(candidate => candidate.name === part) ?? singleCaseInsensitive(entries, part, memberPath));
       if (entry === undefined) return false;
       current = resolve(current, entry.name);
       // Symlinks (and unknown dirent types) keep findContentPath semantics.
-      if (entry.isSymbolicLink() || !entry.isFile() && !entry.isDirectory()) {
+      if (entry.isSymbolicLink() || (!entry.isFile() && !entry.isDirectory())) {
         const found = await findContentPath(rootPath, memberPath, this.options.looseComparison);
         return found !== null && (await stat(found)).isFile();
       }
@@ -429,17 +544,19 @@ export class MountedContent {
   /** Existence in mount order without reading or digesting bytes. */
   async exists(path: string): Promise<boolean> {
     this.assertOpen();
-    const plan = this.plan, requestedPath = normalizeResourcePath(path);
+    const plan = this.plan,
+      requestedPath = normalizeResourcePath(path);
     const probe = async (source: MountedSource, memberPath: string): Promise<boolean> => {
       if (!this.#allowed(source, memberPath)) return false;
       if (source.kind === "archive") return source.archive.findEntries(memberPath, "case-insensitive").some(entry => !entry.isDirectory);
       return this.#probeLoose(source.mount.rootPath, memberPath);
     };
-    if (this.#userMounts.size !== 0) for (const id of plan.defaultOrder) {
-      if (!this.#userMounts.has(id)) continue;
-      const source = this.#sources.get(id);
-      if (source !== undefined && await probe(source, requestedPath)) return true;
-    }
+    if (this.#userMounts.size !== 0)
+      for (const id of plan.defaultOrder) {
+        if (!this.#userMounts.has(id)) continue;
+        const source = this.#sources.get(id);
+        if (source !== undefined && (await probe(source, requestedPath))) return true;
+      }
     for (const link of this.options.links ?? []) {
       if (!requestedPath.startsWith(link.sourcePrefix)) continue;
       const source = this.#sources.get(link.mount);
@@ -465,9 +582,13 @@ export class MountedContent {
     const directory = path.replace(/[\\/]$/, "");
     if (directory !== "") normalizeResourcePath(directory);
     const prefix = this.plan.prefixOrders.find(order => `${directory}/`.toLowerCase().startsWith(order.prefix.toLowerCase()));
-    const names: string[] = [], seen = new Set<string>();
+    const names: string[] = [],
+      seen = new Set<string>();
     const add = (name: string): void => {
-      if (names.length < 4095 && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); names.push(name); }
+      if (names.length < 4095 && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        names.push(name);
+      }
     };
     const depth = (value: string): number => [...value].filter(character => character === "/" || character === "\\").length;
     const suffix = (name: string): boolean => name.toLowerCase().endsWith(extension.toLowerCase());
@@ -476,16 +597,22 @@ export class MountedContent {
       if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
       if (source.kind === "archive") {
         for (const entry of source.archive.entries) {
-          const name = entry.path, lastSeparator = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
-          if (!this.#allowed(source, name) || depth(name) - depth(path) > 2 || directory.length > Math.max(0, lastSeparator)
-            || name.slice(0, directory.length).toLowerCase() !== directory.toLowerCase() || !suffix(name)) continue;
+          const name = entry.path,
+            lastSeparator = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
+          if (
+            !this.#allowed(source, name) ||
+            depth(name) - depth(path) > 2 ||
+            directory.length > Math.max(0, lastSeparator) ||
+            name.slice(0, directory.length).toLowerCase() !== directory.toLowerCase() ||
+            !suffix(name)
+          )
+            continue;
           add(name.slice(directory.length === 0 ? 0 : directory.length + 1));
         }
       } else {
-        if (!this.#userMounts.has(source.mount.identity.id)
-          && (this.options.q3Restriction === "demo" || (this.options.pure?.archives.length ?? 0) !== 0)) continue;
-        const location = directory === "" ? source.mount.rootPath
-          : await findContentPath(source.mount.rootPath, directory, this.options.looseComparison);
+        if (!this.#userMounts.has(source.mount.identity.id) && (this.options.q3Restriction === "demo" || (this.options.pure?.archives.length ?? 0) !== 0))
+          continue;
+        const location = directory === "" ? source.mount.rootPath : await findContentPath(source.mount.rootPath, directory, this.options.looseComparison);
         if (location === null) continue;
         const entries = await readdir(location, { withFileTypes: true }).catch((error: unknown) => {
           if (isMissingFile(error)) return [];
@@ -494,7 +621,7 @@ export class MountedContent {
         this.assertOpen();
         for (const entry of entries) {
           if (entry.isSymbolicLink()) continue;
-          if ((extension === "/") !== entry.isDirectory() || extension !== "/" && !suffix(entry.name)) continue;
+          if ((extension === "/") !== entry.isDirectory() || (extension !== "/" && !suffix(entry.name))) continue;
           add(entry.name);
         }
       }
@@ -515,11 +642,16 @@ export class MountedContent {
       return opened.bytes;
     }
     const source = this.#sources.get(resource.provenance.mount.identity.id);
-    if (source === undefined || source.mount.identity.content !== resource.provenance.mount.identity.content
-      || source.mount.identity.generation !== resource.provenance.mount.identity.generation) throw new Error(`Stale resource mount: ${resource.id}`);
+    if (
+      source === undefined ||
+      source.mount.identity.content !== resource.provenance.mount.identity.content ||
+      source.mount.identity.generation !== resource.provenance.mount.identity.generation
+    )
+      throw new Error(`Stale resource mount: ${resource.id}`);
     let bytes: Uint8Array;
     if (resource.provenance.kind === "archive") {
-      if (source.kind !== "archive" || source.mount.archiveDigest !== resource.provenance.mount.archiveDigest) throw new Error(`Archive identity changed: ${resource.id}`);
+      if (source.kind !== "archive" || source.mount.archiveDigest !== resource.provenance.mount.archiveDigest)
+        throw new Error(`Archive identity changed: ${resource.id}`);
       const memberIndex = resource.provenance.memberIndex;
       const entry = source.archive.entries.find(candidate => candidate.ordinal === memberIndex);
       if (entry === undefined || entry.path !== resource.provenance.memberPath) throw new Error(`Archive member identity changed: ${resource.id}`);
@@ -527,13 +659,15 @@ export class MountedContent {
       bytes = await source.archive.readEntry(entry);
       this.#referenced.set(source.mount.identity.id, source.mount);
     } else {
-      if (source.kind !== "loose" || source.mount.rootPath !== resource.provenance.mount.rootPath) throw new Error(`Loose root identity changed: ${resource.id}`);
+      if (source.kind !== "loose" || source.mount.rootPath !== resource.provenance.mount.rootPath)
+        throw new Error(`Loose root identity changed: ${resource.id}`);
       const read = await this.#readSource(source, resource.provenance.memberPath);
       if (read === null) throw new Error(`Resource is no longer available: ${resource.requestedPath}`);
       bytes = read.bytes;
     }
     this.assertOpen();
-    if (bytes.length !== resource.byteLength || digestBytes(bytes) !== resource.digest) throw new Error(`Resource bytes changed since resolution: ${resource.requestedPath}`);
+    if (bytes.length !== resource.byteLength || digestBytes(bytes) !== resource.digest)
+      throw new Error(`Resource bytes changed since resolution: ${resource.requestedPath}`);
     openedResources.set(this.#openedKey(resource.provenance.mount.identity.id, resource.requestedPath), resource);
     return bytes;
   }
@@ -546,7 +680,9 @@ export class MountedContent {
     if (this.#ownership.kind === "owned") for (const source of this.#sources.values()) if (source.kind === "archive") source.archive.close();
   }
 
-  [Symbol.dispose](): void { this.close(); }
+  [Symbol.dispose](): void {
+    this.close();
+  }
 }
 
 export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions = {}): Promise<MountedContent> {
@@ -556,7 +692,7 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
     for (const mount of plan.mounts) {
       if (mount.kind === "loose") sources.push({ kind: "loose", mount });
       else {
-        if (await digestFile(mount.archivePath) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
+        if ((await digestFile(mount.archivePath)) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
         const archive = await openArchive(mount.archivePath, mount.format);
         sources.push({ kind: "archive", mount, archive });
         if (options.q3Restriction === "demo") {
@@ -574,8 +710,11 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
 }
 
 export function canDownloadResource(resource: ResolvedResourceReference): boolean {
-  return !(resource.provenance.mount.identity.content.startsWith("q2:") && resource.provenance.kind === "archive"
-    && resource.requestedPath.toLowerCase().startsWith("maps/"));
+  return !(
+    resource.provenance.mount.identity.content.startsWith("q2:") &&
+    resource.provenance.kind === "archive" &&
+    resource.requestedPath.toLowerCase().startsWith("maps/")
+  );
 }
 
 export type MountPlanOpener = (plan: ResolvedMountPlan, options?: OpenMountOptions) => Promise<MountedContent>;
@@ -585,7 +724,9 @@ export class MountPreparationScope {
   private readonly archives = new Map<string, Promise<ArchiveHandle>>();
   private closed = false;
   private disposal: Promise<void> | null = null;
-  assertOpen(): void { if (this.closed) throw new Error("Mount preparation scope is closed"); }
+  assertOpen(): void {
+    if (this.closed) throw new Error("Mount preparation scope is closed");
+  }
   private archive(mount: ArchiveMount): Promise<ArchiveHandle> {
     this.assertOpen();
     const key = JSON.stringify([mount.archivePath, mount.archiveDigest, mount.format]);
@@ -598,14 +739,18 @@ export class MountPreparationScope {
   private async openVerified(mount: ArchiveMount): Promise<ArchiveHandle> {
     const storage = new FileSource(mount.archivePath);
     try {
-      if (await digestFile(mount.archivePath) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
+      if ((await digestFile(mount.archivePath)) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
       this.assertOpen();
       return await openArchiveSource(storage, mount.format);
-    } catch (error) { storage.close(); throw error; }
+    } catch (error) {
+      storage.close();
+      throw error;
+    }
   }
   readonly open: MountPlanOpener = async (plan, options = {}) => {
     this.assertOpen();
-    const resolved = resolveMountPlan(plan, options), sources: MountedSource[] = [];
+    const resolved = resolveMountPlan(plan, options),
+      sources: MountedSource[] = [];
     for (const mount of plan.mounts) {
       if (mount.kind === "loose") sources.push({ kind: "loose", mount });
       else {
@@ -613,7 +758,7 @@ export class MountPreparationScope {
         this.assertOpen();
         if (options.q3Restriction === "demo") {
           if (archive.format !== "pk3") throw new Error(`Restricted Q3 content requires PK3 archives: ${mount.archivePath}`);
-          if ((q3ArchiveChecksums(archive, 0).checksum >>> 0) !== 437558517) throw new Error(`Corrupted demo pak0.pk3: ${mount.archivePath}`);
+          if (q3ArchiveChecksums(archive, 0).checksum >>> 0 !== 437558517) throw new Error(`Corrupted demo pak0.pk3: ${mount.archivePath}`);
         }
         sources.push({ kind: "archive", mount, archive });
       }
@@ -628,11 +773,17 @@ export class MountPreparationScope {
     return this.disposal;
   }
   private async closeArchives(): Promise<void> {
-    await Promise.all([...this.archives.values()].map(async pending => {
-      let archive: ArchiveHandle;
-      try { archive = await pending; } catch { return; }
-      archive.close();
-    }));
+    await Promise.all(
+      [...this.archives.values()].map(async pending => {
+        let archive: ArchiveHandle;
+        try {
+          archive = await pending;
+        } catch {
+          return;
+        }
+        archive.close();
+      }),
+    );
     this.archives.clear();
   }
 }

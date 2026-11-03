@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { LocalizationTable } from "../../text/localization.ts";
 
 /** Presentation keeps unknown mod keys intact; native localization retains its byte-buffer contract. */
@@ -7,7 +8,8 @@ export function q2LocalizedText(catalog: LocalizationTable, text: string, args: 
   const entry = key.startsWith("$") ? catalog.find(key.slice(1)) : undefined;
   if (key.startsWith("$") && entry === undefined) return text;
   if (entry === undefined) return args.length === 0 ? text : catalog.localize(text, args);
-  let result = "", start = 0;
+  let result = "",
+    start = 0;
   for (const slot of entry.arguments) {
     const argument = args[slot.argIndex];
     if (argument === undefined) return text;

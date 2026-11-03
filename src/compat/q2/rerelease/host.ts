@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { withRereleasePrimaryProtection } from "./pickup-protection.ts";
 import { RereleaseDebugShapeImports } from "./debug-shapes.ts";
 import type { RereleaseDebugShapesEvent } from "./debug-shapes.ts";
@@ -36,7 +37,13 @@ import type { NativePickupProfile } from "../native-pickups.ts";
 import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { rereleasePickupProfile } from "./pickup-profile.ts";
 
-const boxFilterSignature = signature([{ kind: "scalar", storage: "pointer" }, { kind: "scalar", storage: "pointer" }], { kind: "scalar", storage: "int32" });
+const boxFilterSignature = signature(
+  [
+    { kind: "scalar", storage: "pointer" },
+    { kind: "scalar", storage: "pointer" },
+  ],
+  { kind: "scalar", storage: "int32" },
+);
 
 export interface RereleaseActorBindings {
   readonly body: BodyStateBinding;
@@ -72,7 +79,10 @@ export interface RereleaseSpatialServices {
 export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "invokeImport" | "actorAtSlot"> {
   readonly pickups?: { readonly admission: OriginalPickupAdmission; readonly imageBase: GuestAddress; readonly profile?: NativePickupProfile };
   readonly importBoundary?: (name: string, arguments_: readonly GuestCallValue[], invoke: () => GuestCallResult) => GuestCallResult;
-  readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "callbacks" | "combat" | "inventory" | "trace" | "pointContents" | "setAreaPortal" | "setSolid" | "inlineModelBounds" | "worldActor">;
+  readonly engine: Pick<
+    Q2FoundationHost,
+    "actors" | "bodies" | "callbacks" | "combat" | "inventory" | "trace" | "pointContents" | "setAreaPortal" | "setSolid" | "inlineModelBounds" | "worldActor"
+  >;
   readonly services: RereleaseCoreServices;
   readonly spatial: RereleaseSpatialServices;
   readonly semantics: RereleaseSemanticBindings;
@@ -101,8 +111,13 @@ export class RereleaseQ2GuestHost {
   readonly #sounds: RereleaseSoundImports | null;
   readonly #lifetimes = new Map<number, { readonly actor: OwnedActor; readonly generation: number | null; readonly address: bigint }>();
   readonly #retiredInputClients = new Set<number>();
-  retireInputClient(slot: number): void { this.#retiredInputClients.add(slot); }
-  finishInputRetirement(slot: number): void { this.#retiredInputClients.delete(slot); this.#lifetimes.delete(slot); }
+  retireInputClient(slot: number): void {
+    this.#retiredInputClients.add(slot);
+  }
+  finishInputRetirement(slot: number): void {
+    this.#retiredInputClients.delete(slot);
+    this.#lifetimes.delete(slot);
+  }
   readonly #surfaces = new Map<Q2SurfaceInfo, GuestAddress>();
   readonly #botEntities = new Map<ActorId, RawEntityView>();
   #filterDepth = 0;
@@ -116,25 +131,62 @@ export class RereleaseQ2GuestHost {
     if (options.debugDrawing === "headless" && (options.debugShapes !== undefined || options.worldText !== undefined))
       throw new Error("Headless Q2 debug drawing cannot bind renderer callbacks");
     this.core = new RereleaseCoreImports(options.runner.options.cpu.memory, options.services);
-    this.module = new RereleaseGuestModule({ ...options,
-      actorAtSlot: slot => options.semantics.project === undefined
-        ? options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null
-        : this.actor(this.module.entities().atSlot(slot))?.id ?? null,
-      invokeImport: call => this.#import(call) });
+    this.module = new RereleaseGuestModule({
+      ...options,
+      actorAtSlot: slot =>
+        options.semantics.project === undefined
+          ? (options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null)
+          : (this.actor(this.module.entities().atSlot(slot))?.id ?? null),
+      invokeImport: call => this.#import(call),
+    });
     this.#debugShapes = options.debugShapes === undefined ? null : new RereleaseDebugShapeImports(this.module.memory, options.debugShapes);
     this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
-    this.#sounds = options.sound === undefined ? null : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
-    this.#messages = options.messages === undefined ? null : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
+    this.#sounds =
+      options.sound === undefined
+        ? null
+        : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
+    this.#messages =
+      options.messages === undefined
+        ? null
+        : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
     if (options.foreignDamage !== undefined && options.nativeEntries === undefined) throw new Error("Foreign native damage requires verified entry points");
-    this.foreignActors = options.foreignDamage === undefined || options.nativeEntries === undefined ? null : new RereleaseForeignActors(this, options.nativeEntries, options.foreignDamage);
-    this.#unsubscribe = options.engine.actors.onRelease(actor => { try { this.foreignActors?.released(actor); } finally { this.#botEntities.delete(actor.id); } return undefined; });
+    this.foreignActors =
+      options.foreignDamage === undefined || options.nativeEntries === undefined
+        ? null
+        : new RereleaseForeignActors(this, options.nativeEntries, options.foreignDamage);
+    this.#unsubscribe = options.engine.actors.onRelease(actor => {
+      try {
+        this.foreignActors?.released(actor);
+      } finally {
+        this.#botEntities.delete(actor.id);
+      }
+      return undefined;
+    });
     const profile = options.pickups?.profile ?? rereleasePickupProfile(this.module.memory.module.digest);
-    this.#pickups = options.pickups === undefined || profile === null ? null : new NativePrimaryPickups({ memory: this.module.memory, runner: options.runner,
-      invoke: (target, signature, values) => this.module.invoke(target, signature, values), record: address => this.module.entities().fromPointer(address),
-      current: record => this.#retiredInputClients.has(record.slot) ? null : this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null,
-      admission: () => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("API2023 primary pickup authority disappeared"); return pickups.admission; },
-      withProtection: (recipient, channel, current, operation, committed) => withRereleasePrimaryProtection(this, recipient, channel, current, operation, committed),
-    }, options.pickups.imageBase, profile);
+    this.#pickups =
+      options.pickups === undefined || profile === null
+        ? null
+        : new NativePrimaryPickups(
+            {
+              memory: this.module.memory,
+              runner: options.runner,
+              invoke: (target, signature, values) => this.module.invoke(target, signature, values),
+              record: address => this.module.entities().fromPointer(address),
+              current: record =>
+                this.#retiredInputClients.has(record.slot)
+                  ? null
+                  : (this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null),
+              admission: () => {
+                const pickups = this.options.pickups;
+                if (pickups === undefined) throw new Error("API2023 primary pickup authority disappeared");
+                return pickups.admission;
+              },
+              withProtection: (recipient, channel, current, operation, committed) =>
+                withRereleasePrimaryProtection(this, recipient, channel, current, operation, committed),
+            },
+            options.pickups.imageBase,
+            profile,
+          );
   }
   bindPickupSupply(owner: NativePickupSupply): () => undefined {
     if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
@@ -144,38 +196,53 @@ export class RereleaseQ2GuestHost {
     if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
     return this.#pickups.supply(offer);
   }
-  #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
+  #at(view: RawEntityView, name: string): GuestAddress {
+    return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name)));
+  }
   #vector(address: GuestAddress): Vec3 {
     return this.module.memory.readFloat32Vector(address);
   }
   #writeVector(address: GuestAddress, vector: Vec3): void {
     const memory = this.module.memory;
-    memory.writeFloat32(address, vector.x); memory.writeFloat32(memory.offset(address, 4n), vector.y); memory.writeFloat32(memory.offset(address, 8n), vector.z);
+    memory.writeFloat32(address, vector.x);
+    memory.writeFloat32(memory.offset(address, 4n), vector.y);
+    memory.writeFloat32(memory.offset(address, 8n), vector.z);
   }
   actor(view: RawEntityView): OwnedActor | null {
     if (this.#retiredInputClients.has(view.slot)) return null;
     if (this.options.semantics.project !== undefined) return this.options.semantics.project(view, this.module);
     const projected = this.foreignActors?.lookup(view);
     if (projected !== undefined) return projected;
-    const { memory } = this.module, engine = this.options.engine;
+    const { memory } = this.module,
+      engine = this.options.engine;
     const live = memory.readUint8(this.#at(view, "inuse")) !== 0 || this.#reservedClients.has(view.slot);
     const generation = this.options.semantics.generation?.(view) ?? null;
     const previous = this.#lifetimes.get(view.slot);
-    if (previous !== undefined && (!live || previous.generation !== generation || previous.address !== view.address.byteOffset || !engine.actors.isLive(previous.actor.id))) {
+    if (
+      previous !== undefined &&
+      (!live || previous.generation !== generation || previous.address !== view.address.byteOffset || !engine.actors.isLive(previous.actor.id))
+    ) {
       this.#lifetimes.delete(view.slot);
       if (engine.actors.isLive(previous.actor.id)) engine.actors.release(previous.actor);
     }
     if (!live) return null;
     const current = this.#lifetimes.get(view.slot);
     if (current !== undefined) return current.actor;
-    const actor = engine.actors.atSource(memory.module.id, view.slot) ?? engine.actors.allocateAtSource(memory.module.id, view.slot, "q2-rerelease:native-edict");
+    const actor =
+      engine.actors.atSource(memory.module.id, view.slot) ?? engine.actors.allocateAtSource(memory.module.id, view.slot, "q2-rerelease:native-edict");
     const binding = this.options.semantics.bind(view, actor, this.module);
     engine.bodies.bind(actor, binding.body);
     if (binding.combat !== null) engine.combat.bind(actor, binding.combat);
     if (binding.powerArmorCells !== null) engine.combat.bindPowerArmorCells(actor, binding.powerArmorCells);
     if (binding.inventory !== null) engine.inventory.bind(actor, binding.inventory);
     const callbacks = binding.callbacks;
-    const invoke = (call: () => undefined): undefined => { try { return call(); } finally { this.reconcile(); } };
+    const invoke = (call: () => undefined): undefined => {
+      try {
+        return call();
+      } finally {
+        this.reconcile();
+      }
+    };
     engine.callbacks.bind(actor, {
       think: callbacks.think === null ? null : (self, frame) => invoke(() => callbacks.think?.(self, frame)),
       touch: callbacks.touch === null ? null : contact => invoke(() => callbacks.touch?.(contact)),
@@ -194,21 +261,42 @@ export class RereleaseQ2GuestHost {
     if (actor === null) throw new Error("Q2 reserved source client has no actor");
     return actor;
   }
-  isClientReserved(slot: number): boolean { return this.#reservedClients.has(slot); }
-  releaseClientReservation(slot: number): void { this.#reservedClients.delete(slot); this.reconcile(); }
+  isClientReserved(slot: number): boolean {
+    return this.#reservedClients.has(slot);
+  }
+  releaseClientReservation(slot: number): void {
+    this.#reservedClients.delete(slot);
+    this.reconcile();
+  }
   rebindWorld(commit: () => void): void {
     this.#pickups?.assertIdle();
     if (this.#closed || !this.#initialized || this.#filterDepth !== 0) throw new Error("Q2 world rebind requires an idle initialized host");
-    this.foreignActors?.clear(); this.#reservedClients.clear(); this.#releaseActors(); this.#unsubscribe(); this.#botEntities.clear();
+    this.foreignActors?.clear();
+    this.#reservedClients.clear();
+    this.#releaseActors();
+    this.#unsubscribe();
+    this.#botEntities.clear();
     for (const address of this.#surfaces.values()) this.module.memory.unmap(address, surfaceLayout.byteLength);
     this.#surfaces.clear();
     commit();
-    this.#unsubscribe = this.options.engine.actors.onRelease(actor => { try { this.foreignActors?.released(actor); } finally { this.#botEntities.delete(actor.id); } return undefined; });
+    this.#unsubscribe = this.options.engine.actors.onRelease(actor => {
+      try {
+        this.foreignActors?.released(actor);
+      } finally {
+        this.#botEntities.delete(actor.id);
+      }
+      return undefined;
+    });
   }
   reconcile(): void {
     const table = this.module.entities();
-    for (const [slot, entry] of this.#lifetimes) if (slot >= table.count) { this.#lifetimes.delete(slot); if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor); }
-    const semantics = this.options.semantics, memory = this.module.memory;
+    for (const [slot, entry] of this.#lifetimes)
+      if (slot >= table.count) {
+        this.#lifetimes.delete(slot);
+        if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor);
+      }
+    const semantics = this.options.semantics,
+      memory = this.module.memory;
     const scalar = SparseGuestMemory.managed(memory) ? memory : null;
     const direct = scalar !== null && semantics.project === undefined && semantics.generation === undefined;
     const base = Number(table.base.byteOffset);
@@ -219,25 +307,43 @@ export class RereleaseQ2GuestHost {
         const inuse = scalar?.scalarRead(address + inuseOffset, 1) ?? -1;
         const entry = this.#lifetimes.get(slot);
         if (inuse === 0 && entry === undefined && !this.#reservedClients.has(slot)) continue;
-        if (inuse > 0 && entry !== undefined && Number(entry.address) === address && this.options.engine.actors.isLive(entry.actor.id)
-          && !this.#retiredInputClients.has(slot)) continue;
+        if (
+          inuse > 0 &&
+          entry !== undefined &&
+          Number(entry.address) === address &&
+          this.options.engine.actors.isLive(entry.actor.id) &&
+          !this.#retiredInputClients.has(slot)
+        )
+          continue;
       }
       this.actor(table.atSlot(slot));
     }
   }
   /** Bot registration indexes the same live actors and raw server records. */
-  botEntities(): readonly RawEntityView[] { return [...this.#botEntities.values()]; }
+  botEntities(): readonly RawEntityView[] {
+    return [...this.#botEntities.values()];
+  }
   addressForActor(actor: ActorId): GuestAddress {
     if (this.options.semantics.project !== undefined) return this.options.semantics.foreignAddress(actor);
     const source = this.options.engine.actors.sourceOf(actor);
     if (source !== null && source.provider === this.module.memory.module.id) return this.module.entities().atSlot(source.slot).address;
     return this.foreignActors?.address(actor) ?? this.options.semantics.foreignAddress(actor);
   }
-  preInit(): void { this.core.refreshCvars(); this.module.preInit(); }
+  preInit(): void {
+    this.core.refreshCvars();
+    this.module.preInit();
+  }
   init(): void {
     if (this.#closed) throw new Error("Q2 guest host is closed");
-    try { this.core.refreshCvars(); this.module.init(); this.#initialized = true; this.reconcile(); }
-    catch (error) { this.shutdown(); throw error; }
+    try {
+      this.core.refreshCvars();
+      this.module.init();
+      this.#initialized = true;
+      this.reconcile();
+    } catch (error) {
+      this.shutdown();
+      throw error;
+    }
   }
   async callLoading(name: GameExportName, arguments_: readonly GuestCallValue[], nextFrame: () => Promise<void>): Promise<GuestCallResult> {
     if (this.#closed) throw new Error("Q2 guest host is closed");
@@ -249,35 +355,69 @@ export class RereleaseQ2GuestHost {
   async initLoading(nextFrame: () => Promise<void>): Promise<void> {
     if (this.#initialized) throw new Error("API 2023 Init already completed");
     await this.callLoading("PreInit", [], nextFrame);
-    await this.callLoading("Init", [], nextFrame); this.#initialized = true; this.reconcile();
+    await this.callLoading("Init", [], nextFrame);
+    this.#initialized = true;
+    this.reconcile();
   }
   async spawnEntitiesLoading(map: string, entities: string, spawnpoint: string, nextFrame: () => Promise<void>): Promise<void> {
     const strings = [map, entities, spawnpoint].map(text => ({ text, address: this.module.string(text) }));
-    try { await this.callLoading("SpawnEntities", strings.map(value => guestPointer(value.address)), nextFrame); }
-    finally { for (const value of strings) this.module.memory.unmap(value.address, nativeAllocationBytes(new TextEncoder().encode(value.text).length + 1)); }
+    try {
+      await this.callLoading(
+        "SpawnEntities",
+        strings.map(value => guestPointer(value.address)),
+        nextFrame,
+      );
+    } finally {
+      for (const value of strings) this.module.memory.unmap(value.address, nativeAllocationBytes(new TextEncoder().encode(value.text).length + 1));
+    }
   }
   async runFrameLoading(mainLoop: boolean, nextFrame: () => Promise<void>): Promise<void> {
     await this.callLoading("PrepFrame", [], nextFrame);
-    this.foreignActors?.synchronize(); await this.callLoading("RunFrame", [guestBool(mainLoop)], nextFrame);
+    this.foreignActors?.synchronize();
+    await this.callLoading("RunFrame", [guestBool(mainLoop)], nextFrame);
   }
-  async readSaveLoading(kind: "game" | "level", saved: RereleaseSourceSave, nextFrame: () => Promise<void>, domain: "checkpoint" | "current" = "current"): Promise<void> {
+  async readSaveLoading(
+    kind: "game" | "level",
+    saved: RereleaseSourceSave,
+    nextFrame: () => Promise<void>,
+    domain: "checkpoint" | "current" = "current",
+  ): Promise<void> {
     this.#pickups?.assertIdle();
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
-    if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
-    const memory = this.module.memory, address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
+    if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0))
+      throw new Error("Native save requires its foreign actor binding");
+    const memory = this.module.memory,
+      address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
     let restoring = false;
     try {
-      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections, domain); restoring = true;
+      memory.write(address, bytes);
+      this.foreignActors?.beginRestore(saved.projections, domain);
+      restoring = true;
       await this.callLoading(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)], nextFrame);
       this.foreignActors?.deferred.restore(saved.deferredDamage, domain);
-    } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, nativeAllocationBytes(bytes.length + 1)); }
+    } finally {
+      if (restoring) this.foreignActors?.endRestore();
+      memory.unmap(address, nativeAllocationBytes(bytes.length + 1));
+    }
   }
   shutdown(): void {
     if (this.#closed) return;
-    this.#closed = true; this.#pickups?.close();
-    try { try { this.foreignActors?.close(); } finally { if (this.#initialized) this.module.callGame("Shutdown"); } }
-    finally { try { this.#releaseActors(); } finally { this.#unsubscribe(); } }
+    this.#closed = true;
+    this.#pickups?.close();
+    try {
+      try {
+        this.foreignActors?.close();
+      } finally {
+        if (this.#initialized) this.module.callGame("Shutdown");
+      }
+    } finally {
+      try {
+        this.#releaseActors();
+      } finally {
+        this.#unsubscribe();
+      }
+    }
   }
   #releaseActors(): void {
     const registry = this.options.engine.actors;
@@ -285,64 +425,125 @@ export class RereleaseQ2GuestHost {
     // Projected components borrow actors and must never retire their primary owner.
     // Shared adjunct actors owned by this provider without a source binding
     // (selected monsters) are not guest edicts and survive the rebind.
-    const actors = this.options.semantics.project === undefined ? registry.ownedBy(this.module.memory.module.id)
-      .filter(actor => registry.sourceOf(actor.id)?.provider === this.module.memory.module.id)
-      : [...this.#lifetimes.values()].map(entry => entry.actor);
+    const actors =
+      this.options.semantics.project === undefined
+        ? registry.ownedBy(this.module.memory.module.id).filter(actor => registry.sourceOf(actor.id)?.provider === this.module.memory.module.id)
+        : [...this.#lifetimes.values()].map(entry => entry.actor);
     for (const actor of actors) if (registry.isLive(actor.id)) registry.release(actor);
     this.#lifetimes.clear();
   }
-  spawnEntities(map: string, entities: string, spawnpoint = ""): void { this.core.refreshCvars(); this.module.spawnEntities(map, entities, spawnpoint); this.reconcile(); }
-  prepFrame(): void { this.core.refreshCvars(); this.module.prepFrame(); this.reconcile(); }
-  runFrame(mainLoop: boolean): void { this.core.refreshCvars(); this.foreignActors?.synchronize(); this.module.runFrame(mainLoop); this.reconcile(); }
-  clientConnect(...arguments_: Parameters<RereleaseGuestModule["clientConnect"]>): ReturnType<RereleaseGuestModule["clientConnect"]> {
-    this.core.refreshCvars(); const result = this.module.clientConnect(...arguments_); this.reconcile(); return result;
+  spawnEntities(map: string, entities: string, spawnpoint = ""): void {
+    this.core.refreshCvars();
+    this.module.spawnEntities(map, entities, spawnpoint);
+    this.reconcile();
   }
-  clientBegin(slot: number): void { this.core.refreshCvars(); this.module.clientBegin(slot); this.reconcile(); }
-  clientThink(...arguments_: Parameters<RereleaseGuestModule["clientThink"]>): void { this.core.refreshCvars(); this.module.clientThink(...arguments_); this.reconcile(); }
-  clientDisconnect(slot: number): void { this.module.clientDisconnect(slot); this.reconcile(); }
+  prepFrame(): void {
+    this.core.refreshCvars();
+    this.module.prepFrame();
+    this.reconcile();
+  }
+  runFrame(mainLoop: boolean): void {
+    this.core.refreshCvars();
+    this.foreignActors?.synchronize();
+    this.module.runFrame(mainLoop);
+    this.reconcile();
+  }
+  clientConnect(...arguments_: Parameters<RereleaseGuestModule["clientConnect"]>): ReturnType<RereleaseGuestModule["clientConnect"]> {
+    this.core.refreshCvars();
+    const result = this.module.clientConnect(...arguments_);
+    this.reconcile();
+    return result;
+  }
+  clientBegin(slot: number): void {
+    this.core.refreshCvars();
+    this.module.clientBegin(slot);
+    this.reconcile();
+  }
+  clientThink(...arguments_: Parameters<RereleaseGuestModule["clientThink"]>): void {
+    this.core.refreshCvars();
+    this.module.clientThink(...arguments_);
+    this.reconcile();
+  }
+  clientDisconnect(slot: number): void {
+    this.module.clientDisconnect(slot);
+    this.reconcile();
+  }
   /** Save serialization runs in the guest so expanded source fields remain intact. */
   writeSave(kind: "game" | "level", automaticOrTransition: boolean): RereleaseSourceSave {
     this.#pickups?.assertIdle();
-    const memory = this.module.memory, size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
+    const memory = this.module.memory,
+      size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
     let output: GuestAddress | null = null;
     try {
-      output = resultPointer(this.module.callGame(kind === "game" ? "WriteGameJson" : "WriteLevelJson", [guestBool(automaticOrTransition), guestPointer(size)]));
+      output = resultPointer(
+        this.module.callGame(kind === "game" ? "WriteGameJson" : "WriteLevelJson", [guestBool(automaticOrTransition), guestPointer(size)]),
+      );
       if (output === null) throw new Error("Q2 source save returned null");
       const length = memory.readUint64(size);
       if (length > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Q2 source save length exceeds host copy range");
-      return { native: memory.copy(output, Number(length)), deferredDamage: kind === "level" ? this.foreignActors?.deferred.save() ?? [] : [],
-        projections: kind === "level" ? this.foreignActors?.saveProjections() ?? [] : [] };
-    } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
+      return {
+        native: memory.copy(output, Number(length)),
+        deferredDamage: kind === "level" ? (this.foreignActors?.deferred.save() ?? []) : [],
+        projections: kind === "level" ? (this.foreignActors?.saveProjections() ?? []) : [],
+      };
+    } finally {
+      if (output !== null) this.core.free(output);
+      memory.unmap(size, 8);
+    }
   }
   async writeSaveLoading(kind: "game" | "level", automaticOrTransition: boolean, nextFrame: () => Promise<void>): Promise<RereleaseSourceSave> {
     this.#pickups?.assertIdle();
     if (this.#closed) throw new Error("Q2 guest host is closed");
     this.core.refreshCvars();
-    const memory = this.module.memory, size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
+    const memory = this.module.memory,
+      size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
     let output: GuestAddress | null = null;
     try {
-      output = resultPointer(await this.module.callGameLoading(kind === "game" ? "WriteGameJson" : "WriteLevelJson", [guestBool(automaticOrTransition), guestPointer(size)], nextFrame));
+      output = resultPointer(
+        await this.module.callGameLoading(
+          kind === "game" ? "WriteGameJson" : "WriteLevelJson",
+          [guestBool(automaticOrTransition), guestPointer(size)],
+          nextFrame,
+        ),
+      );
       if (output === null) throw new Error("Q2 source save returned null");
       const length = memory.readUint64(size);
       if (length > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Q2 source save length exceeds host copy range");
-      return { native: memory.copy(output, Number(length)), deferredDamage: kind === "level" ? this.foreignActors?.deferred.save() ?? [] : [],
-        projections: kind === "level" ? this.foreignActors?.saveProjections() ?? [] : [] };
-    } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
+      return {
+        native: memory.copy(output, Number(length)),
+        deferredDamage: kind === "level" ? (this.foreignActors?.deferred.save() ?? []) : [],
+        projections: kind === "level" ? (this.foreignActors?.saveProjections() ?? []) : [],
+      };
+    } finally {
+      if (output !== null) this.core.free(output);
+      memory.unmap(size, 8);
+    }
   }
   readSave(kind: "game" | "level", saved: RereleaseSourceSave, domain: "checkpoint" | "current" = "current"): void {
     this.#pickups?.assertIdle();
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
-    if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
-    const memory = this.module.memory, address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
+    if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0))
+      throw new Error("Native save requires its foreign actor binding");
+    const memory = this.module.memory,
+      address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
     let restoring = false;
     try {
-      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections, domain); restoring = true;
-      this.core.refreshCvars(); this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]); this.reconcile(); this.foreignActors?.deferred.restore(saved.deferredDamage, domain);
-    } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, nativeAllocationBytes(bytes.length + 1)); }
+      memory.write(address, bytes);
+      this.foreignActors?.beginRestore(saved.projections, domain);
+      restoring = true;
+      this.core.refreshCvars();
+      this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]);
+      this.reconcile();
+      this.foreignActors?.deferred.restore(saved.deferredDamage, domain);
+    } finally {
+      if (restoring) this.foreignActors?.endRestore();
+      memory.unmap(address, nativeAllocationBytes(bytes.length + 1));
+    }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
-    return this.options.importBoundary === undefined ? this.#dispatchImport(call)
+    return this.options.importBoundary === undefined
+      ? this.#dispatchImport(call)
       : this.options.importBoundary(call.name, call.arguments, () => this.#dispatchImport(call));
   }
   #dispatchImport(call: RereleaseImportCall): GuestCallResult {
@@ -350,8 +551,16 @@ export class RereleaseQ2GuestHost {
     if (intercepted !== undefined) return intercepted;
     if (this.options.debugDrawing === "headless" && call.api === "game") {
       switch (call.name) {
-        case "Draw_Line": case "Draw_Point": case "Draw_Circle": case "Draw_Bounds": case "Draw_Sphere":
-        case "Draw_Cylinder": case "Draw_Ray": case "Draw_Arrow": case "Draw_OrientedWorldText": case "Draw_StaticWorldText":
+        case "Draw_Line":
+        case "Draw_Point":
+        case "Draw_Circle":
+        case "Draw_Bounds":
+        case "Draw_Sphere":
+        case "Draw_Cylinder":
+        case "Draw_Ray":
+        case "Draw_Arrow":
+        case "Draw_OrientedWorldText":
+        case "Draw_StaticWorldText":
           return { kind: "void" };
       }
     }
@@ -363,9 +572,12 @@ export class RereleaseQ2GuestHost {
     if (sound !== undefined) return sound;
     const message = this.#messages?.invoke(call);
     if (message !== undefined) return message;
-    const args = call.arguments, memory = this.module.memory, engine = this.options.engine;
+    const args = call.arguments,
+      memory = this.module.memory,
+      engine = this.options.engine;
     switch (call.name) {
-      case "Bot_RegisterEdict": case "Bot_UnRegisterEdict": {
+      case "Bot_RegisterEdict":
+      case "Bot_UnRegisterEdict": {
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
         if (this.foreignActors?.lookup(view) !== undefined) return { kind: "void" };
         const actor = this.actor(view);
@@ -379,13 +591,20 @@ export class RereleaseQ2GuestHost {
         // g_local.h TAG_GAME/TAG_LEVEL: native level resets can zero spawn_count
         // and reuse the same allocation; retire borrowed actor lifetimes first.
         const tag = integer(args, 0);
-        if (tag === 765n || tag === 766n) { this.foreignActors?.clear(); this.#releaseActors(); }
+        if (tag === 765n || tag === 766n) {
+          this.foreignActors?.clear();
+          this.#releaseActors();
+        }
         return this.core.invoke(call);
       }
       case "BoxEdicts": {
-        const min = this.#vector(requiredPointer(args, 0)), max = this.#vector(requiredPointer(args, 1));
-        const list = pointer(args, 2), maximum = integer(args, 3), area = Number(integer(args, 4));
-        const filter = pointer(args, 5), data = pointer(args, 6);
+        const min = this.#vector(requiredPointer(args, 0)),
+          max = this.#vector(requiredPointer(args, 1));
+        const list = pointer(args, 2),
+          maximum = integer(args, 3),
+          area = Number(integer(args, 4));
+        const filter = pointer(args, 5),
+          data = pointer(args, 6);
         if (area !== 1 && area !== 2) throw new RangeError("Q2 BoxEdicts requires AREA_SOLID or AREA_TRIGGERS");
         if (maximum < 0n || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Invalid Q2 BoxEdicts capacity");
         if (maximum > 0n && list === null) throw new Error("Q2 BoxEdicts output is null with nonzero capacity");
@@ -400,38 +619,76 @@ export class RereleaseQ2GuestHost {
               const result = this.module.invoke(filter, boxFilterSignature, [guestPointer(address), guestPointer(data)]);
               if (result.kind !== "int32") throw new TypeError("Q2 BoxEdicts filter must return its source enum");
               outcome = result.value;
-            } finally { this.#filterDepth--; }
+            } finally {
+              this.#filterDepth--;
+            }
           }
           if ((outcome & ~65) !== 0) throw new RangeError(`Invalid Q2 BoxEdicts filter result ${outcome}`);
           if ((outcome & 1) === 0) {
             if (maximum === 0n) count++;
-            else if (count < maximum && list !== null) { memory.writePointer(memory.offset(list, count * 8n), address); count++; }
+            else if (count < maximum && list !== null) {
+              memory.writePointer(memory.offset(list, count * 8n), address);
+              count++;
+            }
           }
           if ((outcome & 64) !== 0) break;
         }
         return { kind: "uint64", value: count };
       }
-      case "pointcontents": return { kind: "uint32", value: engine.pointContents(this.#vector(requiredPointer(args, 0))) };
-      case "inPVS": case "inPHS": return guestBool(this.options.spatial.visibility(call.name === "inPVS" ? "pvs" : "phs", this.#vector(requiredPointer(args, 0)), this.#vector(requiredPointer(args, 1)), integer(args, 2) !== 0n));
-      case "AreasConnected": return guestBool(this.options.spatial.areasConnected(Number(integer(args, 0)), Number(integer(args, 1))));
-      case "SetAreaPortalState": engine.setAreaPortal(Number(integer(args, 0)), integer(args, 1) !== 0n); return { kind: "void" };
+      case "pointcontents":
+        return { kind: "uint32", value: engine.pointContents(this.#vector(requiredPointer(args, 0))) };
+      case "inPVS":
+      case "inPHS":
+        return guestBool(
+          this.options.spatial.visibility(
+            call.name === "inPVS" ? "pvs" : "phs",
+            this.#vector(requiredPointer(args, 0)),
+            this.#vector(requiredPointer(args, 1)),
+            integer(args, 2) !== 0n,
+          ),
+        );
+      case "AreasConnected":
+        return guestBool(this.options.spatial.areasConnected(Number(integer(args, 0)), Number(integer(args, 1))));
+      case "SetAreaPortalState":
+        engine.setAreaPortal(Number(integer(args, 0)), integer(args, 1) !== 0n);
+        return { kind: "void" };
       case "trace": {
-        const min = pointer(args, 1), max = pointer(args, 2), pass = pointer(args, 4);
+        const min = pointer(args, 1),
+          max = pointer(args, 2),
+          pass = pointer(args, 4);
         if ((min === null) !== (max === null)) throw new Error("Q2 trace requires both bounds or neither");
-        const ignore = pass === null ? null : this.actor(this.module.entities().fromPointer(pass))?.id ?? null;
-        const trace = engine.trace({ start: this.#vector(requiredPointer(args, 0)), end: this.#vector(requiredPointer(args, 3)), bounds: min === null || max === null ? null : { min: this.#vector(min), max: this.#vector(max) }, ignore, mask: Number(integer(args, 5)) });
+        const ignore = pass === null ? null : (this.actor(this.module.entities().fromPointer(pass))?.id ?? null);
+        const trace = engine.trace({
+          start: this.#vector(requiredPointer(args, 0)),
+          end: this.#vector(requiredPointer(args, 3)),
+          bounds: min === null || max === null ? null : { min: this.#vector(min), max: this.#vector(max) },
+          ignore,
+          mask: Number(integer(args, 5)),
+        });
         return this.encodeTrace(trace);
       }
-      case "linkentity": case "unlinkentity": {
+      case "linkentity":
+      case "unlinkentity": {
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
         if (view.slot === 0) return { kind: "void" };
         if (this.foreignActors?.lookup(view) !== undefined) return { kind: "void" };
         const actor = this.actor(view);
-        if (actor === null) { memory.writeUint8(this.#at(view, "linked"), 0); return { kind: "void" }; }
-        if (call.name === "unlinkentity") { engine.bodies.unlink(actor); memory.writeUint8(this.#at(view, "linked"), 0); return { kind: "void" }; }
+        if (actor === null) {
+          memory.writeUint8(this.#at(view, "linked"), 0);
+          return { kind: "void" };
+        }
+        if (call.name === "unlinkentity") {
+          engine.bodies.unlink(actor);
+          memory.writeUint8(this.#at(view, "linked"), 0);
+          return { kind: "void" };
+        }
         const solid = memory.readUint8(this.#at(view, "solid"));
         if (solid > 3) throw new Error(`Unsupported source Q2 solid ${solid}`);
-        engine.setSolid(actor, solid === 0 ? "none" : solid === 1 ? "trigger" : solid === 2 ? "box" : "brush", solid === 3 ? this.options.spatial.inlineModel(memory.readInt32(this.#at(view, "s.modelindex"))) : null);
+        engine.setSolid(
+          actor,
+          solid === 0 ? "none" : solid === 1 ? "trigger" : solid === 2 ? "box" : "brush",
+          solid === 3 ? this.options.spatial.inlineModel(memory.readInt32(this.#at(view, "s.modelindex"))) : null,
+        );
         this.options.spatial.prepareLink?.(actor, view);
         engine.bodies.link(actor);
         const metadata = this.options.spatial.linkMetadata(actor, view);
@@ -439,11 +696,14 @@ export class RereleaseQ2GuestHost {
         if (linked === null) throw new Error("Shared body failed to retain source link");
         this.#writeVector(this.#at(view, "absmin"), linked.absoluteBounds.min);
         this.#writeVector(this.#at(view, "absmax"), linked.absoluteBounds.max);
-        const min = this.#vector(this.#at(view, "mins")), max = this.#vector(this.#at(view, "maxs"));
+        const min = this.#vector(this.#at(view, "mins")),
+          max = this.#vector(this.#at(view, "maxs"));
         this.#writeVector(this.#at(view, "size"), { x: max.x - min.x, y: max.y - min.y, z: max.z - min.z });
-        memory.writeInt32(this.#at(view, "areanum"), metadata.area); memory.writeInt32(this.#at(view, "areanum2"), metadata.area2);
+        memory.writeInt32(this.#at(view, "areanum"), metadata.area);
+        memory.writeInt32(this.#at(view, "areanum2"), metadata.area2);
         memory.writeUint32(this.#at(view, "s.solid"), metadata.networkSolid);
-        if (memory.readInt32(this.#at(view, "linkcount")) === 0 && (memory.readUint32(this.#at(view, "s.renderfx")) & 128) === 0) this.#writeVector(this.#at(view, "s.old_origin"), this.#vector(this.#at(view, "s.origin")));
+        if (memory.readInt32(this.#at(view, "linkcount")) === 0 && (memory.readUint32(this.#at(view, "s.renderfx")) & 128) === 0)
+          this.#writeVector(this.#at(view, "s.old_origin"), this.#vector(this.#at(view, "s.origin")));
         memory.writeInt32(this.#at(view, "linkcount"), memory.readInt32(this.#at(view, "linkcount")) + 1);
         memory.writeUint8(this.#at(view, "linked"), solid === 0 ? 0 : 1);
         return { kind: "void" };
@@ -456,35 +716,56 @@ export class RereleaseQ2GuestHost {
           const model = Number(name.slice(1));
           if (!Number.isSafeInteger(model) || model < 0) throw new Error("Invalid source inline model name");
           const bounds = engine.inlineModelBounds(model);
-          this.#writeVector(this.#at(view, "mins"), bounds.min); this.#writeVector(this.#at(view, "maxs"), bounds.max);
+          this.#writeVector(this.#at(view, "mins"), bounds.min);
+          this.#writeVector(this.#at(view, "maxs"), bounds.max);
           this.#import({ ...call, name: "linkentity", arguments: [args[0] ?? { kind: "pointer", value: null }] });
         }
         return { kind: "void" };
       }
-      default: return this.core.invoke(call);
+      default:
+        return this.core.invoke(call);
     }
   }
   encodeTrace(trace: TraceResult, clippedEntity?: GuestAddress): GuestCallResult {
     if (trace.kind !== "q2") throw new Error("Rerelease trace requires Q2 source collision fields");
-    const bytes = new Uint8Array(traceLayout.byteLength), view = new DataView(bytes.buffer);
-    const vector = (offset: number, value: Vec3) => { view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true); };
-    const plane = (offset: number, value: BspPlane) => { vector(offset, value.normal); view.setFloat32(offset + 12, value.distance, true); view.setUint8(offset + 16, value.type); view.setUint8(offset + 17, value.signbits); };
-    view.setUint8(0, trace.allSolid ? 1 : 0); view.setUint8(1, trace.startSolid ? 1 : 0); view.setFloat32(4, trace.fraction, true);
-    vector(8, trace.end); plane(20, trace.sourcePlane);
-    view.setBigUint64(40, this.#surface(trace.surface)?.byteOffset ?? 0n, true); view.setUint32(48, trace.contents, true);
+    const bytes = new Uint8Array(traceLayout.byteLength),
+      view = new DataView(bytes.buffer);
+    const vector = (offset: number, value: Vec3) => {
+      view.setFloat32(offset, value.x, true);
+      view.setFloat32(offset + 4, value.y, true);
+      view.setFloat32(offset + 8, value.z, true);
+    };
+    const plane = (offset: number, value: BspPlane) => {
+      vector(offset, value.normal);
+      view.setFloat32(offset + 12, value.distance, true);
+      view.setUint8(offset + 16, value.type);
+      view.setUint8(offset + 17, value.signbits);
+    };
+    view.setUint8(0, trace.allSolid ? 1 : 0);
+    view.setUint8(1, trace.startSolid ? 1 : 0);
+    view.setFloat32(4, trace.fraction, true);
+    vector(8, trace.end);
+    plane(20, trace.sourcePlane);
+    view.setBigUint64(40, this.#surface(trace.surface)?.byteOffset ?? 0n, true);
+    view.setUint32(48, trace.contents, true);
     // SV_Trace retains the world edict even when the sweep reaches its endpoint.
     const hit = clippedEntity ?? (trace.hit.kind === "actor" ? this.addressForActor(trace.hit.actor) : this.module.entities().atSlot(0).address);
     view.setBigUint64(56, hit.byteOffset, true);
-    if (trace.secondary !== null) { plane(64, trace.secondary.plane); view.setBigUint64(88, this.#surface(trace.secondary.surface)?.byteOffset ?? 0n, true); }
+    if (trace.secondary !== null) {
+      plane(64, trace.secondary.plane);
+      view.setBigUint64(88, this.#surface(trace.secondary.surface)?.byteOffset ?? 0n, true);
+    }
     return { kind: "aggregate", layout: traceLayout, bytes };
   }
   #surface(surface: Q2SurfaceInfo | null): GuestAddress | null {
     if (surface === null) return null;
     const previous = this.#surfaces.get(surface);
     if (previous !== undefined) return previous;
-    const memory = this.module.memory, address = memory.allocate({ byteLength: surfaceLayout.byteLength, alignment: 4n, label: "Q2 trace surface" });
+    const memory = this.module.memory,
+      address = memory.allocate({ byteLength: surfaceLayout.byteLength, alignment: 4n, label: "Q2 trace surface" });
     memory.write(address, new TextEncoder().encode(surface.name).slice(0, 31));
-    memory.writeUint32(memory.offset(address, 32n), surface.flags); memory.writeInt32(memory.offset(address, 36n), surface.value);
+    memory.writeUint32(memory.offset(address, 32n), surface.flags);
+    memory.writeInt32(memory.offset(address, 36n), surface.value);
     memory.writeUint32(memory.offset(address, 40n), this.options.spatial.surfaceId(surface));
     memory.write(memory.offset(address, 44n), new TextEncoder().encode(surface.material).slice(0, 15));
     this.#surfaces.set(surface, address);

@@ -23,7 +23,9 @@ export interface SimulationDiagnostics {
     tracksHealth(actor: ActorId): boolean;
   };
   readonly lmctf: {
-    flag(team: Team): { readonly actor: OwnedActor | null; readonly carrier: ActorId | null; readonly home: Vec3; readonly droppedAt: number | null } | undefined;
+    flag(
+      team: Team,
+    ): { readonly actor: OwnedActor | null; readonly carrier: ActorId | null; readonly home: Vec3; readonly droppedAt: number | null } | undefined;
     rune(kind: string): { readonly actor: OwnedActor | null; readonly holder: ActorId | null } | undefined;
     team(actor: ActorId): Team | undefined;
   };

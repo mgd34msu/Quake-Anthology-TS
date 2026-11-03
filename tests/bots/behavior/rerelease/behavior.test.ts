@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { corpusFile } from "../../../support/corpus.ts";
 
@@ -21,130 +22,297 @@ const q2 = corpusFile("q2/rerelease/baseq2/pak0.pak");
 const zero = { x: 0, y: 0, z: 0 };
 
 async function retailFiles(path: string): Promise<BotAssetFiles> {
-  const archive = await openArchive(path), files = new BotAssetFiles();
+  const archive = await openArchive(path),
+    files = new BotAssetFiles();
   try {
-    for (const entry of archive.entries) if (entry.path.startsWith("bots/") && entry.path.endsWith(".txt")) files.add(entry.path, await archive.readEntry(entry));
-  } finally { archive.close(); }
+    for (const entry of archive.entries)
+      if (entry.path.startsWith("bots/") && entry.path.endsWith(".txt")) files.add(entry.path, await archive.readEntry(entry));
+  } finally {
+    archive.close();
+  }
   return files;
 }
 
-test.skipIf(!existsSync(q1) || !existsSync(q2))("retail Q1/Q2 profiles use source commands, resume held triggers, and borrow actual selected movement routes", async () => {
-  const q1Knowledge = loadQuake1Knowledge(await retailFiles(q1)), knowledge = Bot_LoadKnowledge(await retailFiles(q2));
-  if (q1Knowledge === null) throw new Error("Installed Q1 bot data is absent");
-  expect(q1Knowledge.weapons).toHaveLength(8);
-  expect(knowledge.weapons).toHaveLength(21);
-  const grenade = knowledge.weaponByName("ammo_grenades");
-  if (grenade === undefined) throw new Error("Retail Q2 hand grenade missing");
-  expect(grenade.number).toBeGreaterThan(0);
-  expect(grenade.triggerType).toBe("hold_and_release");
-  expect(grenade.triggerHold).toBe(3);
-  expect(grenade.triggerCooldown).toBe(1);
-  let now = 0;
-  const self: BotSelfT = { id: 1, origin: zero, velocity: zero, viewAngles: zero, eye: { x: 0, y: 0, z: 22 }, health: 100,
-    armor: 0, items: grenade.number, ammo: { ammo_grenades: 20 }, currentWeapon: grenade.number, onGround: true,
-    waterLevel: 0, team: 1, dead: false, hasProtection: false };
-  const enemy: BotEntityT = { id: 2, kind: BotEntityKind.Player, classname: "player", origin: { x: 256, y: 0, z: 0 },
-    center: { x: 256, y: 0, z: 22 }, head: { x: 256, y: 0, z: 22 }, feet: { x: 256, y: 0, z: -24 }, velocity: zero,
-    health: 100, team: 2, dead: false, invisible: false, waterLevel: 0, isBot: false, spawnflags: 0, hasHealth: true, hasTargetname: false };
-  const world: BotWorldT = { time: () => now, frameTime: () => 0.05, self: () => self,
-    traceLine: (_start, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
-    traceBox: (_start, _mins, _maxs, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
-    pointContents: () => 0, entities: () => [enemy], hearing: () => [], nav: () => null };
-  const hooks: string[] = [], chats: string[] = [];
-  const behavior = new RereleaseBotBehavior({ definition: "retail-q2-pak0", source: "q2-rerelease", knowledge, skill: "nightmare", seed: 123,
-    gameMode: { gameType: "dm", weaponStay: false }, maxHealth: 100, runSpeed: 300, walkSpeed: 150,
-    movement: { gravity: 800, jumpVelocity: 270, jumpAirSeconds: 0.675, maximumLandingRise: 40, startAbove: 56,
-      bodyMins: { x: -16, y: -16, z: -6 }, bodyMaxs: { x: 16, y: 16, z: 32 } }, callbacks: { time: () => now,
-      preThink: name => { hooks.push(name); }, postThink: name => { hooks.push(name); },
-      chat: event => { chats.push(event.locstring); }, selectWeapon() {}, weaponImpulse: () => 0, humanTeammateNear: () => false } });
-  let firstHold = -1, firstRelease = -1;
-  for (let frame = 0; frame < 100; frame++) {
-    now = frame * 0.05;
-    const command = behavior.think(world);
-    if ((command.buttons & BOT_BUTTON_ATTACK) !== 0 && firstHold < 0) firstHold = now;
-    if ((command.buttons & BOT_BUTTON_ATTACK) === 0 && firstHold >= 0 && firstRelease < 0) firstRelease = now;
-  }
-  expect(firstHold).toBeGreaterThanOrEqual(0);
-  expect(firstRelease - firstHold).toBeCloseTo(3, 5);
-  expect(hooks.slice(0, 2)).toEqual(["Bot_BeginFrame", "Bot_EndFrame"]);
-  const checkpoint = behavior.checkpoint(), savedTime = now;
-  const advance = (): readonly BotUsercmdT[] => {
-    const commands: BotUsercmdT[] = [];
-    for (let frame = 0; frame < 30; frame++) { now += 0.05; commands.push(structuredClone(behavior.think(world))); }
-    return commands;
-  };
-  const first = advance(), after = behavior.checkpoint();
-  behavior.restore(checkpoint); now = savedTime;
-  expect(advance()).toEqual(first);
-  expect(behavior.checkpoint()).toEqual(after);
-  behavior.requestMoveToPoint({ x: 500, y: 0, z: 0 });
-  expect(behavior.goalStatus()).toBe(2);
-  behavior.resetForLevel({ gameType: "coop", weaponStay: true });
-  expect(behavior.goalStatus()).toBe(0);
-
-  const shotgun = q1Knowledge.weaponByName("shotgun"), rocket = q1Knowledge.weaponByName("rocket_launcher");
-  if (shotgun === undefined || rocket === undefined) throw new Error("Retail Q1 weapons missing");
-  const q1Self: BotSelfT = { ...self, items: shotgun.number | rocket.number, currentWeapon: shotgun.number,
-    ammo: { ammo_shells: 25, ammo_rockets: 5 } };
-  const q1World: BotWorldT = { ...world, self: () => q1Self };
-  const q1Behavior = new RereleaseBotBehavior({ ...behavior.options, definition: "retail-q1-pak0", source: "q1-rerelease",
-    knowledge: q1Knowledge, skill: "hard", gameMode: { gameType: "deathmatch", weaponStay: false }, runSpeed: 320, walkSpeed: 160,
-    callbacks: { ...behavior.options.callbacks, weaponImpulse: number => number === rocket.number ? 7 : 2 } });
-  hooks.length = 0;
-  const q1Commands: BotUsercmdT[] = [];
-  for (let frame = 0; frame < 30; frame++) { now = frame * 0.05; q1Commands.push(q1Behavior.think(q1World)); }
-  expect(hooks.slice(0, 2)).toEqual(["Bot_PreThink", "Bot_PostThink"]);
-  expect(q1Commands.some(command => command.impulse === 7)).toBe(true);
-
-  const archive = await openArchive(q1);
-  try {
-    const mapEntry = archive.findEntries("maps/dm4.bsp")[0], navEntry = archive.findEntries("bots/navigation/dm4.nav")[0];
-    if (mapEntry === undefined || navEntry === undefined) throw new Error("Retail dm4 navigation missing");
-    const bytes = await archive.readEntry(mapEntry), geometry = readQ1Bsp(bytes), scene = createSceneQueries(geometry), host = navigationWorld(scene);
-    const graph = navigationFromAsset({ name: "dm4", format: geometry.kind, digest: createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")) },
-      parseKexNavigation(await archive.readEntry(navEntry), "dm4.nav"), profile, host);
-    const runtime = new NavigationRuntime(graph, host), navigation = new SourceRereleaseNavigation(runtime);
-    let reached = false;
-    for (const edge of graph.edges) {
-      if (edge.mode !== "walk" || Math.hypot(edge.end.x - edge.start.x, edge.end.y - edge.start.y) < 64) continue;
-      const path = navigation.planPath(edge.start, edge.end);
-      if (path === null) continue;
-      expect(path.points.length).toBeGreaterThan(1);
-      expect(path.cost).toBeGreaterThan(0);
-      expect(host.commands).toBeGreaterThan(0);
-      expect(navigation.pathValid(path)).toBe(true);
-      runtime.blockEdge(edge.id, "source route changed");
-      expect(navigation.pathValid(path)).toBe(false);
-      reached = true; break;
+test.skipIf(!existsSync(q1) || !existsSync(q2))(
+  "retail Q1/Q2 profiles use source commands, resume held triggers, and borrow actual selected movement routes",
+  async () => {
+    const q1Knowledge = loadQuake1Knowledge(await retailFiles(q1)),
+      knowledge = Bot_LoadKnowledge(await retailFiles(q2));
+    if (q1Knowledge === null) throw new Error("Installed Q1 bot data is absent");
+    expect(q1Knowledge.weapons).toHaveLength(8);
+    expect(knowledge.weapons).toHaveLength(21);
+    const grenade = knowledge.weaponByName("ammo_grenades");
+    if (grenade === undefined) throw new Error("Retail Q2 hand grenade missing");
+    expect(grenade.number).toBeGreaterThan(0);
+    expect(grenade.triggerType).toBe("hold_and_release");
+    expect(grenade.triggerHold).toBe(3);
+    expect(grenade.triggerCooldown).toBe(1);
+    let now = 0;
+    const self: BotSelfT = {
+      id: 1,
+      origin: zero,
+      velocity: zero,
+      viewAngles: zero,
+      eye: { x: 0, y: 0, z: 22 },
+      health: 100,
+      armor: 0,
+      items: grenade.number,
+      ammo: { ammo_grenades: 20 },
+      currentWeapon: grenade.number,
+      onGround: true,
+      waterLevel: 0,
+      team: 1,
+      dead: false,
+      hasProtection: false,
+    };
+    const enemy: BotEntityT = {
+      id: 2,
+      kind: BotEntityKind.Player,
+      classname: "player",
+      origin: { x: 256, y: 0, z: 0 },
+      center: { x: 256, y: 0, z: 22 },
+      head: { x: 256, y: 0, z: 22 },
+      feet: { x: 256, y: 0, z: -24 },
+      velocity: zero,
+      health: 100,
+      team: 2,
+      dead: false,
+      invisible: false,
+      waterLevel: 0,
+      isBot: false,
+      spawnflags: 0,
+      hasHealth: true,
+      hasTargetname: false,
+    };
+    const world: BotWorldT = {
+      time: () => now,
+      frameTime: () => 0.05,
+      self: () => self,
+      traceLine: (_start, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
+      traceBox: (_start, _mins, _maxs, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
+      pointContents: () => 0,
+      entities: () => [enemy],
+      hearing: () => [],
+      nav: () => null,
+    };
+    const hooks: string[] = [],
+      chats: string[] = [];
+    const behavior = new RereleaseBotBehavior({
+      definition: "retail-q2-pak0",
+      source: "q2-rerelease",
+      knowledge,
+      skill: "nightmare",
+      seed: 123,
+      gameMode: { gameType: "dm", weaponStay: false },
+      maxHealth: 100,
+      runSpeed: 300,
+      walkSpeed: 150,
+      movement: {
+        gravity: 800,
+        jumpVelocity: 270,
+        jumpAirSeconds: 0.675,
+        maximumLandingRise: 40,
+        startAbove: 56,
+        bodyMins: { x: -16, y: -16, z: -6 },
+        bodyMaxs: { x: 16, y: 16, z: 32 },
+      },
+      callbacks: {
+        time: () => now,
+        preThink: name => {
+          hooks.push(name);
+        },
+        postThink: name => {
+          hooks.push(name);
+        },
+        chat: event => {
+          chats.push(event.locstring);
+        },
+        selectWeapon() {},
+        weaponImpulse: () => 0,
+        humanTeammateNear: () => false,
+      },
+    });
+    let firstHold = -1,
+      firstRelease = -1;
+    for (let frame = 0; frame < 100; frame++) {
+      now = frame * 0.05;
+      const command = behavior.think(world);
+      if ((command.buttons & BOT_BUTTON_ATTACK) !== 0 && firstHold < 0) firstHold = now;
+      if ((command.buttons & BOT_BUTTON_ATTACK) === 0 && firstHold >= 0 && firstRelease < 0) firstRelease = now;
     }
-    expect(reached).toBe(true);
-  } finally { archive.close(); }
-}, 30000);
+    expect(firstHold).toBeGreaterThanOrEqual(0);
+    expect(firstRelease - firstHold).toBeCloseTo(3, 5);
+    expect(hooks.slice(0, 2)).toEqual(["Bot_BeginFrame", "Bot_EndFrame"]);
+    const checkpoint = behavior.checkpoint(),
+      savedTime = now;
+    const advance = (): readonly BotUsercmdT[] => {
+      const commands: BotUsercmdT[] = [];
+      for (let frame = 0; frame < 30; frame++) {
+        now += 0.05;
+        commands.push(structuredClone(behavior.think(world)));
+      }
+      return commands;
+    };
+    const first = advance(),
+      after = behavior.checkpoint();
+    behavior.restore(checkpoint);
+    now = savedTime;
+    expect(advance()).toEqual(first);
+    expect(behavior.checkpoint()).toEqual(after);
+    behavior.requestMoveToPoint({ x: 500, y: 0, z: 0 });
+    expect(behavior.goalStatus()).toBe(2);
+    behavior.resetForLevel({ gameType: "coop", weaponStay: true });
+    expect(behavior.goalStatus()).toBe(0);
+
+    const shotgun = q1Knowledge.weaponByName("shotgun"),
+      rocket = q1Knowledge.weaponByName("rocket_launcher");
+    if (shotgun === undefined || rocket === undefined) throw new Error("Retail Q1 weapons missing");
+    const q1Self: BotSelfT = { ...self, items: shotgun.number | rocket.number, currentWeapon: shotgun.number, ammo: { ammo_shells: 25, ammo_rockets: 5 } };
+    const q1World: BotWorldT = { ...world, self: () => q1Self };
+    const q1Behavior = new RereleaseBotBehavior({
+      ...behavior.options,
+      definition: "retail-q1-pak0",
+      source: "q1-rerelease",
+      knowledge: q1Knowledge,
+      skill: "hard",
+      gameMode: { gameType: "deathmatch", weaponStay: false },
+      runSpeed: 320,
+      walkSpeed: 160,
+      callbacks: { ...behavior.options.callbacks, weaponImpulse: number => (number === rocket.number ? 7 : 2) },
+    });
+    hooks.length = 0;
+    const q1Commands: BotUsercmdT[] = [];
+    for (let frame = 0; frame < 30; frame++) {
+      now = frame * 0.05;
+      q1Commands.push(q1Behavior.think(q1World));
+    }
+    expect(hooks.slice(0, 2)).toEqual(["Bot_PreThink", "Bot_PostThink"]);
+    expect(q1Commands.some(command => command.impulse === 7)).toBe(true);
+
+    const archive = await openArchive(q1);
+    try {
+      const mapEntry = archive.findEntries("maps/dm4.bsp")[0],
+        navEntry = archive.findEntries("bots/navigation/dm4.nav")[0];
+      if (mapEntry === undefined || navEntry === undefined) throw new Error("Retail dm4 navigation missing");
+      const bytes = await archive.readEntry(mapEntry),
+        geometry = readQ1Bsp(bytes),
+        scene = createSceneQueries(geometry),
+        host = navigationWorld(scene);
+      const graph = navigationFromAsset(
+        { name: "dm4", format: geometry.kind, digest: createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")) },
+        parseKexNavigation(await archive.readEntry(navEntry), "dm4.nav"),
+        profile,
+        host,
+      );
+      const runtime = new NavigationRuntime(graph, host),
+        navigation = new SourceRereleaseNavigation(runtime);
+      let reached = false;
+      for (const edge of graph.edges) {
+        if (edge.mode !== "walk" || Math.hypot(edge.end.x - edge.start.x, edge.end.y - edge.start.y) < 64) continue;
+        const path = navigation.planPath(edge.start, edge.end);
+        if (path === null) continue;
+        expect(path.points.length).toBeGreaterThan(1);
+        expect(path.cost).toBeGreaterThan(0);
+        expect(host.commands).toBeGreaterThan(0);
+        expect(navigation.pathValid(path)).toBe(true);
+        runtime.blockEdge(edge.id, "source route changed");
+        expect(navigation.pathValid(path)).toBe(false);
+        reached = true;
+        break;
+      }
+      expect(reached).toBe(true);
+    } finally {
+      archive.close();
+    }
+  },
+  30000,
+);
 
 test.skipIf(!existsSync(q2))("a sight trace stopping on the target's own box still counts as seeing it", async () => {
   const knowledge = Bot_LoadKnowledge(await retailFiles(q2));
   const grenade = knowledge.weaponByName("ammo_grenades");
   if (grenade === undefined) throw new Error("Retail Q2 hand grenade missing");
   let now = 0;
-  const self: BotSelfT = { id: 1, origin: zero, velocity: zero, viewAngles: zero, eye: { x: 0, y: 0, z: 22 }, health: 100,
-    armor: 0, items: grenade.number, ammo: { ammo_grenades: 20 }, currentWeapon: grenade.number, onGround: true,
-    waterLevel: 0, team: 1, dead: false, hasProtection: false };
-  const enemy: BotEntityT = { id: 2, kind: BotEntityKind.Player, classname: "player", origin: { x: 256, y: 0, z: 0 },
-    center: { x: 256, y: 0, z: 22 }, head: { x: 256, y: 0, z: 22 }, feet: { x: 256, y: 0, z: -24 }, velocity: zero,
-    health: 100, team: 2, dead: false, invisible: false, waterLevel: 0, isBot: false, spawnflags: 0, hasHealth: true, hasTargetname: false };
+  const self: BotSelfT = {
+    id: 1,
+    origin: zero,
+    velocity: zero,
+    viewAngles: zero,
+    eye: { x: 0, y: 0, z: 22 },
+    health: 100,
+    armor: 0,
+    items: grenade.number,
+    ammo: { ammo_grenades: 20 },
+    currentWeapon: grenade.number,
+    onGround: true,
+    waterLevel: 0,
+    team: 1,
+    dead: false,
+    hasProtection: false,
+  };
+  const enemy: BotEntityT = {
+    id: 2,
+    kind: BotEntityKind.Player,
+    classname: "player",
+    origin: { x: 256, y: 0, z: 0 },
+    center: { x: 256, y: 0, z: 22 },
+    head: { x: 256, y: 0, z: 22 },
+    feet: { x: 256, y: 0, z: -24 },
+    velocity: zero,
+    health: 100,
+    team: 2,
+    dead: false,
+    invisible: false,
+    waterLevel: 0,
+    isBot: false,
+    spawnflags: 0,
+    hasHealth: true,
+    hasTargetname: false,
+  };
   const attacksWith = (hitId: number): boolean => {
     now = 0;
     // The center is inside the enemy box, so world traces end on the enemy
     // itself at a fraction below 1, exactly like the live binding.
-    const world: BotWorldT = { time: () => now, frameTime: () => 0.05, self: () => self,
+    const world: BotWorldT = {
+      time: () => now,
+      frameTime: () => 0.05,
+      self: () => self,
       traceLine: (_start, end) => ({ fraction: 0.8, endpos: end, startsolid: false, hitId }),
       traceBox: (_start, _mins, _maxs, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
-      pointContents: () => 0, entities: () => [enemy], hearing: () => [], nav: () => null };
-    const behavior = new RereleaseBotBehavior({ definition: "retail-q2-sight", source: "q2-rerelease", knowledge, skill: "nightmare", seed: 7,
-      gameMode: { gameType: "dm", weaponStay: false }, maxHealth: 100, runSpeed: 300, walkSpeed: 150,
-      movement: { gravity: 800, jumpVelocity: 270, jumpAirSeconds: 0.675, maximumLandingRise: 40, startAbove: 56,
-        bodyMins: { x: -16, y: -16, z: -6 }, bodyMaxs: { x: 16, y: 16, z: 32 } }, callbacks: { time: () => now,
-        preThink: () => {}, postThink: () => {}, chat: () => {}, selectWeapon() {}, weaponImpulse: () => 0, humanTeammateNear: () => false } });
+      pointContents: () => 0,
+      entities: () => [enemy],
+      hearing: () => [],
+      nav: () => null,
+    };
+    const behavior = new RereleaseBotBehavior({
+      definition: "retail-q2-sight",
+      source: "q2-rerelease",
+      knowledge,
+      skill: "nightmare",
+      seed: 7,
+      gameMode: { gameType: "dm", weaponStay: false },
+      maxHealth: 100,
+      runSpeed: 300,
+      walkSpeed: 150,
+      movement: {
+        gravity: 800,
+        jumpVelocity: 270,
+        jumpAirSeconds: 0.675,
+        maximumLandingRise: 40,
+        startAbove: 56,
+        bodyMins: { x: -16, y: -16, z: -6 },
+        bodyMaxs: { x: 16, y: 16, z: 32 },
+      },
+      callbacks: {
+        time: () => now,
+        preThink: () => {},
+        postThink: () => {},
+        chat: () => {},
+        selectWeapon() {},
+        weaponImpulse: () => 0,
+        humanTeammateNear: () => false,
+      },
+    });
     for (let frame = 0; frame < 60; frame++) {
       now = frame * 0.05;
       if ((behavior.think(world).buttons & BOT_BUTTON_ATTACK) !== 0) return true;

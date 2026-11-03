@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
 import type { SoundAsset, SoundOrigin } from "../../src/audio/types.ts";
@@ -8,9 +9,16 @@ import type { Axis, Vec3 } from "../../src/contracts/math.ts";
 const identity = createIdentityOwner("rocket-spatial");
 const actor = identity.actor(1, 0);
 const listener: Vec3 = { x: 8192, y: -4096, z: 384 };
-const axis: Axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
-const sound: SoundAsset = { name: "private-rocket-tone", resource: "resource:private-rocket-tone",
-  pcm: { samples: new Int16Array(64).fill(12000), sampleRate: 44100, channels: 1, frameCount: 64, loopStart: null } };
+const axis: Axis = [
+  { x: 1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 0, y: 0, z: 1 },
+];
+const sound: SoundAsset = {
+  name: "private-rocket-tone",
+  resource: "resource:private-rocket-tone",
+  pcm: { samples: new Int16Array(64).fill(12000), sampleRate: 44100, channels: 1, frameCount: 64, loopStart: null },
+};
 function play(source: SoundOrigin, owner: ActorId | null): readonly number[] {
   using audio = new UnifiedAudio({ milliseconds: () => 1000, random: () => 0 });
   audio.updateActor(actor, listener);
@@ -19,7 +27,9 @@ function play(source: SoundOrigin, owner: ActorId | null): readonly number[] {
   audio.endLoopFrame();
   return [...audio.mix(1)];
 }
-function expected(volume: number): number { return Math.floor(Math.floor(12000 * volume * 178 / 256) / 256); }
+function expected(volume: number): number {
+  return Math.floor(Math.floor((12000 * volume * 178) / 256) / 256);
+}
 
 test("Q3 firing actor is full volume at a nonzero listener and differs from fixed muzzle playback", () => {
   const firing = play({ kind: "actor", actor }, actor);

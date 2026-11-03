@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // ProjectDlightTexture, R_TransformDlights, R_DlightSurface and R_DlightBmodel,
 // id Software renderer/tr_shade.c, tr_world.c and tr_light.c.
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -20,7 +21,8 @@ export function transformDlights(lights: readonly DynamicLight[], origin: Vec3, 
 
 export function splitDlightMask(lights: readonly DynamicLight[], mask: number, plane: Plane): readonly [number, number] {
   if (mask === 0) return [0, 0];
-  let front = 0, back = 0;
+  let front = 0,
+    back = 0;
   for (const [index, light] of lights.entries()) {
     const bit = 1 << index;
     if ((mask & bit) === 0) continue;
@@ -45,10 +47,17 @@ export function gridDlightMask(lights: readonly DynamicLight[], mask: number, bo
   for (const [index, light] of lights.entries()) {
     const bit = 1 << index;
     if ((mask & bit) === 0) continue;
-    const origin = light.origin, radius = light.radius;
-    if (f(origin.x - radius) > bounds.max.x || f(origin.x + radius) < bounds.min.x
-      || f(origin.y - radius) > bounds.max.y || f(origin.y + radius) < bounds.min.y
-      || f(origin.z - radius) > bounds.max.z || f(origin.z + radius) < bounds.min.z) mask &= ~bit;
+    const origin = light.origin,
+      radius = light.radius;
+    if (
+      f(origin.x - radius) > bounds.max.x ||
+      f(origin.x + radius) < bounds.min.x ||
+      f(origin.y - radius) > bounds.max.y ||
+      f(origin.y + radius) < bounds.min.y ||
+      f(origin.z - radius) > bounds.max.z ||
+      f(origin.z + radius) < bounds.min.z
+    )
+      mask &= ~bit;
   }
   return mask;
 }
@@ -57,10 +66,17 @@ export function gridDlightMask(lights: readonly DynamicLight[], mask: number, bo
 export function bmodelDlightMask(lights: readonly DynamicLight[], bounds: Bounds): number {
   let mask = 0;
   for (const [index, light] of lights.entries()) {
-    const origin = light.origin, radius = light.radius;
-    if (f(origin.x - bounds.max.x) > radius || f(bounds.min.x - origin.x) > radius
-      || f(origin.y - bounds.max.y) > radius || f(bounds.min.y - origin.y) > radius
-      || f(origin.z - bounds.max.z) > radius || f(bounds.min.z - origin.z) > radius) continue;
+    const origin = light.origin,
+      radius = light.radius;
+    if (
+      f(origin.x - bounds.max.x) > radius ||
+      f(bounds.min.x - origin.x) > radius ||
+      f(origin.y - bounds.max.y) > radius ||
+      f(bounds.min.y - origin.y) > radius ||
+      f(origin.z - bounds.max.z) > radius ||
+      f(bounds.min.z - origin.z) > radius
+    )
+      continue;
     mask |= 1 << index;
   }
   return mask;
@@ -71,29 +87,46 @@ export function receivesProjectedDlights(material: CompiledMaterial): boolean {
   if (material.finished.sort > 3) return false;
   const iterator = material.finished.iterator.kind;
   // Sky clouds call the generic iterator; skyParms alone does not set SURF_SKY.
-  return (iterator !== "generic" && iterator !== "sky")
-    || !material.registered.definition.surfaceParms.some(flag => flag === "nodlight" || flag === "sky");
+  return (iterator !== "generic" && iterator !== "sky") || !material.registered.definition.surfaceParms.some(flag => flag === "nodlight" || flag === "sky");
 }
 
-export function projectDlightTexture(geometry: DeformGeometry, mask: number, lights: readonly DynamicLight[],
-  image: RendererImage, project: (position: Vec3) => Vec4, cull: RenderState["cull"]): readonly DrawBatch[] {
+export function projectDlightTexture(
+  geometry: DeformGeometry,
+  mask: number,
+  lights: readonly DynamicLight[],
+  image: RendererImage,
+  project: (position: Vec3) => Vec4,
+  cull: RenderState["cull"],
+): readonly DrawBatch[] {
   return Array.from(iterateProjectedDlights(geometry, mask, lights, image, project, cull));
 }
 
-export function* iterateProjectedDlights(geometry: DeformGeometry, mask: number, lights: readonly DynamicLight[],
-  image: RendererImage, project: (position: Vec3) => Vec4, cull: RenderState["cull"]): Generator<DrawBatch, void, unknown> {
+export function* iterateProjectedDlights(
+  geometry: DeformGeometry,
+  mask: number,
+  lights: readonly DynamicLight[],
+  image: RendererImage,
+  project: (position: Vec3) => Vec4,
+  cull: RenderState["cull"],
+): Generator<DrawBatch, void, unknown> {
   for (const [index, light] of lights.entries()) {
     if ((mask & (1 << index)) === 0) continue;
-    const radius = light.radius, scale = f(1 / radius), color = vec3(light.color.x * 255, light.color.y * 255, light.color.z * 255);
+    const radius = light.radius,
+      scale = f(1 / radius),
+      color = vec3(light.color.x * 255, light.color.y * 255, light.color.z * 255);
     const clipBits: number[] = [];
     const vertices = geometry.vertices.map(vertex => {
       const distance = sub3(light.origin, vertex.position);
       const texCoord = { x: f(0.5 + f(distance.x * scale)), y: f(0.5 + f(distance.y * scale)) };
       let clip = (texCoord.x < 0 ? 1 : texCoord.x > 1 ? 2 : 0) | (texCoord.y < 0 ? 4 : texCoord.y > 1 ? 8 : 0);
       let modulate: number;
-      if (distance.z > radius) { clip |= 16; modulate = 0; }
-      else if (distance.z < -radius) { clip |= 32; modulate = 0; }
-      else {
+      if (distance.z > radius) {
+        clip |= 16;
+        modulate = 0;
+      } else if (distance.z < -radius) {
+        clip |= 32;
+        modulate = 0;
+      } else {
         const height = Math.abs(distance.z);
         modulate = height < f(radius * 0.5) ? 1 : f(f(2 * f(radius - height)) * scale);
       }
@@ -104,17 +137,35 @@ export function* iterateProjectedDlights(geometry: DeformGeometry, mask: number,
     });
     const indices: number[] = [];
     for (let offset = 0; offset < geometry.indices.length; offset += 3) {
-      const a = geometry.indices[offset], b = geometry.indices[offset + 1], c = geometry.indices[offset + 2];
+      const a = geometry.indices[offset],
+        b = geometry.indices[offset + 1],
+        c = geometry.indices[offset + 2];
       if (a === undefined || b === undefined || c === undefined) throw new Error("dlight triangle indices are incomplete");
-      const ac = clipBits[a], bc = clipBits[b], cc = clipBits[c];
-      if (ac === undefined || bc === undefined || cc === undefined) throw new Error("ProjectDlightTexture: triangle has no active clipBits entry; inactive source scratch is indeterminate");
+      const ac = clipBits[a],
+        bc = clipBits[b],
+        cc = clipBits[c];
+      if (ac === undefined || bc === undefined || cc === undefined)
+        throw new Error("ProjectDlightTexture: triangle has no active clipBits entry; inactive source scratch is indeterminate");
       if ((ac & bc & cc) === 0) indices.push(a, b, c);
     }
     const numIndexes = indices.length;
     if (numIndexes === 0) continue;
-    yield { lighting: { kind: "vertex" }, texturing: "single", primitive: "triangles", vertices, indices, texture: { kind: "bind-image", image },
-      state: { blend: { source: light.additive === true ? "one" : "dst-color", destination: "one" },
-        depthTest: "equal", depthWrite: false, alphaTest: "none", cull, depthRange: [0, 1], polygonOffset: null } };
-
+    yield {
+      lighting: { kind: "vertex" },
+      texturing: "single",
+      primitive: "triangles",
+      vertices,
+      indices,
+      texture: { kind: "bind-image", image },
+      state: {
+        blend: { source: light.additive === true ? "one" : "dst-color", destination: "one" },
+        depthTest: "equal",
+        depthWrite: false,
+        alphaTest: "none",
+        cull,
+        depthRange: [0, 1],
+        polygonOffset: null,
+      },
+    };
   }
 }

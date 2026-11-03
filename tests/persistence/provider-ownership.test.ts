@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { ProviderCheckpoint } from "../../src/contracts/session.ts";
 import { CAMPAIGN_UNIT_CHECKPOINT, saveProviderContract, validateSaveProviderOwner } from "../../src/persistence/provider-ownership.ts";
@@ -16,7 +17,10 @@ test("reserved host schemas require their exact provider and version", () => {
     { provider: "session:campaign-unit", schema: "q2:foundation", version: 1 },
     { provider: "session:unknown", schema: "session:unknown", version: 1 },
     { provider: "q1:official", schema: "q2:foundation", version: 1 },
-  ] satisfies readonly Omit<ProviderCheckpoint, "bytes">[]) expect(() => validateSaveProviderOwner({ ...record, bytes }, "q2:official")).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
+  ] satisfies readonly Omit<ProviderCheckpoint, "bytes">[])
+    expect(() => validateSaveProviderOwner({ ...record, bytes }, "q2:official")).toThrow(
+      /has a different owner|Unsupported saved provider version|Unsupported session checkpoint/,
+    );
 });
 
 const fixture = process.env["QTS_SAVE_PROVIDER_FIXTURE"];
@@ -30,13 +34,19 @@ test.skipIf(fixture === undefined)("actual public save campaign envelope passes 
   const unit = new CampaignUnit();
   expect(() => unit.restore(image)).not.toThrow();
   expect(() => validateSimulationSave(unit.attach(image))).not.toThrow();
-  const changed = (record: ProviderCheckpoint) => ({ ...image, providers: image.providers.map(value => value === campaign ? record : value) });
-  for (const invalid of [{ ...campaign, provider: image.recipe.map.entities.provider }, { ...campaign, schema: "q2:foundation" }, { ...campaign, version: 2 }] satisfies readonly ProviderCheckpoint[]) {
+  const changed = (record: ProviderCheckpoint) => ({ ...image, providers: image.providers.map(value => (value === campaign ? record : value)) });
+  for (const invalid of [
+    { ...campaign, provider: image.recipe.map.entities.provider },
+    { ...campaign, schema: "q2:foundation" },
+    { ...campaign, version: 2 },
+  ] satisfies readonly ProviderCheckpoint[]) {
     expect(() => validateSimulationSave(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
     expect(() => unit.restore(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
     expect(() => unit.attach(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
   }
   expect(() => validateSimulationSave({ ...image, providers: [...image.providers, campaign] })).toThrow("Duplicate");
   const foundation = simulationProviderCheckpoint(image, "q2:foundation");
-  expect(() => validateSimulationSave({ ...image, providers: image.providers.map(record => record === foundation ? { ...record, provider: "q1:official" } : record) })).toThrow("different owner");
+  expect(() =>
+    validateSimulationSave({ ...image, providers: image.providers.map(record => (record === foundation ? { ...record, provider: "q1:official" } : record)) }),
+  ).toThrow("different owner");
 });

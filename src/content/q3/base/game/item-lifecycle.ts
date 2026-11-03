@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_items.c: item registration, Touch_Item,
 // RespawnItem, FinishSpawningItem, and G_SpawnItem.
@@ -12,8 +13,18 @@ import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import { traceGround } from "./ground.ts";
 import type { ActorSpatialQueries, ServerWorld } from "../world.ts";
-import { EntityEvent, EntityType, GameType, Holdable, ItemType, MissionpackStatIndex, PersistentIndex,
-  Powerup, statSchema, Weapon } from "../shared/definitions.ts";
+import {
+  EntityEvent,
+  EntityType,
+  GameType,
+  Holdable,
+  ItemType,
+  MissionpackStatIndex,
+  PersistentIndex,
+  Powerup,
+  statSchema,
+  Weapon,
+} from "../shared/definitions.ts";
 import type { Product } from "../shared/definitions.ts";
 import { ServerEntityFlags } from "../shared/entity-shared.ts";
 import { canItemBeGrabbed, findItem, findItemForWeapon, itemList } from "../shared/items.ts";
@@ -44,9 +55,12 @@ export type SetItemsConfigstring = (index: 27, value: string) => void;
 
 /** Per-level equivalent of itemRegistered[MAX_ITEMS]. */
 export class ItemRegistry {
-  captureSaveState() { return this.#registered.slice(); }
+  captureSaveState() {
+    return this.#registered.slice();
+  }
   restoreSaveState(value: unknown): void {
-    const reader = new SaveReader(value, "q3.items"), bytes = reader.bytes();
+    const reader = new SaveReader(value, "q3.items"),
+      bytes = reader.bytes();
     if (bytes.length !== this.#registered.length || bytes.some(byte => byte !== 0 && byte !== 1)) reader.fail("invalid registered item table");
     this.#registered.set(bytes);
   }
@@ -105,10 +119,7 @@ export interface SourcePickupDescriptor {
   readonly weaponRespawnSeconds: number;
   readonly teamWeaponRespawnSeconds: number;
 }
-export type SourcePickupAdmission =
-  | { readonly kind: "native" }
-  | { readonly kind: "rejected" }
-  | { readonly kind: "picked"; readonly respawnSeconds: number };
+export type SourcePickupAdmission = { readonly kind: "native" } | { readonly kind: "rejected" } | { readonly kind: "picked"; readonly respawnSeconds: number };
 
 export type SourcePickupPreview =
   | { readonly kind: "native" | "rejected" }
@@ -219,9 +230,14 @@ function pickupContext(context: ItemLifecycleContext, time: number): ItemPickupC
     teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds,
     time,
     clients: context.entities.clients.slice(0, context.entities.maxClients),
-    traceSolidLine: (start: Vec3, end: Vec3) => context.world.trace({
-      start, end, shape: { kind: "point" }, mask: CONTENTS_SOLID, passEntityNum: ENTITYNUM_NONE,
-    }),
+    traceSolidLine: (start: Vec3, end: Vec3) =>
+      context.world.trace({
+        start,
+        end,
+        shape: { kind: "point" },
+        mask: CONTENTS_SOLID,
+        passEntityNum: ENTITYNUM_NONE,
+      }),
     handicapForClient: context.handicapForClient,
   };
 }
@@ -277,29 +293,70 @@ export function respawnItem(entity: GameEntity, context: ItemLifecycleContext): 
 }
 
 function pickupDescriptor(entity: GameEntity, recipient: GameEntity, item: ItemDefinition, context: ItemLifecycleContext): SourcePickupDescriptor {
-  return { itemActor: entity.actor.id, playerActor: recipient.actor.id, item,
-    count: entity.count, generic1: entity.s.generic1, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
-    weaponRespawnSeconds: context.weaponRespawnSeconds, teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds };
+  return {
+    itemActor: entity.actor.id,
+    playerActor: recipient.actor.id,
+    item,
+    count: entity.count,
+    generic1: entity.s.generic1,
+    dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0,
+    gameType: context.gameType,
+    weaponRespawnSeconds: context.weaponRespawnSeconds,
+    teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds,
+  };
 }
 
-export function observeQ3Supply(entity: GameEntity, recipient: GameEntity, context: ItemLifecycleContext): {
-  readonly observation: PickupSupplyObservation; readonly preview: PickupSupplyPreview;
+export function observeQ3Supply(
+  entity: GameEntity,
+  recipient: GameEntity,
+  context: ItemLifecycleContext,
+): {
+  readonly observation: PickupSupplyObservation;
+  readonly preview: PickupSupplyPreview;
 } | null {
-  if (context.product !== "baseq3" || !entity.inuse || !recipient.inuse || context.entities.get(entity.slot) !== entity
-    || context.entities.get(recipient.slot) !== recipient || recipient.client === null || context.callbacks === undefined
-    || entity.touch !== context.callbacks.touch || entity.item === null
-    || (entity.item.type !== ItemType.IT_WEAPON && entity.item.type !== ItemType.IT_AMMO)) return null;
+  if (
+    context.product !== "baseq3" ||
+    !entity.inuse ||
+    !recipient.inuse ||
+    context.entities.get(entity.slot) !== entity ||
+    context.entities.get(recipient.slot) !== recipient ||
+    recipient.client === null ||
+    context.callbacks === undefined ||
+    entity.touch !== context.callbacks.touch ||
+    entity.item === null ||
+    (entity.item.type !== ItemType.IT_WEAPON && entity.item.type !== ItemType.IT_AMMO)
+  )
+    return null;
   const item = requirePublishedItem(context, entity);
   const supplied = context.previewPickup?.(pickupDescriptor(entity, recipient, item, context));
   if (supplied?.kind !== "selected") return null;
-  const ready = (entity.r.contents & CONTENTS_TRIGGER) !== 0 && (entity.s.eFlags & EF_NODRAW) === 0
-    && (entity.r.svFlags & ServerEntityFlags.NOCLIENT) === 0 && !entity.freeAfterEvent && !entity.unlinkAfterEvent;
-  const respawning = entity.team === null && entity.teammaster === null && entity.teamchain === null
-    && (entity.flags & (GameFlags.DROPPED_ITEM | GameFlags.TEAMSLAVE)) === 0 && !entity.freeAfterEvent && !entity.unlinkAfterEvent
-    && entity.think === context.callbacks.respawn && entity.nextthink > 0;
-  return { observation: { actor: entity.actor.id, offer: supplied.offer, availability: ready
-    ? { kind: "ready", eligible: recipient.health >= 1 }
-    : respawning ? { kind: "respawning", atSeconds: entity.nextthink / 1000 } : { kind: "inactive" } }, preview: supplied.preview };
+  const ready =
+    (entity.r.contents & CONTENTS_TRIGGER) !== 0 &&
+    (entity.s.eFlags & EF_NODRAW) === 0 &&
+    (entity.r.svFlags & ServerEntityFlags.NOCLIENT) === 0 &&
+    !entity.freeAfterEvent &&
+    !entity.unlinkAfterEvent;
+  const respawning =
+    entity.team === null &&
+    entity.teammaster === null &&
+    entity.teamchain === null &&
+    (entity.flags & (GameFlags.DROPPED_ITEM | GameFlags.TEAMSLAVE)) === 0 &&
+    !entity.freeAfterEvent &&
+    !entity.unlinkAfterEvent &&
+    entity.think === context.callbacks.respawn &&
+    entity.nextthink > 0;
+  return {
+    observation: {
+      actor: entity.actor.id,
+      offer: supplied.offer,
+      availability: ready
+        ? { kind: "ready", eligible: recipient.health >= 1 }
+        : respawning
+          ? { kind: "respawning", atSeconds: entity.nextthink / 1000 }
+          : { kind: "inactive" },
+    },
+    preview: supplied.preview,
+  };
 }
 
 /** Touch_Item validates eligibility, applies pickup rules, emits events, and hides or schedules the item. */
@@ -314,13 +371,21 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
   if (client.ps.product !== context.product) throw new Error("Item touch player product does not match lifecycle product");
   const item = requirePublishedItem(context, entity);
   const pickupState = { modelIndex: entity.s.modelindex, modelIndex2: entity.s.modelindex2, generic1: entity.s.generic1 };
-  const itemActor = entity.actor.id, playerActor = other.actor.id;
-  const live = () => entity.inuse && other.inuse && context.entities.get(entity.slot) === entity && context.entities.get(other.slot) === other
-    && entity.actor.id.equals(itemActor) && other.actor.id.equals(playerActor);
+  const itemActor = entity.actor.id,
+    playerActor = other.actor.id;
+  const live = () =>
+    entity.inuse &&
+    other.inuse &&
+    context.entities.get(entity.slot) === entity &&
+    context.entities.get(other.slot) === other &&
+    entity.actor.id.equals(itemActor) &&
+    other.actor.id.equals(playerActor);
   const className = item.className;
   if (className === null) throw new Error("Pickup item has no classname");
   const now = gameTime(context);
-  let predict = client.pers.predictItemPickup, respawn = 0, originalRan = false;
+  let predict = client.pers.predictItemPickup,
+    respawn = 0,
+    originalRan = false;
   const original = (): boolean => {
     originalRan = true;
     const admission = context.admitPickup?.(pickupDescriptor(entity, other, item, context)) ?? { kind: "native" };
@@ -336,14 +401,27 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     }
     if (respawn === 0 || !live()) return false;
     if (admission.kind === "native") {
-      const reports = context.entities.rankings, quantity = entity.count !== 0 ? entity.count : item.quantity;
+      const reports = context.entities.rankings,
+        quantity = entity.count !== 0 ? entity.count : item.quantity;
       switch (item.type) {
-        case ItemType.IT_WEAPON: reports.pickupWeapon(other.slot, item.tag); break;
-        case ItemType.IT_AMMO: reports.pickupAmmo(other.slot, item.tag, quantity); break;
-        case ItemType.IT_HEALTH: reports.pickupHealth(other.slot, quantity); break;
-        case ItemType.IT_ARMOR: reports.pickupArmor(other.slot, item.quantity); break;
-        case ItemType.IT_POWERUP: reports.pickupPowerup(other.slot, item.tag); break;
-        case ItemType.IT_HOLDABLE: reports.pickupHoldable(other.slot, item.tag); break;
+        case ItemType.IT_WEAPON:
+          reports.pickupWeapon(other.slot, item.tag);
+          break;
+        case ItemType.IT_AMMO:
+          reports.pickupAmmo(other.slot, item.tag, quantity);
+          break;
+        case ItemType.IT_HEALTH:
+          reports.pickupHealth(other.slot, quantity);
+          break;
+        case ItemType.IT_ARMOR:
+          reports.pickupArmor(other.slot, item.quantity);
+          break;
+        case ItemType.IT_POWERUP:
+          reports.pickupPowerup(other.slot, item.tag);
+          break;
+        case ItemType.IT_HOLDABLE:
+          reports.pickupHoldable(other.slot, item.tag);
+          break;
       }
     }
     return true;
@@ -398,16 +476,37 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     }
     context.entities.options.link(entity);
   };
-  if (context.originalPickups === undefined) { complete(original()); return; }
+  if (context.originalPickups === undefined) {
+    complete(original());
+    return;
+  }
   const weapon = item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_AMMO ? q3WeaponItem(item.tag) : null;
-  const offered: ItemId = item.type === ItemType.IT_WEAPON ? weapon?.item ?? `q3:${className}`
-    : item.type === ItemType.IT_AMMO ? weapon?.ammo ?? `q3:${className}` : `q3:${className}`;
-  const defaultResource: PickupResource | null = item.type === ItemType.IT_ARMOR ? { kind: "protection", channel: "regular" }
-    : item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_AMMO ? { kind: "inventory", item: offered } : null;
-  context.originalPickups.touch({ recipient: playerActor, pickup: itemActor, source: entity.actor.owner, item: offered, defaultResource,
-    count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
-    dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, time: { kind: "milliseconds", value: now },
-    ...(item.type === ItemType.IT_TEAM ? { grant: "map-coupled" } : {}) }, { original, complete });
+  const offered: ItemId =
+    item.type === ItemType.IT_WEAPON
+      ? (weapon?.item ?? `q3:${className}`)
+      : item.type === ItemType.IT_AMMO
+        ? (weapon?.ammo ?? `q3:${className}`)
+        : `q3:${className}`;
+  const defaultResource: PickupResource | null =
+    item.type === ItemType.IT_ARMOR
+      ? { kind: "protection", channel: "regular" }
+      : item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_AMMO
+        ? { kind: "inventory", item: offered }
+        : null;
+  context.originalPickups.touch(
+    {
+      recipient: playerActor,
+      pickup: itemActor,
+      source: entity.actor.owner,
+      item: offered,
+      defaultResource,
+      count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
+      dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0,
+      time: { kind: "milliseconds", value: now },
+      ...(item.type === ItemType.IT_TEAM ? { grant: "map-coupled" } : {}),
+    },
+    { original, complete },
+  );
 }
 
 function sourceFloatSchedule(time: number, seconds: number): number {
@@ -442,8 +541,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
       mask: CONTENTS_SOLID,
     });
     if (trace.solidity !== "clear") {
-      context.warn(gameFormat("FinishSpawningItem: %s startsolid at %s\n",
-        [entity.classname, context.entities.utilities.vtos(entity.s.origin).readString()]));
+      context.warn(gameFormat("FinishSpawningItem: %s startsolid at %s\n", [entity.classname, context.entities.utilities.vtos(entity.s.origin).readString()]));
       context.entities.free(entity);
       return;
     }
@@ -469,13 +567,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
 }
 
 /** G_SpawnItem reads item spawn keys, registers the item, and schedules third-frame placement. */
-export function spawnItem(
-  entity: GameEntity,
-  item: ItemDefinition,
-  variables: SpawnVariables,
-  isDisabled: () => boolean,
-  context: ItemLifecycleContext,
-): void {
+export function spawnItem(entity: GameEntity, item: ItemDefinition, variables: SpawnVariables, isDisabled: () => boolean, context: ItemLifecycleContext): void {
   bindItemSaveCallbacks(context);
   checkContext(context);
   requireOwned(context, entity);
@@ -499,8 +591,16 @@ export function spawnItem(
 }
 
 export function bindItemSaveCallbacks(context: ItemLifecycleContext): void {
-  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.touchItem.think", (self => { respawnItem(self, context); }));
-  context.entities.callbacks.touch.intern("q3.base.game.item-lifecycle.finishSpawningItem.touch", ((self, other, trace) => { touchItem(self, other, trace, context); }));
-  context.entities.callbacks.use.intern("q3.base.game.item-lifecycle.finishSpawningItem.use", self => { respawnItem(self, context); });
-  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.spawnItem.think", self => { finishSpawningItem(self, context); });
+  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.touchItem.think", self => {
+    respawnItem(self, context);
+  });
+  context.entities.callbacks.touch.intern("q3.base.game.item-lifecycle.finishSpawningItem.touch", (self, other, trace) => {
+    touchItem(self, other, trace, context);
+  });
+  context.entities.callbacks.use.intern("q3.base.game.item-lifecycle.finishSpawningItem.use", self => {
+    respawnItem(self, context);
+  });
+  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.spawnItem.think", self => {
+    finishSpawningItem(self, context);
+  });
 }

@@ -1,17 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RawEntityView } from "../../../contracts/execution.ts";
 import type { ProtectionChannel } from "../../../contracts/gameplay.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import { RereleaseSourceClient, RereleaseSourceEdict } from "./source-state.ts";
 
 /** Publish original primary protection stores while a selected grant or debit is held. */
-export function withRereleasePrimaryProtection<T>(host: RereleaseQ2GuestHost, recipient: RawEntityView, channel: ProtectionChannel,
-  current: () => void, operation: (consume: (execute: () => void) => void) => T, committed: () => boolean = () => true): T {
+export function withRereleasePrimaryProtection<T>(
+  host: RereleaseQ2GuestHost,
+  recipient: RawEntityView,
+  channel: ProtectionChannel,
+  current: () => void,
+  operation: (consume: (execute: () => void) => void) => T,
+  committed: () => boolean = () => true,
+): T {
   current();
-  const { engine } = host.options, actor = host.actor(recipient);
+  const { engine } = host.options,
+    actor = host.actor(recipient);
   if (actor === null) throw new Error("Native protection operation has no live recipient");
-  const observe = (run: () => T): T => host.foreignActors === null ? run() : host.foreignActors.withInventoryPublication(actor.id, committed, run);
-  if (engine.combat.protectionOwner(actor, channel) !== null) return observe(() => operation(() => { current(); }));
-  const source = new RereleaseSourceEdict(recipient, host.module), memory = host.module.memory;
+  const observe = (run: () => T): T => (host.foreignActors === null ? run() : host.foreignActors.withInventoryPublication(actor.id, committed, run));
+  if (engine.combat.protectionOwner(actor, channel) !== null)
+    return observe(() =>
+      operation(() => {
+        current();
+      }),
+    );
+  const source = new RereleaseSourceEdict(recipient, host.module),
+    memory = host.module.memory;
   const primaryCurrent = (): void => {
     current();
     if (engine.combat.protectionOwner(actor, channel) !== null) throw new Error("Native primary protection ownership changed during its operation");
@@ -32,10 +46,17 @@ export function withRereleasePrimaryProtection<T>(host: RereleaseQ2GuestHost, re
     remove.push(memory.observeWrites(client.at("pers.inventory"), host.module.requireWorldProfile().client.inventoryCount * 4, publish));
   }
   const run = (): T => {
-    const result = operation(execute => { primaryCurrent(); execute(); primaryCurrent(); });
-    primaryCurrent(); return result;
+    const result = operation(execute => {
+      primaryCurrent();
+      execute();
+      primaryCurrent();
+    });
+    primaryCurrent();
+    return result;
   };
   try {
     return observe(run);
-  } finally { for (const close of remove.reverse()) close(); }
+  } finally {
+    for (const close of remove.reverse()) close();
+  }
 }

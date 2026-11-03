@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /** Opt-in startup phase timing: QTS_STARTUP_TIMING=1 prints each phase to stderr. */
 const started = performance.now();
 let last = started;

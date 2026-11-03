@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * One load-sized admitted-output ring with independent consumer cursors,
  * leases and explicit backpressure, following the shared C foundation
@@ -51,19 +52,38 @@ export class EventRing<T> {
     this.mask = capacity - 1;
   }
 
-  get capacity(): number { return this.slots.length; }
-  get first(): number { return this.firstId; }
-  get next(): number { return this.nextId; }
-  get live(): number { return this.nextId - this.firstId; }
-  get leased(): number { return this.leases.size; }
-  get accepted(): number { return this.acceptedCount; }
-  get blocked(): number { return this.blockedCount; }
+  get capacity(): number {
+    return this.slots.length;
+  }
+  get first(): number {
+    return this.firstId;
+  }
+  get next(): number {
+    return this.nextId;
+  }
+  get live(): number {
+    return this.nextId - this.firstId;
+  }
+  get leased(): number {
+    return this.leases.size;
+  }
+  get accepted(): number {
+    return this.acceptedCount;
+  }
+  get blocked(): number {
+    return this.blockedCount;
+  }
 
   stats(): EventRingStats {
     return {
-      capacity: this.capacity, live: this.live, leased: this.leases.size,
-      accepted: this.acceptedCount, blocked: this.blockedCount, retired: this.retiredCount,
-      first: this.firstId, next: this.nextId,
+      capacity: this.capacity,
+      live: this.live,
+      leased: this.leases.size,
+      accepted: this.acceptedCount,
+      blocked: this.blockedCount,
+      retired: this.retiredCount,
+      first: this.firstId,
+      next: this.nextId,
     };
   }
 
@@ -97,7 +117,8 @@ export class EventRing<T> {
   /** admit() for a batch: all records or a capacity error, never a partial batch. */
   admitAll(records: readonly T[]): number {
     const first = this.appendAll(records);
-    if (first === 0) throw new RangeError(`Event ring capacity exhausted (${this.capacity} undrained records, batch of ${records.length}); drain before admitting more`);
+    if (first === 0)
+      throw new RangeError(`Event ring capacity exhausted (${this.capacity} undrained records, batch of ${records.length}); drain before admitting more`);
     return first;
   }
 
@@ -224,7 +245,9 @@ export class EventRing<T> {
   /** Array form of drain for existing array-shaped boundaries. One allocation. */
   take(cursor: EventCursor): T[] {
     const out: T[] = [];
-    this.drain(cursor, (record) => { out.push(record); });
+    this.drain(cursor, record => {
+      out.push(record);
+    });
     return out;
   }
 

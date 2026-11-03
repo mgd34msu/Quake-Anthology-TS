@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { readFile, rename } from "node:fs/promises";
 import { settingsPath, writeAtomic } from "../core/files/atomic.ts";
 import type { CommandContext } from "../contracts/common.ts";
@@ -20,62 +21,132 @@ export interface SeatSettings {
   readonly rumbleStrength?: number;
   readonly controller: ControllerSelection;
 }
-function object(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function record(value: unknown): Record<string, unknown> { if (!object(value)) throw new Error("Expected a settings object"); return value; }
-function number(value: unknown): number { if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Expected a finite settings number"); return value; }
-function rumbleStrength(value: unknown): number { const result = value === undefined ? 1 : number(value); if (result < 0 || result > 1) throw new Error("Vibration strength must be between zero and one"); return result; }
-function natural(value: unknown): number { const result = number(value); if (!Number.isSafeInteger(result) || result < 0) throw new Error("Expected a nonnegative settings integer"); return result; }
-function boolean(value: unknown): boolean { if (typeof value !== "boolean") throw new Error("Expected a settings boolean"); return value; }
-function string(value: unknown): string { if (typeof value !== "string") throw new Error("Expected settings text"); return value; }
-function strings(value: unknown): string[] { if (!Array.isArray(value)) throw new Error("Expected a settings list"); return value.map((item: unknown) => string(item)); }
+function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function record(value: unknown): Record<string, unknown> {
+  if (!object(value)) throw new Error("Expected a settings object");
+  return value;
+}
+function number(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Expected a finite settings number");
+  return value;
+}
+function rumbleStrength(value: unknown): number {
+  const result = value === undefined ? 1 : number(value);
+  if (result < 0 || result > 1) throw new Error("Vibration strength must be between zero and one");
+  return result;
+}
+function natural(value: unknown): number {
+  const result = number(value);
+  if (!Number.isSafeInteger(result) || result < 0) throw new Error("Expected a nonnegative settings integer");
+  return result;
+}
+function boolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new Error("Expected a settings boolean");
+  return value;
+}
+function string(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Expected settings text");
+  return value;
+}
+function strings(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("Expected a settings list");
+  return value.map((item: unknown) => string(item));
+}
 function curve(value: unknown): StickCurve {
-  const input = record(value), deadzone = number(input["deadzone"]), exponent = number(input["exponent"]);
+  const input = record(value),
+    deadzone = number(input["deadzone"]),
+    exponent = number(input["exponent"]);
   if (input["kind"] === "radial") return { kind: "radial", deadzone, exponent, outerThreshold: number(input["outerThreshold"]) };
   if (input["kind"] === "axial") return { kind: "axial", deadzone, exponent };
   throw new Error("Unknown stick curve");
 }
 function gamepad(value: unknown): GamepadTuning {
-  const input = record(value), gyro = record(input["gyro"]), yawAxis = gyro["yawAxis"];
+  const input = record(value),
+    gyro = record(input["gyro"]),
+    yawAxis = gyro["yawAxis"];
   if (yawAxis !== "y" && yawAxis !== "z") throw new Error("Unknown gyro yaw axis");
-  return validateGamepadTuning({ move: curve(input["move"]), look: curve(input["look"]), swapSticks: boolean(input["swapSticks"]),
-    yawDegreesPerSecond: number(input["yawDegreesPerSecond"]), pitchDegreesPerSecond: number(input["pitchDegreesPerSecond"]),
-    invertPitch: boolean(input["invertPitch"]), forwardSensitivity: number(input["forwardSensitivity"]), sideSensitivity: number(input["sideSensitivity"]),
-    triggerThreshold: number(input["triggerThreshold"]), gyro: { enabled: boolean(gyro["enabled"]), yawAxis,
-      yawSensitivity: number(gyro["yawSensitivity"]), pitchSensitivity: number(gyro["pitchSensitivity"]) } });
+  return validateGamepadTuning({
+    move: curve(input["move"]),
+    look: curve(input["look"]),
+    swapSticks: boolean(input["swapSticks"]),
+    yawDegreesPerSecond: number(input["yawDegreesPerSecond"]),
+    pitchDegreesPerSecond: number(input["pitchDegreesPerSecond"]),
+    invertPitch: boolean(input["invertPitch"]),
+    forwardSensitivity: number(input["forwardSensitivity"]),
+    sideSensitivity: number(input["sideSensitivity"]),
+    triggerThreshold: number(input["triggerThreshold"]),
+    gyro: { enabled: boolean(gyro["enabled"]), yawAxis, yawSensitivity: number(gyro["yawSensitivity"]), pitchSensitivity: number(gyro["pitchSensitivity"]) },
+  });
 }
 function mouse(value: unknown): MouseTuning {
   const input = record(value);
-  return { sensitivity: number(input["sensitivity"]), acceleration: number(input["acceleration"]), filter: boolean(input["filter"]),
-    yaw: number(input["yaw"]), pitch: number(input["pitch"]), side: number(input["side"]), forward: number(input["forward"]),
+  return {
+    sensitivity: number(input["sensitivity"]),
+    acceleration: number(input["acceleration"]),
+    filter: boolean(input["filter"]),
+    yaw: number(input["yaw"]),
+    pitch: number(input["pitch"]),
+    side: number(input["side"]),
+    forward: number(input["forward"]),
     lookSpring: input["lookSpring"] === undefined ? false : boolean(input["lookSpring"]),
     lookStrafe: input["lookStrafe"] === undefined ? false : boolean(input["lookStrafe"]),
-    freeLook: boolean(input["freeLook"]), invertPitch: boolean(input["invertPitch"]) };
+    freeLook: boolean(input["freeLook"]),
+    invertPitch: boolean(input["invertPitch"]),
+  };
 }
 function axis(value: unknown): ControllerAxis {
   switch (value) {
-    case "left-x": case "left-y": case "right-x": case "right-y": case "left-trigger": case "right-trigger": return value;
-    default: throw new Error("Unknown controller axis");
+    case "left-x":
+    case "left-y":
+    case "right-x":
+    case "right-y":
+    case "left-trigger":
+    case "right-trigger":
+      return value;
+    default:
+      throw new Error("Unknown controller axis");
   }
 }
 function physical(value: unknown): PhysicalInput {
   const input = record(value);
   switch (input["kind"]) {
-    case "key": return { kind: "key", code: natural(input["code"]) };
-    case "mouse-button": return { kind: "mouse-button", button: natural(input["button"]) };
-    case "controller-button": return { kind: "controller-button", device: natural(input["device"]), button: natural(input["button"]) };
+    case "key":
+      return { kind: "key", code: natural(input["code"]) };
+    case "mouse-button":
+      return { kind: "mouse-button", button: natural(input["button"]) };
+    case "controller-button":
+      return { kind: "controller-button", device: natural(input["device"]), button: natural(input["button"]) };
     case "controller-axis": {
       const direction = input["direction"];
       if (direction !== "positive" && direction !== "negative") throw new Error("Unknown axis direction");
       return { kind: "controller-axis", device: natural(input["device"]), axis: axis(input["axis"]), direction };
     }
-    default: throw new Error("Unknown binding input");
+    default:
+      throw new Error("Unknown binding input");
   }
 }
 function action(value: unknown): InputAction {
   switch (value) {
-    case "attack": case "jump": case "forward": case "back": case "move-left": case "move-right": case "move-up": case "move-down":
-    case "use": case "crouch": case "walk": case "scores": case "next-weapon": case "previous-weapon": case "menu": return value;
-    default: throw new Error("Unknown input action");
+    case "attack":
+    case "jump":
+    case "forward":
+    case "back":
+    case "move-left":
+    case "move-right":
+    case "move-up":
+    case "move-down":
+    case "use":
+    case "crouch":
+    case "walk":
+    case "scores":
+    case "next-weapon":
+    case "previous-weapon":
+    case "menu":
+      return value;
+    default:
+      throw new Error("Unknown input action");
   }
 }
 function target(value: unknown): InputBindingTarget {
@@ -94,11 +165,23 @@ function controller(value: unknown): ControllerSelection {
   throw new Error("Unknown controller selection");
 }
 export function parseSeatSettings(value: unknown): SeatSettings {
-  const input = record(value), bindings = input["bindings"];
+  const input = record(value),
+    bindings = input["bindings"];
   if (input["version"] !== 1 || !Array.isArray(bindings)) throw new Error("Unsupported seat settings document");
-  return { version: 1, bindings: bindings.map((item: unknown) => { const binding = record(item); return { input: physical(binding["input"]), target: target(binding["target"]) }; }),
+  return {
+    version: 1,
+    bindings: bindings.map((item: unknown) => {
+      const binding = record(item);
+      return { input: physical(binding["input"]), target: target(binding["target"]) };
+    }),
     ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
-    gamepad: gamepad(input["gamepad"]), mouse: mouse(input["mouse"]), history: strings(input["history"]), rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]), controller: controller(input["controller"]) };
+    gamepad: gamepad(input["gamepad"]),
+    mouse: mouse(input["mouse"]),
+    history: strings(input["history"]),
+    rumble: boolean(input["rumble"]),
+    rumbleStrength: rumbleStrength(input["rumbleStrength"]),
+    controller: controller(input["controller"]),
+  };
 }
 /** Input tuning shared by every game; bindings stay in per-product seat settings. */
 export interface GlobalInputTuning {
@@ -111,24 +194,43 @@ export interface GlobalInputTuning {
 export function parseGlobalInputTuning(value: unknown): GlobalInputTuning {
   const input = record(value);
   if (input["version"] !== 1) throw new Error("Unsupported global input tuning document");
-  return { version: 1, mouse: mouse(input["mouse"]),
+  return {
+    version: 1,
+    mouse: mouse(input["mouse"]),
     ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
-    rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]) };
+    rumble: boolean(input["rumble"]),
+    rumbleStrength: rumbleStrength(input["rumbleStrength"]),
+  };
 }
 export { settingsPath, writeAtomic };
 export class ConfigStore {
   constructor(readonly root: string) {}
   // A saved document that is not JSON at all behaves like the absent one
   // every loader already admits; parsed values still face validation.
-  private static parsed(text: string): unknown { try { const value: unknown = JSON.parse(text); return value; } catch { return null; } }
+  private static parsed(text: string): unknown {
+    try {
+      const value: unknown = JSON.parse(text);
+      return value;
+    } catch {
+      return null;
+    }
+  }
   /** Decode and validate one stored document. One that cannot be read is renamed to `.bad` so the next save does not erase it, and loads as absent. */
   private async decoded<T>(name: string, text: string, parse: (value: unknown) => T): Promise<T | null> {
     const value = ConfigStore.parsed(text);
     if (value !== null) {
-      try { return parse(value); } catch { /* quarantined below like a document that is not JSON */ }
+      try {
+        return parse(value);
+      } catch {
+        /* quarantined below like a document that is not JSON */
+      }
     }
     const path = settingsPath(this.root, name);
-    try { await rename(path, `${path}.bad`); } catch { /* the document may already be gone or read-only; defaults still apply */ }
+    try {
+      await rename(path, `${path}.bad`);
+    } catch {
+      /* the document may already be gone or read-only; defaults still apply */
+    }
     return null;
   }
   async loadGyro(name: string): Promise<GyroProfile | null> {
@@ -145,7 +247,8 @@ export class ConfigStore {
     await this.dump(name, JSON.stringify({ version: 1, keyboardSeat }) + "\n");
   }
   async loadInputRouting(name: string): Promise<{ readonly keyboardSeat: number | null } | null> {
-    const text = await this.loadText(name); if (text === null) return null;
+    const text = await this.loadText(name);
+    if (text === null) return null;
     return this.decoded(name, text, value => {
       const data = record(value);
       if (data["version"] !== 1) throw new Error("Unsupported input routing document");
@@ -156,7 +259,8 @@ export class ConfigStore {
     await writeAtomic(settingsPath(this.root, name), `${JSON.stringify(settings, null, 2)}\n`);
   }
   async loadGlobalTuning(name: string): Promise<GlobalInputTuning | null> {
-    const text = await this.loadText(name); if (text === null) return null;
+    const text = await this.loadText(name);
+    if (text === null) return null;
     return this.decoded(name, text, parseGlobalInputTuning);
   }
   async saveGlobalTuning(name: string, tuning: GlobalInputTuning): Promise<void> {
@@ -164,7 +268,7 @@ export class ConfigStore {
   }
   async loadSeat(name: string): Promise<SeatSettings | null> {
     const file = Bun.file(settingsPath(this.root, name));
-    if (!await file.exists()) return null;
+    if (!(await file.exists())) return null;
     return this.decoded(name, await file.text(), parseSeatSettings);
   }
   async saveCvars(name: string, cvars: CvarRegistry, bindings: readonly string[] = []): Promise<void> {
@@ -176,25 +280,39 @@ export class ConfigStore {
   }
   async loadText(name: string): Promise<string | null> {
     const file = Bun.file(settingsPath(this.root, name));
-    return await file.exists() ? file.text() : null;
+    return (await file.exists()) ? file.text() : null;
   }
-  async dump(name: string, contents: string): Promise<void> { await writeAtomic(settingsPath(this.root, name), contents); }
+  async dump(name: string, contents: string): Promise<void> {
+    await writeAtomic(settingsPath(this.root, name), contents);
+  }
 }
 
 export type GyroProfileIdentity = { readonly kind: "seat" } | { readonly kind: "device"; readonly guid: string; readonly serial: string };
-export interface GyroProfile { readonly version: 1; readonly identity: GyroProfileIdentity; readonly tuning: GamepadTuning["gyro"]; }
+export interface GyroProfile {
+  readonly version: 1;
+  readonly identity: GyroProfileIdentity;
+  readonly tuning: GamepadTuning["gyro"];
+}
 export function parseGyroProfile(value: unknown): GyroProfile {
-  const input = record(value), identity = record(input["identity"]), tuning = record(input["tuning"]);
+  const input = record(value),
+    identity = record(input["identity"]),
+    tuning = record(input["tuning"]);
   if (input["version"] !== 1) throw new Error("Unsupported gyro settings version");
   let key: GyroProfileIdentity;
   if (identity["kind"] === "seat") key = { kind: "seat" };
   else if (identity["kind"] === "device") {
-    const guid = string(identity["guid"]), serial = string(identity["serial"]);
+    const guid = string(identity["guid"]),
+      serial = string(identity["serial"]);
     if (!/^[0-9a-f]{32}$/.test(guid) || serial.length === 0 || serial.length > 256 || serial.includes("\0")) throw new Error("Invalid gyro device identity");
     key = { kind: "device", guid, serial };
   } else throw new Error("Unknown gyro profile identity");
   const yawAxis = tuning["yawAxis"];
   if (yawAxis !== "y" && yawAxis !== "z") throw new Error("Unknown gyro yaw axis");
-  const result: GamepadTuning["gyro"] = { enabled: boolean(tuning["enabled"]), yawAxis, yawSensitivity: number(tuning["yawSensitivity"]), pitchSensitivity: number(tuning["pitchSensitivity"]) };
+  const result: GamepadTuning["gyro"] = {
+    enabled: boolean(tuning["enabled"]),
+    yawAxis,
+    yawSensitivity: number(tuning["yawSensitivity"]),
+    pitchSensitivity: number(tuning["pitchSensitivity"]),
+  };
   return { version: 1, identity: key, tuning: result };
 }

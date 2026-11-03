@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* WinQuake/pr_cmds.c PF_newcheckclient/PF_checkclient. GPL-2.0-or-later. */
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -5,7 +6,10 @@ import type { NumericOperations } from "../../contracts/numeric.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import type { SharedSceneQueries } from "../collision/index.ts";
 
-export interface Q1ClientEye { readonly origin: Vec3; readonly viewOffset: Vec3; }
+export interface Q1ClientEye {
+  readonly origin: Vec3;
+  readonly viewOffset: Vec3;
+}
 export interface Q1VisibilityClient extends Q1ClientEye {
   readonly actor: ActorId | null;
   readonly free: boolean;
@@ -23,19 +27,25 @@ export type Q1ClientVisibilityScene = Pick<SharedSceneQueries, "geometry" | "poi
 export class Q1ClientVisibility {
   private state: Q1ClientVisibilityState = { lastCheckSlot: 0, lastCheckTime: 0, checkedCluster: null };
   private readonly maximumCluster: number;
-  constructor(readonly services: {
-    readonly maxClients: number;
-    readonly client: (slot: number) => Q1VisibilityClient;
-    readonly visibility: Q1ClientVisibilityScene;
-  }) {
+  constructor(
+    readonly services: {
+      readonly maxClients: number;
+      readonly client: (slot: number) => Q1VisibilityClient;
+      readonly visibility: Q1ClientVisibilityScene;
+    },
+  ) {
     if (!Number.isSafeInteger(services.maxClients) || services.maxClients < 1) throw new RangeError("Q1 visibility requires reserved client slots");
     this.maximumCluster = services.visibility.geometry.leaves.reduce((maximum, _leaf, index) => Math.max(maximum, services.visibility.leafCluster(index)), -1);
   }
   private eyeCluster(eye: Q1ClientEye, numeric: NumericOperations): number {
     const { origin, viewOffset } = eye;
-    return this.services.visibility.leafCluster(this.services.visibility.pointLeaf({
-      x: numeric.add(origin.x, viewOffset.x), y: numeric.add(origin.y, viewOffset.y), z: numeric.add(origin.z, viewOffset.z),
-    }));
+    return this.services.visibility.leafCluster(
+      this.services.visibility.pointLeaf({
+        x: numeric.add(origin.x, viewOffset.x),
+        y: numeric.add(origin.y, viewOffset.y),
+        z: numeric.add(origin.z, viewOffset.z),
+      }),
+    );
   }
   check(observer: Q1ClientEye, timeSeconds: number, numeric: NumericOperations): ActorId | null {
     if (timeSeconds - this.state.lastCheckTime >= 0.1) {
@@ -54,12 +64,16 @@ export class Q1ClientVisibility {
     const observerCluster = this.eyeCluster(observer, numeric);
     return this.services.visibility.clusterVisible(this.state.checkedCluster, observerCluster, "pvs") ? client.actor : null;
   }
-  capture(): Q1ClientVisibilityState { return { ...this.state }; }
+  capture(): Q1ClientVisibilityState {
+    return { ...this.state };
+  }
   restore(value: unknown): undefined {
     const reader = new SaveReader(value, "q1-client-visibility");
-    const lastCheckSlot = reader.field("lastCheckSlot").integer(0), lastCheckTime = reader.field("lastCheckTime").finite();
+    const lastCheckSlot = reader.field("lastCheckSlot").integer(0),
+      lastCheckTime = reader.field("lastCheckTime").finite();
     const checkedCluster = reader.field("checkedCluster").nullable(value => value.integer(-1));
-    if (lastCheckSlot > this.services.maxClients || lastCheckTime < 0 || (checkedCluster !== null && checkedCluster > this.maximumCluster)) reader.fail("visibility cache outside source range");
+    if (lastCheckSlot > this.services.maxClients || lastCheckTime < 0 || (checkedCluster !== null && checkedCluster > this.maximumCluster))
+      reader.fail("visibility cache outside source range");
     if ((lastCheckSlot === 0) !== (checkedCluster === null) || (lastCheckSlot === 0 && lastCheckTime !== 0)) reader.fail("invalid initial visibility cache");
     this.state = { lastCheckSlot, lastCheckTime, checkedCluster };
     return undefined;

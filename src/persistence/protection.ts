@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ArmorState } from "../contracts/gameplay.ts";
 import type { OwnedActor, ProviderId } from "../contracts/identity.ts";
 import type { ProviderCheckpoint, SaveImage, SavedActorId } from "../contracts/session.ts";
@@ -23,33 +24,50 @@ export function capturePrimaryProtection(actors: SessionActorRegistry, combat: G
     if (actor === null) continue;
     const primary = combat.copiedPrimaryArmor(actor);
     if (primary === null) continue;
-    const regular = combat.protectionOwner(actor, "regular") !== null, powered = combat.protectionOwner(actor, "powered") !== null;
+    const regular = combat.protectionOwner(actor, "regular") !== null,
+      powered = combat.protectionOwner(actor, "powered") !== null;
     if (regular) combat.protectionInventoryItems(actor, "regular");
     if (powered) combat.protectionInventoryItems(actor, "powered");
-    if (regular || powered) entries.push({ actor: savedActorId(actor.id), owner: actor.owner,
-      ...(regular ? { regular: primary.regular } : {}), ...(powered ? { powered: primary.powered } : {}) });
+    if (regular || powered)
+      entries.push({
+        actor: savedActorId(actor.id),
+        owner: actor.owner,
+        ...(regular ? { regular: primary.regular } : {}),
+        ...(powered ? { powered: primary.powered } : {}),
+      });
   }
   return { provider: "world:gameplay", schema, version: 1, bytes: encodeCheckpointValue(entries) };
 }
 
-export function readPrimaryProtection(save: SaveImage, actors: SessionActorRegistry): {
-  readonly recorded: boolean; readonly entries: ReadonlyMap<OwnedActor, HiddenArmor>;
+export function readPrimaryProtection(
+  save: SaveImage,
+  actors: SessionActorRegistry,
+): {
+  readonly recorded: boolean;
+  readonly entries: ReadonlyMap<OwnedActor, HiddenArmor>;
 } {
   const records = save.providers.filter(provider => provider.schema === schema);
   if (records.length > 1) throw new SaveFormatError(schema, "duplicate primary protection checkpoint");
-  const record = records[0], entries = new Map<OwnedActor, HiddenArmor>();
+  const record = records[0],
+    entries = new Map<OwnedActor, HiddenArmor>();
   if (record === undefined) return { recorded: false, entries };
   if (record.provider !== "world:gameplay" || record.version !== 1) throw new SaveFormatError(schema, "unsupported primary protection checkpoint");
   new SaveReader(decodeCheckpointValue(record.bytes)).list(value => {
-    const saved = readSavedActor(value.field("actor")), owner = namespaced(value.field("owner"));
+    const saved = readSavedActor(value.field("actor")),
+      owner = namespaced(value.field("owner"));
     const actor = actors.resolveSaved(saved);
     if (actor === null || actor.owner !== owner || entries.has(actor)) return value.fail("missing or duplicate primary protection owner");
-    const regular = value.field("regular"), powered = value.field("powered");
+    const regular = value.field("regular"),
+      powered = value.field("powered");
     if (regular.value === undefined && powered.value === undefined) return value.fail("empty hidden primary armor");
     const armor = readArmor(new SaveReader({ regular: regular.value ?? { kind: "none" }, powered: powered.value ?? { kind: "none" } }));
     if (armor.regular.kind === "source") return regular.fail("copied primary armor cannot own a source formula");
-    const entry: HiddenArmor = { actor: saved, owner, ...(regular.value === undefined ? {} : { regular: armor.regular }),
-      ...(powered.value === undefined ? {} : { powered: armor.powered }) };
+    const entry: HiddenArmor = {
+      actor: saved,
+      owner,
+      ...(regular.value === undefined ? {} : { regular: armor.regular }),
+      ...(powered.value === undefined ? {} : { powered: armor.powered }),
+    };
     entries.set(actor, entry);
     return undefined;
   });

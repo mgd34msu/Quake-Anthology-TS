@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Source monster controllers share the Q1 frame, movement and combat owners. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
@@ -15,21 +16,45 @@ import type { Q1MissionPack } from "../types.ts";
 import type { MissionMonsterHooks, PackMonsterDefinition } from "./types.ts";
 
 export class MissionMonster extends BaseMonster {
-  constructor(game: Q1EntityServices, entity: Q1Actor, readonly definition: PackMonsterDefinition, readonly runtime: Q1MissionPackMonsters) {
-    super(game, entity, definition.spec, runtime.base, { callbackPrefix: runtime.pack, frames: definition.frames,
-      actions: new Map(Object.entries(definition.actions).map(([name, action]) => [name, (monster: BaseMonster) => action(runtime.require(monster.entity))])) });
+  constructor(
+    game: Q1EntityServices,
+    entity: Q1Actor,
+    readonly definition: PackMonsterDefinition,
+    readonly runtime: Q1MissionPackMonsters,
+  ) {
+    super(game, entity, definition.spec, runtime.base, {
+      callbackPrefix: runtime.pack,
+      frames: definition.frames,
+      actions: new Map(Object.entries(definition.actions).map(([name, action]) => [name, (monster: BaseMonster) => action(runtime.require(monster.entity))])),
+    });
   }
-  override spawn(): undefined { return this.definition.spawn === undefined ? this.spawnDefault() : this.definition.spawn(this); }
-  spawnDefault(): undefined { return super.spawn(); }
-  override start(): undefined { return this.definition.start === undefined ? this.startDefault() : this.definition.start(this); }
+  override spawn(): undefined {
+    return this.definition.spawn === undefined ? this.spawnDefault() : this.definition.spawn(this);
+  }
+  spawnDefault(): undefined {
+    return super.spawn();
+  }
+  override start(): undefined {
+    return this.definition.start === undefined ? this.startDefault() : this.definition.start(this);
+  }
   startDefault(): undefined {
-    const path = this.game.find(this.state.path)[0]; this.entity.references.set("goalentity", path?.actor.id ?? null); this.entity.references.set("movetarget", path?.actor.id ?? null);
+    const path = this.game.find(this.state.path)[0];
+    this.entity.references.set("goalentity", path?.actor.id ?? null);
+    this.entity.references.set("movetarget", path?.actor.id ?? null);
     return super.start();
   }
-  useDefault(activator: ActorId | null): undefined { return super.use(activator); }
-  gibDeathDefault(): boolean { return super.gibDeath(); }
-  protected override sfx(path: string): string { return this.definition.sfx?.(this, path) ?? path; }
-  protected override gibDeath(): boolean { return this.definition.gibDeath === undefined ? super.gibDeath() : this.definition.gibDeath(this); }
+  useDefault(activator: ActorId | null): undefined {
+    return super.use(activator);
+  }
+  gibDeathDefault(): boolean {
+    return super.gibDeath();
+  }
+  protected override sfx(path: string): string {
+    return this.definition.sfx?.(this, path) ?? path;
+  }
+  protected override gibDeath(): boolean {
+    return this.definition.gibDeath === undefined ? super.gibDeath() : this.definition.gibDeath(this);
+  }
   override play(requested: string): undefined {
     const name = this.definition.redirect?.(this, requested) ?? requested;
     if (!this.definition.frames.has(name)) {
@@ -43,65 +68,108 @@ export class MissionMonster extends BaseMonster {
       if ((this.entity.movementFlags & 32) !== 0) this.retaliate(attacker);
       if (this.definition.prePain(this, attacker, damage)) return undefined;
     }
-    if (this.definition.baseBehavior === true) return super.pain(attacker, damage); this.retaliate(attacker); return this.definition.pain(this, attacker, damage); }
-  painDefault(attacker: ActorId | null, damage: number): undefined { return super.pain(attacker, damage); }
-  dieDefault(attacker: ActorId | null): undefined { return super.die(attacker); }
+    if (this.definition.baseBehavior === true) return super.pain(attacker, damage);
+    this.retaliate(attacker);
+    return this.definition.pain(this, attacker, damage);
+  }
+  painDefault(attacker: ActorId | null, damage: number): undefined {
+    return super.pain(attacker, damage);
+  }
+  dieDefault(attacker: ActorId | null): undefined {
+    return super.die(attacker);
+  }
   override die(attacker: ActorId | null): undefined {
     if (this.entity.number("charmed") !== 0) this.entity.effects &= ~8;
     if (this.definition.baseBehavior === true) return super.die(attacker);
     if (this.countedDeath) return undefined;
     this.enemy = attacker;
     if (this.game.health(this.entity.actor.id) < -99) this.game.host.combat.setHealth(this.entity.actor, -99);
-    this.entity.damageable = false; this.entity.touch = null;
+    this.entity.damageable = false;
+    this.entity.touch = null;
     this.countKill();
     return this.definition.die(this, attacker);
   }
-  override meleeAttack(): undefined { return this.definition.baseBehavior === true ? super.meleeAttack() : this.definition.melee?.(this); }
-  override tryAttack(): boolean { return this.definition.checkAttack === undefined ? super.tryAttack() : this.definition.checkAttack(this); }
-  checkAttackDefault(): boolean { return super.tryAttack(); }
+  override meleeAttack(): undefined {
+    return this.definition.baseBehavior === true ? super.meleeAttack() : this.definition.melee?.(this);
+  }
+  override tryAttack(): boolean {
+    return this.definition.checkAttack === undefined ? super.tryAttack() : this.definition.checkAttack(this);
+  }
+  checkAttackDefault(): boolean {
+    return super.tryAttack();
+  }
   override found(target: ActorId): undefined {
     const owner = charmer(this);
-    if (owner !== null && (target === owner || this.game.entity(target)?.references.get("charmer") === owner)) { this.enemy = null; return undefined; }
-    return this.definition.found === undefined ? this.foundDefault(target) : this.definition.found(this, target); }
+    if (owner !== null && (target === owner || this.game.entity(target)?.references.get("charmer") === owner)) {
+      this.enemy = null;
+      return undefined;
+    }
+    return this.definition.found === undefined ? this.foundDefault(target) : this.definition.found(this, target);
+  }
   foundDefault(target: ActorId): undefined {
     if (this.runtime.pack !== "hipnotic") return super.found(target);
-    const { game, entity, spec } = this; this.enemy = target;
-    if (game.isPlayer(target)) { game.sightEntity = entity; game.sightTime = game.time; }
+    const { game, entity, spec } = this;
+    this.enemy = target;
+    if (game.isPlayer(target)) {
+      game.sightEntity = entity;
+      game.sightTime = game.time;
+    }
     entity.fields.set("show_hostile", String(Math.fround(game.time + 1)));
     let sound = spec.sight;
     if (spec.species === "enforcer") {
-      const r = Math.floor(game.host.random() * 3 + 0.5); sound = `enforcer/sight${r === 1 ? 1 : r === 2 ? 2 : r === 0 ? 3 : 4}.wav`;
-    } else if (spec.species === "fish" || spec.species === "gremlin" && entity.number("stoleweapon") !== 0) sound = "";
+      const r = Math.floor(game.host.random() * 3 + 0.5);
+      sound = `enforcer/sight${r === 1 ? 1 : r === 2 ? 2 : r === 0 ? 3 : 4}.wav`;
+    } else if (spec.species === "fish" || (spec.species === "gremlin" && entity.number("stoleweapon") !== 0)) sound = "";
     if (sound !== "") game.sound(entity, sound);
-    this.state.mode = "run"; this.nextFrame = spec.run; entity.references.set("goalentity", target);
+    this.state.mode = "run";
+    this.nextFrame = spec.run;
+    entity.references.set("goalentity", target);
     entity.idealYaw = yawFor(vsub(game.host.bodies.read(target)?.origin ?? { x: 0, y: 0, z: 0 }, this.origin));
-    this.delay(0.1); return this.attackFinished(1);
+    this.delay(0.1);
+    return this.attackFinished(1);
   }
   override ai(mode: MonsterAi, distance: number): undefined {
     if (mode === "walk" && walkWithCharmer(this, distance)) return undefined;
-    return this.definition.ai === undefined ? super.ai(mode, distance) : this.definition.ai(this, mode, distance); }
-  aiDefault(mode: MonsterAi, distance: number): undefined { return super.ai(mode, distance); }
-  protected override firesThroughBlockers(): boolean { return charmer(this) !== null; }
+    return this.definition.ai === undefined ? super.ai(mode, distance) : this.definition.ai(this, mode, distance);
+  }
+  aiDefault(mode: MonsterAi, distance: number): undefined {
+    return super.ai(mode, distance);
+  }
+  protected override firesThroughBlockers(): boolean {
+    return charmer(this) !== null;
+  }
   override run(distance: number): undefined {
     const { game, entity } = this;
     const owner = charmer(this);
-    if (owner !== null && (this.enemy === null || this.enemy === owner || game.health(this.enemy) <= 0)) { this.enemy = null; return huntCharmer(this); }
+    if (owner !== null && (this.enemy === null || this.enemy === owner || game.health(this.enemy) <= 0)) {
+      this.enemy = null;
+      return huntCharmer(this);
+    }
     if (this.runtime.pack === "hipnotic") entity.fields.set("show_hostile", String(Math.fround(game.time + 1)));
     if (entity.attackState !== "dodging") return super.run(distance);
-    if (this.enemy === null || game.health(this.enemy) <= 0) { entity.attackState = "straight"; return super.run(distance); }
+    if (this.enemy === null || game.health(this.enemy) <= 0) {
+      entity.attackState = "straight";
+      return super.run(distance);
+    }
     const target = this.target;
     if (target === null) return undefined;
-    const seen = this.visible(); if (seen) this.state.searchUntil = game.time + 5;
+    const seen = this.visible();
+    if (seen) this.state.searchUntil = game.time + 5;
     if (this.searchForCoopTarget()) return undefined;
     game.makeVectors(game.body(entity).angles);
     if (seen && this.tryAttack()) return undefined;
     this.delay(0.1);
     const offset = this.lefty ? 40 : -40;
-    if (game.time > entity.number("ltime")) { this.lefty = !this.lefty; entity.fields.set("ltime", String(Math.fround(game.time + 0.8))); }
+    if (game.time > entity.number("ltime")) {
+      this.lefty = !this.lefty;
+      entity.fields.set("ltime", String(Math.fround(game.time + 0.8)));
+    }
     entity.idealYaw = yawFor(vsub(target, this.origin));
     if (game.host.walkMove(entity.actor, entity.idealYaw + offset, distance)) return this.changeYaw();
-    this.lefty = !this.lefty; entity.fields.set("ltime", String(Math.fround(game.time + 0.8)));
-    game.host.walkMove(entity.actor, entity.idealYaw - offset, distance); return this.changeYaw();
+    this.lefty = !this.lefty;
+    entity.fields.set("ltime", String(Math.fround(game.time + 0.8)));
+    game.host.walkMove(entity.actor, entity.idealYaw - offset, distance);
+    return this.changeYaw();
   }
   override moveToEnemy(distance: number): undefined {
     const { game, entity } = this;
@@ -112,11 +180,21 @@ export class MissionMonster extends BaseMonster {
     }
     return super.moveToEnemy(distance);
   }
-  override searchForCoopTarget(): boolean { return this.entity.number("charmed") === 0 && super.searchForCoopTarget(); }
-  override makeVectors() { return this.game.makeVectors(this.game.body(this.entity).angles); }
-  override findTarget(): boolean { return this.runtime.pack === "hipnotic" ? findCharmedTarget(this) ?? findHipnoticTarget(this) : super.findTarget(); }
-  override retaliate(attacker: ActorId | null): undefined { return attacker !== null && attacker === charmer(this) ? undefined : super.retaliate(attacker); }
-  override use(activator: ActorId | null): undefined { return this.definition.use === undefined ? super.use(activator) : this.definition.use(this, activator); }
+  override searchForCoopTarget(): boolean {
+    return this.entity.number("charmed") === 0 && super.searchForCoopTarget();
+  }
+  override makeVectors() {
+    return this.game.makeVectors(this.game.body(this.entity).angles);
+  }
+  override findTarget(): boolean {
+    return this.runtime.pack === "hipnotic" ? (findCharmedTarget(this) ?? findHipnoticTarget(this)) : super.findTarget();
+  }
+  override retaliate(attacker: ActorId | null): undefined {
+    return attacker !== null && attacker === charmer(this) ? undefined : super.retaliate(attacker);
+  }
+  override use(activator: ActorId | null): undefined {
+    return this.definition.use === undefined ? super.use(activator) : this.definition.use(this, activator);
+  }
 }
 
 export class Q1MissionPackMonsters {
@@ -124,22 +202,39 @@ export class Q1MissionPackMonsters {
   spawnedGremlins = 0;
   readonly monsters = new Map<OwnedActor, MissionMonster>();
   private readonly definitions = new Map<string, PackMonsterDefinition>();
-  constructor(readonly game: Q1EntityServices, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly hooks: MissionMonsterHooks = {}) {
+  constructor(
+    readonly game: Q1EntityServices,
+    readonly base: Q1Base,
+    readonly pack: Q1MissionPack,
+    readonly hooks: MissionMonsterHooks = {},
+  ) {
     registerMonsterCallbacks(game, pack, entity => this.require(entity));
     if (pack === "hipnotic") {
       const variants = hipnoticSpeciesVariants();
       // The charmed grunt and dog register their own definitions below.
-      for (const spec of baseSpecies) if (spec.species !== "army" && spec.species !== "dog") for (const classname of spec.classnames) {
-        this.definitions.set(classname, speciesDefinition(spec, variants[classname]));
-        if (spec.movement !== "boss") game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
-      }
+      for (const spec of baseSpecies)
+        if (spec.species !== "army" && spec.species !== "dog")
+          for (const classname of spec.classnames) {
+            this.definitions.set(classname, speciesDefinition(spec, variants[classname]));
+            if (spec.movement !== "boss") game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
+          }
     }
-    if (pack === "rogue") for (const definition of rogueSpeciesVariants(this)) for (const classname of definition.spec.classnames) {
-      this.definitions.set(classname, definition);
-      game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
-    }
-    game.host.actors.onRelease(actor => { this.monsters.delete(actor); return undefined; });
-    game.registerStateExtension({ id: `q1:${pack}:monsters`, capture: () => this.capture(), restore: bytes => this.restore(bytes), clone: (source, target) => this.clone(source, target) });
+    if (pack === "rogue")
+      for (const definition of rogueSpeciesVariants(this))
+        for (const classname of definition.spec.classnames) {
+          this.definitions.set(classname, definition);
+          game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
+        }
+    game.host.actors.onRelease(actor => {
+      this.monsters.delete(actor);
+      return undefined;
+    });
+    game.registerStateExtension({
+      id: `q1:${pack}:monsters`,
+      capture: () => this.capture(),
+      restore: bytes => this.restore(bytes),
+      clone: (source, target) => this.clone(source, target),
+    });
   }
   require(entity: Q1Actor): MissionMonster {
     const monster = this.monsters.get(entity.actor);
@@ -148,7 +243,7 @@ export class Q1MissionPackMonsters {
   }
   context(actor: ActorId): MissionMonster | null {
     const owner = this.game.host.actors.resolveOwned(actor);
-    return owner === null ? null : this.monsters.get(owner) ?? null;
+    return owner === null ? null : (this.monsters.get(owner) ?? null);
   }
   register(definition: PackMonsterDefinition): undefined {
     for (const [name, callback] of Object.entries(definition.callbacks ?? {})) this.game.named.register(`${this.pack}:${name}`, callback);
@@ -156,7 +251,8 @@ export class Q1MissionPackMonsters {
       if (this.definitions.has(classname)) throw new Error(`Duplicate ${this.pack} monster ${classname}`);
       this.definitions.set(classname, definition);
       const spawn = (_game: Q1EntityServices, entity: Q1Actor): undefined => this.spawn(entity);
-      if (this.game.hasSpawn(classname)) this.game.replaceSpawn(classname, spawn); else this.game.registerSpawn(classname, spawn);
+      if (this.game.hasSpawn(classname)) this.game.replaceSpawn(classname, spawn);
+      else this.game.registerSpawn(classname, spawn);
     }
     return undefined;
   }
@@ -169,15 +265,26 @@ export class Q1MissionPackMonsters {
     return monster.spawn();
   }
   charm(entity: Q1Actor, owner: ActorId): undefined {
-    entity.references.set("charmer", owner); entity.fields.set("charmed", "1");
+    entity.references.set("charmer", owner);
+    entity.fields.set("charmed", "1");
     if (this.monsters.has(entity.actor)) return undefined;
-    const previous = this.base.monsters.get(entity.actor), definition = this.definitions.get(entity.classname);
+    const previous = this.base.monsters.get(entity.actor),
+      definition = this.definitions.get(entity.classname);
     if (previous === undefined || definition === undefined) throw new Error(`Missing source charm controller for ${entity.classname}`);
     const monster = new MissionMonster(this.game, entity, definition, this);
     monster.restore(new SaveReader(previous.capture(), "hipnotic:charm"));
-    this.base.monsters.delete(entity.actor); this.monsters.set(entity.actor, monster);
-    const name = (callback: object | null): string | null => { const source = callbackName(callback); return source?.startsWith("base:") === true ? `${this.pack}:${source.slice(5)}` : source; };
-    const think = name(entity.think), use = name(entity.use), pain = name(entity.pain), die = name(entity.die), touch = name(entity.touch), pathEnd = name(entity.pathEnd);
+    this.base.monsters.delete(entity.actor);
+    this.monsters.set(entity.actor, monster);
+    const name = (callback: object | null): string | null => {
+      const source = callbackName(callback);
+      return source?.startsWith("base:") === true ? `${this.pack}:${source.slice(5)}` : source;
+    };
+    const think = name(entity.think),
+      use = name(entity.use),
+      pain = name(entity.pain),
+      die = name(entity.die),
+      touch = name(entity.touch),
+      pathEnd = name(entity.pathEnd);
     entity.think = think === null ? null : this.game.named.action(entity, think);
     entity.use = use === null ? null : this.game.named.use(entity, use);
     entity.pain = pain === null ? null : this.game.named.pain(entity, pain);
@@ -190,27 +297,39 @@ export class Q1MissionPackMonsters {
     const original = this.monsters.get(source.actor);
     if (original === undefined) return undefined;
     const monster = new MissionMonster(this.game, target, original.definition, this);
-    monster.restore(new SaveReader(original.capture(), `${this.pack}:monster-clone`)); this.monsters.set(target.actor, monster);
+    monster.restore(new SaveReader(original.capture(), `${this.pack}:monster-clone`));
+    this.monsters.set(target.actor, monster);
     return undefined;
   }
   private capture(): Uint8Array {
-    return encodeCheckpointValue({ version: 1, authoredGremlins: this.authoredGremlins, spawnedGremlins: this.spawnedGremlins, monsters: [...this.monsters.values()].map(monster => ({
-      actor: { slot: monster.entity.actor.id.slot, generation: monster.entity.actor.id.generation }, definition: monster.spec.classnames[0] ?? monster.entity.classname, state: monster.capture(),
-    })) });
+    return encodeCheckpointValue({
+      version: 1,
+      authoredGremlins: this.authoredGremlins,
+      spawnedGremlins: this.spawnedGremlins,
+      monsters: [...this.monsters.values()].map(monster => ({
+        actor: { slot: monster.entity.actor.id.slot, generation: monster.entity.actor.id.generation },
+        definition: monster.spec.classnames[0] ?? monster.entity.classname,
+        state: monster.capture(),
+      })),
+    });
   }
   private restore(bytes: Uint8Array): undefined {
-    const reader = new SaveReader(decodeCheckpointValue(bytes), `q1:${this.pack}:monsters`); reader.field("version").literal(1);
-    this.authoredGremlins = reader.field("authoredGremlins").number(); this.spawnedGremlins = reader.field("spawnedGremlins").number();
+    const reader = new SaveReader(decodeCheckpointValue(bytes), `q1:${this.pack}:monsters`);
+    reader.field("version").literal(1);
+    this.authoredGremlins = reader.field("authoredGremlins").number();
+    this.spawnedGremlins = reader.field("spawnedGremlins").number();
     this.monsters.clear();
     reader.field("monsters").list(saved => {
-      const id = saved.field("actor"), actor = this.game.host.actors.resolveSaved({ slot: id.field("slot").integer(0), generation: id.field("generation").integer(0) });
+      const id = saved.field("actor"),
+        actor = this.game.host.actors.resolveSaved({ slot: id.field("slot").integer(0), generation: id.field("generation").integer(0) });
       if (actor === null) return saved.fail("missing saved monster actor");
       const entity = this.game.entity(actor.id);
       if (entity === null) return saved.fail("missing saved monster source entity");
       const definition = this.definitions.get(saved.field("definition").string());
       if (definition === undefined) return saved.fail("unknown saved mission pack monster");
       const monster = new MissionMonster(this.game, entity, definition, this);
-      monster.restore(saved.field("state")); this.monsters.set(actor, monster);
+      monster.restore(saved.field("state"));
+      this.monsters.set(actor, monster);
       return undefined;
     });
     return undefined;

@@ -1,11 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { ArsenalState, MovementCommand } from "../../../contracts/movement.ts";
 import { Q3_WEAPON_ITEMS } from "../../../content/q3/foundation/arsenal.ts";
 import type { Q3ArsenalControls } from "../../../content/q3/foundation/arsenal.ts";
 
 /** Native movement fields and explicit selected-arsenal commands meet at this boundary. */
-export function resolveQ3ArsenalControls(arsenal: ArsenalState, intent: ArsenalIntent | undefined,
-  command: MovementCommand, product: "baseq3" | "missionpack"): Q3ArsenalControls {
+export function resolveQ3ArsenalControls(
+  arsenal: ArsenalState,
+  intent: ArsenalIntent | undefined,
+  command: MovementCommand,
+  product: "baseq3" | "missionpack",
+): Q3ArsenalControls {
   if (arsenal.state.kind !== "q3") throw new Error("Q3 controls require the selected Q3 arsenal");
   let requestedWeapon = command.kind === "q3" ? command.weapon : arsenal.state.sourceWeapon;
   if (intent !== undefined) {
@@ -17,6 +22,5 @@ export function resolveQ3ArsenalControls(arsenal: ArsenalState, intent: ArsenalI
       if (weapon !== undefined && (product !== "baseq3" || weapon.weapon <= 10)) requestedWeapon = weapon.weapon;
     }
   }
-  return { attack: (command.buttons & 1) !== 0,
-    useHoldable: intent?.useHoldable ?? (command.kind === "q3" && (command.buttons & 4) !== 0), requestedWeapon };
+  return { attack: (command.buttons & 1) !== 0, useHoldable: intent?.useHoldable ?? (command.kind === "q3" && (command.buttons & 4) !== 0), requestedWeapon };
 }

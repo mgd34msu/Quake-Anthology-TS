@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../../contracts/math.ts";
 import type { NavigationEdge, NavigationEntityState, NavigationProfile } from "./types.ts";
 type Train = NonNullable<NavigationEntityState["train"]>;
@@ -6,11 +7,17 @@ export interface NavigationTrainRide {
   readonly arrival: Train["stops"][number];
 }
 function supports(state: NavigationEntityState, train: Train, stop: Train["stops"][number], point: Vec3, profile: NavigationProfile): boolean {
-  const x = stop.origin.x - train.origin.x, y = stop.origin.y - train.origin.y, z = stop.origin.z - train.origin.z;
+  const x = stop.origin.x - train.origin.x,
+    y = stop.origin.y - train.origin.y,
+    z = stop.origin.z - train.origin.z;
   const bounds = profile.shape.bounds;
-  return point.x + bounds.max.x > state.bounds.min.x + x && point.x + bounds.min.x < state.bounds.max.x + x
-    && point.y + bounds.max.y > state.bounds.min.y + y && point.y + bounds.min.y < state.bounds.max.y + y
-    && Math.abs(point.z + bounds.min.z - (state.bounds.max.z + z)) <= profile.maximumStep;
+  return (
+    point.x + bounds.max.x > state.bounds.min.x + x &&
+    point.x + bounds.min.x < state.bounds.max.x + x &&
+    point.y + bounds.max.y > state.bounds.min.y + y &&
+    point.y + bounds.min.y < state.bounds.max.y + y &&
+    Math.abs(point.z + bounds.min.z - (state.bounds.max.z + z)) <= profile.maximumStep
+  );
 }
 /** A ride is a directed source route, including waits and teleport corners, rather than a line to a mover's current destination. */
 export function navigationTrainRide(state: NavigationEntityState, edge: NavigationEdge, profile: NavigationProfile): NavigationTrainRide | null {

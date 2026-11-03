@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { EnemySelection, MonsterDefinitionReference, ProviderTiming, ResourceRequest } from "../../contracts/content.ts";
 import { monsterSource, monsterSources, monsterTiming } from "../monsters/definitions.ts";
 import type { InstalledCatalog } from "./index.ts";
@@ -7,17 +8,19 @@ export { campaignMonsterSlots, defaultMonsterRoster } from "../monsters/roster.t
 export type { MonsterRole, MonsterRosterSlot } from "../monsters/roster.ts";
 
 export function selectedMonsterDefinitions(enemies: EnemySelection): readonly MonsterDefinitionReference[] {
-  return enemies.kind !== "replace" ? [] : [enemies.default, ...Object.values(enemies.byClassname)].flatMap(target => "kind" in target ? [] : [target]);
+  return enemies.kind !== "replace" ? [] : [enemies.default, ...Object.values(enemies.byClassname)].flatMap(target => ("kind" in target ? [] : [target]));
 }
 
 export function validateMonsters(enemies: EnemySelection, catalog: InstalledCatalog): undefined {
   for (const definition of selectedMonsterDefinitions(enemies)) {
-    const source = monsterSource(definition), product = catalog.require(definition.source.content).expectation;
+    const source = monsterSource(definition),
+      product = catalog.require(definition.source.content).expectation;
     if (product.family !== source.family || product.edition !== source.edition || product.campaign !== source.program) {
       throw new RangeError(`Monster source content does not match ${source.provider}: ${definition.source.content}`);
     }
   }
-  if (enemies.kind === "replace" && Object.keys(enemies.byClassname).some(name => name.length === 0)) throw new RangeError("An authored monster classname cannot be empty");
+  if (enemies.kind === "replace" && Object.keys(enemies.byClassname).some(name => name.length === 0))
+    throw new RangeError("An authored monster classname cannot be empty");
   return undefined;
 }
 

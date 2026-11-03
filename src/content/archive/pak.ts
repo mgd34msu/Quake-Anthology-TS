@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Adapted from the reference port common.ts and the reference port qcommon/files.ts.
 // id Software PACK header and ordered 64-byte directory. GPL-2.0-or-later.
 import { BinaryReader } from "../../core/binary/index.ts";
@@ -25,8 +26,19 @@ export function readPakDirectory(bytes: Uint8Array, source: string, fileSize: nu
     const path = tryNormalizeEntryPath(rawPath);
     // An unaddressable member is skipped instead of rejecting the archive; it could never be looked up anyway.
     if (path === null) continue;
-    entries.push(Object.freeze({ format: "pak", ordinal: entries.length, path, rawPath, byteLength,
-      compressedSize: byteLength, compressionMethod: 0, dataOffset, isDirectory: path.endsWith("/") }));
+    entries.push(
+      Object.freeze({
+        format: "pak",
+        ordinal: entries.length,
+        path,
+        rawPath,
+        byteLength,
+        compressedSize: byteLength,
+        compressionMethod: 0,
+        dataOffset,
+        isDirectory: path.endsWith("/"),
+      }),
+    );
   }
   return Object.freeze(entries);
 }

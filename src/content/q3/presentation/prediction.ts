@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Client prediction from id Software's code/cgame/cg_predict.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { createBoxModel } from "../../../world/collision/q3/model.ts";
@@ -25,7 +26,9 @@ const MASK_PLAYERSOLID = 1 | 0x10000 | CONTENTS_BODY;
 function emptyCommand(): UserCommand {
   return { serverTime: 0, angles: vec3(0, 0, 0), buttons: 0, weapon: Weapon.WP_NONE, forwardmove: 0, rightmove: 0, upmove: 0 };
 }
-function copyCommand(command: UserCommand): UserCommand { return { ...command, angles: { ...command.angles } }; }
+function copyCommand(command: UserCommand): UserCommand {
+  return { ...command, angles: { ...command.angles } };
+}
 
 export interface CommandSource {
   readonly currentNumber: number;
@@ -36,7 +39,9 @@ export interface CommandSource {
 export class ClientCommandHistory implements CommandSource {
   private readonly commands = Array.from({ length: 64 }, emptyCommand);
   private number = 0;
-  get currentNumber(): number { return this.number; }
+  get currentNumber(): number {
+    return this.number;
+  }
   append(command: UserCommand): number {
     this.number = (this.number + 1) | 0;
     this.commands[this.number & 63] = copyCommand(command);
@@ -79,22 +84,31 @@ export interface PredictionHost extends PresentationMovementHost {
 function inventory(ps: SourcePlayerState): PlayerInventory {
   const team = ps.persistant.get(PersistentIndex.PERS_TEAM);
   const schema = statSchema(ps.product);
-  const common = { health: ps.health, armor: ps.stats.get(schema.armor), maxHealth: ps.stats.get(schema.maxHealth),
-    holdableItem: ps.stats.get(schema.holdableItem), team,
-    ammo: (weapon: Weapon) => ps.ammo.get(weapon), powerup: (powerup: Powerup) => ps.powerups.get(powerup) };
+  const common = {
+    health: ps.health,
+    armor: ps.stats.get(schema.armor),
+    maxHealth: ps.stats.get(schema.maxHealth),
+    holdableItem: ps.stats.get(schema.holdableItem),
+    team,
+    ammo: (weapon: Weapon) => ps.ammo.get(weapon),
+    powerup: (powerup: Powerup) => ps.powerups.get(powerup),
+  };
   if (ps.product === "baseq3") return { ...common, product: "baseq3" };
   if (schema.product !== "missionpack") throw new Error("Missionpack prediction requires its stat schema");
   return { ...common, product: "missionpack", persistentPowerupIndex: ps.stats.get(schema.persistentPowerup) };
 }
 
 function interpolateVector(a: Vec3, b: Vec3, fraction: number): Vec3 {
-  return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))),
-    f32(a.z + f32(fraction * f32(b.z - a.z))));
+  return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))), f32(a.z + f32(fraction * f32(b.z - a.z))));
 }
 
 export class PredictionRuntime {
   private command = emptyCommand();
-  constructor(readonly state: ClientGameState, readonly collision: CollisionWorld, readonly host: PredictionHost) {}
+  constructor(
+    readonly state: ClientGameState,
+    readonly collision: CollisionWorld,
+    readonly host: PredictionHost,
+  ) {}
 
   private readonly boxModels = new Map<number, ReturnType<typeof createBoxModel>>();
   /** The packed solid value fixes the box, so models are shared instead of rebuilt per trace as CM_TempBoxModel reuses its static box. */
@@ -115,10 +129,17 @@ export class PredictionRuntime {
     for (const cent of this.state.solidEntities) {
       const entity = cent.currentState;
       if (entity.number === skipNumber) continue;
-      const x = entity.solid & 255, zd = (entity.solid >> 8) & 255, zu = ((entity.solid >> 16) & 255) - 32;
-      const trace = entity.solid === SOLID_BMODEL
-        ? this.collision.transformedTrace({ ...query, modelIndex: entity.modelindex }, evaluateTrajectory(entity.pos, this.state.physicsTime), cent.lerpAngles)
-        : this.boxModel(entity.solid, x, zd, zu).transformedTrace(query, cent.lerpOrigin, vec3(0, 0, 0));
+      const x = entity.solid & 255,
+        zd = (entity.solid >> 8) & 255,
+        zu = ((entity.solid >> 16) & 255) - 32;
+      const trace =
+        entity.solid === SOLID_BMODEL
+          ? this.collision.transformedTrace(
+              { ...query, modelIndex: entity.modelindex },
+              evaluateTrajectory(entity.pos, this.state.physicsTime),
+              cent.lerpAngles,
+            )
+          : this.boxModel(entity.solid, x, zd, zu).transformedTrace(query, cent.lerpOrigin, vec3(0, 0, 0));
       if (trace.solidity === "all-solid" || trace.fraction < result.fraction) result = { ...trace, entityNum: entity.number };
       else if (trace.solidity !== "clear" && result.solidity !== "all-solid") result = { ...result, solidity: "start-solid" };
       if (result.solidity === "all-solid") return result;
@@ -145,21 +166,30 @@ export class PredictionRuntime {
     const next = this.state.nextSnap;
     if (this.state.nextFrameTeleport || next === null || next.serverTime <= previous.serverTime) return;
     const fraction = f32(f32((this.state.time - previous.serverTime) | 0) / f32((next.serverTime - previous.serverTime) | 0));
-    const a = previous.playerState, b = next.playerState;
+    const a = previous.playerState,
+      b = next.playerState;
     const cycle = b.bobCycle < a.bobCycle ? (b.bobCycle + 256) | 0 : b.bobCycle;
     out.bobCycle = qvmFloatToInt(f32(f32(a.bobCycle) + f32(fraction * f32((cycle - a.bobCycle) | 0))));
     out.origin = interpolateVector(a.origin, b.origin, fraction);
     out.velocity = interpolateVector(a.velocity, b.velocity, fraction);
-    if (!grabAngles) out.viewangles = vec3(lerpAngleRule(a.viewangles.x, b.viewangles.x, fraction, "float"),
-      lerpAngleRule(a.viewangles.y, b.viewangles.y, fraction, "float"), lerpAngleRule(a.viewangles.z, b.viewangles.z, fraction, "float"));
+    if (!grabAngles)
+      out.viewangles = vec3(
+        lerpAngleRule(a.viewangles.x, b.viewangles.x, fraction, "float"),
+        lerpAngleRule(a.viewangles.y, b.viewangles.y, fraction, "float"),
+        lerpAngleRule(a.viewangles.z, b.viewangles.z, fraction, "float"),
+      );
   }
 
-  touchItem(cent: ClientEntity, settings: PredictionSettings): void { this.host.predictItem(cent, () => this.sourceTouchItem(cent, settings)); }
+  touchItem(cent: ClientEntity, settings: PredictionSettings): void {
+    this.host.predictItem(cent, () => this.sourceTouchItem(cent, settings));
+  }
 
   private sourceTouchItem(cent: ClientEntity, settings: PredictionSettings): void {
-    const ps = this.state.predictedPlayerState, entity = cent.currentState;
+    const ps = this.state.predictedPlayerState,
+      entity = cent.currentState;
     if (!settings.predictItems || !playerTouchesItem(ps.origin, entity.pos, this.state.time) || cent.miscTime === this.state.time) return;
-    if (!canItemBeGrabbed(settings.gameType, { modelIndex: entity.modelindex, modelIndex2: entity.modelindex2, generic1: entity.generic1 }, inventory(ps))) return;
+    if (!canItemBeGrabbed(settings.gameType, { modelIndex: entity.modelindex, modelIndex2: entity.modelindex2, generic1: entity.generic1 }, inventory(ps)))
+      return;
     const item = itemAt(this.state.product, entity.modelindex);
     if (this.state.product === "missionpack" && settings.gameType === GameType.GT_1FCTF && item.tag !== Powerup.PW_NEUTRALFLAG) return;
     if (settings.gameType === GameType.GT_CTF || (this.state.product === "missionpack" && settings.gameType === GameType.GT_HARVESTER)) {
@@ -183,15 +213,26 @@ export class PredictionRuntime {
     if (ps.pmType !== MoveType.PM_NORMAL && !spectator) return;
     for (const cent of this.state.triggerEntities) {
       const entity = cent.currentState;
-      if (entity.eType === EntityType.ET_ITEM && !spectator) { this.touchItem(cent, settings); continue; }
+      if (entity.eType === EntityType.ET_ITEM && !spectator) {
+        this.touchItem(cent, settings);
+        continue;
+      }
       if (entity.solid !== SOLID_BMODEL || entity.modelindex === 0) continue;
-      const trace = this.collision.trace({ start: ps.origin, end: ps.origin,
-        shape: { kind: "box", mins: bounds.min, maxs: bounds.max }, modelIndex: entity.modelindex, mask: -1 });
+      const trace = this.collision.trace({
+        start: ps.origin,
+        end: ps.origin,
+        shape: { kind: "box", mins: bounds.min, maxs: bounds.max },
+        modelIndex: entity.modelindex,
+        mask: -1,
+      });
       if (trace.solidity === "clear") continue;
       if (entity.eType === EntityType.ET_TELEPORT_TRIGGER) this.state.hyperspace = true;
       else if (entity.eType === EntityType.ET_PUSH_TRIGGER) touchJumpPad(ps, entity);
     }
-    if (ps.jumppadFrame !== ps.pmoveFramecount) { ps.jumppadFrame = 0; ps.jumppadEnt = 0; }
+    if (ps.jumppadFrame !== ps.pmoveFramecount) {
+      ps.jumppadFrame = 0;
+      ps.jumppadEnt = 0;
+    }
   }
 
   private requiredCommand(number: number): UserCommand {
@@ -201,15 +242,28 @@ export class PredictionRuntime {
   }
 
   async predictPlayerState(): Promise<void> {
-    const state = this.state, snapshot = state.snap, settings = this.host.settings();
+    const state = this.state,
+      snapshot = state.snap,
+      settings = this.host.settings();
     if (snapshot === null) throw new Error("CG_PredictPlayerState requires cg.snap");
     state.hyperspace = false;
-    if (!state.validPPS) { state.validPPS = true; state.predictedPlayerState = snapshot.playerState.copy(); }
-    if (settings.demoPlayback || (snapshot.playerState.pmFlags & MoveFlags.FOLLOW) !== 0) { this.interpolatePlayerState(false); return; }
-    if (settings.noPredict || settings.synchronousClients) { this.interpolatePlayerState(true); return; }
+    if (!state.validPPS) {
+      state.validPPS = true;
+      state.predictedPlayerState = snapshot.playerState.copy();
+    }
+    if (settings.demoPlayback || (snapshot.playerState.pmFlags & MoveFlags.FOLLOW) !== 0) {
+      this.interpolatePlayerState(false);
+      return;
+    }
+    if (settings.noPredict || settings.synchronousClients) {
+      this.interpolatePlayerState(true);
+      return;
+    }
     let mask = MASK_PLAYERSOLID;
-    if (state.predictedPlayerState.pmType === MoveType.PM_DEAD || snapshot.playerState.persistant.get(PersistentIndex.PERS_TEAM) === Team.TEAM_SPECTATOR) mask &= ~CONTENTS_BODY;
-    const old = state.predictedPlayerState.copy(), current = this.host.commands.currentNumber;
+    if (state.predictedPlayerState.pmType === MoveType.PM_DEAD || snapshot.playerState.persistant.get(PersistentIndex.PERS_TEAM) === Team.TEAM_SPECTATOR)
+      mask &= ~CONTENTS_BODY;
+    const old = state.predictedPlayerState.copy(),
+      current = this.host.commands.currentNumber;
     const oldest = this.requiredCommand((current - 63) | 0);
     if (oldest.serverTime > snapshot.playerState.commandTime && oldest.serverTime < state.time) {
       if (settings.showMiss !== 0) this.host.warn("exceeded PACKET_BACKUP on commands\n");
@@ -236,8 +290,10 @@ export class PredictionRuntime {
           state.thisFrameTeleport = false;
         } else {
           const adjusted = adjustPositionForMover(state, ps.origin, ps.groundEntityNum, state.physicsTime, state.oldTime);
-          const delta = sub3(old.origin, adjusted), length = f32(length3(delta));
-          if (settings.showMiss !== 0 && (old.origin.x !== adjusted.x || old.origin.y !== adjusted.y || old.origin.z !== adjusted.z)) this.host.warn("prediction error\n");
+          const delta = sub3(old.origin, adjusted),
+            length = f32(length3(delta));
+          if (settings.showMiss !== 0 && (old.origin.x !== adjusted.x || old.origin.y !== adjusted.y || old.origin.z !== adjusted.z))
+            this.host.warn("prediction error\n");
           if (length > f32(0.1)) {
             if (settings.showMiss !== 0) this.host.warn(`Prediction miss: ${length.toFixed(6)}\n`);
             if (settings.errorDecayInteger !== 0) {
@@ -253,10 +309,18 @@ export class PredictionRuntime {
         }
       }
       const originalServerTime = this.command.serverTime;
-      if (settings.pmoveFixed && this.host.commandTiming === "q3") this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
-      const result = this.host.movePlayer(ps, this.command, { trace: (start, end, bounds, skip, contents) => this.trace(start, end, bounds, skip, contents),
-        pointContents: (point, pass) => this.pointContents(point, pass), originalServerTime, traceMask: mask, fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
-        noFootsteps: (settings.dmFlags & 32) !== 0, ladders: settings.ladders !== false, gauntletHit: false });
+      if (settings.pmoveFixed && this.host.commandTiming === "q3")
+        this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
+      const result = this.host.movePlayer(ps, this.command, {
+        trace: (start, end, bounds, skip, contents) => this.trace(start, end, bounds, skip, contents),
+        pointContents: (point, pass) => this.pointContents(point, pass),
+        originalServerTime,
+        traceMask: mask,
+        fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
+        noFootsteps: (settings.dmFlags & 32) !== 0,
+        ladders: settings.ladders !== false,
+        gauntletHit: false,
+      });
       moved = true;
       this.touchTriggerPrediction(result.bounds, settings);
     }

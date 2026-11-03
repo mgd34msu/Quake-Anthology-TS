@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { prepareFogVolume } from "../../src/materials/fog.ts";
 
-const planes = [-1, 1].flatMap(sign => [0, 1, 2].map(axis => ({ normal: { x: axis === 0 ? sign : 0, y: axis === 1 ? sign : 0, z: axis === 2 ? sign : 0 }, distance: 64 })));
-const map = { fogs: [{ brush: 0, visibleSide: -1 }], brushes: [{ firstSide: 0, sideCount: 6 }],
-  brushSides: planes.map((_, plane) => ({ plane })), planes };
+const planes = [-1, 1].flatMap(sign =>
+  [0, 1, 2].map(axis => ({ normal: { x: axis === 0 ? sign : 0, y: axis === 1 ? sign : 0, z: axis === 2 ? sign : 0 }, distance: 64 })),
+);
+const map = { fogs: [{ brush: 0, visibleSide: -1 }], brushes: [{ firstSide: 0, sideCount: 6 }], brushSides: planes.map((_, plane) => ({ plane })), planes };
 const parameters = { color: { x: 1, y: 0.5, z: 0.25 }, depthForOpaque: 128 };
 
 test("fog volume colors are scaled by the identity light factor before quantizing to bytes", () => {

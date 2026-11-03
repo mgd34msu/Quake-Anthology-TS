@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* MD2 v8 adapted from the reference port and Q2
  * qcommon/qfiles.h. Copyright (C) 1997-2001 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
@@ -7,7 +8,10 @@ import { BinaryReader } from "../../core/binary/index.ts";
 import { boundsFromPoints, count, fail, index, packedPosition, packedVertex, unionBounds, vector, version } from "./common.ts";
 import { decodeAliasNormal } from "./normals.ts";
 
-export interface Md2CommandVertex { readonly texCoord: Vec2; readonly vertex: number; }
+export interface Md2CommandVertex {
+  readonly texCoord: Vec2;
+  readonly vertex: number;
+}
 export interface Md2Command {
   readonly kind: "strip" | "fan";
   readonly vertices: readonly Md2CommandVertex[];
@@ -81,15 +85,18 @@ export function parseMd2(data: Uint8Array, source = "<md2>"): Q2AliasModel {
   for (let i = 0; i < coordinateCount; i++) textureCoordinates.push({ x: coordinateReader.i16(), y: coordinateReader.i16() });
   const triangles: Q2AliasModel["triangles"][number][] = [];
   for (let i = 0; i < triangleCount; i++) {
-    triangles.push({ vertices: [
-      index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
-      index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
-      index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
-    ], texCoords: [
-      index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
-      index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
-      index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
-    ] });
+    triangles.push({
+      vertices: [
+        index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
+        index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
+        index(triangleReader, triangleReader.u16(), vertexCount, "vertex"),
+      ],
+      texCoords: [
+        index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
+        index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
+        index(triangleReader, triangleReader.u16(), coordinateCount, "texture coordinate"),
+      ],
+    });
   }
   const frames: Q2AliasFrame[] = [];
   for (let i = 0; i < frameCount; i++) {
@@ -105,11 +112,29 @@ export function parseMd2(data: Uint8Array, source = "<md2>"): Q2AliasModel {
       compressedVertices.push(packed);
       vertices.push({ position: packedPosition(packed, scale, translation), normal: decodeAliasNormal(packed.normalIndex) });
     }
-    frames.push({ name, scale, translation, vertices, compressedVertices, origin: { x: 0, y: 0, z: 0 }, bounds: boundsFromPoints(vertices.map(vertex => vertex.position)) });
+    frames.push({
+      name,
+      scale,
+      translation,
+      vertices,
+      compressedVertices,
+      origin: { x: 0, y: 0, z: 0 },
+      bounds: boundsFromPoints(vertices.map(vertex => vertex.position)),
+    });
   }
   commands(commandReader, vertexCount);
   commandReader.seek(0);
   const glCommands = new Int32Array(commandCount);
   for (let i = 0; i < commandCount; i++) glCommands[i] = commandReader.i32();
-  return { kind: "q2-md2", skinWidth, skinHeight, skins, textureCoordinates, triangles, frames, glCommands, bounds: unionBounds(frames.map(frame => frame.bounds)) };
+  return {
+    kind: "q2-md2",
+    skinWidth,
+    skinHeight,
+    skins,
+    textureCoordinates,
+    triangles,
+    frames,
+    glCommands,
+    bounds: unionBounds(frames.map(frame => frame.bounds)),
+  };
 }

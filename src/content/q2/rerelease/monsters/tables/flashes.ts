@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Original rerelease/game.h muzzle-flash enum. ZeniMax Media, GPL-2.0.
 export const rereleaseFlash = {
   UNUSED_0: 0,

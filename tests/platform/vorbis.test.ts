@@ -7,8 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VorbisDecoder, VorbisError } from "../../src/platform/vorbis.ts";
 
-const fixture = process.env["QUAKE_TEST_OGG"]
-  ?? corpusFile("q1/rerelease/id1/music/track02.ogg");
+const fixture = process.env["QUAKE_TEST_OGG"] ?? corpusFile("q1/rerelease/id1/music/track02.ogg");
 const hasFixture = existsSync(fixture);
 if (process.env["QUAKE_TEST_OGG"] !== undefined && !hasFixture) throw new Error(`Missing QUAKE_TEST_OGG: ${fixture}`);
 
@@ -25,7 +24,9 @@ test("invalid paths and malformed files reject without leaked native file descri
       expect(() => VorbisDecoder.open(join(temporary, "missing.ogg"))).toThrow(VorbisError);
     }
     if (before !== null) expect(readdirSync("/proc/self/fd").length).toBe(before);
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test.skipIf(!hasFixture)("external OGG metadata, exact seeking, owned PCM and reopen", () => {
@@ -54,13 +55,16 @@ test.skipIf(!hasFixture)("external OGG metadata, exact seeking, owned PCM and re
     expect(decoder.positionFrames).toBe(metadata.totalFrames);
     decoder.seek(metadata.totalFrames);
     expect(decoder.read()).toBeNull();
-    decoder.close(); decoder.close();
+    decoder.close();
+    decoder.close();
     expect(first.samples).toEqual(retained);
     expect(decoder.closed).toBe(true);
     expect(() => decoder.read()).toThrow("closed");
     expect(() => decoder.seek(0)).toThrow("closed");
     expect(() => decoder.positionFrames).toThrow("closed");
-  } finally { decoder.close(); }
+  } finally {
+    decoder.close();
+  }
   const before = process.platform === "linux" ? readdirSync("/proc/self/fd").length : null;
   for (let index = 0; index < 8; index++) {
     using reopened = VorbisDecoder.open(fixture);
@@ -69,25 +73,28 @@ test.skipIf(!hasFixture)("external OGG metadata, exact seeking, owned PCM and re
   if (before !== null) expect(readdirSync("/proc/self/fd").length).toBe(before);
 });
 
-test.skipIf(!hasFixture)("external OGG decodes to its full native frame total", () => {
-  using decoder = VorbisDecoder.open(fixture);
-  let frames = 0, nonzero = false;
-  while (true) {
-    const chunk = decoder.read(65536);
-    if (chunk === null) break;
-    frames += chunk.frames;
-    nonzero ||= chunk.samples.some(sample => sample !== 0);
-  }
-  expect(frames).toBe(decoder.metadata.totalFrames);
-  expect(nonzero).toBe(true);
-}, 15000);
+test.skipIf(!hasFixture)(
+  "external OGG decodes to its full native frame total",
+  () => {
+    using decoder = VorbisDecoder.open(fixture);
+    let frames = 0,
+      nonzero = false;
+    while (true) {
+      const chunk = decoder.read(65536);
+      if (chunk === null) break;
+      frames += chunk.frames;
+      nonzero ||= chunk.samples.some(sample => sample !== 0);
+    }
+    expect(frames).toBe(decoder.metadata.totalFrames);
+    expect(nonzero).toBe(true);
+  },
+  15000,
+);
 
 test.skipIf(!hasFixture)("invalid read and seek bounds preserve decoder position", () => {
   using decoder = VorbisDecoder.open(fixture);
-  for (const frames of [0, -1, 1.5, NaN, Infinity, 1048577])
-    expect(() => decoder.read(frames)).toThrow("frame limit");
-  for (const frame of [-1, NaN, Infinity, 0.5, decoder.metadata.totalFrames + 1])
-    expect(() => decoder.seek(frame)).toThrow("seek frame");
+  for (const frames of [0, -1, 1.5, NaN, Infinity, 1048577]) expect(() => decoder.read(frames)).toThrow("frame limit");
+  for (const frame of [-1, NaN, Infinity, 0.5, decoder.metadata.totalFrames + 1]) expect(() => decoder.seek(frame)).toThrow("seek frame");
   expect(decoder.positionFrames).toBe(0);
   expect(decoder.read(1)?.frames).toBe(1);
 });
@@ -95,7 +102,8 @@ test.skipIf(!hasFixture)("invalid read and seek bounds preserve decoder position
 test.skipIf(!hasFixture)("PLATFORM-002 a corrupt page is skipped instead of failing the read", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "quake-vorbis-hole-"));
   try {
-    const bytes = new Uint8Array(await Bun.file(fixture).arrayBuffer()), middle = Math.floor(bytes.length / 2);
+    const bytes = new Uint8Array(await Bun.file(fixture).arrayBuffer()),
+      middle = Math.floor(bytes.length / 2);
     for (let index = 0; index < 64; index++) bytes[middle + index] = (bytes[middle + index] ?? 0) ^ 0xff;
     const path = join(temporary, "corrupt.ogg");
     await Bun.write(path, bytes);
@@ -104,6 +112,10 @@ test.skipIf(!hasFixture)("PLATFORM-002 a corrupt page is skipped instead of fail
       let frames = 0;
       for (let chunk = decoder.read(4096); chunk !== null; chunk = decoder.read(4096)) frames += chunk.frames;
       expect(frames).toBeGreaterThan(4096);
-    } finally { decoder.close(); }
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
+    } finally {
+      decoder.close();
+    }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
 });

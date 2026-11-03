@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { closeSync, constants, openSync, writeSync, fsyncSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -25,7 +26,8 @@ export function saveUnavailable(state: SaveEligibility, purpose: SavePurpose): s
   if (state.family !== "q3" && state.intermission && state.matchSave !== true) return "Cannot save during intermission.";
   // Server-administration saves persist world state even with no players in it.
   if (state.playerHealth.length === 0 && state.matchSave !== true) return "No active player to save.";
-  if (state.family !== "q3" && state.matchSave !== true && state.playerHealth.some(health => !Number.isFinite(health) || health <= 0)) return "Cannot save with a dead player.";
+  if (state.family !== "q3" && state.matchSave !== true && state.playerHealth.some(health => !Number.isFinite(health) || health <= 0))
+    return "Cannot save with a dead player.";
   return null;
 }
 
@@ -39,8 +41,12 @@ export function saveCommandPath(directory: string, name: string): string {
  * it for the person at the local console. A script, a game or client module, or a remote client must not be able
  * to point the loader at an arbitrary file, so those sources are refused unless the operator turned the option on.
  */
-export function assertLoadPathAllowed(directory: string, path: string, source: CommandContext | undefined,
-  options: { readonly allowAnyPath: boolean; readonly trustedDirectories: readonly string[] }): void {
+export function assertLoadPathAllowed(
+  directory: string,
+  path: string,
+  source: CommandContext | undefined,
+  options: { readonly allowAnyPath: boolean; readonly trustedDirectories: readonly string[] },
+): void {
   if (options.allowAnyPath) return;
   const inside = (root: string): boolean => {
     const name = relative(resolve(root), resolve(path));
@@ -48,17 +54,21 @@ export function assertLoadPathAllowed(directory: string, path: string, source: C
   };
   if (inside(directory) || options.trustedDirectories.some(inside)) return;
   const origin = source?.origin;
-  if (origin === undefined || source?.producer === undefined && (origin.kind === "local-console" || origin.kind === "server-console" || origin.kind === "local-seat")) return;
-  throw new RangeError(`load of a path outside the save directory is only accepted from the local console; start with --allow-load-paths to allow it from scripts, game modules and remote clients: ${resolve(path)}`);
+  if (
+    origin === undefined ||
+    (source?.producer === undefined && (origin.kind === "local-console" || origin.kind === "server-console" || origin.kind === "local-seat"))
+  )
+    return;
+  throw new RangeError(
+    `load of a path outside the save directory is only accepted from the local console; start with --allow-load-paths to allow it from scripts, game modules and remote clients: ${resolve(path)}`,
+  );
 }
 
 export function containedSaveName(directory: string, path: string): string {
   const name = relative(resolve(directory), resolve(path));
-  if (isAbsolute(name) || name === ".." || name.startsWith(`..${sep}`))
-    throw new RangeError(`Save path is outside the save directory: ${resolve(directory)}`);
+  if (isAbsolute(name) || name === ".." || name.startsWith(`..${sep}`)) throw new RangeError(`Save path is outside the save directory: ${resolve(directory)}`);
   const parts = containedFileParts(name);
-  if (parts.some(part => part.replace(/\.sav$/i, "").toLowerCase() === "current"))
-    throw new RangeError("The current slot is reserved for transition state");
+  if (parts.some(part => part.replace(/\.sav$/i, "").toLowerCase() === "current")) throw new RangeError("The current slot is reserved for transition state");
   if (!name.toLowerCase().endsWith(".sav")) throw new RangeError("Save path must end in .sav");
   return name;
 }
@@ -78,11 +88,17 @@ export async function writeContainedSave(directory: string, path: string, bytes:
       if (count === 0) throw new Error("Save write made no progress");
       position += count;
     }
-    fsyncSync(descriptor); closeSync(descriptor); descriptor = null;
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
     await rename(temporary, `/proc/self/fd/${parent.descriptor}/${parent.leaf}`);
     fsyncSync(parent.descriptor);
   } finally {
     if (descriptor !== null) closeSync(descriptor);
-    try { await rm(temporary, { force: true }); } finally { closeSync(parent.descriptor); }
+    try {
+      await rm(temporary, { force: true });
+    } finally {
+      closeSync(parent.descriptor);
+    }
   }
 }

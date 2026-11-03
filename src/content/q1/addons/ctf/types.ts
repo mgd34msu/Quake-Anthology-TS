@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ThreeWave rerelease CTF source boundary. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
@@ -7,8 +8,17 @@ import type { Q1Actor } from "../../foundation/entity.ts";
 export type CtfTeam = "red" | "blue";
 export type CtfRune = "resistance" | "strength" | "haste" | "regeneration";
 export const CTF_RUNES: readonly CtfRune[] = ["resistance", "strength", "haste", "regeneration"];
-export const CTF_FLAGS = { healthProtect: 1, armorProtect: 2, reflectDamage: 4, fragPenalty: 8, deathPenalty: 16,
-  staticTeams: 64, dropItems: 128, selectTeam: 1024, disableGrapple: 2048 };
+export const CTF_FLAGS = {
+  healthProtect: 1,
+  armorProtect: 2,
+  reflectDamage: 4,
+  fragPenalty: 8,
+  deathPenalty: 16,
+  staticTeams: 64,
+  dropItems: 128,
+  selectTeam: 1024,
+  disableGrapple: 2048,
+};
 export const CTF_FLAG_BOUNDS = { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 74 } };
 export interface CtfInput {
   readonly attack: boolean;
@@ -20,7 +30,12 @@ export interface CtfInput {
   /** Source pose of the selected character, used to attach the carried flag. */
   readonly frame: number;
 }
-export interface CtfStatus { readonly red: number; readonly blue: number; readonly flags: number; readonly runeItems: number; }
+export interface CtfStatus {
+  readonly red: number;
+  readonly blue: number;
+  readonly flags: number;
+  readonly runeItems: number;
+}
 
 /** The selected session, character and arsenal retain admission, score and command ownership. */
 export interface Q1CtfServices {

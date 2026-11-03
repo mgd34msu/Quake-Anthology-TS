@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/cgame/cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -52,10 +53,21 @@ export interface ClientHudCornersHost {
 }
 
 const POWERUPS: readonly Powerup[] = [
-  Powerup.PW_NONE, Powerup.PW_QUAD, Powerup.PW_BATTLESUIT, Powerup.PW_HASTE,
-  Powerup.PW_INVIS, Powerup.PW_REGEN, Powerup.PW_FLIGHT, Powerup.PW_REDFLAG,
-  Powerup.PW_BLUEFLAG, Powerup.PW_NEUTRALFLAG, Powerup.PW_SCOUT, Powerup.PW_GUARD,
-  Powerup.PW_DOUBLER, Powerup.PW_AMMOREGEN, Powerup.PW_INVULNERABILITY,
+  Powerup.PW_NONE,
+  Powerup.PW_QUAD,
+  Powerup.PW_BATTLESUIT,
+  Powerup.PW_HASTE,
+  Powerup.PW_INVIS,
+  Powerup.PW_REGEN,
+  Powerup.PW_FLIGHT,
+  Powerup.PW_REDFLAG,
+  Powerup.PW_BLUEFLAG,
+  Powerup.PW_NEUTRALFLAG,
+  Powerup.PW_SCOUT,
+  Powerup.PW_GUARD,
+  Powerup.PW_DOUBLER,
+  Powerup.PW_AMMOREGEN,
+  Powerup.PW_INVULNERABILITY,
   Powerup.PW_NUM_POWERUPS,
 ];
 
@@ -157,22 +169,31 @@ export class ClientHudCorners {
     }
     width = width * TINYCHAR_WIDTH + TINYCHAR_WIDTH * 2;
     const team = activePlayerState(this.state).persistant.get(PersistentIndex.PERS_TEAM);
-    const color = team === Team.TEAM_RED ? { x: 1, y: 0, z: 0, w: f(0.33) }
-      : team === Team.TEAM_BLUE ? { x: 0, y: 0, z: 1, w: f(0.33) }
-      : { x: 0, y: 1, z: 0, w: f(0.33) };
+    const color =
+      team === Team.TEAM_RED ? { x: 1, y: 0, z: 0, w: f(0.33) } : team === Team.TEAM_BLUE ? { x: 0, y: 0, z: 1, w: f(0.33) } : { x: 0, y: 1, z: 0, w: f(0.33) };
     this.icons.tools.draw.setColor(color);
     this.icons.tools.drawPic({ x: 0, y: 420 - height, width: 640, height }, this.icons.tools.media.graphics.teamStatusBar);
     this.icons.tools.draw.setColor(null);
     for (let index = cgs.teamChatPos - 1; index >= cgs.teamLastChatPos; index--) {
       const message = cgs.teamChatMsgs[index % chatHeight];
       if (message === undefined) throw new RangeError("Invalid team chat ring index");
-      this.icons.tools.drawStringExt({ x: 8, y: 420 - (cgs.teamChatPos - index) * 8, text: message,
-        color: { x: 1, y: 1, z: 1, w: 1 }, forceColor: false, shadow: false,
-        charWidth: TINYCHAR_WIDTH, charHeight: TINYCHAR_HEIGHT, maxChars: 0 });
+      this.icons.tools.drawStringExt({
+        x: 8,
+        y: 420 - (cgs.teamChatPos - index) * 8,
+        text: message,
+        color: { x: 1, y: 1, z: 1, w: 1 },
+        forceColor: false,
+        shadow: false,
+        charWidth: TINYCHAR_WIDTH,
+        charHeight: TINYCHAR_HEIGHT,
+        maxChars: 0,
+      });
     }
   }
 
-  private cvar(name: ClientHudCornerCvar): number { return this.host.readVmCvar(name).integerValue; }
+  private cvar(name: ClientHudCornerCvar): number {
+    return this.host.readVmCvar(name).integerValue;
+  }
 
   private requireBase(sourceName: string): void {
     if (this.state.product === "missionpack") throw new Error(`${sourceName} is not compiled in missionpack`);
@@ -200,8 +221,7 @@ export class ClientHudCorners {
   private drawSnapshot(y: number): number {
     const snapshot = this.state.snap;
     if (snapshot === null) throw new Error("CG_DrawSnapshot requires a current snapshot");
-    const text = gameFormat("time:%i snap:%i cmd:%i", [snapshot.serverTime | 0, this.state.latestSnapshotNum | 0,
-      this.staticState.serverCommandSequence | 0]);
+    const text = gameFormat("time:%i snap:%i cmd:%i", [snapshot.serverTime | 0, this.state.latestSnapshotNum | 0, this.staticState.serverCommandSequence | 0]);
     const width = drawStrlen(text) * BIGCHAR_WIDTH;
     this.icons.tools.drawBigString(635 - width, Math.trunc(y + 2), text, 1);
     return f(y + BIGCHAR_HEIGHT + 4);
@@ -264,27 +284,52 @@ export class ClientHudCorners {
     const height = players * TINYCHAR_HEIGHT;
     const returnY = upper ? y + height : y - height;
     if (!upper) y -= height;
-    this.icons.tools.draw.setColor(team === Team.TEAM_RED ? { x: 1, y: 0, z: 0, w: f(0.33) }
-      : { x: 0, y: 0, z: 1, w: f(0.33) });
+    this.icons.tools.draw.setColor(team === Team.TEAM_RED ? { x: 1, y: 0, z: 0, w: f(0.33) } : { x: 0, y: 0, z: 1, w: f(0.33) });
     this.icons.tools.drawPic({ x, y, width, height }, this.icons.tools.media.graphics.teamStatusBar);
     this.icons.tools.draw.setColor(null);
     for (let index = 0; index < count; index++) {
       const client = this.teamClient(index);
       if (!client.infoValid || client.team !== team) continue;
       let xx = x + TINYCHAR_WIDTH;
-      this.icons.tools.drawStringExt({ x: xx, y, text: client.name, color: { x: 1, y: 1, z: 1, w: 1 },
-        forceColor: false, shadow: false, charWidth: 8, charHeight: 8, maxChars: TEAM_OVERLAY_MAXNAME_WIDTH });
+      this.icons.tools.drawStringExt({
+        x: xx,
+        y,
+        text: client.name,
+        color: { x: 1, y: 1, z: 1, w: 1 },
+        forceColor: false,
+        shadow: false,
+        charWidth: 8,
+        charHeight: 8,
+        maxChars: TEAM_OVERLAY_MAXNAME_WIDTH,
+      });
       if (locationWidth !== 0) {
         let location = this.host.configString(CS_LOCATIONS + client.location);
         if (location.length === 0) location = "unknown";
         xx = x + TINYCHAR_WIDTH * 2 + TINYCHAR_WIDTH * playerWidth;
-        this.icons.tools.drawStringExt({ x: xx, y, text: location, color: { x: 1, y: 1, z: 1, w: 1 },
-          forceColor: false, shadow: false, charWidth: 8, charHeight: 8, maxChars: TEAM_OVERLAY_MAXLOCATION_WIDTH });
+        this.icons.tools.drawStringExt({
+          x: xx,
+          y,
+          text: location,
+          color: { x: 1, y: 1, z: 1, w: 1 },
+          forceColor: false,
+          shadow: false,
+          charWidth: 8,
+          charHeight: 8,
+          maxChars: TEAM_OVERLAY_MAXLOCATION_WIDTH,
+        });
       }
       xx = x + TINYCHAR_WIDTH * 3 + TINYCHAR_WIDTH * playerWidth + TINYCHAR_WIDTH * locationWidth;
-      this.icons.tools.drawStringExt({ x: xx, y, text: gameFormat("%3i %3i", [client.health | 0, client.armor | 0], 16),
-        color: getColorForHealth(client.health, client.armor), forceColor: false, shadow: false,
-        charWidth: 8, charHeight: 8, maxChars: 0 });
+      this.icons.tools.drawStringExt({
+        x: xx,
+        y,
+        text: gameFormat("%3i %3i", [client.health | 0, client.armor | 0], 16),
+        color: getColorForHealth(client.health, client.armor),
+        forceColor: false,
+        shadow: false,
+        charWidth: 8,
+        charHeight: 8,
+        maxChars: 0,
+      });
       xx += TINYCHAR_WIDTH * 3;
       const weapon = this.icons.tools.media.weaponRegistry.weaponOrEmpty(client.curWeapon);
       this.icons.tools.drawPic({ x: xx, y, width: 8, height: 8 }, weapon.weaponIcon ?? this.icons.tools.media.graphics.deferShader);
@@ -378,8 +423,7 @@ export class ClientHudCorners {
     const text = gameFormat("%2i", [score | 0]);
     const width = drawStrlen(text) * BIGCHAR_WIDTH + 8;
     x -= width;
-    const color = selected ? (first ? { x: 0, y: 0, z: 1, w: f(0.33) } : { x: 1, y: 0, z: 0, w: f(0.33) })
-      : { x: f(0.5), y: f(0.5), z: f(0.5), w: f(0.33) };
+    const color = selected ? (first ? { x: 0, y: 0, z: 1, w: f(0.33) } : { x: 1, y: 0, z: 0, w: f(0.33) }) : { x: f(0.5), y: f(0.5), z: f(0.5), w: f(0.33) };
     this.icons.tools.fillRect({ x, y: y - 4, width, height: BIGCHAR_HEIGHT + 8 }, color);
     if (selected) this.icons.tools.drawPic({ x, y: y - 4, width, height: BIGCHAR_HEIGHT + 8 }, this.icons.tools.media.graphics.selectShader);
     this.icons.tools.drawBigString(x + 4, Math.trunc(y), text, 1);

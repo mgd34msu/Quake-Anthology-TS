@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's code/game/q_shared.h entityState_t. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
 import { vec3 } from "../../../core/math.ts";
@@ -14,8 +15,7 @@ function copyVector(value: Vec3): Vec3 {
 }
 
 function copyTrajectory<T extends number>(value: Trajectory<T>): Trajectory<T> {
-  return { type: value.type, time: value.time, duration: value.duration,
-    base: copyVector(value.base), delta: copyVector(value.delta) };
+  return { type: value.type, time: value.time, duration: value.duration, base: copyVector(value.base), delta: copyVector(value.delta) };
 }
 
 export type EntityStateFields<T extends number = number> = Omit<EntityStateRecord<T>, "copy" | "copyFrom">;

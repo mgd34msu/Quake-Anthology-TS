@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
@@ -30,7 +31,8 @@ const identityKeys = ["social_id", "cl_guid", "name"];
 /** Userinfo is `\\key\\value` pairs; protocol-carried ids outrank the display name. */
 function userinfoIdentity(userinfo: string | null): string | null {
   if (userinfo === null) return null;
-  const parts = userinfo.split("\\"), values = new Map<string, string>();
+  const parts = userinfo.split("\\"),
+    values = new Map<string, string>();
   for (let index = 1; index + 1 < parts.length; index += 2) values.set(parts[index] ?? "", parts[index + 1] ?? "");
   for (const key of identityKeys) {
     const value = values.get(key)?.trim();
@@ -42,21 +44,35 @@ function userinfoIdentity(userinfo: string | null): string | null {
 /** The result of the match a family's own end-of-match state reports (Q1/QW intermission, Q2 layout intermission, Q3 level intermission), or null while it plays. */
 export function matchResultOf(simulation: SharedSimulation, match: string, transition?: NativeQ2MapTransition): MatchResult | null {
   if (!ended(simulation, transition)) return null;
-  const q2 = simulation.q2Source(), native = simulation.q2Native();
+  const q2 = simulation.q2Source(),
+    native = simulation.q2Native();
   const scored: { slot: number; score: number; identity: string | null }[] = [];
   for (const actor of simulation.players()) {
     const client = simulation.playerClient(actor);
     // Native Q2 DLLs keep the score in the public STAT_FRAGS/STAT_SPECTATOR player state, which also excludes spectators.
-    const score = native === null ? simulation.matchScore(actor) : client === null ? null
-      : native.edition === "classic" || transition !== undefined ? classicMatchScore(native.playerState(client.slot + 1)) : rereleaseMatchScore(native.playerState(client.slot + 1));
+    const score =
+      native === null
+        ? simulation.matchScore(actor)
+        : client === null
+          ? null
+          : native.edition === "classic" || transition !== undefined
+            ? classicMatchScore(native.playerState(client.slot + 1))
+            : rereleaseMatchScore(native.playerState(client.slot + 1));
     if (client === null || score === null || q2?.players.states.get(actor)?.spectator === true) continue;
     scored.push({ slot: client.slot, score, identity: simulation.botServices.isBot(actor) ? null : userinfoIdentity(simulation.sourcePlayerUserinfo(actor)) });
   }
   if (scored.length === 0) return null;
   const best = Math.max(...scored.map(player => player.score));
   const map = simulation.recipe.map.geometry.requestedPath;
-  const content = simulation.recipe.map.entities.content, family = content.startsWith("q3") ? "q3" : content.startsWith("q2") ? "q2" : "q1";
-  return { family, rules: simulation.recipe.match.provider, match: `${match}:${map}`, map, players: scored.map(player => ({ ...player, won: player.score === best })) };
+  const content = simulation.recipe.map.entities.content,
+    family = content.startsWith("q3") ? "q3" : content.startsWith("q2") ? "q2" : "q1";
+  return {
+    family,
+    rules: simulation.recipe.match.provider,
+    match: `${match}:${map}`,
+    map,
+    players: scored.map(player => ({ ...player, won: player.score === best })),
+  };
 }
 
 /**
@@ -80,7 +96,10 @@ export class ApplicationMatchRankings {
   async attach(store: PlayerProgressStore): Promise<void> {
     if (this.store === store) return;
     this.store = store;
-    const matches = new Map<string, { rules: ProviderId; match: string; players: { account: AccountId; score: number; won: boolean; statistics: ReadonlyMap<string, number> }[] }>();
+    const matches = new Map<
+      string,
+      { rules: ProviderId; match: string; players: { account: AccountId; score: number; won: boolean; statistics: ReadonlyMap<string, number> }[] }
+    >();
     for (const event of store.all()) {
       if (event.kind !== "ranked-match") continue;
       const account = await this.account(event.participant);
@@ -98,7 +117,9 @@ export class ApplicationMatchRankings {
       this.authorization.register(name, password);
       const authorization = await this.authorization.authorize(name, password);
       if (authorization.kind !== "authorized") throw new Error("Local ranking account could not be authorized");
-      account = authorization.account; this.accounts.set(name, account); this.names.set(account.id, name);
+      account = authorization.account;
+      this.accounts.set(name, account);
+      this.names.set(account.id, name);
     }
     return account;
   }
@@ -109,9 +130,13 @@ export class ApplicationMatchRankings {
     this.slots[slot] = account.id;
     return account;
   }
-  unbind(slot: number): void { if (Number.isSafeInteger(slot) && slot >= 0 && slot < MAX_SLOTS) this.slots[slot] = null; }
+  unbind(slot: number): void {
+    if (Number.isSafeInteger(slot) && slot >= 0 && slot < MAX_SLOTS) this.slots[slot] = null;
+  }
   /** Results the full ring refused; their match is not ranked. */
-  get droppedResults(): number { return this.dropped; }
+  get droppedResults(): number {
+    return this.dropped;
+  }
 
   /** Publishes the simulation's match result once, on the first frame its family reports the match as over. */
   observe(simulation: SharedSimulation, transition?: NativeQ2MapTransition): MatchResult | null {
@@ -119,20 +144,33 @@ export class ApplicationMatchRankings {
     const result = matchResultOf(simulation, randomUUID(), transition);
     if (result === null) return null;
     this.published = simulation;
-    if (this.results.append(result) === 0) { this.dropped += 1; return null; }
+    if (this.results.append(result) === 0) {
+      this.dropped += 1;
+      return null;
+    }
     return result;
   }
   /** Consumes pending results through the cursor; returns the entries of the accounts they ranked. */
   async settle(): Promise<readonly RankingEntry[]> {
-    const touched = new Set<AccountId>(), rules = new Set<ProviderId>();
+    const touched = new Set<AccountId>(),
+      rules = new Set<ProviderId>();
     for (const result of this.results.take(this.cursor)) {
       const merged = new Map<AccountId, { account: AccountId; score: number; won: boolean; statistics: ReadonlyMap<string, number> }>();
       for (const player of result.players) {
         const account = this.slots[player.slot];
         if (account === null || account === undefined) continue;
         const old = merged.get(account);
-        merged.set(account, old === undefined ? { account, score: player.score, won: player.won, statistics: new Map([["score", player.score]]) }
-          : { ...old, score: Math.max(old.score, player.score), won: old.won || player.won, statistics: new Map([["score", Math.max(old.score, player.score)]]) });
+        merged.set(
+          account,
+          old === undefined
+            ? { account, score: player.score, won: player.won, statistics: new Map([["score", player.score]]) }
+            : {
+                ...old,
+                score: Math.max(old.score, player.score),
+                won: old.won || player.won,
+                statistics: new Map([["score", Math.max(old.score, player.score)]]),
+              },
+        );
       }
       if (merged.size === 0) continue;
       this.ranking.submit({ match: result.match, rules: result.rules, players: [...merged.values()] });
@@ -140,12 +178,23 @@ export class ApplicationMatchRankings {
       for (const player of merged.values()) {
         touched.add(player.account);
         const name = this.names.get(player.account);
-        if (this.store !== null && name !== undefined) await this.store.record({ kind: "ranked-match", source: result.family, participant: name, event: result.match,
-          map: result.map, score: player.score, won: player.won, rules: result.rules });
+        if (this.store !== null && name !== undefined)
+          await this.store.record({
+            kind: "ranked-match",
+            source: result.family,
+            participant: name,
+            event: result.match,
+            map: result.map,
+            score: player.score,
+            won: player.won,
+            rules: result.rules,
+          });
       }
     }
     this.results.retire();
     return [...rules].flatMap(id => this.ranking.standings(id)).filter(entry => touched.has(entry.account));
   }
-  standings(rules: ProviderId): readonly RankingEntry[] { return this.ranking.standings(rules); }
+  standings(rules: ProviderId): readonly RankingEntry[] {
+    return this.ranking.standings(rules);
+  }
 }

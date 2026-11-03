@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export { SessionActorRegistry } from "./registry.ts";
 export type { SourceActorCheckpoint } from "./registry.ts";
 export { SharedBodyTable, copyVector, copyBounds, copyBody, translatedBodyBounds } from "./body.ts";

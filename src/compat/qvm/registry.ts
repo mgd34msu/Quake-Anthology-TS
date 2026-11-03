@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * VM_Create, VM_Free, VM_Clear, VM_Call and VM_VmInfo_f from id Software's qcommon/vm.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -6,9 +7,7 @@ import { CommonError } from "../../core/common-error.ts";
 import type { QvmInterpreter } from "./interpreter.ts";
 
 /** Explicit replacement for selecting the source DEBUG_VM build and debugger controls. */
-export type QvmExecutionProfile =
-  | { readonly kind: "release" }
-  | { readonly kind: "debug"; readonly trace: 0 | 1 | 2; readonly breakFunction: number };
+export type QvmExecutionProfile = { readonly kind: "release" } | { readonly kind: "debug"; readonly trace: 0 | 1 | 2; readonly breakFunction: number };
 
 export type VmBinding =
   | { readonly kind: "initializing" }
@@ -43,7 +42,9 @@ interface VmSlot {
   record: VmRecord;
 }
 
-function slot(): VmSlot { return { registration: null, record: { kind: "freed" } }; }
+function slot(): VmSlot {
+  return { registration: null, record: { kind: "freed" } };
+}
 function lower(name: string): string {
   return name.replace(/[A-Z]/g, character => String.fromCharCode(character.charCodeAt(0) + 32));
 }
@@ -54,14 +55,18 @@ export class VmRegistry {
   private lastCalled: VmRegistration | null = null;
   private debugLevel = 0;
 
-  constructor(private readonly print: (text: string) => void = () => undefined,
+  constructor(
+    private readonly print: (text: string) => void = () => undefined,
     private readonly executionProfile: () => QvmExecutionProfile = () => ({ kind: "release" }),
   ) {}
 
-  debug(level: number): void { this.debugLevel = level; }
+  debug(level: number): void {
+    this.debugLevel = level;
+  }
 
   reserve(name: string): VmRegistration {
-    const nul = name.indexOf("\0"), sourceName = nul < 0 ? name : name.slice(0, nul);
+    const nul = name.indexOf("\0"),
+      sourceName = nul < 0 ? name : name.slice(0, nul);
     if (sourceName.length === 0) throw new CommonError("fatal", "VM_Create: bad parms");
     for (const cell of this.slots) {
       const existing = cell.registration;
@@ -80,16 +85,42 @@ export class VmRegistry {
     };
     const registration: VmRegistration = {
       name: sourceName.slice(0, 63),
-      get binding(): VmBinding { return cell.registration === registration ? cell.record : { kind: "freed" }; },
-      executionProfile: (): QvmExecutionProfile => { current(); return this.executionProfile(); },
-      bindData(memory): void { preparing().dataLength = memory.length; },
-      bindInstructionPointersLength(length): void { preparing().instructionPointersLength = length; },
-      bindCodeLength(length): void { preparing().codeLength = length; },
-      bindInterpreter(interpreter): void { preparing(); cell.record = { kind: "interpreted", interpreter }; },
-      bindTypeScript(): void { preparing(); cell.record = { kind: "typescript" }; },
-      called: (): void => { current(); this.lastCalled = registration; },
-      debug: (level): void => { current(); this.debug(level); },
-      print: (text): void => { current(); this.print(text); },
+      get binding(): VmBinding {
+        return cell.registration === registration ? cell.record : { kind: "freed" };
+      },
+      executionProfile: (): QvmExecutionProfile => {
+        current();
+        return this.executionProfile();
+      },
+      bindData(memory): void {
+        preparing().dataLength = memory.length;
+      },
+      bindInstructionPointersLength(length): void {
+        preparing().instructionPointersLength = length;
+      },
+      bindCodeLength(length): void {
+        preparing().codeLength = length;
+      },
+      bindInterpreter(interpreter): void {
+        preparing();
+        cell.record = { kind: "interpreted", interpreter };
+      },
+      bindTypeScript(): void {
+        preparing();
+        cell.record = { kind: "typescript" };
+      },
+      called: (): void => {
+        current();
+        this.lastCalled = registration;
+      },
+      debug: (level): void => {
+        current();
+        this.debug(level);
+      },
+      print: (text): void => {
+        current();
+        this.print(text);
+      },
       printCall: (callnum): void => {
         current();
         if (this.debugLevel !== 0) this.print(`VM_Call( ${callnum} )\n`);
@@ -107,7 +138,10 @@ export class VmRegistry {
   }
 
   clear(): void {
-    for (const cell of this.slots) { cell.registration = null; cell.record = { kind: "freed" }; }
+    for (const cell of this.slots) {
+      cell.registration = null;
+      cell.record = { kind: "freed" };
+    }
     this.lastCalled = null;
   }
 
@@ -117,7 +151,10 @@ export class VmRegistry {
       const registration = cell.registration;
       if (registration === null) break;
       print(`${registration.name} : `);
-      if (cell.record.kind === "typescript") { print("TypeScript replacement\n"); continue; }
+      if (cell.record.kind === "typescript") {
+        print("TypeScript replacement\n");
+        continue;
+      }
       print(`${cell.record.kind === "interpreted" ? cell.record.interpreter.semantics : "interpreted"}\n`);
       print(`    code length : ${this.codeLength(cell).toString().padStart(7)}\n`);
       print(`    table length: ${this.tableLength(cell).toString().padStart(7)}\n`);

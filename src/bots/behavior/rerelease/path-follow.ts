@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // The "move along a path" controller: turns a string-pulled point list into
 // forward/side/jump for one frame, and notices when the bot has stopped
 // making progress so the brain can re-plan.
@@ -62,7 +63,17 @@ export interface BotPathStateT {
 }
 
 export function newPathState(): BotPathStateT {
-  return { path: null, index: 0, stuckOrigin: { x: 0, y: 0, z: 0 }, stuckSince: 0, stuckCount: 0, jumpReadyAt: 0, plannedAt: 0, liftWaitSince: -1, liftWaitZ: 0 };
+  return {
+    path: null,
+    index: 0,
+    stuckOrigin: { x: 0, y: 0, z: 0 },
+    stuckSince: 0,
+    stuckCount: 0,
+    jumpReadyAt: 0,
+    plannedAt: 0,
+    liftWaitSince: -1,
+    liftWaitZ: 0,
+  };
 }
 
 export function setPath(state: BotPathStateT, path: NavPathT | null, origin: BotVec3, now: number): void {
@@ -76,7 +87,8 @@ export function setPath(state: BotPathStateT, path: NavPathT | null, origin: Bot
   // two points for the rest of the level.
   if (path !== null) {
     while (state.index + 1 < path.points.length) {
-      const here = path.points[state.index], next = path.points[state.index + 1];
+      const here = path.points[state.index],
+        next = path.points[state.index + 1];
       if (here === undefined || next === undefined) throw new Error("Bot path has no segment at its cursor");
       const back = (here.x - origin.x) * (next.x - origin.x) + (here.y - origin.y) * (next.y - origin.y);
       if (back >= 0) break;
@@ -208,14 +220,15 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   let target = path.points[state.index];
   if (target === undefined) throw new Error("Bot path target is absent");
   const link = path.links[state.index] ?? null;
-  const previousTransport = state.index > 0 ? path.links[state.index - 1] ?? null : null;
+  const previousTransport = state.index > 0 ? (path.links[state.index - 1] ?? null) : null;
   const train = link?.type === NavLinkType.Train ? link : previousTransport?.type === NavLinkType.Train ? previousTransport : null;
   if (train !== null) {
     const step = input.transport?.(train, input.origin);
     if (step == null || step.kind === "unavailable") return { ...idle, status: BotPathStatus.Stuck, target, link: train };
     if (step.kind === "wait" || step.kind === "ride") {
       if (state.liftWaitSince < 0 || bvecDistance(input.origin, state.stuckOrigin) > 8) {
-        state.liftWaitSince = input.now; state.stuckOrigin = { ...input.origin };
+        state.liftWaitSince = input.now;
+        state.stuckOrigin = { ...input.origin };
       }
       if (input.now - state.liftWaitSince > LIFT_WAIT_SECONDS) return { ...idle, status: BotPathStatus.Stuck, target, link: train };
       state.stuckSince = input.now;
@@ -234,7 +247,8 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   if (link !== null && link.type === NavLinkType.WalkOffLedge && input.onGround && input.origin.z - target.z > 64) {
     const prev = state.index > 0 ? path.points[state.index - 1] : input.origin;
     if (prev === undefined) throw new Error("Bot path previous point is absent");
-    let ax = target.x - prev.x, ay = target.y - prev.y;
+    let ax = target.x - prev.x,
+      ay = target.y - prev.y;
     let al = Math.hypot(ax, ay);
     if (al < 1 && input.velocity !== undefined) {
       ax = input.velocity.x;
@@ -328,9 +342,12 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   let wishSpeed = speed;
   const next = path.points[state.index + 1];
   if (next !== undefined && bvecDistance2D(input.origin, target) < CORNER_SLOW_DISTANCE) {
-    const ax = target.x - input.origin.x, ay = target.y - input.origin.y;
-    const bx = next.x - target.x, by = next.y - target.y;
-    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    const ax = target.x - input.origin.x,
+      ay = target.y - input.origin.y;
+    const bx = next.x - target.x,
+      by = next.y - target.y;
+    const la = Math.hypot(ax, ay),
+      lb = Math.hypot(bx, by);
     if (la > 1 && lb > 1) {
       const cos = (ax * bx + ay * by) / (la * lb);
       if (cos < Math.cos((CORNER_TURN_DEGREES * Math.PI) / 180)) wishSpeed = Math.min(wishSpeed, input.walkSpeed ?? BOT_WALK_SPEED);
@@ -342,7 +359,8 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   // a corner at speed tracks the route instead of the engine's acceleration
   // deciding where it goes. Only the lateral part -- braking along the
   // route made a slow bot reverse and dither between close points.
-  let wx = dir.x * wishSpeed, wy = dir.y * wishSpeed;
+  let wx = dir.x * wishSpeed,
+    wy = dir.y * wishSpeed;
   if (input.velocity !== undefined) {
     const along = input.velocity.x * dir.x + input.velocity.y * dir.y;
     const lateralX = input.velocity.x - along * dir.x;
@@ -371,7 +389,7 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   if (input.onGround) {
     const needsJump = link !== null && navLinkIsJump(link.type);
     const stepUp = target.z - input.origin.z > 24 && bvecDistance2D(input.origin, target) < 96;
-    if (needsJump || stepUp && posture?.type !== NavLinkType.Ladder) jump = true;
+    if (needsJump || (stepUp && posture?.type !== NavLinkType.Ladder)) jump = true;
   }
 
   return { status: BotPathStatus.Moving, forwardmove, sidemove, upmove, jump, target, link };
@@ -392,7 +410,14 @@ export function rollCombatJump(state: BotPathStateT, movement: BotMovementSettin
 }
 
 /** Straight-line steering with no path at all, for a target the bot can see. */
-export function steerDirect(origin: BotVec3, yaw: number, target: BotVec3, walkOnly: boolean, runSpeed = BOT_RUN_SPEED, walkSpeed = BOT_WALK_SPEED): { forwardmove: number; sidemove: number } {
+export function steerDirect(
+  origin: BotVec3,
+  yaw: number,
+  target: BotVec3,
+  walkOnly: boolean,
+  runSpeed = BOT_RUN_SPEED,
+  walkSpeed = BOT_WALK_SPEED,
+): { forwardmove: number; sidemove: number } {
   const dir = steerDirection(origin, target);
   const speed = walkOnly ? walkSpeed : runSpeed;
   const { forward, right } = angleVectors(0, yaw, 0);

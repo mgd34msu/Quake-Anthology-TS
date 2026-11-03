@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { TraceQuery } from "../../../contracts/scene.ts";
@@ -20,7 +21,10 @@ export interface Q3WorldAdapterHost {
 
 /** Q3 source query words project onto the same geometry and actor index used by every provider. */
 export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
-  constructor(readonly host: Q3WorldAdapterHost, readonly records: Q3EntityRecords) {}
+  constructor(
+    readonly host: Q3WorldAdapterHost,
+    readonly records: Q3EntityRecords,
+  ) {}
 
   private actor(number: number): ActorId | null {
     if (number === 1022 || number === 1023 || number < 0) return null;
@@ -29,10 +33,15 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
   }
 
   private query(input: ActorTraceQuery): TraceQuery {
-    return { start: input.start, end: input.end, target: { kind: "world" },
+    return {
+      start: input.start,
+      end: input.end,
+      target: { kind: "world" },
       shape: input.shape.kind === "point" ? input.shape : { kind: input.shape.kind, bounds: { min: input.shape.mins, max: input.shape.maxs } },
-      passActor: input.passActor, numeric: Q3_BINARY32_PROFILE,
-      policy: { kind: "q3", contentsMask: input.mask, curves: this.host.curves(), playerCurveClip: this.host.playerCurveClip() } };
+      passActor: input.passActor,
+      numeric: Q3_BINARY32_PROFILE,
+      policy: { kind: "q3", contentsMask: input.mask, curves: this.host.curves(), playerCurveClip: this.host.playerCurveClip() },
+    };
   }
 
   trace(input: ServerTraceQuery): ServerTraceResult {
@@ -44,19 +53,36 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
       const entity = this.records.byActor(result.hit.actor);
       if (entity !== null) entityNum = entity.slot;
     }
-    return { fraction: result.fraction, end: result.end, entityNum, contact: result.contact,
-      solidity: result.solidity, contents: result.contents, surfaceFlags: result.surfaceFlags };
+    return {
+      fraction: result.fraction,
+      end: result.end,
+      entityNum,
+      contact: result.contact,
+      solidity: result.solidity,
+      contents: result.contents,
+      surfaceFlags: result.surfaceFlags,
+    };
   }
 
   traceActor(input: ActorTraceQuery): ActorTraceResult {
     const result = this.host.queries.trace(this.query(input));
     if (result.kind !== "q3") throw new Error("Shared scene did not adapt a Q3 trace policy");
-    return { fraction: result.fraction, end: result.end, hit: result.hit, contact: result.contact,
-      solidity: result.allSolid ? "all-solid" : result.startSolid ? "start-solid" : "clear", contents: result.contents, surfaceFlags: result.surfaceFlags };
+    return {
+      fraction: result.fraction,
+      end: result.end,
+      hit: result.hit,
+      contact: result.contact,
+      solidity: result.allSolid ? "all-solid" : result.startSolid ? "start-solid" : "clear",
+      contents: result.contents,
+      surfaceFlags: result.surfaceFlags,
+    };
   }
 
   areaActors(bounds: Bounds, maximum: number): readonly ActorId[] {
-    return this.host.queries.queryActors(bounds).slice(0, maximum).map(actor => actor.body.actor);
+    return this.host.queries
+      .queryActors(bounds)
+      .slice(0, maximum)
+      .map(actor => actor.body.actor);
   }
 
   areaEntities(bounds: Bounds, maximum = 1024): readonly number[] {
@@ -76,28 +102,48 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
   }
 
   linkState(number: number): LinkState | undefined {
-    const actor = this.actor(number), linked = actor === null ? null : this.host.bodies.linked(actor);
+    const actor = this.actor(number),
+      linked = actor === null ? null : this.host.bodies.linked(actor);
     return linked === null ? undefined : { linked: true, linkcount: linked.linkCount, absbounds: linked.absoluteBounds };
   }
 
   link(entity: GameEntity): void {
     entity.r.clearBoundsOverrides();
     const byte = (value: number): number => Math.max(1, Math.min(255, Math.trunc(value)));
-    entity.s.solid = entity.r.model.kind === "inline" ? 0xffffff : (entity.r.contents & (1 | 0x2000000)) === 0 ? 0
-      : (byte(Math.fround(entity.r.maxs.z + 32)) << 16) | (byte(-entity.r.mins.z) << 8) | byte(entity.r.maxs.x);
-    const shape = entity.r.model.kind === "inline" ? { kind: "model", model: entity.r.model.index } satisfies ActorCollision["shape"] : entity.r.model;
-    this.host.collision(entity.actor, { family: "q3", shape, contents: entity.r.contents,
-      owner: this.actor(entity.r.ownerNum), role: entity.r.contents === 0x40000000 ? "trigger" : "solid", monster: false, deadMonster: false });
-    this.host.bodies.link(entity.actor, entity.r.currentOrigin); entity.r.captureLink();
+    entity.s.solid =
+      entity.r.model.kind === "inline"
+        ? 0xffffff
+        : (entity.r.contents & (1 | 0x2000000)) === 0
+          ? 0
+          : (byte(Math.fround(entity.r.maxs.z + 32)) << 16) | (byte(-entity.r.mins.z) << 8) | byte(entity.r.maxs.x);
+    const shape = entity.r.model.kind === "inline" ? ({ kind: "model", model: entity.r.model.index } satisfies ActorCollision["shape"]) : entity.r.model;
+    this.host.collision(entity.actor, {
+      family: "q3",
+      shape,
+      contents: entity.r.contents,
+      owner: this.actor(entity.r.ownerNum),
+      role: entity.r.contents === 0x40000000 ? "trigger" : "solid",
+      monster: false,
+      deadMonster: false,
+    });
+    this.host.bodies.link(entity.actor, entity.r.currentOrigin);
+    entity.r.captureLink();
   }
 
-  unlink(number: number): void { const entity = this.records.get(number); if (entity?.inuse) { entity.r.captureLink(); this.host.bodies.unlink(entity.actor); } }
+  unlink(number: number): void {
+    const entity = this.records.get(number);
+    if (entity?.inuse) {
+      entity.r.captureLink();
+      this.host.bodies.unlink(entity.actor);
+    }
+  }
 
   unlinkActor(actor: ActorId): (() => void) | null {
     const owner = this.records.host.actors.resolveOwned(actor);
     if (owner === null || this.host.bodies.linked(actor) === null) return null;
     const native = this.records.nativeByActor(actor);
-    native?.r.captureLink(); this.host.bodies.unlink(owner);
+    native?.r.captureLink();
+    this.host.bodies.unlink(owner);
     return () => {
       if (!this.records.host.actors.isLive(owner.id) || this.host.bodies.read(owner.id) === null) return;
       if (native !== null && this.records.nativeByActor(owner.id) === native) this.link(native);
@@ -112,12 +158,22 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
   }
 
   contactActor(bounds: Bounds, actor: ActorId, capsule = false): boolean {
-    const spatial = this.host.queries.spatial.get(actor), body = this.host.bodies.read(actor);
+    const spatial = this.host.queries.spatial.get(actor),
+      body = this.host.bodies.read(actor);
     if (spatial === null || body === null) return false;
     const origin = { x: 0, y: 0, z: 0 };
-    const query = this.query({ start: origin, end: origin, shape: { kind: capsule ? "capsule" : "box", mins: bounds.min, maxs: bounds.max }, passActor: null, mask: -1 });
-    if (spatial.collision.shape.kind === "model") return this.host.queries.geometryTrace({ ...query,
-      target: { kind: "model", model: spatial.collision.shape.model, origin: body.origin, angles: body.angles } }).startSolid;
+    const query = this.query({
+      start: origin,
+      end: origin,
+      shape: { kind: capsule ? "capsule" : "box", mins: bounds.min, maxs: bounds.max },
+      passActor: null,
+      mask: -1,
+    });
+    if (spatial.collision.shape.kind === "model")
+      return this.host.queries.geometryTrace({
+        ...query,
+        target: { kind: "model", model: spatial.collision.shape.model, origin: body.origin, angles: body.angles },
+      }).startSolid;
     return traceActorBody(query, { body: { ...spatial.body, state: body }, collision: spatial.collision }).startSolid;
   }
 }

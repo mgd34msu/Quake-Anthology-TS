@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Owned client state from id Software's code/cgame/cg_local.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { vec3 } from "../../../core/math.ts";
@@ -17,13 +18,38 @@ import { ClientInfo } from "./client-info.ts";
 import type { RetailSnapshot } from "./retail-snapshot.ts";
 
 export interface ClientScore {
-  client: number; score: number; ping: number; time: number; scoreFlags: number; accuracy: number;
-  impressiveCount: number; excellentCount: number; guantletCount: number; defendCount: number;
-  assistCount: number; perfect: number; captures: number; team: number;
+  client: number;
+  score: number;
+  ping: number;
+  time: number;
+  scoreFlags: number;
+  accuracy: number;
+  impressiveCount: number;
+  excellentCount: number;
+  guantletCount: number;
+  defendCount: number;
+  assistCount: number;
+  perfect: number;
+  captures: number;
+  team: number;
 }
 function createClientScore(): ClientScore {
-  return { client: 0, score: 0, ping: 0, time: 0, scoreFlags: 0, accuracy: 0, impressiveCount: 0,
-    excellentCount: 0, guantletCount: 0, defendCount: 0, assistCount: 0, perfect: 0, captures: 0, team: 0 };
+  return {
+    client: 0,
+    score: 0,
+    ping: 0,
+    time: 0,
+    scoreFlags: 0,
+    accuracy: 0,
+    impressiveCount: 0,
+    excellentCount: 0,
+    guantletCount: 0,
+    defendCount: 0,
+    assistCount: 0,
+    perfect: 0,
+    captures: 0,
+    team: 0,
+  };
 }
 export interface ClientReward {
   sound: PcmSound | null;
@@ -86,9 +112,13 @@ export class ClientGameStaticState {
 export function createClientPlayerEntity() {
   return {
     ...createPlayerPoseState(),
-    flag: { ...createLerpFrame(), yawAngle: 0, yawing: false, pitchAngle: 0, pitching: false }, lightningFiring: 0,
-    railgunImpact: vec3(0, 0, 0), railgunFlash: false,
-    barrelAngle: 0, barrelTime: 0, barrelSpinning: false,
+    flag: { ...createLerpFrame(), yawAngle: 0, yawing: false, pitchAngle: 0, pitching: false },
+    lightningFiring: 0,
+    railgunImpact: vec3(0, 0, 0),
+    railgunFlash: false,
+    barrelAngle: 0,
+    barrelTime: 0,
+    barrelSpinning: false,
   };
 }
 
@@ -97,8 +127,21 @@ export interface SkullTrail {
   numPositions: number;
 }
 function createSkullTrail(): SkullTrail {
-  return { positions: [vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0),
-    vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0)], numPositions: 0 };
+  return {
+    positions: [
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+      vec3(0, 0, 0),
+    ],
+    numPositions: 0,
+  };
 }
 
 export class ClientEntity {
@@ -244,7 +287,11 @@ export class ClientGameState {
   testModelEntity = createModelEntity();
   readonly predictableEvents = new PlayerStateSlots(16);
 
-  constructor(readonly product: Product, readonly clientNum: number, public processedSnapshotNum: number) {
+  constructor(
+    readonly product: Product,
+    readonly clientNum: number,
+    public processedSnapshotNum: number,
+  ) {
     if (!Number.isInteger(clientNum) || clientNum < 0 || clientNum >= 64) throw new RangeError("Invalid cgame client number");
     if (!Number.isInteger(processedSnapshotNum) || processedSnapshotNum < -0x80000000 || processedSnapshotNum > 0x7fffffff) {
       throw new RangeError("Invalid initial snapshot number");

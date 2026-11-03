@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export interface Q2TravelTarget {
   readonly kind: "map" | "cinematic" | "picture" | "demo";
   readonly name: string;
@@ -16,7 +17,8 @@ export function parseQ2Travel(expression: string): Q2TravelTarget {
     const dollar = part.indexOf("$");
     const level = dollar < 0 ? part : part.slice(0, dollar);
     const spawnPoint = dollar < 0 ? "" : part.slice(dollar + 1);
-    const newUnit = level.startsWith("*"), name = newUnit ? level.slice(1) : level;
+    const newUnit = level.startsWith("*"),
+      name = newUnit ? level.slice(1) : level;
     if (!/^[a-zA-Z0-9_/-]+(?:\.(?:cin|pcx|dm2))?$/.test(name) || name.startsWith("/") || name.includes("//"))
       throw new Error(`Invalid Q2 travel destination: ${name}`);
     if (!/^[a-zA-Z0-9_-]*$/.test(spawnPoint)) throw new Error(`Invalid Q2 spawn point: ${spawnPoint}`);

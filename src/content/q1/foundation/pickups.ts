@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
@@ -22,75 +23,157 @@ export interface Pickup {
   readonly take: (game: Q1EntityServices, entity: Q1Actor, player: Q1PlayerState) => "refused" | "taken" | "leave";
 }
 function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | null {
-  const name = entity.classname, big = (entity.spawnflags & (name === "item_weapon" ? 8 : 1)) !== 0;
+  const name = entity.classname,
+    big = (entity.spawnflags & (name === "item_weapon" ? 8 : 1)) !== 0;
   if (name === "item_health") {
-    const mega = !big && (entity.spawnflags & 2) !== 0, amount = big ? 15 : mega ? 100 : 25, megaCap = game.sourceMg3Pickups ? 500 : 250;
-    return { model: `maps/b_bh${big ? 10 : mega ? 100 : 25}.bsp`, sound: big ? "items/r_item1.wav" : mega ? "items/r_item2.wav" : "items/health1.wav", bounds: "box", skin: 0,
-      respawn: mega ? 120 : 20, take: (runtime, _item, player) => {
-        const health = runtime.health(player.actor.id); if (health <= 0 || health >= (mega ? megaCap : player.maxHealth)) return "refused";
+    const mega = !big && (entity.spawnflags & 2) !== 0,
+      amount = big ? 15 : mega ? 100 : 25,
+      megaCap = game.sourceMg3Pickups ? 500 : 250;
+    return {
+      model: `maps/b_bh${big ? 10 : mega ? 100 : 25}.bsp`,
+      sound: big ? "items/r_item1.wav" : mega ? "items/r_item2.wav" : "items/health1.wav",
+      bounds: "box",
+      skin: 0,
+      respawn: mega ? 120 : 20,
+      take: (runtime, _item, player) => {
+        const health = runtime.health(player.actor.id);
+        if (health <= 0 || health >= (mega ? megaCap : player.maxHealth)) return "refused";
         runtime.host.combat.setHealth(player.actor, Math.min(mega ? megaCap : player.maxHealth, health + amount));
         return "taken";
-      } };
+      },
+    };
   }
   if (name === "item_armor1" || name === "item_armor2" || name === "item_armorInv") {
     const absorption = name === "item_armor1" ? 0.3 : name === "item_armor2" ? 0.6 : 0.8;
     const points = name === "item_armor1" ? 100 : name === "item_armor2" ? 150 : 200;
     const item: ItemId = `q1:${name}`;
-    return { model: "progs/armor.mdl", sound: "items/armor1.wav", bounds: "weapon", skin: name === "item_armor1" ? 0 : name === "item_armor2" ? 1 : 2, respawn: 20,
+    return {
+      model: "progs/armor.mdl",
+      sound: "items/armor1.wav",
+      bounds: "weapon",
+      skin: name === "item_armor1" ? 0 : name === "item_armor2" ? 1 : 2,
+      respawn: 20,
       take: (runtime, _entity, player) => {
         const armor = runtime.host.combat.read(player.actor.id)?.armor.regular;
         if (armor?.kind === "source") return "refused";
-        const current = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
+        const current =
+          armor === undefined || armor.kind === "none"
+            ? 0
+            : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
         if (current >= absorption * points) return "refused";
-        runtime.host.combat.setRegularArmor(player.actor, { kind: "q1", points, absorption, item }); return "taken";
-      } };
+        runtime.host.combat.setRegularArmor(player.actor, { kind: "q1", points, absorption, item });
+        return "taken";
+      },
+    };
   }
   const weapon = WEAPONS.find(candidate => name === `weapon_${candidate}`);
   if (weapon !== undefined && weapon !== "axe" && weapon !== "shotgun") {
-    const model = weapon === "supershotgun" ? "g_shot" : weapon === "nailgun" ? "g_nail" : weapon === "supernailgun" ? "g_nail2" : weapon === "grenadelauncher" ? "g_rock" : weapon === "rocketlauncher" ? "g_rock2" : "g_light";
-    return { supply: { kind: "weapon", offer: weaponOffer(weapon) }, model: `progs/${model}.mdl`, sound: "weapons/pkup.wav", bounds: "weapon", skin: 0, respawn: 30,
-      take: (runtime, _entity, player) => takeWeapon(runtime, player, weapon) };
+    const model =
+      weapon === "supershotgun"
+        ? "g_shot"
+        : weapon === "nailgun"
+          ? "g_nail"
+          : weapon === "supernailgun"
+            ? "g_nail2"
+            : weapon === "grenadelauncher"
+              ? "g_rock"
+              : weapon === "rocketlauncher"
+                ? "g_rock2"
+                : "g_light";
+    return {
+      supply: { kind: "weapon", offer: weaponOffer(weapon) },
+      model: `progs/${model}.mdl`,
+      sound: "weapons/pkup.wav",
+      bounds: "weapon",
+      skin: 0,
+      respawn: 30,
+      take: (runtime, _entity, player) => takeWeapon(runtime, player, weapon),
+    };
   }
   const ammo: { readonly item: ItemId; readonly model: string; readonly amount: number } | null =
-    name === "item_weapon" && (entity.spawnflags & 2) !== 0 ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
-    name === "item_weapon" && (entity.spawnflags & 4) !== 0 ? { item: "q1:ammo/nails", model: "nail", amount: big ? 40 : 20 } :
-    name === "item_weapon" && (entity.spawnflags & 1) !== 0 ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 } :
-    name === "item_shells" ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 } :
-    name === "item_spikes" ? { item: "q1:ammo/nails", model: "nail", amount: big ? 50 : 25 } :
-    name === "item_rockets" ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
-    name === "item_cells" ? { item: "q1:ammo/cells", model: "batt", amount: game.sourceMg3Pickups ? (big ? 20 : 10) : big ? 12 : 6 } : null;
+    name === "item_weapon" && (entity.spawnflags & 2) !== 0
+      ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 }
+      : name === "item_weapon" && (entity.spawnflags & 4) !== 0
+        ? { item: "q1:ammo/nails", model: "nail", amount: big ? 40 : 20 }
+        : name === "item_weapon" && (entity.spawnflags & 1) !== 0
+          ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 }
+          : name === "item_shells"
+            ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 }
+            : name === "item_spikes"
+              ? { item: "q1:ammo/nails", model: "nail", amount: big ? 50 : 25 }
+              : name === "item_rockets"
+                ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 }
+                : name === "item_cells"
+                  ? { item: "q1:ammo/cells", model: "batt", amount: game.sourceMg3Pickups ? (big ? 20 : 10) : big ? 12 : 6 }
+                  : null;
   if (ammo !== null) {
     const offer = { item: ammo.item, amount: ammo.amount };
-    return { supply: { kind: "ammo", offer }, model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
-    respawn: game.options.deathmatch === 3 || game.options.deathmatch === 5 ? 15 : 30,
-    take: (runtime, _entity, player) => {
-      if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, offer) ? "taken" : "refused";
-      const best = runtime.chooseBest(player.actor);
-      if (runtime.host.inventory.give(player.actor, offer.item, offer.amount) === 0) return "refused";
-      q1AmmoPickupSelection(runtime, player, best, player.autoSwitch !== "never"); return "taken";
-    } };
+    return {
+      supply: { kind: "ammo", offer },
+      model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`,
+      sound: "weapons/lock4.wav",
+      bounds: "box",
+      skin: 0,
+      respawn: game.options.deathmatch === 3 || game.options.deathmatch === 5 ? 15 : 30,
+      take: (runtime, _entity, player) => {
+        if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, offer) ? "taken" : "refused";
+        const best = runtime.chooseBest(player.actor);
+        if (runtime.host.inventory.give(player.actor, offer.item, offer.amount) === 0) return "refused";
+        q1AmmoPickupSelection(runtime, player, best, player.autoSwitch !== "never");
+        return "taken";
+      },
+    };
   }
   if (name === "item_key1" || name === "item_key2") {
     const item: ItemId = name === "item_key1" ? "q1:key/silver" : "q1:key/gold";
-    const authored = game.sourceDoorKeys ? entity.number("worldtype") : 0, worldType = authored > 0 && authored <= 3 ? authored - 1 : game.worldType;
+    const authored = game.sourceDoorKeys ? entity.number("worldtype") : 0,
+      worldType = authored > 0 && authored <= 3 ? authored - 1 : game.worldType;
     const prefix = worldType === 0 ? "w" : worldType === 1 ? "m" : "b";
-    return { model: `progs/${prefix}_${name === "item_key1" ? "s" : "g"}_key.mdl`, sound: worldType === 2 ? "misc/basekey.wav" : worldType === 1 ? "misc/runekey.wav" : "misc/medkey.wav", bounds: "weapon", skin: 0, respawn: -1,
+    return {
+      model: `progs/${prefix}_${name === "item_key1" ? "s" : "g"}_key.mdl`,
+      sound: worldType === 2 ? "misc/basekey.wav" : worldType === 1 ? "misc/runekey.wav" : "misc/medkey.wav",
+      bounds: "weapon",
+      skin: 0,
+      respawn: -1,
       take: (runtime, _entity, player) => {
-        if (runtime.host.inventory.give(player.actor, item, 1) === 0) return "refused"; return runtime.options.coop ? "leave" : "taken";
-      } };
+        if (runtime.host.inventory.give(player.actor, item, 1) === 0) return "refused";
+        return runtime.options.coop ? "leave" : "taken";
+      },
+    };
   }
   const powerup: { readonly kind: Q1Powerup; readonly model: string; readonly sound: string } | null =
-    name === "item_artifact_invulnerability" ? { kind: "invulnerability", model: "invulner", sound: "protect" } :
-    name === "item_artifact_invisibility" ? { kind: "invisibility", model: "invisibl", sound: "inv1" } :
-    name === "item_artifact_envirosuit" ? { kind: "suit", model: "suit", sound: "suit" } :
-    name === "item_artifact_super_damage" ? { kind: "quad", model: "quaddama", sound: "damage" } : null;
-  if (powerup !== null) return { model: `progs/${powerup.model}.mdl`, sound: `items/${powerup.sound}.wav`, bounds: "artifact", skin: 0,
-    respawn: powerup.kind === "invulnerability" || powerup.kind === "invisibility" ? 300 : 60,
-    take: (runtime, _entity, player) => { // MG1 items.qc: with a horde manager present, quad and pentagram last 5 seconds.
-      const horde = (powerup.kind === "quad" || powerup.kind === "invulnerability") && [...runtime.entities.values()].some(candidate => candidate.classname === "horde_manager");
-      runtime.givePowerup(player, powerup.kind, horde ? 5 : 30); return "taken"; } };
+    name === "item_artifact_invulnerability"
+      ? { kind: "invulnerability", model: "invulner", sound: "protect" }
+      : name === "item_artifact_invisibility"
+        ? { kind: "invisibility", model: "invisibl", sound: "inv1" }
+        : name === "item_artifact_envirosuit"
+          ? { kind: "suit", model: "suit", sound: "suit" }
+          : name === "item_artifact_super_damage"
+            ? { kind: "quad", model: "quaddama", sound: "damage" }
+            : null;
+  if (powerup !== null)
+    return {
+      model: `progs/${powerup.model}.mdl`,
+      sound: `items/${powerup.sound}.wav`,
+      bounds: "artifact",
+      skin: 0,
+      respawn: powerup.kind === "invulnerability" || powerup.kind === "invisibility" ? 300 : 60,
+      take: (runtime, _entity, player) => {
+        // MG1 items.qc: with a horde manager present, quad and pentagram last 5 seconds.
+        const horde =
+          (powerup.kind === "quad" || powerup.kind === "invulnerability") &&
+          [...runtime.entities.values()].some(candidate => candidate.classname === "horde_manager");
+        runtime.givePowerup(player, powerup.kind, horde ? 5 : 30);
+        return "taken";
+      },
+    };
   if (name === "item_backpack") {
-    const counters: readonly (readonly [string, ItemId])[] = [["shells", "q1:ammo/shells"], ["nails", "q1:ammo/nails"], ["rockets", "q1:ammo/rockets"], ["cells", "q1:ammo/cells"]];
+    const counters: readonly (readonly [string, ItemId])[] = [
+      ["shells", "q1:ammo/shells"],
+      ["nails", "q1:ammo/nails"],
+      ["rockets", "q1:ammo/rockets"],
+      ["cells", "q1:ammo/cells"],
+    ];
     const cargo: PickupCargoEntry[] = counters.map(([field, item]) => ({ kind: "counter", item, count: entity.number(field) }));
     const carried = entity.fields.get("weapon");
     if (carried !== undefined && carried !== "") {
@@ -98,26 +181,44 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
       // A map-supplied weapon key the game does not know is ignored rather than failing the pickup.
       if (weapon !== undefined) cargo.push({ kind: "weapon", item: weaponItem(weapon), count: 1 });
     }
-    return { cargo, model: "progs/backpack.mdl", sound: "weapons/lock4.wav", bounds: "artifact", skin: 0, respawn: -1,
+    return {
+      cargo,
+      model: "progs/backpack.mdl",
+      sound: "weapons/lock4.wav",
+      bounds: "artifact",
+      skin: 0,
+      respawn: -1,
       take: (runtime, _item, player) => {
-        const admission = runtime.pickupAdmission ?? new SharedPickupAdmission({ inventory: runtime.host.inventory,
-          profile: { id: "q1:source-backpack", weaponOwnership: "all-destinations", ammo: counters.map(([, item]) => ({ source: item, destinations: [item] })),
-            weapons: WEAPONS.map(weapon => ({ source: weaponItem(weapon), destinations: [weaponItem(weapon)] })) },
-          ammoGranted: () => undefined, weaponGranted: (_actor, weapons, selection) => {
-            for (const item of weapons) { const weapon = WEAPONS.find(weapon => weaponItem(weapon) === item);
-              if (weapon === undefined) throw new Error("Q1 backpack selected a foreign weapon");
-              q1WeaponPickupSelection(runtime, player, weapon, selection);
-            }
-            return undefined;
-          } });
+        const admission =
+          runtime.pickupAdmission ??
+          new SharedPickupAdmission({
+            inventory: runtime.host.inventory,
+            profile: {
+              id: "q1:source-backpack",
+              weaponOwnership: "all-destinations",
+              ammo: counters.map(([, item]) => ({ source: item, destinations: [item] })),
+              weapons: WEAPONS.map(weapon => ({ source: weaponItem(weapon), destinations: [weaponItem(weapon)] })),
+            },
+            ammoGranted: () => undefined,
+            weaponGranted: (_actor, weapons, selection) => {
+              for (const item of weapons) {
+                const weapon = WEAPONS.find(weapon => weaponItem(weapon) === item);
+                if (weapon === undefined) throw new Error("Q1 backpack selected a foreign weapon");
+                q1WeaponPickupSelection(runtime, player, weapon, selection);
+              }
+              return undefined;
+            },
+          });
         return admission.cargo(player.actor, cargo, runtime.options.deathmatch === 0 ? "always" : "better") ? "taken" : "refused";
-      } };
+      },
+    };
   }
   return game.foreignPickup?.(entity) ?? null;
 }
 
 function weaponOffer(weapon: Q1Weapon): Extract<PickupSupplyOffer, { readonly kind: "weapon" }>["offer"] {
-  const ammo = ammoItem(weapon), amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
+  const ammo = ammoItem(weapon),
+    amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
   return { item: weaponItem(weapon), ammo: ammo === null ? [] : [{ item: ammo, amount }] };
 }
 export function weaponEligibility(game: Q1EntityServices, player: Q1PlayerState, item: ItemId): { readonly leave: boolean; readonly owned: boolean } {
@@ -129,18 +230,19 @@ function pickupPlayer(game: Q1EntityServices, other: ActorId): Q1PlayerState | n
   return game.health(other) <= 0 ? null : game.player(other);
 }
 export function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
-  const offer = weaponOffer(weapon), { leave, owned } = weaponEligibility(game, player, offer.item);
+  const offer = weaponOffer(weapon),
+    { leave, owned } = weaponEligibility(game, player, offer.item);
   if (leave && owned) return "refused";
   if (game.pickupAdmission !== null) {
-    const autoSwitch = game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned);
+    const autoSwitch = game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || (player.autoSwitch === "new" && !owned));
     const accepted = game.pickupAdmission.weapon(player.actor, offer, !autoSwitch ? "never" : game.options.deathmatch === 0 ? "always" : "better");
     return !accepted ? "refused" : leave ? "leave" : "taken";
   }
   game.host.inventory.give(player.actor, offer.item, 1);
   const selected = game.pickupRules?.weaponGranted?.(game, player, weapon) ?? weapon;
-  for (const ammo of offer.ammo) game.host.inventory.give(player.actor, ammo.item,
-    game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, ammo.amount) ?? ammo.amount);
-  if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned)) {
+  for (const ammo of offer.ammo)
+    game.host.inventory.give(player.actor, ammo.item, game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, ammo.amount) ?? ammo.amount);
+  if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || (player.autoSwitch === "new" && !owned))) {
     q1WeaponPickupSelection(game, player, selected, game.options.deathmatch === 0 ? "always" : "better");
   }
   return leave ? "leave" : "taken";
@@ -152,7 +254,12 @@ export function observeQ1Supply(game: Q1EntityServices, pickup: ActorId, other: 
   if (entity === null) return null;
   const offer = pickupDefinition(game, entity)?.supply;
   if (offer === undefined || entity.touch === null || !("q1CallbackName" in entity.touch) || entity.touch.q1CallbackName !== "item_touch") return null;
-  if (offer.kind === "weapon" && game.pickupAdmission === null && (game.pickupRules?.weaponGranted !== undefined || game.pickupRules?.weaponAmmoGrant !== undefined)) return null;
+  if (
+    offer.kind === "weapon" &&
+    game.pickupAdmission === null &&
+    (game.pickupRules?.weaponGranted !== undefined || game.pickupRules?.weaponAmmoGrant !== undefined)
+  )
+    return null;
   if (entity.solid === "trigger") {
     const player = pickupPlayer(game, other);
     const weapon = player !== null && offer.kind === "weapon" ? weaponEligibility(game, player, offer.offer.item) : null;
@@ -166,12 +273,19 @@ export function previewQ1Supply(game: Q1EntityServices, pickup: ActorId, recipie
   if (observation === null) return null;
   const offer = observation.offer;
   if (game.pickupAdmission !== null) return game.pickupAdmission.preview(recipient, offer);
-  if (offer.kind === "weapon") return previewPickupGrants(game.host.inventory.entries(recipient), {
-    kind: "weapon", weapons: [{ item: offer.offer.item, amount: 1 }], ammo: offer.offer.ammo,
-  });
-  if (offer.kind === "ammo") return previewPickupGrants(game.host.inventory.entries(recipient), {
-    kind: "ammo", acceptance: "nonzero", ammo: [offer.offer], weapons: { kind: "grant", grants: [] },
-  });
+  if (offer.kind === "weapon")
+    return previewPickupGrants(game.host.inventory.entries(recipient), {
+      kind: "weapon",
+      weapons: [{ item: offer.offer.item, amount: 1 }],
+      ammo: offer.offer.ammo,
+    });
+  if (offer.kind === "ammo")
+    return previewPickupGrants(game.host.inventory.entries(recipient), {
+      kind: "ammo",
+      acceptance: "nonzero",
+      ammo: [offer.offer],
+      weapons: { kind: "grant", grants: [] },
+    });
   return null;
 }
 export function q1AmmoPickupSelection(game: Q1EntityServices, player: Q1PlayerState, before: Q1Weapon, autoSwitch: boolean): undefined {
@@ -179,14 +293,20 @@ export function q1AmmoPickupSelection(game: Q1EntityServices, player: Q1PlayerSt
   return undefined;
 }
 export function q1WeaponPickupSelection(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon, selection: PickupSelection): undefined {
-  if (selection === "always" || selection === "better" && (game.pickupRules?.weaponRank?.(weapon) ?? rank(weapon)) < (game.pickupRules?.weaponRank?.(player.weapon) ?? rank(player.weapon))) game.selectWeapon(player.actor, weapon);
+  if (
+    selection === "always" ||
+    (selection === "better" &&
+      (game.pickupRules?.weaponRank?.(weapon) ?? rank(weapon)) < (game.pickupRules?.weaponRank?.(player.weapon) ?? rank(player.weapon)))
+  )
+    game.selectWeapon(player.actor, weapon);
   return undefined;
 }
 function rank(weapon: Q1Weapon): number {
   return ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun", "shotgun", "axe"].indexOf(weapon);
 }
 export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
-  const definition = pickupDefinition(game, entity); if (definition === null) return false;
+  const definition = pickupDefinition(game, entity);
+  if (definition === null) return false;
   if (game.usesId1Precaches) {
     if (entity.classname === "item_weapon") {
       const size = (entity.spawnflags & 8) !== 0 ? 1 : 0;
@@ -215,14 +335,28 @@ export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
       game.precacheSound("items/damage3.wav");
     }
   }
-  entity.model = definition.model; entity.originalModel = entity.model; entity.skin = definition.skin;
-  entity.solid = "none"; entity.movement = "none";
-  game.setBounds(entity, definition.bounds === "box" ? { min: ZERO, max: { x: 32, y: 32, z: 56 } } : definition.bounds === "weapon" ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } } : { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
+  entity.model = definition.model;
+  entity.originalModel = entity.model;
+  entity.skin = definition.skin;
+  entity.solid = "none";
+  entity.movement = "none";
+  game.setBounds(
+    entity,
+    definition.bounds === "box"
+      ? { min: ZERO, max: { x: 32, y: 32, z: 56 } }
+      : definition.bounds === "weapon"
+        ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } }
+        : { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
+  );
   entity.touch = game.named.touch(entity, "item_touch");
   if (entity.classname === "item_backpack") {
-    entity.solid = "trigger"; entity.movement = "toss"; entity.movementFlags = 256;
+    entity.solid = "trigger";
+    entity.movement = "toss";
+    entity.movementFlags = 256;
     game.setBounds(entity, { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } });
-    game.setBody(entity, { velocity: { x: -100 + game.host.random() * 200, y: -100 + game.host.random() * 200, z: 300 } }); game.link(entity); return true;
+    game.setBody(entity, { velocity: { x: -100 + game.host.random() * 200, y: -100 + game.host.random() * 200, z: 300 } });
+    game.link(entity);
+    return true;
   }
   // StartItem: the MG programs remove coop- and rune-gated items and start SPAWNED ones hidden until used.
   const start = game.sourceItemStart?.(entity);
@@ -240,27 +374,64 @@ export function givePickup(game: Q1EntityServices, entity: Q1Actor, other: Actor
   return true;
 }
 
-export function touchQ1Pickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId, item: ItemId,
-  defaultResource: PickupResource | null, continuation: OriginalPickupContinuation, cargo?: readonly PickupCargoEntry[]): undefined {
+export function touchQ1Pickup(
+  game: Q1EntityServices,
+  entity: Q1Actor,
+  other: ActorId,
+  item: ItemId,
+  defaultResource: PickupResource | null,
+  continuation: OriginalPickupContinuation,
+  cargo?: readonly PickupCargoEntry[],
+): undefined {
   const live = () => game.live(entity) && game.host.actors.isLive(other);
   if (!live()) return undefined;
-  const complete = (taken: boolean) => { if (live()) continuation.complete(taken); };
-  if (game.host.originalPickups === undefined) { if ((continuation.eligible?.() ?? true) && live()) complete(continuation.original()); }
-  else game.host.originalPickups.touch({ recipient: other, pickup: entity.actor.id, source: entity.actor.owner, item, defaultResource,
-    ...(cargo === undefined ? {} : { cargo }),
-    count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
-    dropped: entity.classname === "item_backpack", time: { kind: "seconds", value: game.time } }, { ...continuation, complete });
+  const complete = (taken: boolean) => {
+    if (live()) continuation.complete(taken);
+  };
+  if (game.host.originalPickups === undefined) {
+    if ((continuation.eligible?.() ?? true) && live()) complete(continuation.original());
+  } else
+    game.host.originalPickups.touch(
+      {
+        recipient: other,
+        pickup: entity.actor.id,
+        source: entity.actor.owner,
+        item,
+        defaultResource,
+        ...(cargo === undefined ? {} : { cargo }),
+        count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
+        dropped: entity.classname === "item_backpack",
+        time: { kind: "seconds", value: game.time },
+      },
+      { ...continuation, complete },
+    );
   return undefined;
 }
 
-const weaponNames: Readonly<Record<string, string>> = { weapon_supershotgun: "$qc_double_shotgun", weapon_nailgun: "$qc_nailgun", weapon_supernailgun: "$qc_super_nailgun",
-  weapon_grenadelauncher: "$qc_grenade_launcher", weapon_rocketlauncher: "$qc_rocket_launcher", weapon_lightning: "$qc_thunderbolt" };
-const ammoNames: Readonly<Record<string, string>> = { item_shells: "$qc_shells", item_spikes: "$qc_nails", item_rockets: "$qc_rockets", item_cells: "$qc_cells" };
-const powerupNames: Readonly<Record<string, string>> = { item_artifact_invulnerability: "$qc_pentagram_of_protection", item_artifact_invisibility: "$qc_ring_of_shadows",
-  item_artifact_envirosuit: "$qc_biosuit", item_artifact_super_damage: "$qc_quad_damage" };
+const weaponNames: Readonly<Record<string, string>> = {
+  weapon_supershotgun: "$qc_double_shotgun",
+  weapon_nailgun: "$qc_nailgun",
+  weapon_supernailgun: "$qc_super_nailgun",
+  weapon_grenadelauncher: "$qc_grenade_launcher",
+  weapon_rocketlauncher: "$qc_rocket_launcher",
+  weapon_lightning: "$qc_thunderbolt",
+};
+const ammoNames: Readonly<Record<string, string>> = {
+  item_shells: "$qc_shells",
+  item_spikes: "$qc_nails",
+  item_rockets: "$qc_rockets",
+  item_cells: "$qc_cells",
+};
+const powerupNames: Readonly<Record<string, string>> = {
+  item_artifact_invulnerability: "$qc_pentagram_of_protection",
+  item_artifact_invisibility: "$qc_ring_of_shadows",
+  item_artifact_envirosuit: "$qc_biosuit",
+  item_artifact_super_damage: "$qc_quad_damage",
+};
 /** items.qc prints one line per accepted pickup. */
 function sendPickupMessage(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
-  const name = entity.classname, big = (entity.spawnflags & 1) !== 0;
+  const name = entity.classname,
+    big = (entity.spawnflags & 1) !== 0;
   if (name === "item_health") return game.message(other, "$qc_item_health", false, [big ? 15 : (entity.spawnflags & 2) !== 0 ? 100 : 25]);
   if (name === "item_armor1" || name === "item_armor2" || name === "item_armorInv") return game.message(other, "$qc_item_armor", false);
   if (name === "item_key1" || name === "item_key2") {
@@ -271,44 +442,79 @@ function sendPickupMessage(game: Q1EntityServices, entity: Q1Actor, other: Actor
   return item === undefined ? undefined : game.message(other, "$qc_got_item", false, [item]);
 }
 function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
-    const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
-    if (entity.solid !== "trigger") return undefined;
-    const player = pickupPlayer(game, other); if (player === null) return undefined;
-    const key = entity.classname === "item_key1" ? "q1:key/silver" : entity.classname === "item_key2" ? "q1:key/gold" : null;
-    const item: ItemId = definition.supply?.offer.item ?? key ?? `q1:${entity.classname}`;
-    const armor = ["item_armor1", "item_armor2", "item_armorInv"].includes(entity.classname);
-    const resource: PickupResource | null = armor ? { kind: "protection", channel: "regular" }
-      : definition.supply !== undefined || key !== null ? { kind: "inventory", item } : null;
-    let leave = false, originalRan = false;
-    const live = () => game.live(entity) && game.host.actors.isLive(other);
-    // COOP_RESPAWN_ITEMS_FOR_PLAYERS: one player cannot collect every respawn of a coop item.
-    const shared = game.sourceItemStart !== null && game.options.coop && !entity.classname.startsWith("weapon_") && !entity.classname.startsWith("item_key") && entity.classname !== "item_backpack";
-    const previous = entity.references.get("enemy");
-    if (shared && entity.wait <= 0 && previous != null && sameActor(previous, other)) return undefined;
-    return touchQ1Pickup(game, entity, other, item, resource, {
-      original: () => { originalRan = true; const result = definition.take(game, entity, player); leave = result === "leave"; return result !== "refused"; },
+  const definition = pickupDefinition(game, entity);
+  if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
+  if (entity.solid !== "trigger") return undefined;
+  const player = pickupPlayer(game, other);
+  if (player === null) return undefined;
+  const key = entity.classname === "item_key1" ? "q1:key/silver" : entity.classname === "item_key2" ? "q1:key/gold" : null;
+  const item: ItemId = definition.supply?.offer.item ?? key ?? `q1:${entity.classname}`;
+  const armor = ["item_armor1", "item_armor2", "item_armorInv"].includes(entity.classname);
+  const resource: PickupResource | null = armor
+    ? { kind: "protection", channel: "regular" }
+    : definition.supply !== undefined || key !== null
+      ? { kind: "inventory", item }
+      : null;
+  let leave = false,
+    originalRan = false;
+  const live = () => game.live(entity) && game.host.actors.isLive(other);
+  // COOP_RESPAWN_ITEMS_FOR_PLAYERS: one player cannot collect every respawn of a coop item.
+  const shared =
+    game.sourceItemStart !== null &&
+    game.options.coop &&
+    !entity.classname.startsWith("weapon_") &&
+    !entity.classname.startsWith("item_key") &&
+    entity.classname !== "item_backpack";
+  const previous = entity.references.get("enemy");
+  if (shared && entity.wait <= 0 && previous != null && sameActor(previous, other)) return undefined;
+  return touchQ1Pickup(
+    game,
+    entity,
+    other,
+    item,
+    resource,
+    {
+      original: () => {
+        originalRan = true;
+        const result = definition.take(game, entity, player);
+        leave = result === "leave";
+        return result !== "refused";
+      },
       complete: taken => {
         if (!taken) return;
         if (shared) entity.references.set("enemy", other);
-        if (!originalRan) leave = definition.supply?.kind === "weapon"
-          ? game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch))
-          : key !== null && game.options.coop;
+        if (!originalRan)
+          leave =
+            definition.supply?.kind === "weapon"
+              ? (game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch)))
+              : key !== null && game.options.coop;
         if (!live()) return;
         sendPickupMessage(game, entity, other);
         if (!live()) return;
-        if (game.options.edition === "rerelease" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2 && !game.sourceNoMegaRot) player.megaRotAt = game.time + 5;
+        if (game.options.edition === "rerelease" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2 && !game.sourceNoMegaRot)
+          player.megaRotAt = game.time + 5;
         game.sound(player.actor, definition.sound, "item");
         if (!live()) return;
         game.effect("pickup", game.body(entity).origin, player.actor.id);
         if (!live()) return;
-        if (definition.cargo !== undefined) { game.remove(entity); return; }
-        if (leave) {
-          // MG weapon_touch fires the targets before the leave return, once.
-          if (!entity.classname.startsWith("weapon_")) { game.useTargets(entity, other); if (key !== null && game.sourceItemStart !== null) entity.target = ""; }
-          else if (game.sourceItemStart !== null) { game.useTargets(entity, other); entity.target = ""; }
+        if (definition.cargo !== undefined) {
+          game.remove(entity);
           return;
         }
-        entity.solid = "none"; entity.model = ""; game.link(entity);
+        if (leave) {
+          // MG weapon_touch fires the targets before the leave return, once.
+          if (!entity.classname.startsWith("weapon_")) {
+            game.useTargets(entity, other);
+            if (key !== null && game.sourceItemStart !== null) entity.target = "";
+          } else if (game.sourceItemStart !== null) {
+            game.useTargets(entity, other);
+            entity.target = "";
+          }
+          return;
+        }
+        entity.solid = "none";
+        entity.model = "";
+        game.link(entity);
         if (!live()) return;
         const respawn = game.pickupRules?.respawn?.(game, entity, definition.respawn) ?? definition.respawn;
         if (!live()) return;
@@ -318,41 +524,73 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
           game.schedule(entity, 5, game.named.action(entity, "health_rot"));
         } else if (game.sourceItemStart !== null && game.options.coop && entity.classname === "item_artifact_envirosuit") {
           if (live()) game.useTargets(entity, other);
-          entity.target = ""; game.schedule(entity, 2.5, game.named.action(entity, "SUB_regen")); return;
+          entity.target = "";
+          game.schedule(entity, 2.5, game.named.action(entity, "SUB_regen"));
+          return;
         } else if (respawns) game.schedule(entity, respawn, game.named.action(entity, "SUB_regen"));
         else if (shared && entity.wait <= 0) {
           entity.count++;
           if (entity.count < game.host.players().length) game.schedule(entity, 1, game.named.action(entity, "SUB_regen"));
-          else { entity.references.set("enemy", null); entity.count = 0; game.schedule(entity, 6 * 60, game.named.action(entity, "SUB_regen")); }
+          else {
+            entity.references.set("enemy", null);
+            entity.count = 0;
+            game.schedule(entity, 6 * 60, game.named.action(entity, "SUB_regen"));
+          }
         } else if (game.sourceItemStart !== null && entity.wait > 0) {
-          entity.references.set("enemy", null); game.schedule(entity, entity.wait, game.named.action(entity, "SUB_regen"));
+          entity.references.set("enemy", null);
+          game.schedule(entity, entity.wait, game.named.action(entity, "SUB_regen"));
         } else game.cancel(entity);
         if (live()) game.useTargets(entity, other);
       },
-    }, definition.cargo);
+    },
+    definition.cargo,
+  );
 }
 
 function placeItem(game: Q1EntityServices, entity: Q1Actor): undefined {
-    const body = game.body(entity); const start = vadd(body.origin, { x: 0, y: 0, z: 6 });
-    if (game.sourceItemStart !== null && (entity.spawnflags & 65536) !== 0) {
-      // DROPTOFLOOR_DISABLE: the item keeps its authored height plus the six-unit lift and never drops or falls out of the level.
-      entity.solid = "trigger"; entity.movement = "none"; entity.movementFlags = 256;
-      game.setBody(entity, { origin: start, velocity: ZERO }); game.link(entity); return undefined;
-    }
-    const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
-    if (trace.allSolid || trace.fraction === 1) return game.remove(entity);
-    entity.solid = "trigger"; entity.movement = "toss"; entity.movementFlags = 256 | 512;
-    game.setBody(entity, { origin: trace.end, velocity: ZERO, ground: trace.actor }); game.link(entity); return undefined;
+  const body = game.body(entity);
+  const start = vadd(body.origin, { x: 0, y: 0, z: 6 });
+  if (game.sourceItemStart !== null && (entity.spawnflags & 65536) !== 0) {
+    // DROPTOFLOOR_DISABLE: the item keeps its authored height plus the six-unit lift and never drops or falls out of the level.
+    entity.solid = "trigger";
+    entity.movement = "none";
+    entity.movementFlags = 256;
+    game.setBody(entity, { origin: start, velocity: ZERO });
+    game.link(entity);
+    return undefined;
+  }
+  const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
+  if (trace.allSolid || trace.fraction === 1) return game.remove(entity);
+  entity.solid = "trigger";
+  entity.movement = "toss";
+  entity.movementFlags = 256 | 512;
+  game.setBody(entity, { origin: trace.end, velocity: ZERO, ground: trace.actor });
+  game.link(entity);
+  return undefined;
 }
 export function registerPickupCallbacks(game: Q1EntityServices): undefined {
   game.named.register("item_touch", { touch: pickupTouch });
   game.named.register("PlaceItem", { action: placeItem });
-  game.named.register("SUB_regen", { action: (runtime, entity) => { entity.solid = "trigger"; entity.model = entity.originalModel; runtime.sound(entity, "items/itembk2.wav"); return runtime.link(entity); } });
-  game.named.register("health_rot", { action: (runtime, entity) => {
-    const player = entity.owner === null ? null : runtime.player(entity.owner);
-    if (player !== null && runtime.health(player.actor.id) > player.maxHealth) { runtime.host.combat.setHealth(player.actor, runtime.health(player.actor.id) - 1); return runtime.schedule(entity, 1, runtime.named.action(entity, "health_rot")); }
-    const regenerates = runtime.sourceItemStart !== null ? runtime.options.deathmatch !== 0 && runtime.options.deathmatch !== 2 : runtime.options.deathmatch === 1;
-    if (regenerates) return runtime.schedule(entity, 20, runtime.named.action(entity, "SUB_regen")); return undefined;
-  } });
+  game.named.register("SUB_regen", {
+    action: (runtime, entity) => {
+      entity.solid = "trigger";
+      entity.model = entity.originalModel;
+      runtime.sound(entity, "items/itembk2.wav");
+      return runtime.link(entity);
+    },
+  });
+  game.named.register("health_rot", {
+    action: (runtime, entity) => {
+      const player = entity.owner === null ? null : runtime.player(entity.owner);
+      if (player !== null && runtime.health(player.actor.id) > player.maxHealth) {
+        runtime.host.combat.setHealth(player.actor, runtime.health(player.actor.id) - 1);
+        return runtime.schedule(entity, 1, runtime.named.action(entity, "health_rot"));
+      }
+      const regenerates =
+        runtime.sourceItemStart !== null ? runtime.options.deathmatch !== 0 && runtime.options.deathmatch !== 2 : runtime.options.deathmatch === 1;
+      if (regenerates) return runtime.schedule(entity, 20, runtime.named.action(entity, "SUB_regen"));
+      return undefined;
+    },
+  });
   return undefined;
 }

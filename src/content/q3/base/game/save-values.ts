@@ -1,10 +1,59 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../../persistence/value.ts";
 import type { GameEntity, GameClient, ClientPersistant, PlayerTeamState, ClientSession } from "./state.ts";
 import type { PlayerState } from "../shared/player-state.ts";
 import type { EntityStateFields } from "../shared/entity-state.ts";
 import type { GameLevel } from "./level.ts";
 
-export type EntityValues = Pick<GameEntity, "spawnflags" | "neverFree" | "flags" | "model" | "model2" | "freetime" | "eventTime" | "freeAfterEvent" | "unlinkAfterEvent" | "physicsObject" | "physicsBounce" | "clipmask" | "moverState" | "soundPos1" | "sound1to2" | "sound2to1" | "soundPos2" | "soundLoop" | "pos1" | "pos2" | "message" | "timestamp" | "angle" | "target" | "targetname" | "team" | "targetShaderName" | "targetShaderNewName" | "speed" | "movedir" | "painDebounceTime" | "flySoundDebounceTime" | "lastMoveTime" | "damage" | "splashDamage" | "splashRadius" | "methodOfDeath" | "splashMethodOfDeath" | "count" | "kamikazeTime" | "kamikazeShockTime" | "watertype" | "waterlevel" | "noiseIndex" | "wait" | "random">;
+export type EntityValues = Pick<
+  GameEntity,
+  | "spawnflags"
+  | "neverFree"
+  | "flags"
+  | "model"
+  | "model2"
+  | "freetime"
+  | "eventTime"
+  | "freeAfterEvent"
+  | "unlinkAfterEvent"
+  | "physicsObject"
+  | "physicsBounce"
+  | "clipmask"
+  | "moverState"
+  | "soundPos1"
+  | "sound1to2"
+  | "sound2to1"
+  | "soundPos2"
+  | "soundLoop"
+  | "pos1"
+  | "pos2"
+  | "message"
+  | "timestamp"
+  | "angle"
+  | "target"
+  | "targetname"
+  | "team"
+  | "targetShaderName"
+  | "targetShaderNewName"
+  | "speed"
+  | "movedir"
+  | "painDebounceTime"
+  | "flySoundDebounceTime"
+  | "lastMoveTime"
+  | "damage"
+  | "splashDamage"
+  | "splashRadius"
+  | "methodOfDeath"
+  | "splashMethodOfDeath"
+  | "count"
+  | "kamikazeTime"
+  | "kamikazeShockTime"
+  | "watertype"
+  | "waterlevel"
+  | "noiseIndex"
+  | "wait"
+  | "random"
+>;
 export function captureEntityValues(source: GameEntity): EntityValues {
   return {
     spawnflags: source.spawnflags,
@@ -104,7 +153,38 @@ export function restoreEntityValues(target: GameEntity, state: EntityValues): vo
   target.random = state.random;
 }
 
-export type ClientValues = Pick<GameClient, "readyToExit" | "noclip" | "lastCmdTime" | "buttons" | "oldButtons" | "latchedButtons" | "oldOrigin" | "damageArmor" | "damageBlood" | "damageKnockback" | "damageFrom" | "damageFromWorld" | "accurateCount" | "accuracyShots" | "accuracyHits" | "lastKilledClient" | "lastHurtClient" | "lastHurtMod" | "respawnTime" | "inactivityTime" | "inactivityWarning" | "rewardTime" | "airOutTime" | "lastKillTime" | "fireHeld" | "switchTeamTime" | "timeResidual" | "portalID" | "invulnerabilityTime">;
+export type ClientValues = Pick<
+  GameClient,
+  | "readyToExit"
+  | "noclip"
+  | "lastCmdTime"
+  | "buttons"
+  | "oldButtons"
+  | "latchedButtons"
+  | "oldOrigin"
+  | "damageArmor"
+  | "damageBlood"
+  | "damageKnockback"
+  | "damageFrom"
+  | "damageFromWorld"
+  | "accurateCount"
+  | "accuracyShots"
+  | "accuracyHits"
+  | "lastKilledClient"
+  | "lastHurtClient"
+  | "lastHurtMod"
+  | "respawnTime"
+  | "inactivityTime"
+  | "inactivityWarning"
+  | "rewardTime"
+  | "airOutTime"
+  | "lastKillTime"
+  | "fireHeld"
+  | "switchTeamTime"
+  | "timeResidual"
+  | "portalID"
+  | "invulnerabilityTime"
+>;
 export function captureClientValues(source: GameClient): ClientValues {
   return {
     readyToExit: source.readyToExit,
@@ -170,7 +250,46 @@ export function restoreClientValues(target: GameClient, state: ClientValues): vo
   target.invulnerabilityTime = state.invulnerabilityTime;
 }
 
-export type PlayerValues = Pick<PlayerState, "commandTime" | "pmType" | "bobCycle" | "pmFlags" | "pmTime" | "weaponTime" | "gravity" | "speed" | "deltaAngles" | "groundEntityNum" | "legsTimer" | "legsAnim" | "torsoTimer" | "torsoAnim" | "movementDir" | "grapplePoint" | "eFlags" | "eventSequence" | "externalEvent" | "externalEventParm" | "externalEventTime" | "clientNum" | "weapon" | "weaponState" | "viewangles" | "viewheight" | "damageEvent" | "damageYaw" | "damagePitch" | "damageCount" | "generic1" | "loopSound" | "jumppadEnt" | "ping" | "pmoveFramecount" | "jumppadFrame" | "entityEventSequence">;
+export type PlayerValues = Pick<
+  PlayerState,
+  | "commandTime"
+  | "pmType"
+  | "bobCycle"
+  | "pmFlags"
+  | "pmTime"
+  | "weaponTime"
+  | "gravity"
+  | "speed"
+  | "deltaAngles"
+  | "groundEntityNum"
+  | "legsTimer"
+  | "legsAnim"
+  | "torsoTimer"
+  | "torsoAnim"
+  | "movementDir"
+  | "grapplePoint"
+  | "eFlags"
+  | "eventSequence"
+  | "externalEvent"
+  | "externalEventParm"
+  | "externalEventTime"
+  | "clientNum"
+  | "weapon"
+  | "weaponState"
+  | "viewangles"
+  | "viewheight"
+  | "damageEvent"
+  | "damageYaw"
+  | "damagePitch"
+  | "damageCount"
+  | "generic1"
+  | "loopSound"
+  | "jumppadEnt"
+  | "ping"
+  | "pmoveFramecount"
+  | "jumppadFrame"
+  | "entityEventSequence"
+>;
 export function capturePlayerValues(source: PlayerState): PlayerValues {
   return {
     commandTime: source.commandTime,
@@ -252,7 +371,20 @@ export function restorePlayerValues(target: PlayerState, state: PlayerValues): v
   target.entityEventSequence = state.entityEventSequence;
 }
 
-export type PersistantValues = Pick<ClientPersistant, "connected" | "localClient" | "initialSpawn" | "predictItemPickup" | "pmoveFixed" | "netname" | "maxHealth" | "enterTime" | "voteCount" | "teamVoteCount" | "teamInfo">;
+export type PersistantValues = Pick<
+  ClientPersistant,
+  | "connected"
+  | "localClient"
+  | "initialSpawn"
+  | "predictItemPickup"
+  | "pmoveFixed"
+  | "netname"
+  | "maxHealth"
+  | "enterTime"
+  | "voteCount"
+  | "teamVoteCount"
+  | "teamInfo"
+>;
 export function capturePersistantValues(source: ClientPersistant): PersistantValues {
   return {
     connected: source.connected,
@@ -282,7 +414,21 @@ export function restorePersistantValues(target: ClientPersistant, state: Persist
   target.teamInfo = state.teamInfo;
 }
 
-export type TeamValues = Pick<PlayerTeamState, "state" | "location" | "captures" | "baseDefense" | "carrierDefense" | "flagRecovery" | "fragCarrier" | "assists" | "lastHurtCarrier" | "lastReturnedFlag" | "flagSince" | "lastFraggedCarrier">;
+export type TeamValues = Pick<
+  PlayerTeamState,
+  | "state"
+  | "location"
+  | "captures"
+  | "baseDefense"
+  | "carrierDefense"
+  | "flagRecovery"
+  | "fragCarrier"
+  | "assists"
+  | "lastHurtCarrier"
+  | "lastReturnedFlag"
+  | "flagSince"
+  | "lastFraggedCarrier"
+>;
 export function captureTeamValues(source: PlayerTeamState): TeamValues {
   return {
     state: source.state,
@@ -336,7 +482,35 @@ export function restoreSessionValues(target: ClientSession, state: SessionValues
   target.teamLeader = state.teamLeader;
 }
 
-export type NetworkValues = Pick<EntityStateFields, "number" | "eType" | "eFlags" | "time" | "time2" | "origin" | "origin2" | "angles" | "angles2" | "otherEntityNum" | "otherEntityNum2" | "groundEntityNum" | "constantLight" | "loopSound" | "modelindex" | "modelindex2" | "clientNum" | "frame" | "solid" | "event" | "eventParm" | "powerups" | "weapon" | "legsAnim" | "torsoAnim" | "generic1">;
+export type NetworkValues = Pick<
+  EntityStateFields,
+  | "number"
+  | "eType"
+  | "eFlags"
+  | "time"
+  | "time2"
+  | "origin"
+  | "origin2"
+  | "angles"
+  | "angles2"
+  | "otherEntityNum"
+  | "otherEntityNum2"
+  | "groundEntityNum"
+  | "constantLight"
+  | "loopSound"
+  | "modelindex"
+  | "modelindex2"
+  | "clientNum"
+  | "frame"
+  | "solid"
+  | "event"
+  | "eventParm"
+  | "powerups"
+  | "weapon"
+  | "legsAnim"
+  | "torsoAnim"
+  | "generic1"
+>;
 export function captureNetworkValues(source: EntityStateFields): NetworkValues {
   return {
     number: source.number,
@@ -396,7 +570,31 @@ export function restoreNetworkValues(target: EntityStateFields, state: NetworkVa
   target.generic1 = state.generic1;
 }
 
-export type LevelValues = Pick<GameLevel, "time" | "startTime" | "warmupTime" | "warmupModificationCount" | "restarted" | "numConnectedClients" | "numNonSpectatorClients" | "numPlayingClients" | "numVotingClients" | "follow1" | "follow2" | "intermissionTime" | "intermissionQueued" | "intermissionOrigin" | "intermissionAngle" | "changemap" | "readyToExit" | "exitTime" | "frameNum" | "previousTime" | "newSession" | "frySound">;
+export type LevelValues = Pick<
+  GameLevel,
+  | "time"
+  | "startTime"
+  | "warmupTime"
+  | "warmupModificationCount"
+  | "restarted"
+  | "numConnectedClients"
+  | "numNonSpectatorClients"
+  | "numPlayingClients"
+  | "numVotingClients"
+  | "follow1"
+  | "follow2"
+  | "intermissionTime"
+  | "intermissionQueued"
+  | "intermissionOrigin"
+  | "intermissionAngle"
+  | "changemap"
+  | "readyToExit"
+  | "exitTime"
+  | "frameNum"
+  | "previousTime"
+  | "newSession"
+  | "frySound"
+>;
 export function captureLevelValues(source: GameLevel): LevelValues {
   return {
     time: source.time,
@@ -678,4 +876,6 @@ export function readLevelValues(reader: SaveReader): LevelValues {
   };
 }
 
-export function readVector(reader: SaveReader) { return { x: reader.field("x").number(), y: reader.field("y").number(), z: reader.field("z").number() }; }
+export function readVector(reader: SaveReader) {
+  return { x: reader.field("x").number(), y: reader.field("y").number(), z: reader.field("z").number() };
+}

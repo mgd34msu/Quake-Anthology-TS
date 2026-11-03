@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { SavedActorId } from "../../../contracts/session.ts";
 import { readSavedActor, savedActorId } from "../../../persistence/save-image.ts";
 import { SaveReader } from "../../../persistence/value.ts";
@@ -29,7 +30,8 @@ const zero = { x: 0, y: 0, z: 0 };
 
 /** A sensory projection and ID lookup over existing shared actors, with no entity or physics ownership. */
 export function createSharedBotWorld(options: Options) {
-  const simulation = options.simulation, source = simulation.q2Source() ?? simulation.q1Source();
+  const simulation = options.simulation,
+    source = simulation.q2Source() ?? simulation.q1Source();
   if (source === null) throw new Error("Shared bot observations require an admitted Q1 or Q2 world");
   const arsenal = simulation.q2WeaponSource();
   const numeric = simulation.recipe.timing.find(entry => entry.provider === simulation.recipe.engineBehavior.provider)?.numeric;
@@ -43,56 +45,103 @@ export function createSharedBotWorld(options: Options) {
       return player === undefined ? null : { name: player.name, spectator: player.spectator, score: player.score, skin: player.skin };
     }
     const player = source.composition.clients.get(actor);
-    return player === null ? null : { name: player.name, spectator: player.observer, score: player.frags, skin: simulation.recipe.character.appearance.provider };
+    return player === null
+      ? null
+      : { name: player.name, spectator: player.observer, score: player.frags, skin: simulation.recipe.character.appearance.provider };
   };
   const metadata = (actor: ActorId | null) => {
     if (actor === null) return null;
-    const q2 = source.kind === "q2" ? source.game.entity(actor) : arsenal?.game.entity(actor) ?? null;
+    const q2 = source.kind === "q2" ? source.game.entity(actor) : (arsenal?.game.entity(actor) ?? null);
     if (q2 !== null) return { model: q2.model, frame: q2.frame, classname: q2.classname, hidden: (q2.serverFlags & 1) !== 0, maxHealth: q2.maxHealth };
     const q1 = source.kind === "q1" ? source.game.entity(actor) : null;
-    return q1 === null ? null : { model: q1.model, frame: q1.frame, classname: q1.classname, hidden: false, maxHealth: source.kind === "q1" ? source.game.player(actor)?.maxHealth ?? q1.maxHealth : q1.maxHealth };
+    return q1 === null
+      ? null
+      : {
+          model: q1.model,
+          frame: q1.frame,
+          classname: q1.classname,
+          hidden: false,
+          maxHealth: source.kind === "q1" ? (source.game.player(actor)?.maxHealth ?? q1.maxHealth) : q1.maxHealth,
+        };
   };
   const knowledge = createBotArsenalBinding(simulation, client => actorForId(client));
   if (knowledge === null) throw new Error("Shared bot arsenal binding is unavailable");
   const cvars = options.cvars;
   if (!options.restoring) {
-    for (const [name, value] of Object.entries({ sv_maxclients: String(simulation.options.maxClients), g_gametype: "0", mapname: mapName,
-    sv_mapname: mapName, g_spSkill: "2", bot_enable: "1", bot_minplayers: "0", dedicated: "1", g_gravity: String(simulation.physics.gravity) })) cvars.register(name, value);
-    cvars.set("mapname", mapName, true); cvars.set("sv_mapname", mapName, true);
+    for (const [name, value] of Object.entries({
+      sv_maxclients: String(simulation.options.maxClients),
+      g_gametype: "0",
+      mapname: mapName,
+      sv_mapname: mapName,
+      g_spSkill: "2",
+      bot_enable: "1",
+      bot_minplayers: "0",
+      dedicated: "1",
+      g_gravity: String(simulation.physics.gravity),
+    }))
+      cvars.register(name, value);
+    cvars.set("mapname", mapName, true);
+    cvars.set("sv_mapname", mapName, true);
   }
-  const ids = new Map<ActorId, number>(), actors = new Map<number, ActorId>(), userinfos = new Map<number, string>(), strings = new Map<number, string>(), models = new Map<string, number>();
-  let nextEntity = 64, nextGeneration = 1;
-  const freeIds: number[] = [], generations = new Map<number, number>(), begun = new Set<number>();
+  const ids = new Map<ActorId, number>(),
+    actors = new Map<number, ActorId>(),
+    userinfos = new Map<number, string>(),
+    strings = new Map<number, string>(),
+    models = new Map<string, number>();
+  let nextEntity = 64,
+    nextGeneration = 1;
+  const freeIds: number[] = [],
+    generations = new Map<number, number>(),
+    begun = new Set<number>();
   const retire = (): void => {
-    for (const [actor, id] of ids) if (!simulation.actors.isLive(actor)) { ids.delete(actor); actors.delete(id); freeIds.push(id); }
+    for (const [actor, id] of ids)
+      if (!simulation.actors.isLive(actor)) {
+        ids.delete(actor);
+        actors.delete(id);
+        freeIds.push(id);
+      }
   };
   const entityId = (actor: ActorId): number => {
     const player = simulation.movementPlayer(actor);
     if (player !== null) return player.client.slot;
     if (metadata(actor)?.classname === "worldspawn") return 1022;
-    const existing = ids.get(actor); if (existing !== undefined) return existing;
+    const existing = ids.get(actor);
+    if (existing !== undefined) return existing;
     retire();
     const id = freeIds.pop() ?? nextEntity++;
     if (id >= 1022) throw new Error("Live bot observations exceed the current simultaneous entity capacity");
-    ids.set(actor, id); actors.set(id, actor); generations.set(id, nextGeneration++); return id;
+    ids.set(actor, id);
+    actors.set(id, actor);
+    generations.set(id, nextGeneration++);
+    return id;
   };
   const refresh = (): void => {
     retire();
     for (const actor of simulation.actors.observations()) if (simulation.bodies.read(actor.id) !== null) entityId(actor.id);
   };
   const actorForId = (number: number): ActorId | null => {
-    const actor = number < 64 ? simulation.players().find(actor => simulation.movementPlayer(actor)?.client.slot === number) ?? null
-      : number === 1022 ? source.kind === "q1" ? source.game.world?.actor.id ?? null : source.game.host.worldActor() : actors.get(number) ?? null;
+    const actor =
+      number < 64
+        ? (simulation.players().find(actor => simulation.movementPlayer(actor)?.client.slot === number) ?? null)
+        : number === 1022
+          ? source.kind === "q1"
+            ? (source.game.world?.actor.id ?? null)
+            : source.game.host.worldActor()
+          : (actors.get(number) ?? null);
     return actor !== null && simulation.actors.isLive(actor) ? actor : null;
   };
   const modelIndex = (name: string): number => {
     if (name === "") return 0;
     if (name.startsWith("*")) return Number(name.slice(1));
-    const existing = models.get(name); if (existing !== undefined) return existing;
-    const index = simulation.options.world.models.length + models.size; models.set(name, index); return index;
+    const existing = models.get(name);
+    if (existing !== undefined) return existing;
+    const index = simulation.options.world.models.length + models.size;
+    models.set(name, index);
+    return index;
   };
   const playerInfo = (client: number): string => {
-    const actor = actorForId(client), player = clientInfo(actor);
+    const actor = actorForId(client),
+      player = clientInfo(actor);
     if (player === null) return "";
     return `\\n\\${player.name}\\t\\${player.spectator ? 3 : 0}\\model\\${player.skin}`;
   };
@@ -103,148 +152,309 @@ export function createSharedBotWorld(options: Options) {
     if (body === null) return null;
     const observation = source.kind === "q1" ? observeQ1Supply(source.game, actor, recipient) : source.items.observeSupply(source.game, actor, recipient);
     if (observation === null) return null;
-    const preview = source.kind === "q1" ? previewQ1Supply(source.game, actor, recipient)
-      : source.items.previewSupply(source.game, actor, recipient);
+    const preview = source.kind === "q1" ? previewQ1Supply(source.game, actor, recipient) : source.items.previewSupply(source.game, actor, recipient);
     if (preview === null) return null;
     const entity = metadata(actor);
-    return { observation, preview, entity: entityId(actor), origin: { ...body.origin },
-      bounds: { min: { ...body.bounds.min }, max: { ...body.bounds.max } }, name: entity?.classname ?? observation.offer.kind };
+    return {
+      observation,
+      preview,
+      entity: entityId(actor),
+      origin: { ...body.origin },
+      bounds: { min: { ...body.bounds.min }, max: { ...body.bounds.max } },
+      name: entity?.classname ?? observation.offer.kind,
+    };
   };
   const game: SourceBotGame = {
-    pickups: { inspect: inspectPickup, candidates: client => {
-      const pickups: BotObservedPickup[] = [];
-      for (const actor of actors.values()) { const pickup = inspectPickup(client, actor); if (pickup !== null) pickups.push(pickup); }
-      return pickups;
-    } },
-    options: { product: "baseq3", cvars, configstrings: { get: index => index >= 544 && index < 608 ? playerInfo(index - 544) : strings.get(index) ?? "", set: (index, value) => { strings.set(index, value); } },
-      engine: { print: options.print, getUserinfo: client => userinfos.get(client) ?? "", setUserinfo: (client, info) => { userinfos.set(client, info); },
-        sendServerCommand: options.message, dropClient: (client, reason) => { options.print(reason); options.drop(client); },
-        insertConsoleCommand: options.console, appendConsoleCommand: options.console } },
-    gameType: 0, maxClients: simulation.options.maxClients,
-    get entityCount() { return nextEntity; },
+    pickups: {
+      inspect: inspectPickup,
+      candidates: client => {
+        const pickups: BotObservedPickup[] = [];
+        for (const actor of actors.values()) {
+          const pickup = inspectPickup(client, actor);
+          if (pickup !== null) pickups.push(pickup);
+        }
+        return pickups;
+      },
+    },
+    options: {
+      product: "baseq3",
+      cvars,
+      configstrings: {
+        get: index => (index >= 544 && index < 608 ? playerInfo(index - 544) : (strings.get(index) ?? "")),
+        set: (index, value) => {
+          strings.set(index, value);
+        },
+      },
+      engine: {
+        print: options.print,
+        getUserinfo: client => userinfos.get(client) ?? "",
+        setUserinfo: (client, info) => {
+          userinfos.set(client, info);
+        },
+        sendServerCommand: options.message,
+        dropClient: (client, reason) => {
+          options.print(reason);
+          options.drop(client);
+        },
+        insertConsoleCommand: options.console,
+        appendConsoleCommand: options.console,
+      },
+    },
+    gameType: 0,
+    maxClients: simulation.options.maxClients,
+    get entityCount() {
+      return nextEntity;
+    },
     random: { random: () => source.game.host.random(), crandom: () => source.game.host.random() * 2 - 1 },
-    clock: { get time() { return Math.trunc(simulation.timeSeconds * 1000); }, startTime: 0, get intermissionTime() { return source.kind === "q2" ? source.players.intermission.kind === "playing" ? 0 : Math.trunc(source.players.intermission.started * 1000) : source.game.intermission === null ? 0 : Math.trunc((source.game.intermission.exitAfter - 5) * 1000); } },
-    memory: new GameMemory(() => 0, options.print), knowledge: { ...knowledge.knowledge, updateInventory: state => {
-      knowledge.knowledge.updateInventory(state);
-      const actor = actorForId(state.client);
-      if (source.kind === "q2") {
-        const powers = actor === null ? null : source.items.playerPowerups(actor), now = source.game.host.now();
-        state.inventory[BotInventory.QUAD] = Number(powers !== null && powers.quadUntil > now);
-        state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(powers !== null && (powers.breatherUntil > now || powers.enviroUntil > now));
-      } else {
-        state.inventory[BotInventory.QUAD] = Number(actor !== null && source.game.powerupExpires(actor, "quad") > source.game.time);
-        state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(actor !== null && source.game.powerupExpires(actor, "suit") > source.game.time);
-      }
-    } },
+    clock: {
+      get time() {
+        return Math.trunc(simulation.timeSeconds * 1000);
+      },
+      startTime: 0,
+      get intermissionTime() {
+        return source.kind === "q2"
+          ? source.players.intermission.kind === "playing"
+            ? 0
+            : Math.trunc(source.players.intermission.started * 1000)
+          : source.game.intermission === null
+            ? 0
+            : Math.trunc((source.game.intermission.exitAfter - 5) * 1000);
+      },
+    },
+    memory: new GameMemory(() => 0, options.print),
+    knowledge: {
+      ...knowledge.knowledge,
+      updateInventory: state => {
+        knowledge.knowledge.updateInventory(state);
+        const actor = actorForId(state.client);
+        if (source.kind === "q2") {
+          const powers = actor === null ? null : source.items.playerPowerups(actor),
+            now = source.game.host.now();
+          state.inventory[BotInventory.QUAD] = Number(powers !== null && powers.quadUntil > now);
+          state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(powers !== null && (powers.breatherUntil > now || powers.enviroUntil > now));
+        } else {
+          state.inventory[BotInventory.QUAD] = Number(actor !== null && source.game.powerupExpires(actor, "quad") > source.game.time);
+          state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(actor !== null && source.game.powerupExpires(actor, "suit") > source.game.time);
+        }
+      },
+    },
     observable: number => {
       const actor = actorForId(number);
-      return actor !== null && simulation.actors.isLive(actor) && simulation.bodies.read(actor) !== null
-        && simulation.bodies.linked(actor) !== null && metadata(actor)?.hidden !== true;
+      return (
+        actor !== null &&
+        simulation.actors.isLive(actor) &&
+        simulation.bodies.read(actor) !== null &&
+        simulation.bodies.linked(actor) !== null &&
+        metadata(actor)?.hidden !== true
+      );
     },
     entity: number => {
-      const actor = actorForId(number), entity = metadata(actor), state = new EntityState(); state.number = number;
-      const body = actor === null ? null : simulation.bodies.read(actor), movement = actor === null ? null : simulation.movementPlayer(actor);
+      const actor = actorForId(number),
+        entity = metadata(actor),
+        state = new EntityState();
+      state.number = number;
+      const body = actor === null ? null : simulation.bodies.read(actor),
+        movement = actor === null ? null : simulation.movementPlayer(actor);
       const common = clientInfo(actor);
       let player: BotObservedEntity["player"] = null;
       if (actor !== null && movement !== null && common !== null && body !== null) {
-        const ps = new PlayerState("baseq3"), combat = simulation.combat.read(actor), schema = statSchema("baseq3");
-        ps.clientNum = movement.client.slot; ps.origin = { ...body.origin }; ps.velocity = { ...body.velocity }; ps.viewangles = { ...movement.viewAngles };
-        ps.viewheight = movement.viewHeight; ps.groundEntityNum = body.ground === null ? 1023 : entityId(body.ground);
+        const ps = new PlayerState("baseq3"),
+          combat = simulation.combat.read(actor),
+          schema = statSchema("baseq3");
+        ps.clientNum = movement.client.slot;
+        ps.origin = { ...body.origin };
+        ps.velocity = { ...body.velocity };
+        ps.viewangles = { ...movement.viewAngles };
+        ps.viewheight = movement.viewHeight;
+        ps.groundEntityNum = body.ground === null ? 1023 : entityId(body.ground);
         ps.pmType = common.spectator ? MoveType.PM_SPECTATOR : (combat?.health ?? 0) <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
-        ps.weapon = knowledge.sourceWeapon(number); ps.weaponState = knowledge.sourceWeaponState(number);
-        ps.stats.set(schema.health, combat?.health ?? 0); ps.stats.set(schema.armor, combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points); ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
-        ps.persistant.set(0, common.score); ps.persistant.set(3, common.spectator ? 3 : 0);
-        player = { state: ps, connected: options.actor(number) === null || begun.has(number), team: common.spectator ? 3 : 0, name: common.name, lastHurtClient: 0, lastHurtMod: 0 };
-        state.eType = EntityType.ET_PLAYER; state.weapon = ps.weapon; Object.assign(state.pos.base, body.origin); Object.assign(state.apos.base, movement.viewAngles);
+        ps.weapon = knowledge.sourceWeapon(number);
+        ps.weaponState = knowledge.sourceWeaponState(number);
+        ps.stats.set(schema.health, combat?.health ?? 0);
+        ps.stats.set(schema.armor, combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points);
+        ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
+        ps.persistant.set(0, common.score);
+        ps.persistant.set(3, common.spectator ? 3 : 0);
+        player = {
+          state: ps,
+          connected: options.actor(number) === null || begun.has(number),
+          team: common.spectator ? 3 : 0,
+          name: common.name,
+          lastHurtClient: 0,
+          lastHurtMod: 0,
+        };
+        state.eType = EntityType.ET_PLAYER;
+        state.weapon = ps.weapon;
+        Object.assign(state.pos.base, body.origin);
+        Object.assign(state.apos.base, movement.viewAngles);
         state.groundEntityNum = ps.groundEntityNum;
       } else state.eType = actor !== null && simulation.physics.solidOf(actor)?.solid === "brush" ? EntityType.ET_MOVER : EntityType.ET_GENERAL;
-      state.origin = { ...(body?.origin ?? zero) }; state.modelindex = entity === null ? 0 : modelIndex(entity.model); state.frame = entity?.frame ?? 0;
-      return { generation: number < 64 ? actor?.generation ?? 0 : generations.get(number) ?? 0, present: actor !== null && simulation.actors.isLive(actor) && body !== null, linked: actor !== null && simulation.bodies.linked(actor) !== null,
-        hidden: entity?.hidden ?? false, bot: actor !== null && options.actor(number)?.equals(actor) === true,
-        state, origin: { ...(body?.origin ?? zero) }, angles: { ...(body?.angles ?? zero) }, bounds: body?.bounds ?? { min: zero, max: zero },
+      state.origin = { ...(body?.origin ?? zero) };
+      state.modelindex = entity === null ? 0 : modelIndex(entity.model);
+      state.frame = entity?.frame ?? 0;
+      return {
+        generation: number < 64 ? (actor?.generation ?? 0) : (generations.get(number) ?? 0),
+        present: actor !== null && simulation.actors.isLive(actor) && body !== null,
+        linked: actor !== null && simulation.bodies.linked(actor) !== null,
+        hidden: entity?.hidden ?? false,
+        bot: actor !== null && options.actor(number)?.equals(actor) === true,
+        state,
+        origin: { ...(body?.origin ?? zero) },
+        angles: { ...(body?.angles ?? zero) },
+        bounds: body?.bounds ?? { min: zero, max: zero },
         contents: actor !== null && simulation.physics.solidOf(actor)?.solid === "brush" ? 1 : player === null ? 0 : 0x2000000,
         inlineModel: entity?.model.startsWith("*") ? Number(entity.model.slice(1)) : null,
-        classname: entity?.classname ?? null, eventTime: 0, activatorFrame: null, proximityTrigger: false, player };
+        classname: entity?.classname ?? null,
+        eventTime: 0,
+        activatorFrame: null,
+        proximityTrigger: false,
+        player,
+      };
     },
-    world: { pointContents: point => {
-      const result = simulation.scene.pointContents({ point, target: { kind: "world" }, passActor: null, policy, numeric });
-      if (result.kind !== "q3") throw new Error("Bot contents did not use the Q3 decision representation");
-      return result.contents;
-    }, trace: query => {
-      const result = simulation.scene.trace({ start: query.start, end: query.end,
-        shape: query.shape.kind === "point" ? { kind: "point" } : { kind: "box", bounds: { min: query.shape.mins, max: query.shape.maxs } },
-        target: { kind: "world" }, policy: { ...policy, contentsMask: query.mask }, numeric, passActor: actorForId(query.passEntityNum) });
-      if (result.kind !== "q3") throw new Error("Bot trace did not use the Q3 decision representation");
-      return { fraction: result.fraction, end: result.end, entityNum: result.hit.kind === "actor" ? entityId(result.hit.actor) : result.hit.kind === "world" ? 1022 : 1023,
-        solidity: result.allSolid ? "all-solid" : result.startSolid ? "start-solid" : "clear", contact: result.contact,
-        contents: result.contents, surfaceFlags: result.surfaceFlags };
-    } },
-    modelIndex, chooseTeam: () => 0, activateBot: client => {
-      if (source.kind === "q2") { const entity = source.game.entity(options.actor(client)); if (entity !== null) entity.serverFlags |= 16; }
+    world: {
+      pointContents: point => {
+        const result = simulation.scene.pointContents({ point, target: { kind: "world" }, passActor: null, policy, numeric });
+        if (result.kind !== "q3") throw new Error("Bot contents did not use the Q3 decision representation");
+        return result.contents;
+      },
+      trace: query => {
+        const result = simulation.scene.trace({
+          start: query.start,
+          end: query.end,
+          shape: query.shape.kind === "point" ? { kind: "point" } : { kind: "box", bounds: { min: query.shape.mins, max: query.shape.maxs } },
+          target: { kind: "world" },
+          policy: { ...policy, contentsMask: query.mask },
+          numeric,
+          passActor: actorForId(query.passEntityNum),
+        });
+        if (result.kind !== "q3") throw new Error("Bot trace did not use the Q3 decision representation");
+        return {
+          fraction: result.fraction,
+          end: result.end,
+          entityNum: result.hit.kind === "actor" ? entityId(result.hit.actor) : result.hit.kind === "world" ? 1022 : 1023,
+          solidity: result.allSolid ? "all-solid" : result.startSolid ? "start-solid" : "clear",
+          contact: result.contact,
+          contents: result.contents,
+          surfaceFlags: result.surfaceFlags,
+        };
+      },
     },
-    exitLevel: () => { if (source.kind === "q2") source.players.endDeathmatchLevel(source.game); else source.game.requestIntermissionExit(simulation.timeSeconds, true); }, resetPodiumPlayers: () => {},
+    modelIndex,
+    chooseTeam: () => 0,
+    activateBot: client => {
+      if (source.kind === "q2") {
+        const entity = source.game.entity(options.actor(client));
+        if (entity !== null) entity.serverFlags |= 16;
+      }
+    },
+    exitLevel: () => {
+      if (source.kind === "q2") source.players.endDeathmatchLevel(source.game);
+      else source.game.requestIntermissionExit(simulation.timeSeconds, true);
+    },
+    resetPodiumPlayers: () => {},
     clientUserinfoChanged: client => {
       const actor = options.actor(client);
       if (actor === null) return;
-      if (source.kind === "q2") { const entity = source.game.entity(actor); if (entity !== null) source.players.userinfoChanged(entity, source.game, userinfos.get(client) ?? ""); }
-      else {
-        const fields = (userinfos.get(client) ?? "").split("\\"), info = new Map<string, string>();
-        for (let index = 1; index + 1 < fields.length; index += 2) { const key = fields[index], value = fields[index + 1]; if (key !== undefined && value !== undefined) info.set(key, value); }
+      if (source.kind === "q2") {
+        const entity = source.game.entity(actor);
+        if (entity !== null) source.players.userinfoChanged(entity, source.game, userinfos.get(client) ?? "");
+      } else {
+        const fields = (userinfos.get(client) ?? "").split("\\"),
+          info = new Map<string, string>();
+        for (let index = 1; index + 1 < fields.length; index += 2) {
+          const key = fields[index],
+            value = fields[index + 1];
+          if (key !== undefined && value !== undefined) info.set(key, value);
+        }
         source.composition.clients.update(actor, info);
       }
     },
     clientConnect: (client, firstTime, bot) => {
       if (source.kind === "q2") {
-        const result = source.product.rerelease === null ? source.players.connect(source.game, userinfos.get(client) ?? "") : source.product.rerelease.players.connect(source.game, userinfos.get(client) ?? "", bot);
+        const result =
+          source.product.rerelease === null
+            ? source.players.connect(source.game, userinfos.get(client) ?? "")
+            : source.product.rerelease.players.connect(source.game, userinfos.get(client) ?? "", bot);
         if (!result.allowed) return result.reason;
         userinfos.set(client, result.userinfo);
       }
       game.clientUserinfoChanged(client);
       return options.connect(client, !firstTime) ? null : "Bot setup failed";
     },
-    clientBegin: client => { begun.add(client); options.begin(client); },
+    clientBegin: client => {
+      begun.add(client);
+      options.begin(client);
+    },
   };
   if (!options.restoring) refresh();
-  return { game, knowledge, entityId, actorForId, refresh,
+  return {
+    game,
+    knowledge,
+    entityId,
+    actorForId,
+    refresh,
     checkpoint() {
-      return { version: 1, source: source.kind, memory: game.memory.captureSaveState(), nextEntity, nextGeneration,
+      return {
+        version: 1,
+        source: source.kind,
+        memory: game.memory.captureSaveState(),
+        nextEntity,
+        nextGeneration,
         actors: Array.from(ids, ([actor, id]) => ({ actor: savedActorId(actor), id })),
-        freeIds: [...freeIds], generations: Array.from(generations, ([id, generation]) => ({ id, generation })),
-        begun: [...begun], userinfos: Array.from(userinfos, ([id, value]) => ({ id, value })),
-        strings: Array.from(strings, ([id, value]) => ({ id, value })), models: Array.from(models, ([name, id]) => ({ name, id })) };
+        freeIds: [...freeIds],
+        generations: Array.from(generations, ([id, generation]) => ({ id, generation })),
+        begun: [...begun],
+        userinfos: Array.from(userinfos, ([id, value]) => ({ id, value })),
+        strings: Array.from(strings, ([id, value]) => ({ id, value })),
+        models: Array.from(models, ([name, id]) => ({ name, id })),
+      };
     },
     restoreCheckpoint(value: unknown, actor: (saved: SavedActorId) => ActorId): void {
       const reader = new SaveReader(value, "sharedBotWorld");
-      reader.field("version").literal(1); reader.field("source").literal(source.kind);
+      reader.field("version").literal(1);
+      reader.field("source").literal(source.kind);
       const restoredMemory = new GameMemory(() => 0, options.print);
       restoredMemory.restoreSaveState(reader.field("memory").value);
-      const entityLimit = reader.field("nextEntity").integer(64), generationLimit = reader.field("nextGeneration").integer(1);
+      const entityLimit = reader.field("nextEntity").integer(64),
+        generationLimit = reader.field("nextGeneration").integer(1);
       if (entityLimit > 1022) reader.field("nextEntity").fail("observation entity capacity exceeded");
       const readEntity = (entry: SaveReader): number => {
         const id = entry.integer(64);
         if (id >= entityLimit) entry.fail("observation entity outside allocated range");
         return id;
       };
-      const restoredIds = new Map<ActorId, number>(), restoredActors = new Map<number, ActorId>(), seenActors = new Set<string>();
+      const restoredIds = new Map<ActorId, number>(),
+        restoredActors = new Map<number, ActorId>(),
+        seenActors = new Set<string>();
       reader.field("actors").list(entry => {
-        const id = readEntity(entry.field("id")), saved = readSavedActor(entry.field("actor")), key = `${saved.slot}:${saved.generation}`;
+        const id = readEntity(entry.field("id")),
+          saved = readSavedActor(entry.field("actor")),
+          key = `${saved.slot}:${saved.generation}`;
         if (restoredActors.has(id) || seenActors.has(key)) entry.fail("duplicate observation entity or actor");
         const resolved = actor(saved);
         if ([...restoredIds.keys()].some(existing => existing.equals(resolved))) entry.fail("duplicate remapped observation actor");
-        seenActors.add(key); restoredIds.set(resolved, id); restoredActors.set(id, resolved);
+        seenActors.add(key);
+        restoredIds.set(resolved, id);
+        restoredActors.set(id, resolved);
       });
-      const restoredFree: number[] = [], free = new Set<number>();
+      const restoredFree: number[] = [],
+        free = new Set<number>();
       reader.field("freeIds").list(entry => {
         const id = readEntity(entry);
         if (free.has(id) || restoredActors.has(id)) entry.fail("duplicate or active free observation entity");
-        free.add(id); restoredFree.push(id);
+        free.add(id);
+        restoredFree.push(id);
       });
       if (restoredActors.size + free.size !== entityLimit - 64) reader.fail("allocated observation entities are missing");
-      const restoredGenerations = new Map<number, number>(), usedGenerations = new Set<number>();
+      const restoredGenerations = new Map<number, number>(),
+        usedGenerations = new Set<number>();
       reader.field("generations").list(entry => {
-        const id = readEntity(entry.field("id")), generation = entry.field("generation").integer(1);
-        if (generation >= generationLimit || restoredGenerations.has(id) || usedGenerations.has(generation)) entry.fail("invalid or duplicate observation generation");
-        usedGenerations.add(generation); restoredGenerations.set(id, generation);
+        const id = readEntity(entry.field("id")),
+          generation = entry.field("generation").integer(1);
+        if (generation >= generationLimit || restoredGenerations.has(id) || usedGenerations.has(generation))
+          entry.fail("invalid or duplicate observation generation");
+        usedGenerations.add(generation);
+        restoredGenerations.set(id, generation);
       });
       if (restoredGenerations.size !== entityLimit - 64) reader.fail("observation generations are missing");
       const restoredBegun = new Set<number>();
@@ -262,26 +472,38 @@ export function createSharedBotWorld(options: Options) {
         });
         return result;
       };
-      const restoredUserinfos = readStrings("userinfos"), restoredStrings = readStrings("strings");
-      const restoredModels = new Map<string, number>(), modelIds = new Set<number>();
+      const restoredUserinfos = readStrings("userinfos"),
+        restoredStrings = readStrings("strings");
+      const restoredModels = new Map<string, number>(),
+        modelIds = new Set<number>();
       reader.field("models").list(entry => {
-        const name = entry.field("name").string(), id = entry.field("id").integer(simulation.options.world.models.length);
+        const name = entry.field("name").string(),
+          id = entry.field("id").integer(simulation.options.world.models.length);
         if (name === "" || name.startsWith("*") || restoredModels.has(name) || modelIds.has(id)) entry.fail("invalid or duplicate model index");
-        restoredModels.set(name, id); modelIds.add(id);
+        restoredModels.set(name, id);
+        modelIds.add(id);
       });
       for (let index = 0; index < restoredModels.size; index++) {
         if (!modelIds.has(simulation.options.world.models.length + index)) reader.field("models").fail("model indices are not contiguous");
       }
       game.memory.restoreSaveState(restoredMemory.captureSaveState());
-      ids.clear(); for (const [actor, id] of restoredIds) ids.set(actor, id);
-      actors.clear(); for (const [id, actor] of restoredActors) actors.set(id, actor);
+      ids.clear();
+      for (const [actor, id] of restoredIds) ids.set(actor, id);
+      actors.clear();
+      for (const [id, actor] of restoredActors) actors.set(id, actor);
       freeIds.splice(0, freeIds.length, ...restoredFree);
-      generations.clear(); for (const [id, generation] of restoredGenerations) generations.set(id, generation);
-      begun.clear(); for (const id of restoredBegun) begun.add(id);
-      userinfos.clear(); for (const [id, value] of restoredUserinfos) userinfos.set(id, value);
-      strings.clear(); for (const [id, value] of restoredStrings) strings.set(id, value);
-      models.clear(); for (const [name, id] of restoredModels) models.set(name, id);
-      nextEntity = entityLimit; nextGeneration = generationLimit;
+      generations.clear();
+      for (const [id, generation] of restoredGenerations) generations.set(id, generation);
+      begun.clear();
+      for (const id of restoredBegun) begun.add(id);
+      userinfos.clear();
+      for (const [id, value] of restoredUserinfos) userinfos.set(id, value);
+      strings.clear();
+      for (const [id, value] of restoredStrings) strings.set(id, value);
+      models.clear();
+      for (const [name, id] of restoredModels) models.set(name, id);
+      nextEntity = entityLimit;
+      nextGeneration = generationLimit;
     },
   };
 }

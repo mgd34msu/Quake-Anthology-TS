@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { RereleaseNavigationServices } from "../../../compat/q2/rerelease/navigation.ts";
 import type { RereleaseSemanticBindings } from "../../../compat/q2/rerelease/host.ts";
 import type { RereleaseDebugShapesEvent } from "../../../compat/q2/rerelease/debug-shapes.ts";
@@ -22,14 +23,18 @@ export interface RereleaseGuestServicesOptions extends ClassicGuestServicesOptio
   readonly semanticBindings?: RereleaseSemanticBindings;
   readonly foreignDamage?: RereleaseQ2HostOptions["foreignDamage"];
 }
-export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> & Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText" | "navigation" | "foreignDamage">;
+export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> &
+  Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText" | "navigation" | "foreignDamage">;
 export interface RereleaseGuestMessage extends ClassicGuestMessage {
   readonly sourceDialect: "q2-multicast-float";
   readonly dupeKey: number;
 }
 export interface RereleaseGuestServicesPort {
   readonly options: RereleaseGuestServicesOptions;
-  readonly hostOptions: Pick<RereleaseQ2HostOptions, "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds" | "foreignDamage"> & { readonly pickups?: OriginalPickupAdmission };
+  readonly hostOptions: Pick<
+    RereleaseQ2HostOptions,
+    "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds" | "foreignDamage"
+  > & { readonly pickups?: OriginalPickupAdmission };
   bindMemory(memory: MappedGuestMemory): RereleaseCoreServices;
   bindHost(host: RereleaseQ2GuestHost): void;
   completeSpawn(): void;
@@ -42,7 +47,16 @@ export interface RereleaseGuestServicesPort {
   entityState(slot: number): Q2RereleaseEntityState;
   playerState(slot: number): Q2RereleasePlayerState;
   modelAppearance(slot: number): { readonly path: string; readonly skin: number; readonly skinPath: string | null; readonly attachedModels: readonly string[] };
-  entityInfo(slot: number): { readonly actor: ActorId | null; readonly active: boolean; readonly serverFlags: number; readonly areas: readonly [number, number]; readonly clusters: readonly number[] | null; readonly firstCluster: number; readonly headnode: number; readonly ownerSlot: number | null };
+  entityInfo(slot: number): {
+    readonly actor: ActorId | null;
+    readonly active: boolean;
+    readonly serverFlags: number;
+    readonly areas: readonly [number, number];
+    readonly clusters: readonly number[] | null;
+    readonly firstCluster: number;
+    readonly headnode: number;
+    readonly ownerSlot: number | null;
+  };
   drainMessages(): readonly RereleaseGuestMessage[];
   configstrings(): ReadonlyMap<number, string>;
   setConfigstring(index: number, value: string): undefined;

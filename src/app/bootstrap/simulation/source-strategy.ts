@@ -90,7 +90,14 @@ import { quakeCCharacterAnimation } from "./quakec-character-animation.ts";
 import { decodeQ1FoundationCheckpoint, type SaveReader } from "../../../persistence/index.ts";
 import { restoreQ2Product } from "../../../content/composition/q2/index.ts";
 import { restoreQ2ServerCvars, savedQ2ServerCvarsHave } from "../../../settings/server/index.ts";
-import { simulationProviderCheckpoint, nativeQ3RuntimeReader, savedSourceCvars, nativeQ2RereleaseSave, nativeQ2OriginalSave, nativeQ2SavedClients } from "./save.ts";
+import {
+  simulationProviderCheckpoint,
+  nativeQ3RuntimeReader,
+  savedSourceCvars,
+  nativeQ2RereleaseSave,
+  nativeQ2OriginalSave,
+  nativeQ2SavedClients,
+} from "./save.ts";
 import { encodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
 import type { RereleaseGuestSave } from "./rerelease-guest-world.ts";
 import { encodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
@@ -105,7 +112,10 @@ export interface GuestMonsterProxy {
 
 /** The server state an original native save carries. */
 export interface NativeSavedServer {
-  readonly server: { readonly configstrings: readonly { readonly index: number; readonly value: string }[]; readonly portals: readonly { readonly portal: number; readonly open: boolean }[] };
+  readonly server: {
+    readonly configstrings: readonly { readonly index: number; readonly value: string }[];
+    readonly portals: readonly { readonly portal: number; readonly open: boolean }[];
+  };
 }
 
 /** The checks and request a restore of an original native save runs with. */
@@ -256,8 +266,15 @@ export interface TravelContext {
   readonly serverFlags: number | null;
   readonly landmark: TravelLandmark | null;
 }
-export interface InventoryCoverage { readonly actors: readonly OwnedActor[]; readonly legacy: boolean }
-export interface EquipmentSuppression { readonly quad: boolean; readonly quadFire: boolean; readonly haste: boolean }
+export interface InventoryCoverage {
+  readonly actors: readonly OwnedActor[];
+  readonly legacy: boolean;
+}
+export interface EquipmentSuppression {
+  readonly quad: boolean;
+  readonly quadFire: boolean;
+  readonly haste: boolean;
+}
 export type SupplyFamily = "q1" | "q2" | "q3";
 type SpawnPoint = { readonly origin: Vec3; readonly angles: Vec3 };
 const NO_SUPPRESSION: EquipmentSuppression = { quad: false, quadFire: false, haste: false };
@@ -303,7 +320,14 @@ export interface SourceStrategy {
   initialArsenalState(): ArsenalState["state"];
   /** Attaches the source entity of a new player; null when the source has none. */
   attachEntity(actor: OwnedActor, player: MovementPlayer): Q2Entity;
-  configureAdmitted(actor: OwnedActor, client: ClientId, player: MovementPlayer, entity: Q2Entity, userinfo: string | undefined, travel: SimulationTravel | undefined): void;
+  configureAdmitted(
+    actor: OwnedActor,
+    client: ClientId,
+    player: MovementPlayer,
+    entity: Q2Entity,
+    userinfo: string | undefined,
+    travel: SimulationTravel | undefined,
+  ): void;
   /** Attaches the Q2 character presentation a Q1 source gives its Q2-dressed players. */
   attachForeignCharacter(player: MovementPlayer): void;
   /** Lands the source's own carry; true when it carried the player. */
@@ -641,7 +665,12 @@ export interface WeaponFacts {
   readonly infiniteAmmo: boolean;
 }
 
-export interface SourceIdentity { readonly name?: string; readonly skin?: string; readonly shirt?: number; readonly pants?: number }
+export interface SourceIdentity {
+  readonly name?: string;
+  readonly skin?: string;
+  readonly shirt?: number;
+  readonly pants?: number;
+}
 
 export interface ArsenalUiParts {
   readonly items: PlayerUiItem[];
@@ -661,312 +690,839 @@ function sameInfo(previous: ReadonlyMap<string, string>, values: ReadonlyMap<str
 
 class LoadingStrategy implements SourceStrategy {
   readonly kind: SourceRuntime["kind"] = "loading";
-  grantQuad(_actor: ActorId): void { /* the source has no quad */ }
-  userinfo(_actor: ActorId): string | null { return null; }
-  storeUserinfo(_actor: ActorId, _client: ClientId, _userinfo: string): void { throw new Error("Component userinfo requires an initialized source"); }
-  updateUserinfo(_actor: ActorId, _userinfo: string, _previous: string | null): void | Promise<void> { /* no source yet: nothing stores userinfo */ }
-  pause(): PauseControl | null { return null; }
+  grantQuad(_actor: ActorId): void {
+    /* the source has no quad */
+  }
+  userinfo(_actor: ActorId): string | null {
+    return null;
+  }
+  storeUserinfo(_actor: ActorId, _client: ClientId, _userinfo: string): void {
+    throw new Error("Component userinfo requires an initialized source");
+  }
+  updateUserinfo(_actor: ActorId, _userinfo: string, _previous: string | null): void | Promise<void> {
+    /* no source yet: nothing stores userinfo */
+  }
+  pause(): PauseControl | null {
+    return null;
+  }
 
-  admitClient(_client: ClientId, _travel: SimulationTravel | undefined, _userinfo: string | undefined): PlayerAdmission | null { throw new Error("Map spawn is incomplete"); }
-  prepareBot(_client: ClientId): OwnedActor { throw new Error("Bot admission requires a supported source observation binding"); }
-  initialArsenalState(): ArsenalState["state"] { throw new Error("Player spawn requires a Q1 or Q2 source"); }
-  attachEntity(_actor: OwnedActor, _player: MovementPlayer): Q2Entity { return null; }
-  configureAdmitted(_actor: OwnedActor, _client: ClientId, _player: MovementPlayer, _entity: Q2Entity, _userinfo: string | undefined, _travel: SimulationTravel | undefined): void { /* only Q1 and Q2 sources configure a shared admission */ }
-  attachForeignCharacter(_player: MovementPlayer): void { /* only Q1 sources dress their players in a Q2 character */ }
-  admitCarry(_actor: OwnedActor, _entity: Q2Entity, _carried: CarriedPlayerState | undefined): boolean { return false; }
-  enterWorld(_actor: OwnedActor, _player: MovementPlayer, _fresh: boolean): void { /* only Q1 and Q2 sources enter the world through the shared admission */ }
-  captureEntryCarry(_actor: OwnedActor): Q1TravelState | null { return null; }
-  movementBindings(_actor: OwnedActor, _selectedClock: string): PlayerBindings { return {}; }
-  q2Gibbed(_actor: ActorId): boolean { return false; }
-  q3Client(_actor: ActorId): Q3NativeClient | null | undefined { return null; }
-  suppliesPunch(): boolean { return false; }
-  skipsTriggerTouch(_actor: ActorId): boolean { return false; }
+  admitClient(_client: ClientId, _travel: SimulationTravel | undefined, _userinfo: string | undefined): PlayerAdmission | null {
+    throw new Error("Map spawn is incomplete");
+  }
+  prepareBot(_client: ClientId): OwnedActor {
+    throw new Error("Bot admission requires a supported source observation binding");
+  }
+  initialArsenalState(): ArsenalState["state"] {
+    throw new Error("Player spawn requires a Q1 or Q2 source");
+  }
+  attachEntity(_actor: OwnedActor, _player: MovementPlayer): Q2Entity {
+    return null;
+  }
+  configureAdmitted(
+    _actor: OwnedActor,
+    _client: ClientId,
+    _player: MovementPlayer,
+    _entity: Q2Entity,
+    _userinfo: string | undefined,
+    _travel: SimulationTravel | undefined,
+  ): void {
+    /* only Q1 and Q2 sources configure a shared admission */
+  }
+  attachForeignCharacter(_player: MovementPlayer): void {
+    /* only Q1 sources dress their players in a Q2 character */
+  }
+  admitCarry(_actor: OwnedActor, _entity: Q2Entity, _carried: CarriedPlayerState | undefined): boolean {
+    return false;
+  }
+  enterWorld(_actor: OwnedActor, _player: MovementPlayer, _fresh: boolean): void {
+    /* only Q1 and Q2 sources enter the world through the shared admission */
+  }
+  captureEntryCarry(_actor: OwnedActor): Q1TravelState | null {
+    return null;
+  }
+  movementBindings(_actor: OwnedActor, _selectedClock: string): PlayerBindings {
+    return {};
+  }
+  q2Gibbed(_actor: ActorId): boolean {
+    return false;
+  }
+  q3Client(_actor: ActorId): Q3NativeClient | null | undefined {
+    return null;
+  }
+  suppliesPunch(): boolean {
+    return false;
+  }
+  skipsTriggerTouch(_actor: ActorId): boolean {
+    return false;
+  }
 
-  lmctf(): Q2Lmctf | null { return null; }
-  preparesQ1Clients(): boolean { return false; }
-  intermissionFading(): boolean { return false; }
-  fadeIntermission(): void { /* only a Q2 rerelease source fades an intermission */ }
-  beginTimedFrame(_elapsed: number): void { /* only a Q1 source takes timed frames */ }
-  beginGuestFrame(_frame: FrameContext): void { /* only a QuakeC source takes guest frames */ }
-  beginActorTurns(_frame: FrameContext): void { /* the source has no per-boundary actor setup */ }
-  intermissionActive(): boolean { return false; }
-  requestIntermissionExit(_actor: ActorId, _buttons: number): void { /* only a Q1 source has an intermission to leave */ }
-  preFrame(_input: PreFrameInput): void { /* only a Q1 source runs a client pre-frame */ }
-  preThink(_player: MovementPlayer, _command: ActorCommand): boolean { return true; }
-  playerThink(_player: MovementPlayer, _command: ActorCommand): boolean { return false; }
-  tracksGravity(): boolean { return false; }
-  gravityScale(_actor: ActorId): number { return 1; }
-  movementApplied(_actor: ActorId, _moved: Moved): void { /* only a Q2 source reacts to movement impacts */ }
-  afterPlayerCommand(_player: MovementPlayer, _paused: boolean): void { /* the source has no post-command client think */ }
-  beforeClientActor(_actor: OwnedActor): void { /* the source has no per-client actor setup */ }
-  retouch(_actor: OwnedActor): void { /* only a Q1 source forces retouches */ }
-  spectating(_actor: ActorId): boolean { return false; }
-  runPlayerActor(_actor: OwnedActor): boolean { return false; }
-  watchesTransitions(): boolean { return false; }
+  lmctf(): Q2Lmctf | null {
+    return null;
+  }
+  preparesQ1Clients(): boolean {
+    return false;
+  }
+  intermissionFading(): boolean {
+    return false;
+  }
+  fadeIntermission(): void {
+    /* only a Q2 rerelease source fades an intermission */
+  }
+  beginTimedFrame(_elapsed: number): void {
+    /* only a Q1 source takes timed frames */
+  }
+  beginGuestFrame(_frame: FrameContext): void {
+    /* only a QuakeC source takes guest frames */
+  }
+  beginActorTurns(_frame: FrameContext): void {
+    /* the source has no per-boundary actor setup */
+  }
+  intermissionActive(): boolean {
+    return false;
+  }
+  requestIntermissionExit(_actor: ActorId, _buttons: number): void {
+    /* only a Q1 source has an intermission to leave */
+  }
+  preFrame(_input: PreFrameInput): void {
+    /* only a Q1 source runs a client pre-frame */
+  }
+  preThink(_player: MovementPlayer, _command: ActorCommand): boolean {
+    return true;
+  }
+  playerThink(_player: MovementPlayer, _command: ActorCommand): boolean {
+    return false;
+  }
+  tracksGravity(): boolean {
+    return false;
+  }
+  gravityScale(_actor: ActorId): number {
+    return 1;
+  }
+  movementApplied(_actor: ActorId, _moved: Moved): void {
+    /* only a Q2 source reacts to movement impacts */
+  }
+  afterPlayerCommand(_player: MovementPlayer, _paused: boolean): void {
+    /* the source has no post-command client think */
+  }
+  beforeClientActor(_actor: OwnedActor): void {
+    /* the source has no per-client actor setup */
+  }
+  retouch(_actor: OwnedActor): void {
+    /* only a Q1 source forces retouches */
+  }
+  spectating(_actor: ActorId): boolean {
+    return false;
+  }
+  runPlayerActor(_actor: OwnedActor): boolean {
+    return false;
+  }
+  watchesTransitions(): boolean {
+    return false;
+  }
 
-  selectedPlayer(_actor: ActorId): SelectedPlayerStats { return { maxHealth: 100, team: null, quadUntil: 0, hasteUntil: 0 }; }
-  q3GameType(): number | null { return null; }
-  q3ServerInfo(): string { return ""; }
-  primaryEquipment(): boolean { return false; }
-  hasEquipmentEffects(): boolean { return false; }
-  weaponDamageFactor(_actor: ActorId, _quad: boolean): number | null { return null; }
+  selectedPlayer(_actor: ActorId): SelectedPlayerStats {
+    return { maxHealth: 100, team: null, quadUntil: 0, hasteUntil: 0 };
+  }
+  q3GameType(): number | null {
+    return null;
+  }
+  q3ServerInfo(): string {
+    return "";
+  }
+  primaryEquipment(): boolean {
+    return false;
+  }
+  hasEquipmentEffects(): boolean {
+    return false;
+  }
+  weaponDamageFactor(_actor: ActorId, _quad: boolean): number | null {
+    return null;
+  }
   equipmentDamageFactor(actor: ActorId): number {
     const factor = this.weaponDamageFactor(actor, true);
     if (factor === null) throw new Error("Primary Q3 equipment lost its source");
     return factor;
   }
-  equipmentFiringDelay(_actor: ActorId, _milliseconds: number, _persistent: number): number { throw new Error("Primary Q3 equipment lost its source"); }
-  weaponDelay(_actor: ActorId, seconds: number): number { return seconds; }
-  equipmentDelay(actor: ActorId, _provider: ProviderId, seconds: number): number { return this.weaponDelay(actor, seconds); }
-  curvesEnabled(): boolean { return true; }
-  playerCurveClip(): boolean { return true; }
-  friendlyFire(): boolean { return true; }
-  knockback(): number { return 1000; }
-  intermissionQueued(): number { return 0; }
-  checkHurtCarrier(_target: ActorId, _attacker: ActorId): void { /* only a Q3 source tracks carrier defense */ }
-  checkObeliskAttack(_target: ActorId, _attacker: ActorId): boolean { return false; }
-  quadFactor(): number { return 4; }
-  proximityTimeout(): number { return 20000; }
-  returnPickup(_actor: ActorId): void { throw new Error("Borrowed persistent pickup has no original Q3 map owner"); }
-  teleportSpawn(_actor: OwnedActor): SpawnPoint { throw new Error("Selected map travel is unavailable while the world is loading"); }
-  dropObjectives(_actor: OwnedActor): void { throw new Error("Selected objective drop has no source map owner"); }
-  originalPlayer(): OriginalPlayer | null { return null; }
-  setMaxHealth(_actor: ActorId, _health: number): void { /* the source has no max health of its own */ }
-  installPickupAdmission(_admission: SharedPickupAdmission): void { /* the source admits its pickups itself */ }
-  supplyFamily(): SupplyFamily { return "q3"; }
-  ownsSupply(): boolean { return false; }
-  identitySupply(): boolean { return false; }
-  extraReplacedItems(): readonly ItemId[] { return []; }
-  animatesWeaponFire(): boolean { return false; }
-  noteFired(_actor: ActorId, _item: ItemId | null): void { /* only a Q1 source records weapon use */ }
-  weaponNoise(_actor: ActorId, _origin: Vec3, _kind: "weapon" | "impact"): undefined { /* only a Q2 source wakes monsters by weapon noise */ return undefined; }
-  allowsAutoSwitch(_actor: ActorId): boolean { return true; }
-  cvars(): CvarRegistry | null { return null; }
-  q1PowerupExpires(_actor: ActorId, _powerup: Q1Powerup): number { return 0; }
-  damageModifier(): SourceDamageModifier | null { return null; }
-  runsQ3Powerups(): boolean { return false; }
-  equipmentSuppression(): EquipmentSuppression { return NO_SUPPRESSION; }
-  monsterNoise(_actor: ActorId, _origin: Vec3, _secondary: boolean | undefined): undefined { /* only a Q2 source has noise-driven monsters */ return undefined; }
-  ownsEquipmentPlayers(): boolean { return false; }
-  sourceInventory(_actor: ActorId): InventoryStateBinding | null { return null; }
-  playerAvailable(_actor: ActorId): boolean | null { return null; }
-  stepsHandGrenades(): boolean { return true; }
-  teleportBits(_actor: ActorId): number | null { return null; }
+  equipmentFiringDelay(_actor: ActorId, _milliseconds: number, _persistent: number): number {
+    throw new Error("Primary Q3 equipment lost its source");
+  }
+  weaponDelay(_actor: ActorId, seconds: number): number {
+    return seconds;
+  }
+  equipmentDelay(actor: ActorId, _provider: ProviderId, seconds: number): number {
+    return this.weaponDelay(actor, seconds);
+  }
+  curvesEnabled(): boolean {
+    return true;
+  }
+  playerCurveClip(): boolean {
+    return true;
+  }
+  friendlyFire(): boolean {
+    return true;
+  }
+  knockback(): number {
+    return 1000;
+  }
+  intermissionQueued(): number {
+    return 0;
+  }
+  checkHurtCarrier(_target: ActorId, _attacker: ActorId): void {
+    /* only a Q3 source tracks carrier defense */
+  }
+  checkObeliskAttack(_target: ActorId, _attacker: ActorId): boolean {
+    return false;
+  }
+  quadFactor(): number {
+    return 4;
+  }
+  proximityTimeout(): number {
+    return 20000;
+  }
+  returnPickup(_actor: ActorId): void {
+    throw new Error("Borrowed persistent pickup has no original Q3 map owner");
+  }
+  teleportSpawn(_actor: OwnedActor): SpawnPoint {
+    throw new Error("Selected map travel is unavailable while the world is loading");
+  }
+  dropObjectives(_actor: OwnedActor): void {
+    throw new Error("Selected objective drop has no source map owner");
+  }
+  originalPlayer(): OriginalPlayer | null {
+    return null;
+  }
+  setMaxHealth(_actor: ActorId, _health: number): void {
+    /* the source has no max health of its own */
+  }
+  installPickupAdmission(_admission: SharedPickupAdmission): void {
+    /* the source admits its pickups itself */
+  }
+  supplyFamily(): SupplyFamily {
+    return "q3";
+  }
+  ownsSupply(): boolean {
+    return false;
+  }
+  identitySupply(): boolean {
+    return false;
+  }
+  extraReplacedItems(): readonly ItemId[] {
+    return [];
+  }
+  animatesWeaponFire(): boolean {
+    return false;
+  }
+  noteFired(_actor: ActorId, _item: ItemId | null): void {
+    /* only a Q1 source records weapon use */
+  }
+  weaponNoise(_actor: ActorId, _origin: Vec3, _kind: "weapon" | "impact"): undefined {
+    /* only a Q2 source wakes monsters by weapon noise */ return undefined;
+  }
+  allowsAutoSwitch(_actor: ActorId): boolean {
+    return true;
+  }
+  cvars(): CvarRegistry | null {
+    return null;
+  }
+  q1PowerupExpires(_actor: ActorId, _powerup: Q1Powerup): number {
+    return 0;
+  }
+  damageModifier(): SourceDamageModifier | null {
+    return null;
+  }
+  runsQ3Powerups(): boolean {
+    return false;
+  }
+  equipmentSuppression(): EquipmentSuppression {
+    return NO_SUPPRESSION;
+  }
+  monsterNoise(_actor: ActorId, _origin: Vec3, _secondary: boolean | undefined): undefined {
+    /* only a Q2 source has noise-driven monsters */ return undefined;
+  }
+  ownsEquipmentPlayers(): boolean {
+    return false;
+  }
+  sourceInventory(_actor: ActorId): InventoryStateBinding | null {
+    return null;
+  }
+  playerAvailable(_actor: ActorId): boolean | null {
+    return null;
+  }
+  stepsHandGrenades(): boolean {
+    return true;
+  }
+  teleportBits(_actor: ActorId): number | null {
+    return null;
+  }
 
-  notarget(_actor: ActorId): boolean | null { return null; }
-  cloakAlpha(_actor: ActorId): number | null { return null; }
-  godMode(_actor: ActorId): boolean { return false; }
-  weaponEvent(_event: Q2WeaponEvent): boolean { return false; }
-  hasEnemy(_target: ActorId): boolean { return false; }
-  teamDamageEnabled(_matchProvider: string): boolean { return false; }
-  matchDamageEffects(): Q2MatchDamageEffects { throw new Error("Q2 match damage requires its source runtime"); }
-  requiredMonsterNoise(_actor: ActorId, _origin: Vec3, _secondary: boolean | undefined, message: string): undefined { throw new Error(message); }
-  requireQ2(message: string): void { throw new Error(message); }
-  pushed(_actor: ActorId, _velocity: Vec3): void { /* only a Q2 source keeps the previous velocity */ }
-  setEntityGravity(_actor: ActorId, _gravity: number): void { /* only a Q2 source keeps entity gravity */ }
-  monstersSearching(_player: ActorId | null): boolean { return false; }
-  q1Game(): Of<"q1">["game"] | null { return null; }
-  selectWeapon(_actor: OwnedActor, _item: ItemId): boolean { return false; }
-  connectedClients(): readonly ClientId[] | null { return null; }
-  playerActors(): readonly ActorId[] | null { return null; }
+  notarget(_actor: ActorId): boolean | null {
+    return null;
+  }
+  cloakAlpha(_actor: ActorId): number | null {
+    return null;
+  }
+  godMode(_actor: ActorId): boolean {
+    return false;
+  }
+  weaponEvent(_event: Q2WeaponEvent): boolean {
+    return false;
+  }
+  hasEnemy(_target: ActorId): boolean {
+    return false;
+  }
+  teamDamageEnabled(_matchProvider: string): boolean {
+    return false;
+  }
+  matchDamageEffects(): Q2MatchDamageEffects {
+    throw new Error("Q2 match damage requires its source runtime");
+  }
+  requiredMonsterNoise(_actor: ActorId, _origin: Vec3, _secondary: boolean | undefined, message: string): undefined {
+    throw new Error(message);
+  }
+  requireQ2(message: string): void {
+    throw new Error(message);
+  }
+  pushed(_actor: ActorId, _velocity: Vec3): void {
+    /* only a Q2 source keeps the previous velocity */
+  }
+  setEntityGravity(_actor: ActorId, _gravity: number): void {
+    /* only a Q2 source keeps entity gravity */
+  }
+  monstersSearching(_player: ActorId | null): boolean {
+    return false;
+  }
+  q1Game(): Of<"q1">["game"] | null {
+    return null;
+  }
+  selectWeapon(_actor: OwnedActor, _item: ItemId): boolean {
+    return false;
+  }
+  connectedClients(): readonly ClientId[] | null {
+    return null;
+  }
+  playerActors(): readonly ActorId[] | null {
+    return null;
+  }
 
-  requireLoaded(message: string): void { throw new Error(message); }
-  assertSaveReady(): void { /* the source has no extra save conditions */ }
-  projectsMonsters(): boolean { return false; }
-  usesGuestMonsters(): boolean { return false; }
-  reconstructsActor(_actor: ActorId): boolean { return false; }
-  checkpointProviders(_add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, _providers: SaveProvider[]): void { /* the shared providers cover the source */ }
-  checkpointGuests(): SaveImage["guests"] { return []; }
-  checkpointExtras(): Readonly<Record<string, number | string | null>> { return {}; }
-  nativeClients(): ReturnType<SourceStrategy["nativeClients"]> { return null; }
-  sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] { return []; }
-  expectedDeclaration(): string | null { return null; }
-  legacyCombat(): Of<"q3-qvm">["combat"] { return null; }
-  requireInventoryProjection(kind: "qvm" | "native"): void { throw new Error(kind === "qvm" ? "Saved QVM inventory requires qualified source storage" : "Saved native inventory requires qualified source storage"); }
-  inventoryCoverage(_projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null { return null; }
-  travelSource(_context: TravelContext): SimulationTravel["source"] { throw new Error("Source campaign travel requires its native source file lifecycle"); }
-  travelers(): ReturnType<SourceStrategy["travelers"]> { return null; }
-  travelPlayerState(_actor: ActorId): CarriedPlayerState { throw new Error("Source campaign travel requires its native source file lifecycle"); }
-  guestHealth(_actor: ActorId): number | null { return null; }
-  setGuestHealth(_actor: ActorId, _health: number): void { /* only a QVM guest keeps a health stat outside the shared combat view */ }
-  guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[] { return []; }
-  canonicalTeam(original: string | null): string | null { return original; }
-  declaresMatch(): boolean { return false; }
-  matchScore(_actor: ActorId): number { throw new Error("The selected source declares no match score"); }
-  setMatchScore(_actor: ActorId, _value: number): void { throw new Error("The selected source declares no match score"); }
-  setMatchTeam(_actor: ActorId, _requested: string | null): void { throw new Error("This original source has no declared team-change command"); }
-  hasGuestUi(): boolean { return false; }
-  guestUi(_actor: ActorId): PlayerUi { throw new Error("Actor has no native source UI"); }
-  uiSubject(actor: ActorId): ActorId { return actor; }
-  clientUi(_actor: ActorId): ReturnType<Of<"quakec">["game"]["clientUi"]> | null { return null; }
-  uiPowerups(_actor: ActorId): PlayerUi["powerups"] { return []; }
-  arsenalUi(_actor: ActorId, _arsenal: ArsenalState): ArsenalUiParts { return { items: [], ammo: null, weaponStatus: null, arsenalWarning: "none" }; }
-  guestView(_actor: ActorId): PlayerView | null { return null; }
-  chasing(_actor: ActorId): boolean { return false; }
-  cutsceneFov(_fov: number | undefined): number { return 90; }
-  overrideView(_actor: ActorId, _view: PlayerView, _intermission: boolean, _health: number): PlayerView | null { return null; }
-  foreignCharacterDeath(): boolean { return false; }
-  rereleaseViewHeight(): boolean { return false; }
-  presentations(_fraction: number, _backLerp: number): readonly SimulationPresentation[] { return []; }
-  guestWeaponViews(): boolean { return false; }
-  usesQ2Views(): boolean { return false; }
-  q2PlayerEntity(_actor: ActorId): Q2Entity { return null; }
-  q1Player(_actor: ActorId): ReturnType<Of<"q1">["game"]["player"]> | null { return null; }
-  q1Colors(_actor: ActorId): { readonly shirt: number; readonly pants: number } | null | undefined { return null; }
-  weaponVisible(_actor: ActorId): boolean | null { return null; }
-  guestBobCycle(_actor: ActorId): number { return 0; }
-  rendersOwnIntermission(): boolean { return false; }
-  forwardsCommands(): boolean { return false; }
-  preCommand(_actor: ActorId, _name: string, _args: readonly string[]): boolean { return false; }
-  afterCommand(_actor: ActorId, _player: MovementPlayer, _name: string, _args: readonly string[]): void { /* the source has no commands of its own after the shared ones */ }
-  setIdentity(_actor: ActorId, _identity: SourceIdentity): void { throw new Error("Source identity updates require a native Q1 or Q2 player"); }
-  setFieldOfView(_actor: ActorId, _fieldOfView: number, _mode: "change" | "restore"): boolean { return false; }
-  angleDelta(_actor: ActorId, _client: ClientId): readonly number[] | undefined { return undefined; }
-  commandMovement(_client: ClientId): MovementState | undefined { return undefined; }
-  guestGrantExclusions(): ReadonlySet<ItemId> | null { return null; }
-  grantProfile(_arsenal: SelectedArsenal): PickupSupplyProfile | null { return null; }
-  sourceItem(_requested: string): ReturnType<Of<"q2">["items"]["lookup"]> | null { return null; }
-  grantedWeapon(_owner: OwnedActor, _arsenal: SelectedArsenal, _requested: string, _destinations: readonly ItemId[], _profile: PickupSupplyProfile | null): void { /* only Q2 weapons carry their own ammo grant */ }
-  baseArsenal(_player: MovementPlayer): ArsenalState { throw new Error("Arsenal accessed before source admission"); }
-  q1Client(_actor: ActorId): ReturnType<Of<"q1">["composition"]["clients"]["require"]> | null { return null; }
-  q1Impulse(_actor: ActorId): void { /* only a Q1 source consumes impulses */ }
-  weaponsPaused(): boolean { return false; }
-  stepSelectedHoldable(_player: MovementPlayer, _input: WeaponStepInput): boolean { return false; }
-  primaryWeaponStep(_player: MovementPlayer, _input: WeaponStepInput): WeaponStepResult | null { return null; }
-  weaponFacts(_actor: ActorId): WeaponFacts { return { q3Ps: undefined, spectator: false, hand: "right", quadUntil: 0, infiniteAmmo: false }; }
-  dropsImpulse(): boolean { return false; }
-  requestsWeaponDirectly(): boolean { return false; }
-  alwaysRequestsWeapon(): boolean { return false; }
-  ownsContacts(_actor: ActorId): boolean { return false; }
-  quakeWorldContacts(): boolean { return false; }
-  jumpVoice(_actor: OwnedActor, _player: MovementPlayer): boolean { return false; }
-  animation(_input: AnimationStepInput): AnimationStepResult | null { return null; }
-  attackArsenal(_actor: ActorId): ArsenalState | null { return null; }
-  playerWeapon(_player: MovementPlayer): void { /* only Q1 and Q2 sources run a client weapon frame */ }
-  admitsGuestMonsters(): boolean { return false; }
-  assertSavable(): void { /* the source has no original save restrictions */ }
-  captureGuestSave(_nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> { return Promise.resolve(undefined); }
-  originalSave(_guestSave?: RereleaseGuestSave): SaveProvider | null { return null; }
-  restoreLoading(_save: SaveImage, _nextFrame: () => Promise<void>): Promise<void> { throw new Error("Native original loading requires its source provider"); }
-  restoreGuest(_save: SaveImage, _nativeRestored: boolean): void { /* only a native Q2 source restores its own original save */ }
-  guestEdition(): "classic" | "rerelease" | null { return null; }
-  monsterProxy(): GuestMonsterProxy | null { return null; }
-  asQ1(): Of<"q1"> | null { return null; }
-  asQ2(): Of<"q2"> | null { return null; }
-  asQuakeC(): Of<"quakec"> | null { return null; }
-  asQ3(): Of<"q3"> | null { return null; }
-  asQ3Qvm(): Of<"q3-qvm"> | null { return null; }
-  asQ2Native(): Of<"q2-native"> | null { return null; }
-  stepRoute(): "native" | "awaited" | "shared" { return "shared"; }
-  settles(_game: Q3Game): boolean { return false; }
-  syncGravity(): void { /* only a Q2 source owns the world gravity setting */ }
-  afterStep(): void { /* the source has no post-step work */ }
-  finishFrame(_run: boolean): void { /* the source has no end-of-frame work */ }
-  concludeFrame(): void { /* the source has no frame conclusion */ }
-  q1Powerups(_actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined { return undefined; }
-  foreignPowerups(_actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } { return { quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0 }; }
-  q1CharacterFrame(_actor: ActorId, _frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void { /* only a Q1 source records its character frames */ }
-  teamGame(): boolean { throw new Error("Team match policy requires an initialized source"); }
-  serverCvars(): ServerCvarRegistry | null { return null; }
-  serverSettingsOwner(owner: ServerSettingsOwner): ServerSettingsOwner { return owner; }
-  clientOf(_actor: ActorId): ClientId | null | undefined { return undefined; }
-  disconnect(_actor: ActorId, _player: MovementPlayer | null): "release" | "done" { return "release"; }
-  dropInventory(_player: MovementPlayer): void { /* only a Q1 source drops a backpack */ }
-  respawn(_player: MovementPlayer): void { throw new Error("Respawn before source entry"); }
-  keepsAngleDeltas(): boolean { return false; }
-  telefragCause(): { readonly kind: "q1"; readonly deathType: "telefrag" } | { readonly kind: "q2"; readonly meansOfDeath: 21; readonly damageFlags: 32 } { return { kind: "q2", meansOfDeath: 21, damageFlags: 32 }; }
-  cutsceneControl(_player: MovementPlayer, _angles: Vec3): void { /* only a Q1 source clears the held input */ }
+  requireLoaded(message: string): void {
+    throw new Error(message);
+  }
+  assertSaveReady(): void {
+    /* the source has no extra save conditions */
+  }
+  projectsMonsters(): boolean {
+    return false;
+  }
+  usesGuestMonsters(): boolean {
+    return false;
+  }
+  reconstructsActor(_actor: ActorId): boolean {
+    return false;
+  }
+  checkpointProviders(_add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, _providers: SaveProvider[]): void {
+    /* the shared providers cover the source */
+  }
+  checkpointGuests(): SaveImage["guests"] {
+    return [];
+  }
+  checkpointExtras(): Readonly<Record<string, number | string | null>> {
+    return {};
+  }
+  nativeClients(): ReturnType<SourceStrategy["nativeClients"]> {
+    return null;
+  }
+  sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] {
+    return [];
+  }
+  expectedDeclaration(): string | null {
+    return null;
+  }
+  legacyCombat(): Of<"q3-qvm">["combat"] {
+    return null;
+  }
+  requireInventoryProjection(kind: "qvm" | "native"): void {
+    throw new Error(kind === "qvm" ? "Saved QVM inventory requires qualified source storage" : "Saved native inventory requires qualified source storage");
+  }
+  inventoryCoverage(_projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null {
+    return null;
+  }
+  travelSource(_context: TravelContext): SimulationTravel["source"] {
+    throw new Error("Source campaign travel requires its native source file lifecycle");
+  }
+  travelers(): ReturnType<SourceStrategy["travelers"]> {
+    return null;
+  }
+  travelPlayerState(_actor: ActorId): CarriedPlayerState {
+    throw new Error("Source campaign travel requires its native source file lifecycle");
+  }
+  guestHealth(_actor: ActorId): number | null {
+    return null;
+  }
+  setGuestHealth(_actor: ActorId, _health: number): void {
+    /* only a QVM guest keeps a health stat outside the shared combat view */
+  }
+  guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[] {
+    return [];
+  }
+  canonicalTeam(original: string | null): string | null {
+    return original;
+  }
+  declaresMatch(): boolean {
+    return false;
+  }
+  matchScore(_actor: ActorId): number {
+    throw new Error("The selected source declares no match score");
+  }
+  setMatchScore(_actor: ActorId, _value: number): void {
+    throw new Error("The selected source declares no match score");
+  }
+  setMatchTeam(_actor: ActorId, _requested: string | null): void {
+    throw new Error("This original source has no declared team-change command");
+  }
+  hasGuestUi(): boolean {
+    return false;
+  }
+  guestUi(_actor: ActorId): PlayerUi {
+    throw new Error("Actor has no native source UI");
+  }
+  uiSubject(actor: ActorId): ActorId {
+    return actor;
+  }
+  clientUi(_actor: ActorId): ReturnType<Of<"quakec">["game"]["clientUi"]> | null {
+    return null;
+  }
+  uiPowerups(_actor: ActorId): PlayerUi["powerups"] {
+    return [];
+  }
+  arsenalUi(_actor: ActorId, _arsenal: ArsenalState): ArsenalUiParts {
+    return { items: [], ammo: null, weaponStatus: null, arsenalWarning: "none" };
+  }
+  guestView(_actor: ActorId): PlayerView | null {
+    return null;
+  }
+  chasing(_actor: ActorId): boolean {
+    return false;
+  }
+  cutsceneFov(_fov: number | undefined): number {
+    return 90;
+  }
+  overrideView(_actor: ActorId, _view: PlayerView, _intermission: boolean, _health: number): PlayerView | null {
+    return null;
+  }
+  foreignCharacterDeath(): boolean {
+    return false;
+  }
+  rereleaseViewHeight(): boolean {
+    return false;
+  }
+  presentations(_fraction: number, _backLerp: number): readonly SimulationPresentation[] {
+    return [];
+  }
+  guestWeaponViews(): boolean {
+    return false;
+  }
+  usesQ2Views(): boolean {
+    return false;
+  }
+  q2PlayerEntity(_actor: ActorId): Q2Entity {
+    return null;
+  }
+  q1Player(_actor: ActorId): ReturnType<Of<"q1">["game"]["player"]> | null {
+    return null;
+  }
+  q1Colors(_actor: ActorId): { readonly shirt: number; readonly pants: number } | null | undefined {
+    return null;
+  }
+  weaponVisible(_actor: ActorId): boolean | null {
+    return null;
+  }
+  guestBobCycle(_actor: ActorId): number {
+    return 0;
+  }
+  rendersOwnIntermission(): boolean {
+    return false;
+  }
+  forwardsCommands(): boolean {
+    return false;
+  }
+  preCommand(_actor: ActorId, _name: string, _args: readonly string[]): boolean {
+    return false;
+  }
+  afterCommand(_actor: ActorId, _player: MovementPlayer, _name: string, _args: readonly string[]): void {
+    /* the source has no commands of its own after the shared ones */
+  }
+  setIdentity(_actor: ActorId, _identity: SourceIdentity): void {
+    throw new Error("Source identity updates require a native Q1 or Q2 player");
+  }
+  setFieldOfView(_actor: ActorId, _fieldOfView: number, _mode: "change" | "restore"): boolean {
+    return false;
+  }
+  angleDelta(_actor: ActorId, _client: ClientId): readonly number[] | undefined {
+    return undefined;
+  }
+  commandMovement(_client: ClientId): MovementState | undefined {
+    return undefined;
+  }
+  guestGrantExclusions(): ReadonlySet<ItemId> | null {
+    return null;
+  }
+  grantProfile(_arsenal: SelectedArsenal): PickupSupplyProfile | null {
+    return null;
+  }
+  sourceItem(_requested: string): ReturnType<Of<"q2">["items"]["lookup"]> | null {
+    return null;
+  }
+  grantedWeapon(
+    _owner: OwnedActor,
+    _arsenal: SelectedArsenal,
+    _requested: string,
+    _destinations: readonly ItemId[],
+    _profile: PickupSupplyProfile | null,
+  ): void {
+    /* only Q2 weapons carry their own ammo grant */
+  }
+  baseArsenal(_player: MovementPlayer): ArsenalState {
+    throw new Error("Arsenal accessed before source admission");
+  }
+  q1Client(_actor: ActorId): ReturnType<Of<"q1">["composition"]["clients"]["require"]> | null {
+    return null;
+  }
+  q1Impulse(_actor: ActorId): void {
+    /* only a Q1 source consumes impulses */
+  }
+  weaponsPaused(): boolean {
+    return false;
+  }
+  stepSelectedHoldable(_player: MovementPlayer, _input: WeaponStepInput): boolean {
+    return false;
+  }
+  primaryWeaponStep(_player: MovementPlayer, _input: WeaponStepInput): WeaponStepResult | null {
+    return null;
+  }
+  weaponFacts(_actor: ActorId): WeaponFacts {
+    return { q3Ps: undefined, spectator: false, hand: "right", quadUntil: 0, infiniteAmmo: false };
+  }
+  dropsImpulse(): boolean {
+    return false;
+  }
+  requestsWeaponDirectly(): boolean {
+    return false;
+  }
+  alwaysRequestsWeapon(): boolean {
+    return false;
+  }
+  ownsContacts(_actor: ActorId): boolean {
+    return false;
+  }
+  quakeWorldContacts(): boolean {
+    return false;
+  }
+  jumpVoice(_actor: OwnedActor, _player: MovementPlayer): boolean {
+    return false;
+  }
+  animation(_input: AnimationStepInput): AnimationStepResult | null {
+    return null;
+  }
+  attackArsenal(_actor: ActorId): ArsenalState | null {
+    return null;
+  }
+  playerWeapon(_player: MovementPlayer): void {
+    /* only Q1 and Q2 sources run a client weapon frame */
+  }
+  admitsGuestMonsters(): boolean {
+    return false;
+  }
+  assertSavable(): void {
+    /* the source has no original save restrictions */
+  }
+  captureGuestSave(_nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> {
+    return Promise.resolve(undefined);
+  }
+  originalSave(_guestSave?: RereleaseGuestSave): SaveProvider | null {
+    return null;
+  }
+  restoreLoading(_save: SaveImage, _nextFrame: () => Promise<void>): Promise<void> {
+    throw new Error("Native original loading requires its source provider");
+  }
+  restoreGuest(_save: SaveImage, _nativeRestored: boolean): void {
+    /* only a native Q2 source restores its own original save */
+  }
+  guestEdition(): "classic" | "rerelease" | null {
+    return null;
+  }
+  monsterProxy(): GuestMonsterProxy | null {
+    return null;
+  }
+  asQ1(): Of<"q1"> | null {
+    return null;
+  }
+  asQ2(): Of<"q2"> | null {
+    return null;
+  }
+  asQuakeC(): Of<"quakec"> | null {
+    return null;
+  }
+  asQ3(): Of<"q3"> | null {
+    return null;
+  }
+  asQ3Qvm(): Of<"q3-qvm"> | null {
+    return null;
+  }
+  asQ2Native(): Of<"q2-native"> | null {
+    return null;
+  }
+  stepRoute(): "native" | "awaited" | "shared" {
+    return "shared";
+  }
+  settles(_game: Q3Game): boolean {
+    return false;
+  }
+  syncGravity(): void {
+    /* only a Q2 source owns the world gravity setting */
+  }
+  afterStep(): void {
+    /* the source has no post-step work */
+  }
+  finishFrame(_run: boolean): void {
+    /* the source has no end-of-frame work */
+  }
+  concludeFrame(): void {
+    /* the source has no frame conclusion */
+  }
+  q1Powerups(_actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined {
+    return undefined;
+  }
+  foreignPowerups(_actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } {
+    return { quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0 };
+  }
+  q1CharacterFrame(_actor: ActorId, _frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void {
+    /* only a Q1 source records its character frames */
+  }
+  teamGame(): boolean {
+    throw new Error("Team match policy requires an initialized source");
+  }
+  serverCvars(): ServerCvarRegistry | null {
+    return null;
+  }
+  serverSettingsOwner(owner: ServerSettingsOwner): ServerSettingsOwner {
+    return owner;
+  }
+  clientOf(_actor: ActorId): ClientId | null | undefined {
+    return undefined;
+  }
+  disconnect(_actor: ActorId, _player: MovementPlayer | null): "release" | "done" {
+    return "release";
+  }
+  dropInventory(_player: MovementPlayer): void {
+    /* only a Q1 source drops a backpack */
+  }
+  respawn(_player: MovementPlayer): void {
+    throw new Error("Respawn before source entry");
+  }
+  keepsAngleDeltas(): boolean {
+    return false;
+  }
+  telefragCause(): { readonly kind: "q1"; readonly deathType: "telefrag" } | { readonly kind: "q2"; readonly meansOfDeath: 21; readonly damageFlags: 32 } {
+    return { kind: "q2", meansOfDeath: 21, damageFlags: 32 };
+  }
+  cutsceneControl(_player: MovementPlayer, _angles: Vec3): void {
+    /* only a Q1 source clears the held input */
+  }
   checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     if (channels.includes("stance") && movement === "q1-netquake") throw new Error(STANCE_CLAIM_ERROR);
   }
-  guestGrounded(_actor: ActorId): boolean | null { return null; }
-  guestClientView(_actor: ActorId): { readonly viewOffset: Vec3; readonly crouched: boolean } | null { return null; }
-  outputsSuspended(_actor: ActorId, player: MovementPlayer | null): boolean { return player?.intermission === true || player?.cutscene !== null && player?.cutscene !== undefined; }
-  handoff(_actor: ActorId): PrimaryWeaponHandoff { throw new Error("Primary source is not ready"); }
-  equipmentPowerups(_actor: ActorId): { readonly quadUntil: number | null; readonly hasteUntil: number } { return { quadUntil: null, hasteUntil: 0 }; }
-  refineWeaponInput(_actor: ActorId, input: Q2WeaponInput): Q2WeaponInput { return input; }
-  guestWeaponAnimation(_actor: ActorId, _priority: "attack" | "reverse", _melee: boolean): boolean { return false; }
-  writeCharacterAnimation(_actor: ActorId, _animation: import("../../../contracts/movement.ts").ActorAnimationState): void { /* only a Q3 source mirrors the character animation into its entity */ }
-  characterPose(_actor: ActorId): ReturnType<Of<"q1">["composition"]["characterPose"]> | null { return null; }
-  reactionStart(_actor: OwnedActor, _decision: DamageDecision): void { /* the source has no early damage reaction */ }
-  reactionEnd(_actor: OwnedActor, _decision: DamageDecision): void { /* the source has no late damage reaction */ }
-  damageCommitted(_actor: OwnedActor, _decision: DamageDecision): void { /* the source records no committed damage */ }
-  stopSpeed(): number { return 100; }
-  restoreContinuation(_save: SaveImage): void { /* the source keeps no per-player continuation outside the shared tables */ }
-  restoreFoundation(_save: SaveImage, _reader: SaveReader): void { /* the source has no foundation checkpoint */ }
-  restoreGravity(_save: SaveImage): void { /* only a Q2 source stores its gravity in a server variable */ }
-  ammoTimer(_actor: ActorId, _weapon: number): number | null { return null; }
-  legacyQ3Family(): "q1" | "q2" | null { return null; }
+  guestGrounded(_actor: ActorId): boolean | null {
+    return null;
+  }
+  guestClientView(_actor: ActorId): { readonly viewOffset: Vec3; readonly crouched: boolean } | null {
+    return null;
+  }
+  outputsSuspended(_actor: ActorId, player: MovementPlayer | null): boolean {
+    return player?.intermission === true || (player?.cutscene !== null && player?.cutscene !== undefined);
+  }
+  handoff(_actor: ActorId): PrimaryWeaponHandoff {
+    throw new Error("Primary source is not ready");
+  }
+  equipmentPowerups(_actor: ActorId): { readonly quadUntil: number | null; readonly hasteUntil: number } {
+    return { quadUntil: null, hasteUntil: 0 };
+  }
+  refineWeaponInput(_actor: ActorId, input: Q2WeaponInput): Q2WeaponInput {
+    return input;
+  }
+  guestWeaponAnimation(_actor: ActorId, _priority: "attack" | "reverse", _melee: boolean): boolean {
+    return false;
+  }
+  writeCharacterAnimation(_actor: ActorId, _animation: import("../../../contracts/movement.ts").ActorAnimationState): void {
+    /* only a Q3 source mirrors the character animation into its entity */
+  }
+  characterPose(_actor: ActorId): ReturnType<Of<"q1">["composition"]["characterPose"]> | null {
+    return null;
+  }
+  reactionStart(_actor: OwnedActor, _decision: DamageDecision): void {
+    /* the source has no early damage reaction */
+  }
+  reactionEnd(_actor: OwnedActor, _decision: DamageDecision): void {
+    /* the source has no late damage reaction */
+  }
+  damageCommitted(_actor: OwnedActor, _decision: DamageDecision): void {
+    /* the source records no committed damage */
+  }
+  stopSpeed(): number {
+    return 100;
+  }
+  restoreContinuation(_save: SaveImage): void {
+    /* the source keeps no per-player continuation outside the shared tables */
+  }
+  restoreFoundation(_save: SaveImage, _reader: SaveReader): void {
+    /* the source has no foundation checkpoint */
+  }
+  restoreGravity(_save: SaveImage): void {
+    /* only a Q2 source stores its gravity in a server variable */
+  }
+  ammoTimer(_actor: ActorId, _weapon: number): number | null {
+    return null;
+  }
+  legacyQ3Family(): "q1" | "q2" | null {
+    return null;
+  }
 }
 
 class LoadedStrategy extends LoadingStrategy {
-  override requireLoaded(_message: string): void { /* the source has loaded */ }
+  override requireLoaded(_message: string): void {
+    /* the source has loaded */
+  }
 }
 
 class Q1Strategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"q1">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"q1">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "q1" as const;
   override restoreFoundation(save: SaveImage, reader: SaveReader): void {
-    if (savedSourceCvars(save) === undefined) reader.field("sourceCvars").list(value => { this.source.cvars.set(value.field("name").string(), value.field("value").string(), true); return undefined; });
+    if (savedSourceCvars(save) === undefined)
+      reader.field("sourceCvars").list(value => {
+        this.source.cvars.set(value.field("name").string(), value.field("value").string(), true);
+        return undefined;
+      });
     this.source.game.restore(decodeQ1FoundationCheckpoint(simulationProviderCheckpoint(save, "q1:foundation").bytes), { scheduleThinks: false });
   }
-  override legacyQ3Family(): "q1" { return "q1"; }
-  override reactionEnd(actor: OwnedActor, decision: DamageDecision): void { this.source.composition.beforeReaction(actor, decision); }
-  override handoff(actor: ActorId): PrimaryWeaponHandoff { return this.source.game.primaryWeaponHandoff(this.host.requirePlayer(actor).actor); }
+  override legacyQ3Family(): "q1" {
+    return "q1";
+  }
+  override reactionEnd(actor: OwnedActor, decision: DamageDecision): void {
+    this.source.composition.beforeReaction(actor, decision);
+  }
+  override handoff(actor: ActorId): PrimaryWeaponHandoff {
+    return this.source.game.primaryWeaponHandoff(this.host.requirePlayer(actor).actor);
+  }
   override equipmentPowerups(actor: ActorId): { readonly quadUntil: number | null; readonly hasteUntil: number } {
     return { quadUntil: this.source.game.player(actor)?.powerups.get("quad") ?? 0, hasteUntil: 0 };
   }
-  override characterPose(actor: ActorId): ReturnType<Of<"q1">["composition"]["characterPose"]> { return this.source.composition.characterPose(actor); }
-  override grantQuad(actor: ActorId): void { this.source.game.player(actor)?.powerups.set("quad", this.source.game.time + 30); }
-  override q1Powerups(actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined { return this.source.game.player(actor)?.powerups; }
+  override characterPose(actor: ActorId): ReturnType<Of<"q1">["composition"]["characterPose"]> {
+    return this.source.composition.characterPose(actor);
+  }
+  override grantQuad(actor: ActorId): void {
+    this.source.game.player(actor)?.powerups.set("quad", this.source.game.time + 30);
+  }
+  override q1Powerups(actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined {
+    return this.source.game.player(actor)?.powerups;
+  }
   override foreignPowerups(actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } {
     const powers = this.source.game.player(actor)?.powerups;
     return { quadUntil: powers?.get("quad") ?? 0, doubleUntil: 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0 };
   }
-  override q1CharacterFrame(actor: ActorId, frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void { this.source.composition.characterFrame(actor, frame); }
-  override concludeFrame(): void { if (this.source.game.forceRetouch > 0) this.source.game.forceRetouch--; }
-  override teamGame(): boolean { return this.source.composition.selection.program === "ctf" || this.source.cvars.variableValue("teamplay") !== 0; }
-  override serverCvars(): ServerCvarRegistry { return this.source.cvars; }
-  override disconnect(actor: ActorId): "done" { this.source.composition.disconnect(actor); return "done"; }
-  override dropInventory(player: MovementPlayer): void { this.source.composition.dropInventory(player.actor); }
-  override respawn(player: MovementPlayer): void { this.source.composition.requestRespawn(player.actor.id, this.host.entryCarry(player.actor)); }
-  override telefragCause(): { readonly kind: "q1"; readonly deathType: "telefrag" } { return { kind: "q1", deathType: "telefrag" }; }
+  override q1CharacterFrame(actor: ActorId, frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void {
+    this.source.composition.characterFrame(actor, frame);
+  }
+  override concludeFrame(): void {
+    if (this.source.game.forceRetouch > 0) this.source.game.forceRetouch--;
+  }
+  override teamGame(): boolean {
+    return this.source.composition.selection.program === "ctf" || this.source.cvars.variableValue("teamplay") !== 0;
+  }
+  override serverCvars(): ServerCvarRegistry {
+    return this.source.cvars;
+  }
+  override disconnect(actor: ActorId): "done" {
+    this.source.composition.disconnect(actor);
+    return "done";
+  }
+  override dropInventory(player: MovementPlayer): void {
+    this.source.composition.dropInventory(player.actor);
+  }
+  override respawn(player: MovementPlayer): void {
+    this.source.composition.requestRespawn(player.actor.id, this.host.entryCarry(player.actor));
+  }
+  override telefragCause(): { readonly kind: "q1"; readonly deathType: "telefrag" } {
+    return { kind: "q1", deathType: "telefrag" };
+  }
   override cutsceneControl(player: MovementPlayer, angles: Vec3): void {
     this.source.game.playerInput(player.actor, { attack: false, jump: false });
     this.source.game.weaponInput(player.actor, false, angles, this.host.timeSeconds, player.waterLevel);
   }
-  override asQ1(): Of<"q1"> { return this.source; }
+  override asQ1(): Of<"q1"> {
+    return this.source;
+  }
   override baseArsenal(player: MovementPlayer): ArsenalState {
     const state = this.source.game.player(player.actor.id);
     if (state === null) throw new Error("Q1 player has no arsenal");
-    return { provider: this.host.weaponProvider.provider, activeWeapon: this.source.game.weaponItem(state.weapon), ammo: this.host.inventory.entries(player.actor.id),
-      state: { kind: "q1", frame: state.weaponFrame, attackFinishedSeconds: state.attackFinished, sourceWeapon: isQ1BaseWeapon(state.weapon) ? q1WeaponBit(state.weapon) : 0 } };
+    return {
+      provider: this.host.weaponProvider.provider,
+      activeWeapon: this.source.game.weaponItem(state.weapon),
+      ammo: this.host.inventory.entries(player.actor.id),
+      state: {
+        kind: "q1",
+        frame: state.weaponFrame,
+        attackFinishedSeconds: state.attackFinished,
+        sourceWeapon: isQ1BaseWeapon(state.weapon) ? q1WeaponBit(state.weapon) : 0,
+      },
+    };
   }
-  override q1Client(actor: ActorId): ReturnType<Of<"q1">["composition"]["clients"]["require"]> { return this.source.composition.clients.require(actor); }
-  override q1Impulse(actor: ActorId): void { this.source.composition.impulse(actor); }
-  override primaryWeaponStep(player: MovementPlayer): null { this.host.playerWeapon(player); return null; }
+  override q1Client(actor: ActorId): ReturnType<Of<"q1">["composition"]["clients"]["require"]> {
+    return this.source.composition.clients.require(actor);
+  }
+  override q1Impulse(actor: ActorId): void {
+    this.source.composition.impulse(actor);
+  }
+  override primaryWeaponStep(player: MovementPlayer): null {
+    this.host.playerWeapon(player);
+    return null;
+  }
   override playerWeapon(player: MovementPlayer): void {
-    const source = this.source, host = this.host, pressed = (player.buttons & 1) !== 0;
+    const source = this.source,
+      host = this.host,
+      pressed = (player.buttons & 1) !== 0;
     source.composition.impulse(player.actor.id);
-    if (host.selectedArsenal === null && source.game.weaponInput(player.actor, pressed, player.viewAngles, host.timeSeconds, player.waterLevel)) source.composition.fired(player.actor.id, host.arsenal(player).activeWeapon);
+    if (host.selectedArsenal === null && source.game.weaponInput(player.actor, pressed, player.viewAngles, host.timeSeconds, player.waterLevel))
+      source.composition.fired(player.actor.id, host.arsenal(player).activeWeapon);
   }
   override weaponFacts(actor: ActorId): WeaponFacts {
     return { q3Ps: undefined, spectator: false, hand: "right", quadUntil: this.source.game.player(actor)?.powerups.get("quad") ?? 0, infiniteAmmo: false };
   }
-  override dropsImpulse(): boolean { return true; }
-  override requestsWeaponDirectly(): boolean { return true; }
+  override dropsImpulse(): boolean {
+    return true;
+  }
+  override requestsWeaponDirectly(): boolean {
+    return true;
+  }
   private cheatsDenied(actor: ActorId): boolean {
     const game = this.source.game;
     if (game.options.deathmatch !== 0 && (game.options.edition === "classic" || this.source.cvars.variableValue("sv_cheats") === 0)) {
-      game.message(actor, "Cheats are disabled on this server.\n", false); return true;
+      game.message(actor, "Cheats are disabled on this server.\n", false);
+      return true;
     }
     return false;
   }
   override preCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     if (name === "say" || name === "say_team") {
       if (args.length === 0) return true;
-      const sender = source.composition.clients.require(actor), prefix = `\x01${sender.name}: `;
+      const sender = source.composition.clients.require(actor),
+        prefix = `\x01${sender.name}: `;
       const text = `${prefix}${args.join(" ").slice(0, Math.max(0, 62 - prefix.length))}\n`;
       for (const recipient of source.composition.clients.records.values()) {
         if (name === "say_team" && source.cvars.variableValue("teamplay") !== 0 && recipient.team !== sender.team) continue;
@@ -980,37 +1536,54 @@ class Q1Strategy extends LoadedStrategy {
       return true;
     }
     if (name === "give") {
-      if (source.game.options.deathmatch !== 0 && (source.game.options.edition === "classic" || source.cvars.variableValue("sv_cheats") === 0)) source.game.message(actor, "Cheats are disabled on this server.\n", false);
+      if (source.game.options.deathmatch !== 0 && (source.game.options.edition === "classic" || source.cvars.variableValue("sv_cheats") === 0))
+        source.game.message(actor, "Cheats are disabled on this server.\n", false);
       else giveQ1(source.composition, actor, args);
       return true;
     }
     if (name !== "god" && name !== "notarget" && name !== "noclip" && name !== "fly") return false;
-    const player = host.requirePlayer(actor), client = source.composition.clients.require(actor);
+    const player = host.requirePlayer(actor),
+      client = source.composition.clients.require(actor);
     if (this.cheatsDenied(actor)) return true;
     let enabled: boolean;
     if (name === "god") {
-      client.godMode = !client.godMode; enabled = client.godMode;
+      client.godMode = !client.godMode;
+      enabled = client.godMode;
       host.combat.setTraits(player.actor, { invulnerable: enabled || (source.game.player(actor)?.powerups.get("invulnerability") ?? 0) > host.timeSeconds });
     } else if (name === "notarget") {
-      enabled = !source.composition.noTarget(actor); source.composition.setNoTarget(actor, enabled);
+      enabled = !source.composition.noTarget(actor);
+      source.composition.setNoTarget(actor, enabled);
     } else if (name === "fly") {
       enabled = player.setFlight(!player.flight);
     } else {
       const state = player.readState();
-      enabled = !(state.kind === "q1-netquake" ? state.moveType === 8 : state.kind === "q1-quakeworld" ? state.spectator !== 0
-        : state.kind === "q3" ? state.movementType === 1 : state.type === 1);
+      enabled = !(state.kind === "q1-netquake"
+        ? state.moveType === 8
+        : state.kind === "q1-quakeworld"
+          ? state.spectator !== 0
+          : state.kind === "q3"
+            ? state.movementType === 1
+            : state.type === 1);
       host.setPlayerMovement(actor, { kind: "noclip", enabled });
     }
-    source.game.message(actor, `${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`, false); return true;
+    source.game.message(actor, `${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`, false);
+    return true;
   }
   override afterCommand(actor: ActorId, player: MovementPlayer, name: string, args: readonly string[]): void {
-    const game = this.source.game, active = game.player(actor)?.weapon, owned = Q1_WEAPONS.filter(weapon => this.host.inventory.count(actor, `q1:weapon/${weapon}`) > 0);
+    const game = this.source.game,
+      active = game.player(actor)?.weapon,
+      owned = Q1_WEAPONS.filter(weapon => this.host.inventory.count(actor, `q1:weapon/${weapon}`) > 0);
     const requested = args.join("").toLowerCase().replaceAll(" ", "");
-    const weapon = name === "weapnext" || name === "weapprev" ? owned[(owned.findIndex(value => value === active) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length] : Q1_WEAPONS.find(value => value === requested || `q1:weapon/${value}` === requested);
+    const weapon =
+      name === "weapnext" || name === "weapprev"
+        ? owned[(owned.findIndex(value => value === active) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length]
+        : Q1_WEAPONS.find(value => value === requested || `q1:weapon/${value}` === requested);
     if (weapon !== undefined && this.host.selectedArsenal === null) game.selectWeapon(player.actor, weapon);
   }
   override setIdentity(actor: ActorId, identity: SourceIdentity): void {
-    const clients = this.source.composition.clients, client = clients.require(actor), info = new Map(client.userinfo);
+    const clients = this.source.composition.clients,
+      client = clients.require(actor),
+      info = new Map(client.userinfo);
     if (identity.name !== undefined) info.set("name", identity.name);
     clients.update(actor, info);
     if (identity.shirt !== undefined || identity.pants !== undefined) clients.colors(actor, identity.shirt ?? client.shirt, identity.pants ?? client.pants);
@@ -1018,132 +1591,244 @@ class Q1Strategy extends LoadedStrategy {
   override grantProfile(arsenal: SelectedArsenal): PickupSupplyProfile {
     return arsenal.family === "q3" ? Q1_Q3_SUPPLY_PROFILE : arsenal.family === "q2" ? Q1_Q2_SUPPLY_PROFILE : Q1_HIPNOTIC_SUPPLY_PROFILE;
   }
-  override uiPowerups(actor: ActorId): PlayerUi["powerups"] { return q1PowerupTimers(this.source.game.player(actor)?.powerups ?? new Map<Q1Powerup, number>(), this.source.game.time); }
+  override uiPowerups(actor: ActorId): PlayerUi["powerups"] {
+    return q1PowerupTimers(this.source.game.player(actor)?.powerups ?? new Map<Q1Powerup, number>(), this.source.game.time);
+  }
   override arsenalUi(actor: ActorId, _arsenal: ArsenalState): ArsenalUiParts {
-    const game = this.source.game, inventory = this.host.inventory, items: PlayerUiItem[] = [];
-    let ammo: PlayerUi["ammo"] = null, weaponStatus: PlayerUi["weaponStatus"] = null;
+    const game = this.source.game,
+      inventory = this.host.inventory,
+      items: PlayerUiItem[] = [];
+    let ammo: PlayerUi["ammo"] = null,
+      weaponStatus: PlayerUi["weaponStatus"] = null;
     for (const [sourceOrdinal, weapon] of [...Q1_WEAPONS, ...game.registeredWeapons.keys()].entries()) {
-      const item = game.weaponAmmo(weapon), count = item === null ? null : inventory.count(actor, item);
-      items.push({ id: game.weaponItem(weapon), label: weapon, kind: "weapon", sourceOrdinal,
-        owned: inventory.count(actor, game.weaponItem(weapon)) > 0, hasAmmo: count === null || count >= (game.registeredWeapons.get(weapon)?.ammoPerShot ?? (weapon === "supernailgun" || weapon === "supershotgun" ? 2 : 1)), count, warningCount: 0 });
+      const item = game.weaponAmmo(weapon),
+        count = item === null ? null : inventory.count(actor, item);
+      items.push({
+        id: game.weaponItem(weapon),
+        label: weapon,
+        kind: "weapon",
+        sourceOrdinal,
+        owned: inventory.count(actor, game.weaponItem(weapon)) > 0,
+        hasAmmo:
+          count === null || count >= (game.registeredWeapons.get(weapon)?.ammoPerShot ?? (weapon === "supernailgun" || weapon === "supershotgun" ? 2 : 1)),
+        count,
+        warningCount: 0,
+      });
     }
-    const state = game.player(actor), weapon = state?.weapon;
+    const state = game.player(actor),
+      weapon = state?.weapon;
     if (state !== null) weaponStatus = q1WeaponStatus(game, state, this.host.weaponProvider);
-    if (weapon !== undefined) { const item = game.weaponAmmo(weapon); if (item !== null) ammo = { item, count: inventory.count(actor, item) }; }
+    if (weapon !== undefined) {
+      const item = game.weaponAmmo(weapon);
+      if (item !== null) ammo = { item, count: inventory.count(actor, item) };
+    }
     return { items, ammo, weaponStatus, arsenalWarning: "none" };
   }
-  override q1Player(actor: ActorId): ReturnType<Of<"q1">["game"]["player"]> | null { return this.source.game.player(actor); }
-  override q1Colors(actor: ActorId): { readonly shirt: number; readonly pants: number } | null | undefined { return this.source.composition.clients.get(actor); }
-  override canonicalTeam(original: string | null): string | null {
-    return this.source.composition.clients.program === "ctf" ? original === "red" ? "team:red" : original === "blue" ? "team:blue" : original : original;
+  override q1Player(actor: ActorId): ReturnType<Of<"q1">["game"]["player"]> | null {
+    return this.source.game.player(actor);
   }
-  override declaresMatch(): boolean { return true; }
-  override matchScore(actor: ActorId): number { return this.source.composition.clients.require(actor).frags; }
+  override q1Colors(actor: ActorId): { readonly shirt: number; readonly pants: number } | null | undefined {
+    return this.source.composition.clients.get(actor);
+  }
+  override canonicalTeam(original: string | null): string | null {
+    return this.source.composition.clients.program === "ctf" ? (original === "red" ? "team:red" : original === "blue" ? "team:blue" : original) : original;
+  }
+  override declaresMatch(): boolean {
+    return true;
+  }
+  override matchScore(actor: ActorId): number {
+    return this.source.composition.clients.require(actor).frags;
+  }
   override setMatchScore(actor: ActorId, value: number): void {
     if (!Number.isFinite(value)) throw new Error("Quake score must be finite");
-    const client = this.source.composition.clients.require(actor); client.frags = Math.fround(value); this.source.composition.clients.publish(client);
+    const client = this.source.composition.clients.require(actor);
+    client.frags = Math.fround(value);
+    this.source.composition.clients.publish(client);
   }
   override setMatchTeam(actor: ActorId, requested: string | null): void {
-    const clients = this.source.composition.clients, entry = clients.require(actor), value = clients.program === "ctf"
-      ? requested === "team:red" ? 5 : requested === "team:blue" ? 14 : NaN : requested === null ? NaN : Number(requested);
+    const clients = this.source.composition.clients,
+      entry = clients.require(actor),
+      value = clients.program === "ctf" ? (requested === "team:red" ? 5 : requested === "team:blue" ? 14 : NaN) : requested === null ? NaN : Number(requested);
     if (!Number.isInteger(value) || value < 1 || value > 14) throw new Error("Team has no original Quake color command");
     clients.colors(actor, entry.shirt, value - 1);
   }
-  override userinfo(actor: ActorId): string | null { return joinInfo(this.source.composition.clients.require(actor).userinfo); }
+  override userinfo(actor: ActorId): string | null {
+    return joinInfo(this.source.composition.clients.require(actor).userinfo);
+  }
   override storeUserinfo(actor: ActorId, _client: ClientId, userinfo: string): void {
-    const info = this.source.composition.clients.require(actor).userinfo; info.clear();
+    const info = this.source.composition.clients.require(actor).userinfo;
+    info.clear();
     for (const [name, value] of q2Userinfo(userinfo)) info.set(name, value);
   }
   override updateUserinfo(actor: ActorId, userinfo: string, previous: string | null): void {
-    const current = this.source.composition.clients.require(actor).userinfo, values = q2Userinfo(userinfo);
+    const current = this.source.composition.clients.require(actor).userinfo,
+      values = q2Userinfo(userinfo);
     if (sameInfo(current, values)) return;
     this.source.composition.userinfo(actor, values);
     this.host.userinfoChanged(actor, previous);
   }
-  override pause(): PauseControl { return { cvars: this.source.cvars, isSpectator: () => false }; }
+  override pause(): PauseControl {
+    return { cvars: this.source.cvars, isSpectator: () => false };
+  }
 
-  override admitClient(): null { return null; }
-  override prepareBot(client: ClientId): OwnedActor { return this.host.requirePlayer(this.host.admitPlayer(client).actor).actor; }
-  override initialArsenalState(): ArsenalState["state"] { return { kind: "q1", frame: 0, attackFinishedSeconds: 0, sourceWeapon: 1 }; }
+  override admitClient(): null {
+    return null;
+  }
+  override prepareBot(client: ClientId): OwnedActor {
+    return this.host.requirePlayer(this.host.admitPlayer(client).actor).actor;
+  }
+  override initialArsenalState(): ArsenalState["state"] {
+    return { kind: "q1", frame: 0, attackFinishedSeconds: 0, sourceWeapon: 1 };
+  }
   override configureAdmitted(actor: OwnedActor, client: ClientId, _player: MovementPlayer, _entity: Q2Entity, userinfo: string | undefined): void {
     const source = this.source;
     source.game.attachPlayer(actor);
-    source.composition.attach(actor, { slot: client.slot, userinfo: userinfo === undefined ? new Map([["name", `Player ${client.slot + 1}`], ["topcolor", "0"], ["bottomcolor", "0"]]) : q2Userinfo(userinfo) });
+    source.composition.attach(actor, {
+      slot: client.slot,
+      userinfo:
+        userinfo === undefined
+          ? new Map([
+              ["name", `Player ${client.slot + 1}`],
+              ["topcolor", "0"],
+              ["bottomcolor", "0"],
+            ])
+          : q2Userinfo(userinfo),
+    });
   }
-  override attachForeignCharacter(player: MovementPlayer): void { if (player.character === "q2") this.host.attachQ2Character(player); }
+  override attachForeignCharacter(player: MovementPlayer): void {
+    if (player.character === "q2") this.host.attachQ2Character(player);
+  }
   override admitCarry(actor: OwnedActor, _entity: Q2Entity, carried: CarriedPlayerState | undefined): boolean {
     if (carried?.kind !== "q1") return false;
     this.source.composition.admitTravel(actor, carried.carry);
     return true;
   }
-  override enterWorld(actor: OwnedActor, player: MovementPlayer): void { this.host.spawnQ1Player(this.source, actor, player); }
-  override captureEntryCarry(actor: OwnedActor): Q1TravelState { return this.source.composition.captureTravel(actor); }
+  override enterWorld(actor: OwnedActor, player: MovementPlayer): void {
+    this.host.spawnQ1Player(this.source, actor, player);
+  }
+  override captureEntryCarry(actor: OwnedActor): Q1TravelState {
+    return this.source.composition.captureTravel(actor);
+  }
   override movementBindings(actor: OwnedActor): PlayerBindings {
-    const source = this.source, host = this.host;
-    return { netQuake: {
-      projection: null, jumpAuthority: "selected-movement",
-      input: command => source.composition.input(actor.id, { attack: (command.buttons & 1) !== 0, jump: (command.buttons & 2) !== 0,
-        use: (command.buttons & 4) !== 0, impulse: command.impulse }),
-      beforePhysics: frame => {
-        const player = host.requirePlayer(actor.id);
-        source.composition.playerPreThink(actor.id); source.game.playerFrame(actor, seconds(frame.time), player.waterLevel);
-        return undefined;
+    const source = this.source,
+      host = this.host;
+    return {
+      netQuake: {
+        projection: null,
+        jumpAuthority: "selected-movement",
+        input: command =>
+          source.composition.input(actor.id, {
+            attack: (command.buttons & 1) !== 0,
+            jump: (command.buttons & 2) !== 0,
+            use: (command.buttons & 4) !== 0,
+            impulse: command.impulse,
+          }),
+        beforePhysics: frame => {
+          const player = host.requirePlayer(actor.id);
+          source.composition.playerPreThink(actor.id);
+          source.game.playerFrame(actor, seconds(frame.time), player.waterLevel);
+          return undefined;
+        },
+        think: frame => {
+          host.runEntityThink(actor.id, frame);
+          return undefined;
+        },
+        afterPhysics: frame => {
+          source.game.playerAfterPhysics(actor, seconds(frame.time));
+          source.composition.playerPostThink(actor.id);
+          host.afterClientThink(actor);
+          return undefined;
+        },
       },
-      think: frame => { host.runEntityThink(actor.id, frame); return undefined; },
-      afterPhysics: frame => { source.game.playerAfterPhysics(actor, seconds(frame.time)); source.composition.playerPostThink(actor.id);
-        host.afterClientThink(actor); return undefined; },
-    } };
+    };
   }
 
-  override preparesQ1Clients(): boolean { return true; }
-  override beginTimedFrame(elapsed: number): void { this.source.game.beginFrame(this.host.timeSeconds, elapsed); }
-  override intermissionActive(): boolean { return this.source.game.intermission !== null; }
+  override preparesQ1Clients(): boolean {
+    return true;
+  }
+  override beginTimedFrame(elapsed: number): void {
+    this.source.game.beginFrame(this.host.timeSeconds, elapsed);
+  }
+  override intermissionActive(): boolean {
+    return this.source.game.intermission !== null;
+  }
   override requestIntermissionExit(actor: ActorId, buttons: number): void {
     this.source.composition.requestIntermissionExit(buttons !== 0, { actor, attack: (buttons & 1) !== 0 });
   }
   override preFrame(input: PreFrameInput): void {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     host.setWorldGravity(source.cvars.variableValue("sv_gravity"));
     source.composition.preFrame(input.elapsed);
     for (const player of input.players) {
       if (player.profile.kind === "q1-netquake") continue;
       const received = [...input.commands].reverse().find(value => sameActor(value.actor, player.actor.id) && value.sequence > player.lastSequence);
-      if (input.deferred && received !== undefined && player.cutscene === null && !player.intermission) { input.pending?.set(player, received.sequence); continue; }
+      if (input.deferred && received !== undefined && player.cutscene === null && !player.intermission) {
+        input.pending?.set(player, received.sequence);
+        continue;
+      }
       const command = received?.command;
-      const jump = command === undefined ? (player.buttons & 2) !== 0 : command.kind === "q1-netquake" ? (command.buttons & 2) !== 0
-        : command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 : command.upMove > 0;
-      source.composition.input(player.actor.id, { attack: player.cutscene === null && ((command?.buttons ?? player.buttons) & 1) !== 0, jump: player.cutscene === null && jump,
-        use: ((command?.buttons ?? player.buttons) & 4) !== 0, impulse: command !== undefined && "impulse" in command ? command.impulse : received?.arsenal?.impulse ?? 0 });
+      const jump =
+        command === undefined
+          ? (player.buttons & 2) !== 0
+          : command.kind === "q1-netquake"
+            ? (command.buttons & 2) !== 0
+            : command.kind === "q2-rerelease"
+              ? (command.buttons & 8) !== 0
+              : command.upMove > 0;
+      source.composition.input(player.actor.id, {
+        attack: player.cutscene === null && ((command?.buttons ?? player.buttons) & 1) !== 0,
+        jump: player.cutscene === null && jump,
+        use: ((command?.buttons ?? player.buttons) & 4) !== 0,
+        impulse: command !== undefined && "impulse" in command ? command.impulse : (received?.arsenal?.impulse ?? 0),
+      });
       source.composition.playerPreThink(player.actor.id);
       source.game.playerFrame(player.actor, host.timeSeconds, player.waterLevel);
     }
   }
   override preThink(player: MovementPlayer, command: ActorCommand): boolean {
-    const source = this.source, effective = command.command;
-    const jump = effective.kind === "q1-netquake" || effective.kind === "q1-quakeworld" ? (effective.buttons & 2) !== 0
-      : effective.kind === "q2-rerelease" ? (effective.buttons & 8) !== 0 : effective.upMove > 0;
-    source.composition.input(player.actor.id, { attack: (effective.buttons & 1) !== 0, jump,
-      use: (effective.buttons & 4) !== 0, impulse: command.arsenal?.impulse ?? ("impulse" in effective ? effective.impulse : 0) });
+    const source = this.source,
+      effective = command.command;
+    const jump =
+      effective.kind === "q1-netquake" || effective.kind === "q1-quakeworld"
+        ? (effective.buttons & 2) !== 0
+        : effective.kind === "q2-rerelease"
+          ? (effective.buttons & 8) !== 0
+          : effective.upMove > 0;
+    source.composition.input(player.actor.id, {
+      attack: (effective.buttons & 1) !== 0,
+      jump,
+      use: (effective.buttons & 4) !== 0,
+      impulse: command.arsenal?.impulse ?? ("impulse" in effective ? effective.impulse : 0),
+    });
     source.composition.playerPreThink(player.actor.id);
     source.game.playerFrame(player.actor, this.host.timeSeconds, player.waterLevel);
     return this.host.isLive(player.actor.id);
   }
   override afterPlayerCommand(player: MovementPlayer): void {
     if (!this.host.isLive(player.actor.id)) return;
-    this.source.game.playerAfterPhysics(player.actor, this.host.timeSeconds); this.source.composition.playerPostThink(player.actor.id);
+    this.source.game.playerAfterPhysics(player.actor, this.host.timeSeconds);
+    this.source.composition.playerPostThink(player.actor.id);
   }
-  override beforeClientActor(actor: OwnedActor): void { this.retouch(actor); }
-  override retouch(actor: OwnedActor): void { if (this.source.game.forceRetouch > 0) this.host.relink(actor); }
+  override beforeClientActor(actor: OwnedActor): void {
+    this.retouch(actor);
+  }
+  override retouch(actor: OwnedActor): void {
+    if (this.source.game.forceRetouch > 0) this.host.relink(actor);
+  }
 
   override selectedPlayer(actor: ActorId): SelectedPlayerStats {
     const player = this.source.game.player(actor);
     return { maxHealth: player?.maxHealth ?? 100, team: null, quadUntil: Math.trunc((player?.powerups.get("quad") ?? 0) * 1000), hasteUntil: 0 };
   }
-  override intermissionQueued(): number { return this.source.game.intermission === null ? 0 : 1; }
+  override intermissionQueued(): number {
+    return this.source.game.intermission === null ? 0 : 1;
+  }
   override teleportSpawn(actor: OwnedActor): SpawnPoint {
     const spot = this.source.composition.selectSpawn(actor.id, true);
     if (spot === null) throw new Error("Selected teleporter has no source spawn");
-    const body = this.source.game.body(spot); return { origin: body.origin, angles: body.angles };
+    const body = this.source.game.body(spot);
+    return { origin: body.origin, angles: body.angles };
   }
   override dropObjectives(actor: OwnedActor): void {
     const composition = this.source.composition;
@@ -1151,18 +1836,37 @@ class Q1Strategy extends LoadedStrategy {
     composition.packs?.world.dropCarriedFlag(actor.id);
   }
   override setMaxHealth(actor: ActorId, health: number): void {
-    const target = this.source.game.player(actor); if (target === null) throw new Error("Selected max health has no Q1 player");
+    const target = this.source.game.player(actor);
+    if (target === null) throw new Error("Selected max health has no Q1 player");
     target.maxHealth = health;
   }
-  override installPickupAdmission(admission: SharedPickupAdmission): void { this.source.game.pickupAdmission = admission; }
-  override supplyFamily(): SupplyFamily { return "q1"; }
-  override noteFired(actor: ActorId, item: ItemId | null): void { this.source.composition.fired(actor, item); }
-  override allowsAutoSwitch(actor: ActorId): boolean { return this.source.game.player(actor)?.autoSwitch !== "never"; }
-  override cvars(): CvarRegistry { return this.source.cvars; }
-  override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number { return this.source.game.player(actor)?.powerups.get(powerup) ?? 0; }
-  override notarget(actor: ActorId): boolean { return this.source.composition.noTarget(actor); }
-  override godMode(actor: ActorId): boolean { return this.source.composition.clients.get(actor)?.godMode ?? false; }
-  override q1Game(): Of<"q1">["game"] { return this.source.game; }
+  override installPickupAdmission(admission: SharedPickupAdmission): void {
+    this.source.game.pickupAdmission = admission;
+  }
+  override supplyFamily(): SupplyFamily {
+    return "q1";
+  }
+  override noteFired(actor: ActorId, item: ItemId | null): void {
+    this.source.composition.fired(actor, item);
+  }
+  override allowsAutoSwitch(actor: ActorId): boolean {
+    return this.source.game.player(actor)?.autoSwitch !== "never";
+  }
+  override cvars(): CvarRegistry {
+    return this.source.cvars;
+  }
+  override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number {
+    return this.source.game.player(actor)?.powerups.get(powerup) ?? 0;
+  }
+  override notarget(actor: ActorId): boolean {
+    return this.source.composition.noTarget(actor);
+  }
+  override godMode(actor: ActorId): boolean {
+    return this.source.composition.clients.get(actor)?.godMode ?? false;
+  }
+  override q1Game(): Of<"q1">["game"] {
+    return this.source.game;
+  }
   override selectWeapon(actor: OwnedActor, item: ItemId): boolean {
     const game = this.source.game;
     const weapon = [...Q1_WEAPONS, ...game.registeredWeapons.keys()].find(value => game.weaponItem(value) === item);
@@ -1173,8 +1877,12 @@ class Q1Strategy extends LoadedStrategy {
     add("world:source-cvars", encodeCheckpointValue(this.source.cvars.captureSaveState()));
     add("q1:foundation", encodeQ1FoundationCheckpoint(this.source.game.capture()));
   }
-  override sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] { return this.source.cvars.snapshots().map(value => ({ name: value.name, value: value.value })); }
-  override travelSource(): SimulationTravel["source"] { return { kind: "q1", flags: this.host.q1Campaign.flags, skill: this.host.q1Campaign.skill }; }
+  override sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] {
+    return this.source.cvars.snapshots().map(value => ({ name: value.name, value: value.value }));
+  }
+  override travelSource(): SimulationTravel["source"] {
+    return { kind: "q1", flags: this.host.q1Campaign.flags, skill: this.host.q1Campaign.skill };
+  }
   override travelPlayerState(actor: ActorId): CarriedPlayerState {
     const composition = this.source.composition;
     return { kind: "q1", carry: this.host.q1Restart ? composition.newTravel() : composition.captureTravel(this.host.requireOwned(actor)) };
@@ -1182,48 +1890,92 @@ class Q1Strategy extends LoadedStrategy {
 }
 
 class QuakeCStrategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"quakec">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"quakec">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "quakec" as const;
   override damageCommitted(actor: OwnedActor, decision: DamageDecision): void {
     const player = this.host.playerStates.get(actor);
     if (player?.character === "q2" && decision.appliedDamage > 0)
-      player.animation = quakeCCharacterAnimation(player.animation, this.host.health(actor.id) <= 0 ? "death" : "pain", player.bounds.max.z < player.standingBounds.max.z);
+      player.animation = quakeCCharacterAnimation(
+        player.animation,
+        this.host.health(actor.id) <= 0 ? "death" : "pain",
+        player.bounds.max.z < player.standingBounds.max.z,
+      );
   }
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     if (channels.includes("stance") && movement === "q1-quakeworld" && this.source.game.kind === "quakeworld") throw new Error(STANCE_CLAIM_ERROR);
   }
   override outputsSuspended(actor: ActorId, player: MovementPlayer | null): boolean {
-    return super.outputsSuspended(actor, player) || this.source.game.localClientIntermission(actor) === true || this.source.game.localClientView(actor) !== null;
+    return (
+      super.outputsSuspended(actor, player) || this.source.game.localClientIntermission(actor) === true || this.source.game.localClientView(actor) !== null
+    );
   }
   override handoff(actor: ActorId): PrimaryWeaponHandoff {
-    const game = this.source.game, host = this.host;
+    const game = this.source.game,
+      host = this.host;
     host.requirePlayer(actor);
-    return { kind: "immediate", provider: host.weaponProvider.provider,
+    return {
+      kind: "immediate",
+      provider: host.weaponProvider.provider,
       accepts: item => host.primaryUi(actor).items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned),
       select: item => game.requestClientWeapon(actor, item),
-      holster: () => { if (!host.isLive(actor)) throw new Error("QC weapon owner retired"); }, isHolstered: () => game.clientWeaponSettled(actor),
-      resume: item => item === null || game.requestClientWeapon(actor, item) };
+      holster: () => {
+        if (!host.isLive(actor)) throw new Error("QC weapon owner retired");
+      },
+      isHolstered: () => game.clientWeaponSettled(actor),
+      resume: item => item === null || game.requestClientWeapon(actor, item),
+    };
   }
   override concludeFrame(): void {
-    const host = this.host, game = this.source.game;
+    const host = this.host,
+      game = this.source.game;
     game.endFrame();
-    for (const player of host.playerStates.values()) { const intermission = game.localClientIntermission(player.actor.id); if (intermission !== null) player.intermission = intermission; }
-    if (game.kind === "quakeworld") { host.runQuakeWorldCommands(); game.messages.flush(); }
+    for (const player of host.playerStates.values()) {
+      const intermission = game.localClientIntermission(player.actor.id);
+      if (intermission !== null) player.intermission = intermission;
+    }
+    if (game.kind === "quakeworld") {
+      host.runQuakeWorldCommands();
+      game.messages.flush();
+    }
     for (const player of host.playerStates.values()) {
       if (player.character === "q1" || player.intermission || player.cutscene !== null) continue;
-      const body = host.body(player.actor.id); if (body === null) continue;
+      const body = host.body(player.actor.id);
+      if (body === null) continue;
       const moving = Math.hypot(body.velocity.x, body.velocity.y) !== 0;
-      const locomotion = player.waterLevel >= 2 ? "swim" : player.ground.kind === "none" ? "jump"
-        : player.bounds.max.z < player.standingBounds.max.z ? "crouch" : moving ? "run" : "idle";
-      const yaw = player.viewAngles.y * Math.PI / 180;
+      const locomotion =
+        player.waterLevel >= 2
+          ? "swim"
+          : player.ground.kind === "none"
+            ? "jump"
+            : player.bounds.max.z < player.standingBounds.max.z
+              ? "crouch"
+              : moving
+                ? "run"
+                : "idle";
+      const yaw = (player.viewAngles.y * Math.PI) / 180;
       const backwards = body.velocity.x * Math.cos(yaw) + body.velocity.y * Math.sin(yaw) < 0;
-      player.animation = host.quakeCCharacterStep({ actor: player.actor, frame: host.sourceFrame, animation: player.animation,
-        locomotion, backwards, force: false }).animation;
+      player.animation = host.quakeCCharacterStep({
+        actor: player.actor,
+        frame: host.sourceFrame,
+        animation: player.animation,
+        locomotion,
+        backwards,
+        force: false,
+      }).animation;
     }
   }
-  override teamGame(): boolean { return this.source.game.cvars.variableValue("teamplay") !== 0; }
-  override serverCvars(): ServerCvarRegistry { return this.source.game.cvars; }
+  override teamGame(): boolean {
+    return this.source.game.cvars.variableValue("teamplay") !== 0;
+  }
+  override serverCvars(): ServerCvarRegistry {
+    return this.source.game.cvars;
+  }
   override disconnect(_actor: ActorId, player: MovementPlayer | null): "done" {
     if (player === null) return "done";
     this.source.game.disconnectClient(player.actor);
@@ -1233,28 +1985,49 @@ class QuakeCStrategy extends LoadedStrategy {
     this.host.forgetPlayer(player);
     return "done";
   }
-  override admitsGuestMonsters(): boolean { return true; }
-  override asQuakeC(): Of<"quakec"> { return this.source; }
-  override baseArsenal(player: MovementPlayer): ArsenalState { return this.source.game.clientArsenal(player.actor.id); }
+  override admitsGuestMonsters(): boolean {
+    return true;
+  }
+  override asQuakeC(): Of<"quakec"> {
+    return this.source;
+  }
+  override baseArsenal(player: MovementPlayer): ArsenalState {
+    return this.source.game.clientArsenal(player.actor.id);
+  }
   override weaponFacts(actor: ActorId): WeaponFacts {
     return { q3Ps: undefined, spectator: false, hand: "right", quadUntil: this.source.game.clientPowerupExpires(actor, "quad"), infiniteAmmo: false };
   }
-  override requestsWeaponDirectly(): boolean { return true; }
-  override ownsContacts(actor: ActorId): boolean { return this.source.game.isSpectatorClient(actor); }
-  override quakeWorldContacts(): boolean { return this.source.game.kind === "quakeworld"; }
+  override requestsWeaponDirectly(): boolean {
+    return true;
+  }
+  override ownsContacts(actor: ActorId): boolean {
+    return this.source.game.isSpectatorClient(actor);
+  }
+  override quakeWorldContacts(): boolean {
+    return this.source.game.kind === "quakeworld";
+  }
   override animation(input: AnimationStepInput): AnimationStepResult {
     return { animation: input.animation.state.kind === "q1" ? this.source.game.clientAnimation(input.actor.id) : input.animation, effects: [] };
   }
-  override attackArsenal(actor: ActorId): ArsenalState { return this.source.game.clientArsenal(actor); }
+  override attackArsenal(actor: ActorId): ArsenalState {
+    return this.source.game.clientArsenal(actor);
+  }
   override preCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
-    if (name === "kill") { this.source.game.clientKill(actor); return true; }
+    if (name === "kill") {
+      this.source.game.clientKill(actor);
+      return true;
+    }
     if (name !== "god" && name !== "notarget" && name !== "noclip" && name !== "fly" && name !== "give") return false;
     this.source.game.hostCheat(actor, name, args);
     if (name === "fly" || name === "noclip") this.host.requirePlayer(actor).setFlight(this.source.game.readMoveType(actor) === 5);
     return true;
   }
-  override clientUi(actor: ActorId): ReturnType<Of<"quakec">["game"]["clientUi"]> { return this.source.game.clientUi(actor); }
-  override uiPowerups(actor: ActorId): PlayerUi["powerups"] { return this.source.game.clientUi(actor).powerups; }
+  override clientUi(actor: ActorId): ReturnType<Of<"quakec">["game"]["clientUi"]> {
+    return this.source.game.clientUi(actor);
+  }
+  override uiPowerups(actor: ActorId): PlayerUi["powerups"] {
+    return this.source.game.clientUi(actor).powerups;
+  }
   override overrideView(actor: ActorId, view: PlayerView, intermission: boolean, health: number): PlayerView | null {
     const camera = this.source.game.localClientView(actor);
     if (camera !== null) return camera;
@@ -1263,22 +2036,33 @@ class QuakeCStrategy extends LoadedStrategy {
     return { ...view, origin: add(view.origin, { ...offset, z: 0 }), viewHeight: offset.z, angles: health <= 0 ? { ...view.angles, z: 80 } : view.angles };
   }
   override canonicalTeam(original: string | null): string | null {
-    const mapping = this.source.game.prepared.teams?.find(value => value.source === original); return mapping === undefined ? original : mapping.team;
+    const mapping = this.source.game.prepared.teams?.find(value => value.source === original);
+    return mapping === undefined ? original : mapping.team;
   }
-  override declaresMatch(): boolean { return true; }
-  override matchScore(actor: ActorId): number { return this.source.game.matchScore(actor); }
-  override setMatchScore(actor: ActorId, value: number): void { this.source.game.setMatchScore(actor, value); }
+  override declaresMatch(): boolean {
+    return true;
+  }
+  override matchScore(actor: ActorId): number {
+    return this.source.game.matchScore(actor);
+  }
+  override setMatchScore(actor: ActorId, value: number): void {
+    this.source.game.setMatchScore(actor, value);
+  }
   override setMatchTeam(actor: ActorId, requested: string | null): void {
     const mapping = this.source.game.prepared.teams?.find(value => value.team === requested);
-    this.source.game.setMatchTeam(actor, mapping === undefined ? requested : mapping.source); this.host.notifyClientEvent("userinfo", actor);
+    this.source.game.setMatchTeam(actor, mapping === undefined ? requested : mapping.source);
+    this.host.notifyClientEvent("userinfo", actor);
   }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
     return client === null ? null : joinInfo(this.source.game.clientInfo(client));
   }
-  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void { this.source.game.setClientInfoStorage(client, q2Userinfo(userinfo)); }
+  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void {
+    this.source.game.setClientInfoStorage(client, q2Userinfo(userinfo));
+  }
   override updateUserinfo(actor: ActorId, userinfo: string, previous: string | null): void {
-    const client = this.host.playerClient(actor); if (client === null) return;
+    const client = this.host.playerClient(actor);
+    if (client === null) return;
     const values = q2Userinfo(userinfo);
     if (sameInfo(this.source.game.clientInfo(client), values)) return;
     this.source.game.setClientInfo(client, values);
@@ -1293,104 +2077,197 @@ class QuakeCStrategy extends LoadedStrategy {
     return this.host.admitQuakeCPlayer(this.source, client, travel, userinfo);
   }
   override movementBindings(actor: OwnedActor, selectedClock: string): PlayerBindings {
-    const source = this.source, host = this.host, game = source.game;
+    const source = this.source,
+      host = this.host,
+      game = source.game;
     const mixedQc = selectedClock !== (game.kind === "quakeworld" ? "q1-quakeworld" : "q1-netquake");
-    if (game.kind === "netquake" && !mixedQc) return { netQuake: {
-      projection: { read: state => game.readClientState(actor.id, state), write: state => game.writeClientState(actor.id, state) },
-      jumpAuthority: "source-gamecode", input: command => game.clientInput(actor.id, command),
-      beforePhysics: () => { const before = game.clientArsenal(actor.id); game.clientPreThink(actor); host.projectQuakeCAttack(actor, before); return undefined; },
-      think: frame => { const before = game.clientArsenal(actor.id); game.runThink(actor, frame); host.projectQuakeCAttack(actor, before); return undefined; }, afterPhysics: () => {
-        const before = game.clientArsenal(actor.id);
-        game.clientPostThink(actor); host.projectQuakeCAttack(actor, before); return undefined;
-      },
-    } };
-    if (mixedQc) return { sourceClient: {
-      projectState: (state: MovementState) => game.isSpectatorClient(actor.id) ? quakeCFreeMovement(state) : state,
-      beforeMovement: (input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand) => {
-        const before = game.clientArsenal(actor.id), result = sourceCommand === undefined
-          ? game.mixedClientPreThink(actor, input.command, frame)
-          : game.mixedQuakeWorldPreThink(actor, sourceCommand, input.command, frame);
-        host.projectQuakeCAttack(actor, before); return result;
-      },
-      afterMovement: (player: MovementPlayer, _frame: FrameContext, sourceCommand?: QwUserCommand): undefined => {
-        const before = game.clientArsenal(actor.id);
-        game.mixedClientPostThink(actor, player.ground, player.waterLevel, player.waterType, player.profile.kind, sourceCommand === undefined ? "immediate" : "deferred");
-        host.projectQuakeCAttack(actor, before);
-        player.arsenal = host.arsenal(player);
-        return undefined;
-      },
-    } };
+    if (game.kind === "netquake" && !mixedQc)
+      return {
+        netQuake: {
+          projection: { read: state => game.readClientState(actor.id, state), write: state => game.writeClientState(actor.id, state) },
+          jumpAuthority: "source-gamecode",
+          input: command => game.clientInput(actor.id, command),
+          beforePhysics: () => {
+            const before = game.clientArsenal(actor.id);
+            game.clientPreThink(actor);
+            host.projectQuakeCAttack(actor, before);
+            return undefined;
+          },
+          think: frame => {
+            const before = game.clientArsenal(actor.id);
+            game.runThink(actor, frame);
+            host.projectQuakeCAttack(actor, before);
+            return undefined;
+          },
+          afterPhysics: () => {
+            const before = game.clientArsenal(actor.id);
+            game.clientPostThink(actor);
+            host.projectQuakeCAttack(actor, before);
+            return undefined;
+          },
+        },
+      };
+    if (mixedQc)
+      return {
+        sourceClient: {
+          projectState: (state: MovementState) => (game.isSpectatorClient(actor.id) ? quakeCFreeMovement(state) : state),
+          beforeMovement: (input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand) => {
+            const before = game.clientArsenal(actor.id),
+              result =
+                sourceCommand === undefined
+                  ? game.mixedClientPreThink(actor, input.command, frame)
+                  : game.mixedQuakeWorldPreThink(actor, sourceCommand, input.command, frame);
+            host.projectQuakeCAttack(actor, before);
+            return result;
+          },
+          afterMovement: (player: MovementPlayer, _frame: FrameContext, sourceCommand?: QwUserCommand): undefined => {
+            const before = game.clientArsenal(actor.id);
+            game.mixedClientPostThink(
+              actor,
+              player.ground,
+              player.waterLevel,
+              player.waterType,
+              player.profile.kind,
+              sourceCommand === undefined ? "immediate" : "deferred",
+            );
+            host.projectQuakeCAttack(actor, before);
+            player.arsenal = host.arsenal(player);
+            return undefined;
+          },
+        },
+      };
     if (game.kind !== "quakeworld") return {};
-    return { quakeWorld: {
-      read: (state: QwMovementState) => game.readQuakeWorldState(actor.id, state),
-      write: (state: QwMovementState) => game.writeQuakeWorldState(actor.id, state),
-      beforePhysics: (command: QwUserCommand, frame: FrameContext) => {
-        const before = game.clientArsenal(actor.id); game.quakeWorldPreThink(actor, command, frame);
-        host.projectQuakeCAttack(actor, before); return undefined;
+    return {
+      quakeWorld: {
+        read: (state: QwMovementState) => game.readQuakeWorldState(actor.id, state),
+        write: (state: QwMovementState) => game.writeQuakeWorldState(actor.id, state),
+        beforePhysics: (command: QwUserCommand, frame: FrameContext) => {
+          const before = game.clientArsenal(actor.id);
+          game.quakeWorldPreThink(actor, command, frame);
+          host.projectQuakeCAttack(actor, before);
+          return undefined;
+        },
+        water: (level: number, type: number) => game.quakeWorldWater(actor.id, level, type),
+        profile: (profile: QwMovementProfile) => game.quakeWorldProfile(actor.id, profile),
       },
-      water: (level: number, type: number) => game.quakeWorldWater(actor.id, level, type),
-      profile: (profile: QwMovementProfile) => game.quakeWorldProfile(actor.id, profile),
-    } };
+    };
   }
-  override suppliesPunch(): boolean { return this.source.game.kind === "netquake"; }
-  override skipsTriggerTouch(actor: ActorId): boolean { const game = this.source.game; return game.kind === "quakeworld" && game.isSpectatorClient(actor); }
+  override suppliesPunch(): boolean {
+    return this.source.game.kind === "netquake";
+  }
+  override skipsTriggerTouch(actor: ActorId): boolean {
+    const game = this.source.game;
+    return game.kind === "quakeworld" && game.isSpectatorClient(actor);
+  }
 
-  override preparesQ1Clients(): boolean { return this.source.game.kind === "netquake"; }
-  override beginGuestFrame(frame: FrameContext): void { this.source.game.beginFrame(frame); }
-  override beforeClientActor(actor: OwnedActor): void { this.source.game.beforeActor(actor); }
+  override preparesQ1Clients(): boolean {
+    return this.source.game.kind === "netquake";
+  }
+  override beginGuestFrame(frame: FrameContext): void {
+    this.source.game.beginFrame(frame);
+  }
+  override beforeClientActor(actor: OwnedActor): void {
+    this.source.game.beforeActor(actor);
+  }
   override afterPlayerCommand(player: MovementPlayer): void {
-    const game = this.source.game, host = this.host;
+    const game = this.source.game,
+      host = this.host;
     if (game.kind !== "quakeworld" || player.profile.kind !== "q1-quakeworld" || !host.isLive(player.actor.id)) return;
     const before = game.clientArsenal(player.actor.id);
-    game.clientPostThink(player.actor); host.projectQuakeCAttack(player.actor, before);
+    game.clientPostThink(player.actor);
+    host.projectQuakeCAttack(player.actor, before);
     if (!game.isSpectatorClient(player.actor.id)) host.runQuakeWorldNewMissile();
-    player.arsenal = host.arsenal(player); if (player.character === "q1") player.animation = game.clientAnimation(player.actor.id);
-    player.state = player.readState(); host.syncQuakeCClientView(player);
+    player.arsenal = host.arsenal(player);
+    if (player.character === "q1") player.animation = game.clientAnimation(player.actor.id);
+    player.state = player.readState();
+    host.syncQuakeCClientView(player);
   }
 
   override selectedPlayer(actor: ActorId): SelectedPlayerStats {
     const equipment = this.source.game.clientEquipment(actor);
     return { maxHealth: equipment?.maxHealth ?? 100, team: null, quadUntil: Math.trunc((equipment?.quadUntil ?? 0) * 1000), hasteUntil: 0 };
   }
-  override hasEquipmentEffects(): boolean { return true; }
-  override weaponDamageFactor(): number { return 1; }
-  override equipmentFiringDelay(actor: ActorId, milliseconds: number, persistent: number): number { return q3WeaponDelay(milliseconds, persistent, this.host.hasteFlag(actor)); }
-  override quadFactor(): number { return 1; }
-  override teleportSpawn(actor: OwnedActor): SpawnPoint { return this.source.game.clientSpawnPoint(actor.id); }
-  override dropObjectives(actor: OwnedActor): void { this.source.game.dropClientObjectives(actor.id); }
-  override setMaxHealth(actor: ActorId, health: number): void { this.source.game.setClientMaxHealth(actor, health); }
-  override supplyFamily(): SupplyFamily { return "q1"; }
-  override ownsSupply(): boolean { return true; }
-  override cvars(): CvarRegistry { return this.source.game.cvars; }
+  override hasEquipmentEffects(): boolean {
+    return true;
+  }
+  override weaponDamageFactor(): number {
+    return 1;
+  }
+  override equipmentFiringDelay(actor: ActorId, milliseconds: number, persistent: number): number {
+    return q3WeaponDelay(milliseconds, persistent, this.host.hasteFlag(actor));
+  }
+  override quadFactor(): number {
+    return 1;
+  }
+  override teleportSpawn(actor: OwnedActor): SpawnPoint {
+    return this.source.game.clientSpawnPoint(actor.id);
+  }
+  override dropObjectives(actor: OwnedActor): void {
+    this.source.game.dropClientObjectives(actor.id);
+  }
+  override setMaxHealth(actor: ActorId, health: number): void {
+    this.source.game.setClientMaxHealth(actor, health);
+  }
+  override supplyFamily(): SupplyFamily {
+    return "q1";
+  }
+  override ownsSupply(): boolean {
+    return true;
+  }
+  override cvars(): CvarRegistry {
+    return this.source.game.cvars;
+  }
   override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number {
-    return powerup === "quad" || powerup === "invulnerability" || powerup === "invisibility" || powerup === "suit" ? this.source.game.clientPowerupExpires(actor, powerup)
+    return powerup === "quad" || powerup === "invulnerability" || powerup === "invisibility" || powerup === "suit"
+      ? this.source.game.clientPowerupExpires(actor, powerup)
       : this.host.selectedQ1Powerup(actor, powerup);
   }
   override damageModifier(): SourceDamageModifier {
     const game = this.source.game;
     return { owner: this.host.entitiesProvider, transform: (attacker, amount) => game.damageAmount(attacker, amount) };
   }
-  override equipmentSuppression(): EquipmentSuppression { return { quad: true, quadFire: false, haste: false }; }
-  override notarget(actor: ActorId): boolean | null { return this.source.game.notarget(actor); }
-  override connectedClients(): readonly ClientId[] | null { return this.source.game.kind === "netquake" ? this.source.game.connectedClientIdentities() : null; }
+  override equipmentSuppression(): EquipmentSuppression {
+    return { quad: true, quadFire: false, haste: false };
+  }
+  override notarget(actor: ActorId): boolean | null {
+    return this.source.game.notarget(actor);
+  }
+  override connectedClients(): readonly ClientId[] | null {
+    return this.source.game.kind === "netquake" ? this.source.game.connectedClientIdentities() : null;
+  }
 
-  override usesGuestMonsters(): boolean { return true; }
-  override checkpointGuests(): SaveImage["guests"] { return [this.source.game.checkpoint()]; }
-  override travelSource(): SimulationTravel["source"] { return this.source.game.captureTravel(); }
+  override usesGuestMonsters(): boolean {
+    return true;
+  }
+  override checkpointGuests(): SaveImage["guests"] {
+    return [this.source.game.checkpoint()];
+  }
+  override travelSource(): SimulationTravel["source"] {
+    return this.source.game.captureTravel();
+  }
   // Same-dialect QC destinations travel through program parms in the source record; the shared snapshot serves every other destination.
-  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState {
+    return this.host.sharedTravelState(actor) ?? { kind: "quakec" };
+  }
 }
 
 class Q2Strategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"q2">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"q2">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "q2" as const;
   override restoreFoundation(save: SaveImage): void {
     restoreQ2Product(this.source.product, save.providers);
-    const savedCvars = savedSourceCvars(save), registry = this.host.q2ServerRegistry;
+    const savedCvars = savedSourceCvars(save),
+      registry = this.host.q2ServerRegistry;
     if (registry !== null && savedCvars !== undefined) restoreQ2ServerCvars(registry, savedCvars);
   }
   override restoreGravity(save: SaveImage): void {
-    const registry = this.host.q2ServerRegistry; if (registry === null) return;
+    const registry = this.host.q2ServerRegistry;
+    if (registry === null) return;
     const saved = savedSourceCvars(save);
     // The merge in restoreQ2ServerCvars preserves registered defaults, so
     // presence must be tested against the saved state itself.
@@ -1399,98 +2276,190 @@ class Q2Strategy extends LoadedStrategy {
       else registry.set("sv_gravity", String(this.host.worldGravity), true);
     }
   }
-  override legacyQ3Family(): "q2" { return "q2"; }
+  override legacyQ3Family(): "q2" {
+    return "q2";
+  }
   override reactionEnd(actor: OwnedActor, decision: DamageDecision): void {
-    const host = this.host, source = this.source, entity = source.game.entity(actor.id), player = host.playerStates.get(actor);
-    if (entity !== null) { entity.lastAttack = decision.request.attack; if (player !== undefined) source.product.beforeReaction(actor.id, decision.request.attack); }
+    const host = this.host,
+      source = this.source,
+      entity = source.game.entity(actor.id),
+      player = host.playerStates.get(actor);
+    if (entity !== null) {
+      entity.lastAttack = decision.request.attack;
+      if (player !== undefined) source.product.beforeReaction(actor.id, decision.request.attack);
+    }
     if (decision.reaction === "death" && player !== undefined && player.character !== "q2" && entity !== null)
-      source.players.recordDeath(entity, source.game, { attack: decision.request.attack, self: actor, attacker: decision.request.attack.attacker,
-        inflictor: decision.request.attack.inflictor, damage: decision.appliedDamage, kick: decision.request.knockback, point: decision.request.point });
+      source.players.recordDeath(entity, source.game, {
+        attack: decision.request.attack,
+        self: actor,
+        attacker: decision.request.attack.attacker,
+        inflictor: decision.request.attack.inflictor,
+        damage: decision.appliedDamage,
+        kick: decision.request.knockback,
+        point: decision.request.point,
+      });
   }
   override damageCommitted(actor: OwnedActor, decision: DamageDecision): void {
-    const host = this.host, source = this.source, entity = source.game.entity(actor.id);
+    const host = this.host,
+      source = this.source,
+      entity = source.game.entity(actor.id);
     if (entity !== null && host.playerStates.get(actor)?.character === "q2") source.players.recordDamage(entity, source.game, decision);
     const feedback = decision.feedback;
     if (feedback?.kind === "q2" && feedback.powerArmor > 0 && !host.playerStates.has(actor)) source.monsters.notePowerArmor(actor.id, source.game.host.now());
-    const character = host.characters.get(actor), state = source.players.states.get(actor.id);
-    if (character !== undefined && state !== undefined && state.dead) state.respawnTime = Math.max(state.respawnTime, character.respawnEligibleAfterMilliseconds / 1000);
+    const character = host.characters.get(actor),
+      state = source.players.states.get(actor.id);
+    if (character !== undefined && state !== undefined && state.dead)
+      state.respawnTime = Math.max(state.respawnTime, character.respawnEligibleAfterMilliseconds / 1000);
   }
-  override stopSpeed(): number { return this.source.product.movementStopSpeed ?? 100; }
+  override stopSpeed(): number {
+    return this.source.product.movementStopSpeed ?? 100;
+  }
   override outputsSuspended(actor: ActorId, player: MovementPlayer | null): boolean {
     return super.outputsSuspended(actor, player) || this.source.players.states.get(actor)?.chaseTarget != null;
   }
   override handoff(actor: ActorId): PrimaryWeaponHandoff {
-    const source = this.source, host = this.host, player = host.requirePlayer(actor), entity = source.game.entity(actor);
+    const source = this.source,
+      host = this.host,
+      player = host.requirePlayer(actor),
+      entity = source.game.entity(actor);
     if (entity === null) throw new Error("Q2 primary has no source player");
     const definition = (item: ItemId) => source.weapons.registeredDefinitions().find(weapon => weapon.item === item);
-    return { kind: "immediate", provider: host.weaponProvider.provider, accepts: item => definition(item) !== undefined && host.inventory.count(actor, item) > 0,
-      select: item => { const weapon = definition(item); if (weapon === undefined) return false; const result = source.weapons.requestWeapon(entity, source.game, weapon.name); return result === "selected" || result === "current"; },
-      holster: () => source.weapons.requestHolster(entity), isHolstered: () => source.weapons.isHolstered(entity),
-      resume: item => { source.weapons.resumePrimary(entity, source.game, host.q2WeaponInput(player), item === null ? null : definition(item)?.name ?? null); return item === null || host.arsenal(player).activeWeapon === item; } };
+    return {
+      kind: "immediate",
+      provider: host.weaponProvider.provider,
+      accepts: item => definition(item) !== undefined && host.inventory.count(actor, item) > 0,
+      select: item => {
+        const weapon = definition(item);
+        if (weapon === undefined) return false;
+        const result = source.weapons.requestWeapon(entity, source.game, weapon.name);
+        return result === "selected" || result === "current";
+      },
+      holster: () => source.weapons.requestHolster(entity),
+      isHolstered: () => source.weapons.isHolstered(entity),
+      resume: item => {
+        source.weapons.resumePrimary(entity, source.game, host.q2WeaponInput(player), item === null ? null : (definition(item)?.name ?? null));
+        return item === null || host.arsenal(player).activeWeapon === item;
+      },
+    };
   }
-  override refineWeaponInput(actor: ActorId, input: Q2WeaponInput): Q2WeaponInput { return this.source.product.weaponInput(actor, input); }
+  override refineWeaponInput(actor: ActorId, input: Q2WeaponInput): Q2WeaponInput {
+    return this.source.product.weaponInput(actor, input);
+  }
   override syncGravity(): void {
     const registry = this.host.q2ServerRegistry;
     if (registry === null) return;
     const gravity = registry.variableValue("sv_gravity");
     if (gravity !== this.host.worldGravity) this.host.setWorldGravity(gravity);
   }
-  override afterStep(): void { emitQ2ShadowLights(this.source.game); }
+  override afterStep(): void {
+    emitQ2ShadowLights(this.source.game);
+  }
   override finishFrame(run: boolean): void {
-    const source = this.source, host = this.host;
-    for (const player of host.playerStates.values()) { const entity = source.game.entity(player.actor.id); if (entity !== null) {
-      if (!player.intermission && player.character === "q2" && host.health(player.actor.id) <= 0) {
-        entity.viewHeight = source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2; player.viewHeight = entity.viewHeight;
+    const source = this.source,
+      host = this.host;
+    for (const player of host.playerStates.values()) {
+      const entity = source.game.entity(player.actor.id);
+      if (entity !== null) {
+        if (!player.intermission && player.character === "q2" && host.health(player.actor.id) <= 0) {
+          entity.viewHeight = source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2;
+          player.viewHeight = entity.viewHeight;
+        }
+        source.players.endFrame(entity, source.game);
+        const state = source.players.states.get(player.actor.id);
+        if (player.character === "q2" && state !== undefined)
+          player.animation = {
+            provider: host.recipe.character.definition.provider,
+            state: {
+              kind: "q2",
+              frame: entity.frame,
+              endFrame: state.animationEnd,
+              priority: state.animationPriority,
+              duck: state.animationDuck,
+              run: state.animationRun,
+            },
+          };
       }
-      source.players.endFrame(entity, source.game);
-      const state = source.players.states.get(player.actor.id);
-      if (player.character === "q2" && state !== undefined) player.animation = { provider: host.recipe.character.definition.provider,
-        state: { kind: "q2", frame: entity.frame, endFrame: state.animationEnd, priority: state.animationPriority, duck: state.animationDuck, run: state.animationRun } };
-    } }
+    }
     if (!run) return;
     const match = source.product.match.source;
-    if (match instanceof Q2Lmctf && match.match.phase === "countdown" && !match.match.paused && match.match.remaining <= 0 && source.game.host.now() >= match.match.nextThink)
+    if (
+      match instanceof Q2Lmctf &&
+      match.match.phase === "countdown" &&
+      !match.match.paused &&
+      match.match.remaining <= 0 &&
+      source.game.host.now() >= match.match.nextThink
+    )
       host.q2ServerRegistry?.applyLatched("timelimit");
     source.product.afterPlayerFrames();
     source.monsters.endFrame(source.game);
-    host.withQ2Rules(() => { source.product.checkRules(); });
+    host.withQ2Rules(() => {
+      source.product.checkRules();
+    });
   }
   override teamGame(): boolean {
-    const source = this.source, selected = source.product.match;
+    const source = this.source,
+      selected = source.product.match;
     if (selected.source instanceof Q2Lmctf) return (selected.source.rules.ctfFlags & 128) === 0;
     const match = selected.selection.kind;
-    return match === "ctf" || match === "lmctf" || match === "deathball" || source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & (64 | 128)) !== 0;
+    return (
+      match === "ctf" ||
+      match === "lmctf" ||
+      match === "deathball" ||
+      (source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & (64 | 128)) !== 0)
+    );
   }
-  override serverCvars(): ServerCvarRegistry | null { return this.host.q2ServerRegistry; }
+  override serverCvars(): ServerCvarRegistry | null {
+    return this.host.q2ServerRegistry;
+  }
   override disconnect(actor: ActorId): "release" | "done" {
     const entity = this.source.game.entity(actor);
     if (entity === null) return "release";
-    this.source.players.disconnect(entity, this.source.game); this.source.game.remove(entity);
+    this.source.players.disconnect(entity, this.source.game);
+    this.source.game.remove(entity);
     return this.host.isLive(actor) ? "release" : "done";
   }
   override respawn(player: MovementPlayer): void {
     const entity = this.source.game.entity(player.actor.id);
     if (entity !== null) this.source.players.respawn(entity, this.source.game);
   }
-  override asQ2(): Of<"q2"> { return this.source; }
+  override asQ2(): Of<"q2"> {
+    return this.source;
+  }
   override baseArsenal(player: MovementPlayer): ArsenalState {
     return projectQ2Arsenal(player.actor.id, this.host.weaponProvider.provider, this.source.weapons, this.host.inventory);
   }
-  override weaponsPaused(): boolean { const match = this.source.product.match.source; return match instanceof Q2Lmctf && match.match.paused; }
+  override weaponsPaused(): boolean {
+    const match = this.source.product.match.source;
+    return match instanceof Q2Lmctf && match.match.paused;
+  }
   override playerWeapon(player: MovementPlayer): void {
     const entity = this.source.game.entity(player.actor.id);
-    if (entity !== null) { this.source.product.match.beforePlayer(entity, this.source.game); this.source.players.beginFrame(entity, this.source.game); }
+    if (entity !== null) {
+      this.source.product.match.beforePlayer(entity, this.source.game);
+      this.source.players.beginFrame(entity, this.source.game);
+    }
   }
   override weaponFacts(actor: ActorId): WeaponFacts {
     const state = this.source.players.states.get(actor);
-    return { q3Ps: undefined, spectator: state?.spectator === true, hand: state?.hand ?? "right", quadUntil: this.source.items.playerPowerups(actor).quadUntil,
-      infiniteAmmo: (this.source.game.options.deathmatchFlags & 8192) !== 0 };
+    return {
+      q3Ps: undefined,
+      spectator: state?.spectator === true,
+      hand: state?.hand ?? "right",
+      quadUntil: this.source.items.playerPowerups(actor).quadUntil,
+      infiniteAmmo: (this.source.game.options.deathmatchFlags & 8192) !== 0,
+    };
   }
-  override requestsWeaponDirectly(): boolean { return true; }
-  override alwaysRequestsWeapon(): boolean { return true; }
+  override requestsWeaponDirectly(): boolean {
+    return true;
+  }
+  override alwaysRequestsWeapon(): boolean {
+    return true;
+  }
   override preCommand(actor: ActorId, name: string): boolean {
     if (name !== "fly") return false;
-    const source = this.source, player = this.host.requirePlayer(actor), entity = source.game.entity(actor);
+    const source = this.source,
+      player = this.host.requirePlayer(actor),
+      entity = source.game.entity(actor);
     if (entity === null) throw new Error("Q2 player entity missing");
     if (source.players.intermission.kind !== "playing") return true;
     const context = source.players.context(entity, source.game);
@@ -1501,18 +2470,34 @@ class Q2Strategy extends LoadedStrategy {
     return true;
   }
   override afterCommand(actor: ActorId, player: MovementPlayer, name: string, args: readonly string[]): void {
-    const source = this.source, host = this.host, entity = source.game.entity(actor); if (entity === null) throw new Error("Q2 player entity missing");
-    if (name !== "weapnext" && name !== "weapprev" && name !== "use") { source.players.clientCommand(entity, source.game, name, args); return; }
+    const source = this.source,
+      host = this.host,
+      entity = source.game.entity(actor);
+    if (entity === null) throw new Error("Q2 player entity missing");
+    if (name !== "weapnext" && name !== "weapprev" && name !== "use") {
+      source.players.clientCommand(entity, source.game, name, args);
+      return;
+    }
     const match = source.product.match.source;
     if (match instanceof Q2Lmctf && !match.canMove(actor)) return;
-    const active = source.weapons.states.get(actor)?.weapon, owned = source.weapons.registeredDefinitions().filter(weapon => host.inventory.count(actor, weapon.item) > 0);
+    const active = source.weapons.states.get(actor)?.weapon,
+      owned = source.weapons.registeredDefinitions().filter(weapon => host.inventory.count(actor, weapon.item) > 0);
     const requested = args.join("").toLowerCase().replaceAll(" ", "");
-    const weapon = name === "weapnext" || name === "weapprev" ? owned[(owned.findIndex(value => value.name === active) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length] : source.weapons.registeredDefinitions().find(value => value.name === requested || value.item === requested);
-    if (weapon !== undefined) { if (host.selectedArsenal === null) source.weapons.requestWeapon(entity, source.game, weapon.name); }
-    else if (name === "use") { const item = host.inventory.entries(actor).find(value => value.item === requested || value.item === `q2:item_${requested}`); if (item !== undefined) source.items.use(player.actor, item.item, source.game); }
+    const weapon =
+      name === "weapnext" || name === "weapprev"
+        ? owned[(owned.findIndex(value => value.name === active) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length]
+        : source.weapons.registeredDefinitions().find(value => value.name === requested || value.item === requested);
+    if (weapon !== undefined) {
+      if (host.selectedArsenal === null) source.weapons.requestWeapon(entity, source.game, weapon.name);
+    } else if (name === "use") {
+      const item = host.inventory.entries(actor).find(value => value.item === requested || value.item === `q2:item_${requested}`);
+      if (item !== undefined) source.items.use(player.actor, item.item, source.game);
+    }
   }
   override setIdentity(actor: ActorId, identity: SourceIdentity): void {
-    const source = this.source, entity = source.game.entity(actor), state = source.players.states.get(actor);
+    const source = this.source,
+      entity = source.game.entity(actor),
+      state = source.players.states.get(actor);
     if (entity === null || state === undefined) throw new Error("Q2 source identity requires an admitted player");
     const info = new Map(q2Userinfo(state.userinfo));
     if (identity.name !== undefined) info.set("name", identity.name);
@@ -1520,22 +2505,32 @@ class Q2Strategy extends LoadedStrategy {
     source.players.userinfoChanged(entity, source.game, joinInfo(info));
   }
   override setFieldOfView(actor: ActorId, fieldOfView: number, mode: "change" | "restore"): boolean {
-    const source = this.source, host = this.host, player = host.requirePlayer(actor);
+    const source = this.source,
+      host = this.host,
+      player = host.requirePlayer(actor);
     const updateView = (previous: number, current: number): void => {
       if (player.intermission || source.players.intermission.kind === "intermission") return;
       const view = host.q2Views.get(actor);
       if (view?.fov === previous) host.q2Views.set(actor, { ...view, fov: current });
     };
-    const entity = source.game.entity(actor), state = source.players.states.get(actor);
+    const entity = source.game.entity(actor),
+      state = source.players.states.get(actor);
     if (entity === null || state === undefined) return true;
-    const info = new Map(q2Userinfo(state.userinfo)), previous = state.fov;
+    const info = new Map(q2Userinfo(state.userinfo)),
+      previous = state.fov;
     // Saved userinfo holds the ordinary request; source cameras can change only the effective FOV.
     const requested = Number.parseInt(info.get("fov") ?? "0", 10) || 0;
-    const fixed = source.game.options.edition !== "rerelease" && source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & 32768) !== 0;
-    const ordinary = fixed ? 90 : source.game.options.edition === "rerelease" ? Math.max(1, Math.min(160, requested))
-      : requested < 1 ? 90 : Math.min(160, requested);
-    const preserve = !fixed && (player.cutscene !== null || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0
-      || mode === "restore" && previous !== ordinary);
+    const fixed =
+      source.game.options.edition !== "rerelease" && source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & 32768) !== 0;
+    const ordinary = fixed
+      ? 90
+      : source.game.options.edition === "rerelease"
+        ? Math.max(1, Math.min(160, requested))
+        : requested < 1
+          ? 90
+          : Math.min(160, requested);
+    const preserve =
+      !fixed && (player.cutscene !== null || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0 || (mode === "restore" && previous !== ordinary));
     info.set("fov", String(fieldOfView));
     source.players.userinfoChanged(entity, source.game, joinInfo(info));
     if (preserve) state.fov = previous;
@@ -1543,19 +2538,33 @@ class Q2Strategy extends LoadedStrategy {
     return true;
   }
   override grantProfile(arsenal: SelectedArsenal): PickupSupplyProfile {
-    return arsenal.family === "q3" ? Q2_Q3_SUPPLY_PROFILE : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser") ? Q2_HIPNOTIC_SUPPLY_PROFILE : Q2_Q1_SUPPLY_PROFILE;
+    return arsenal.family === "q3"
+      ? Q2_Q3_SUPPLY_PROFILE
+      : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser")
+        ? Q2_HIPNOTIC_SUPPLY_PROFILE
+        : Q2_Q1_SUPPLY_PROFILE;
   }
-  override sourceItem(requested: string): ReturnType<Of<"q2">["items"]["lookup"]> { return this.source.items.lookup(requested); }
-  override grantedWeapon(owner: OwnedActor, arsenal: SelectedArsenal, requested: string, destinations: readonly ItemId[], profile: PickupSupplyProfile | null): void {
+  override sourceItem(requested: string): ReturnType<Of<"q2">["items"]["lookup"]> {
+    return this.source.items.lookup(requested);
+  }
+  override grantedWeapon(
+    owner: OwnedActor,
+    arsenal: SelectedArsenal,
+    requested: string,
+    destinations: readonly ItemId[],
+    profile: PickupSupplyProfile | null,
+  ): void {
     const definition = this.source.weapons.registeredDefinitions().find(item => item.item === requested);
     const sourceAmmo = definition?.ammo == null ? null : this.source.items.lookup(definition.ammo);
     const mappedAmmo = sourceAmmo === null ? undefined : profile?.ammo.find(item => item.source === sourceAmmo.id);
-    if (mappedAmmo !== undefined && sourceAmmo !== null) for (const item of mappedAmmo.destinations)
-      this.host.inventory.give(owner, item, (this.source.game.options.deathmatchFlags & 8192) !== 0 ? 1000 : sourceAmmo.quantity);
+    if (mappedAmmo !== undefined && sourceAmmo !== null)
+      for (const item of mappedAmmo.destinations)
+        this.host.inventory.give(owner, item, (this.source.game.options.deathmatchFlags & 8192) !== 0 ? 1000 : sourceAmmo.quantity);
     arsenal.pickupWeapons(owner, destinations, "better");
   }
   override uiSubject(actor: ActorId): ActorId {
-    const observer = this.source.players.states.get(actor), target = observer?.spectator === true ? observer.chaseTarget : null;
+    const observer = this.source.players.states.get(actor),
+      target = observer?.spectator === true ? observer.chaseTarget : null;
     const watched = target === null || target === undefined ? undefined : this.source.players.states.get(target);
     return target != null && watched?.connected === true && !watched.spectator ? target : actor;
   }
@@ -1563,14 +2572,25 @@ class Q2Strategy extends LoadedStrategy {
     return q2PowerupTimers(this.source.items.playerPowerups(actor), this.source.product.armory?.items.powerups(actor), this.source.game.host.now());
   }
   override arsenalUi(actor: ActorId, arsenal: ArsenalState): ArsenalUiParts {
-    const source = this.source, inventory = this.host.inventory, items: PlayerUiItem[] = [];
+    const source = this.source,
+      inventory = this.host.inventory,
+      items: PlayerUiItem[] = [];
     let ammo: PlayerUi["ammo"] = null;
     for (const [sourceOrdinal, definition] of source.items.list().entries()) {
       if (!definition.usable) continue;
-      const weapon = source.weapons.registeredDefinitions().find(value => value.item === definition.id), quantity = inventory.count(actor, definition.id);
+      const weapon = source.weapons.registeredDefinitions().find(value => value.item === definition.id),
+        quantity = inventory.count(actor, definition.id);
       const count = weapon === undefined ? quantity : weapon.ammo === null ? null : inventory.count(actor, weapon.ammo);
-      items.push({ id: definition.id, label: definition.name, kind: weapon === undefined ? "powerup" : "weapon", sourceOrdinal,
-        owned: quantity > 0, hasAmmo: count === null || count >= (weapon?.quantity ?? 1), count, warningCount: weapon?.warning ?? 0 });
+      items.push({
+        id: definition.id,
+        label: definition.name,
+        kind: weapon === undefined ? "powerup" : "weapon",
+        sourceOrdinal,
+        owned: quantity > 0,
+        hasAmmo: count === null || count >= (weapon?.quantity ?? 1),
+        count,
+        warningCount: weapon?.warning ?? 0,
+      });
     }
     const weapon = source.weapons.registeredDefinitions().find(value => value.item === arsenal.activeWeapon);
     const weaponStatus = q2WeaponStatus(weapon ?? null, item => inventory.count(actor, item), this.host.weaponProvider);
@@ -1581,22 +2601,34 @@ class Q2Strategy extends LoadedStrategy {
     const observer = this.source.players.states.get(actor);
     return observer?.spectator === true && observer.chaseTarget !== null;
   }
-  override cutsceneFov(fov: number | undefined): number { return fov ?? 90; }
-  override rereleaseViewHeight(): boolean { return this.source.product.rerelease !== null; }
-  override usesQ2Views(): boolean { return true; }
-  override q2PlayerEntity(actor: ActorId): Q2Entity { return this.source.game.entity(actor); }
+  override cutsceneFov(fov: number | undefined): number {
+    return fov ?? 90;
+  }
+  override rereleaseViewHeight(): boolean {
+    return this.source.product.rerelease !== null;
+  }
+  override usesQ2Views(): boolean {
+    return true;
+  }
+  override q2PlayerEntity(actor: ActorId): Q2Entity {
+    return this.source.game.entity(actor);
+  }
   override canonicalTeam(original: string | null): string | null {
     const match = this.source.product.match.source;
-    return match instanceof Q2Ctf || match instanceof Q2Lmctf ? original === "RED" ? "team:red" : original === "BLUE" ? "team:blue" : original : original;
+    return match instanceof Q2Ctf || match instanceof Q2Lmctf ? (original === "RED" ? "team:red" : original === "BLUE" ? "team:blue" : original) : original;
   }
-  override declaresMatch(): boolean { return true; }
+  override declaresMatch(): boolean {
+    return true;
+  }
   override matchScore(actor: ActorId): number {
-    const state = this.source.players.states.get(actor); if (state === undefined) throw new Error("Original Q2 score has no player");
+    const state = this.source.players.states.get(actor);
+    if (state === undefined) throw new Error("Original Q2 score has no player");
     const match = this.source.product.match.source;
-    return match instanceof Q2Lmctf ? match.states.get(actor)?.statistics.get("score") ?? 0 : state.score;
+    return match instanceof Q2Lmctf ? (match.states.get(actor)?.statistics.get("score") ?? 0) : state.score;
   }
   override setMatchScore(actor: ActorId, value: number): void {
-    const state = this.source.players.states.get(actor); if (state === undefined) throw new Error("Original Q2 score has no player");
+    const state = this.source.players.states.get(actor);
+    if (state === undefined) throw new Error("Original Q2 score has no player");
     state.score = sourceScore(value);
     const match = this.source.product.match.source;
     if (match instanceof Q2Lmctf) match.states.get(actor)?.statistics.set("score", state.score);
@@ -1604,46 +2636,77 @@ class Q2Strategy extends LoadedStrategy {
   override setMatchTeam(actor: ActorId, requested: string | null): void {
     const match = this.source.product.match.source;
     if (!(match instanceof Q2Ctf || match instanceof Q2Lmctf)) throw new Error("This original source has no declared team-change command");
-    const entity = this.source.game.entity(actor), argument = requested === "team:red" ? "red" : requested === "team:blue" ? "blue" : null;
+    const entity = this.source.game.entity(actor),
+      argument = requested === "team:red" ? "red" : requested === "team:blue" ? "blue" : null;
     if (entity === null || argument === null) throw new Error("Team has no original Q2 team command");
     match.command(entity, this.source.game, "team", [argument]);
   }
-  override userinfo(actor: ActorId): string | null { return this.source.players.states.get(actor)?.userinfo ?? null; }
+  override userinfo(actor: ActorId): string | null {
+    return this.source.players.states.get(actor)?.userinfo ?? null;
+  }
   override storeUserinfo(actor: ActorId, _client: ClientId, userinfo: string): void {
-    const player = this.source.players.states.get(actor); if (player === undefined) throw new Error("Component userinfo has no Q2 player");
+    const player = this.source.players.states.get(actor);
+    if (player === undefined) throw new Error("Component userinfo has no Q2 player");
     player.userinfo = userinfo;
   }
   override updateUserinfo(actor: ActorId, userinfo: string, previous: string | null): void {
-    const source = this.source, state = source.players.states.get(actor), entity = source.game.entity(actor);
+    const source = this.source,
+      state = source.players.states.get(actor),
+      entity = source.game.entity(actor);
     if (state === undefined || entity === null || state.userinfo === userinfo) return;
-    const previousFov = state.fov, previousRequest = q2Userinfo(state.userinfo).get("fov");
+    const previousFov = state.fov,
+      previousRequest = q2Userinfo(state.userinfo).get("fov");
     source.players.userinfoChanged(entity, source.game, userinfo);
-    if (this.host.hasCutscene(actor) || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0 || previousRequest === q2Userinfo(userinfo).get("fov")) state.fov = previousFov;
+    if (this.host.hasCutscene(actor) || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0 || previousRequest === q2Userinfo(userinfo).get("fov"))
+      state.fov = previousFov;
     const view = this.host.q2Views.get(actor);
     if (view?.fov === previousFov) this.host.q2Views.set(actor, { ...view, fov: state.fov });
     this.host.userinfoChanged(actor, previous);
   }
 
-  override admitClient(): null { return null; }
+  override admitClient(): null {
+    return null;
+  }
   override prepareBot(client: ClientId): OwnedActor {
-    const admitted = this.host.admitPlayer(client), entity = this.source.game.entity(admitted.actor);
+    const admitted = this.host.admitPlayer(client),
+      entity = this.source.game.entity(admitted.actor);
     if (entity === null) throw new Error("Bot admission lost its shared source entity");
-    entity.serverFlags |= 16; return entity.actor;
+    entity.serverFlags |= 16;
+    return entity.actor;
   }
   override initialArsenalState(): ArsenalState["state"] {
     return { kind: "q2", gunFrame: 0, state: 0, pendingWeapon: null, machinegunShots: 0, grenadeTime: { kind: "seconds", value: 0 }, grenadeBlewUp: false };
   }
   override attachEntity(actor: OwnedActor, player: MovementPlayer): Q2Entity {
     const entity = this.source.game.attachPlayer(actor);
-    if (entity !== null) { entity.viewHeight = player.viewHeight; entity.solid = "box"; }
+    if (entity !== null) {
+      entity.viewHeight = player.viewHeight;
+      entity.solid = "box";
+    }
     return entity;
   }
-  override configureAdmitted(actor: OwnedActor, client: ClientId, player: MovementPlayer, entity: Q2Entity, userinfo: string | undefined, travel: SimulationTravel | undefined): void {
+  override configureAdmitted(
+    actor: OwnedActor,
+    client: ClientId,
+    player: MovementPlayer,
+    entity: Q2Entity,
+    userinfo: string | undefined,
+    travel: SimulationTravel | undefined,
+  ): void {
     const source = this.source;
     source.items.configurePlayer(actor, source.game, true);
     if (entity === null) return;
-    const model = player.character === "q2" ? player.characterAppearance.provider.split("/").at(-1) ?? "male" : "male";
-    source.product.admit(actor, { slot: client.slot, userinfo: userinfo ?? `\\name\\Player ${client.slot + 1}\\skin\\${model}/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.host.usesQ2Weapons() }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
+    const model = player.character === "q2" ? (player.characterAppearance.provider.split("/").at(-1) ?? "male") : "male";
+    source.product.admit(
+      actor,
+      {
+        slot: client.slot,
+        userinfo: userinfo ?? `\\name\\Player ${client.slot + 1}\\skin\\${model}/grunt\\fov\\90`,
+        initializeInventory: false,
+        useQ2Weapons: this.host.usesQ2Weapons(),
+      },
+      travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null,
+    );
   }
   override admitCarry(_actor: OwnedActor, entity: Q2Entity, carried: CarriedPlayerState | undefined): boolean {
     if (carried?.kind !== "q2") return false;
@@ -1654,13 +2717,26 @@ class Q2Strategy extends LoadedStrategy {
     if (fresh || this.host.hasPendingStartItems(actor.id)) this.host.giveQ2StartItems(actor.id);
     this.host.resumeQ2Presentation(actor.id);
   }
-  override q2Gibbed(actor: ActorId): boolean { return this.source.players.states.get(actor)?.gibbed === true; }
+  override q2Gibbed(actor: ActorId): boolean {
+    return this.source.players.states.get(actor)?.gibbed === true;
+  }
 
-  override lmctf(): Q2Lmctf | null { const match = this.source.product.match.source; return match instanceof Q2Lmctf ? match : null; }
-  override intermissionFading(): boolean { return this.source.product.rerelease?.players.intermissionFadeUntil != null; }
-  override fadeIntermission(): void { this.source.product.rerelease?.players.fadeFrame(this.source.game); }
-  override beginActorTurns(): void { this.source.monsters.beginFrame(this.source.game); }
-  override tracksGravity(): boolean { return true; }
+  override lmctf(): Q2Lmctf | null {
+    const match = this.source.product.match.source;
+    return match instanceof Q2Lmctf ? match : null;
+  }
+  override intermissionFading(): boolean {
+    return this.source.product.rerelease?.players.intermissionFadeUntil != null;
+  }
+  override fadeIntermission(): void {
+    this.source.product.rerelease?.players.fadeFrame(this.source.game);
+  }
+  override beginActorTurns(): void {
+    this.source.monsters.beginFrame(this.source.game);
+  }
+  override tracksGravity(): boolean {
+    return true;
+  }
   override gravityScale(actor: ActorId): number {
     const source = this.source;
     const matchGravity = source.product.match.gravityScale(actor);
@@ -1668,68 +2744,120 @@ class Q2Strategy extends LoadedStrategy {
     return matchGravity * flightGravity;
   }
   override movementApplied(actor: ActorId, moved: Moved): void {
-    if (moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(actor, moved.impactDelta, (moved.state.flags & 128) !== 0);
+    if (moved.kind === "q2-rerelease" && moved.status === "active")
+      this.source.product.movementImpact(actor, moved.impactDelta, (moved.state.flags & 128) !== 0);
   }
   override afterPlayerCommand(player: MovementPlayer, paused: boolean): void {
     const source = this.source;
     if (paused || !this.host.isLive(player.actor.id)) return;
     const entity = source.game.entity(player.actor.id);
     if (entity === null) return;
-    if (!player.intermission) entity.viewHeight = player.character === "q2" && this.host.health(player.actor.id) <= 0
-      ? source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2 : player.viewHeight;
+    if (!player.intermission)
+      entity.viewHeight =
+        player.character === "q2" && this.host.health(player.actor.id) <= 0
+          ? source.players.states.get(player.actor.id)?.gibbed === true
+            ? 8
+            : -2
+          : player.viewHeight;
     source.players.afterClientThink(entity, source.game);
   }
-  override spectating(actor: ActorId): boolean { return this.source.players.states.get(actor)?.spectator === true; }
-  override watchesTransitions(): boolean { return true; }
+  override spectating(actor: ActorId): boolean {
+    return this.source.players.states.get(actor)?.spectator === true;
+  }
+  override watchesTransitions(): boolean {
+    return true;
+  }
 
   override selectedPlayer(actor: ActorId): SelectedPlayerStats {
-    return { maxHealth: this.source.game.entity(actor)?.maxHealth ?? 100, team: null, quadUntil: Math.trunc(this.source.items.playerPowerups(actor).quadUntil * 1000), hasteUntil: 0 };
+    return {
+      maxHealth: this.source.game.entity(actor)?.maxHealth ?? 100,
+      team: null,
+      quadUntil: Math.trunc(this.source.items.playerPowerups(actor).quadUntil * 1000),
+      hasteUntil: 0,
+    };
   }
-  override friendlyFire(): boolean { return (this.source.game.options.deathmatchFlags & 256) === 0; }
-  override intermissionQueued(): number { return this.source.players.intermission.kind !== "playing" ? 1 : 0; }
+  override friendlyFire(): boolean {
+    return (this.source.game.options.deathmatchFlags & 256) === 0;
+  }
+  override intermissionQueued(): number {
+    return this.source.players.intermission.kind !== "playing" ? 1 : 0;
+  }
   override teleportSpawn(actor: OwnedActor): SpawnPoint {
-    const entity = this.source.game.entity(actor.id); if (entity === null) throw new Error("Selected teleporter has no Q2 player");
+    const entity = this.source.game.entity(actor.id);
+    if (entity === null) throw new Error("Selected teleporter has no Q2 player");
     return this.source.players.selectTeleportSpawn(entity, this.source.game);
   }
   override dropObjectives(actor: OwnedActor): void {
-    const match = this.source.product.match.source, entity = this.source.game.entity(actor.id);
+    const match = this.source.product.match.source,
+      entity = this.source.game.entity(actor.id);
     if (entity !== null && (match instanceof Q2Ctf || match instanceof Q2Lmctf)) match.flags.drop(entity, this.source.game);
   }
   override setMaxHealth(actor: ActorId, health: number): void {
-    const target = this.source.game.entity(actor); if (target === null) throw new Error("Selected max health has no Q2 player");
+    const target = this.source.game.entity(actor);
+    if (target === null) throw new Error("Selected max health has no Q2 player");
     target.maxHealth = health;
   }
-  override installPickupAdmission(admission: SharedPickupAdmission): void { this.source.items.setPickupAdmission(admission); }
-  override supplyFamily(): SupplyFamily { return "q2"; }
-  override extraReplacedItems(): readonly ItemId[] { return ["q2:weapon_blaster"]; }
-  override weaponNoise(actor: ActorId, origin: Vec3, kind: "weapon" | "impact"): undefined { return this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, kind); }
+  override installPickupAdmission(admission: SharedPickupAdmission): void {
+    this.source.items.setPickupAdmission(admission);
+  }
+  override supplyFamily(): SupplyFamily {
+    return "q2";
+  }
+  override extraReplacedItems(): readonly ItemId[] {
+    return ["q2:weapon_blaster"];
+  }
+  override weaponNoise(actor: ActorId, origin: Vec3, kind: "weapon" | "impact"): undefined {
+    return this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, kind);
+  }
   override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number {
     const powers = this.source.items.playerPowerups(actor);
     return powerup === "quad" ? powers.quadUntil : powerup === "invulnerability" ? powers.invulnerabilityUntil : powerup === "suit" ? powers.enviroUntil : 0;
   }
-  override monsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined { return this.source.monsters.reportNoise(actor, origin, secondary); }
-  override requiredMonsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined { return this.source.monsters.reportNoise(actor, origin, secondary); }
-  override requireQ2(): void { /* the source is Q2 */ }
+  override monsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined {
+    return this.source.monsters.reportNoise(actor, origin, secondary);
+  }
+  override requiredMonsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined {
+    return this.source.monsters.reportNoise(actor, origin, secondary);
+  }
+  override requireQ2(): void {
+    /* the source is Q2 */
+  }
   override cloakAlpha(actor: ActorId): number | null {
     return this.source.players instanceof Q2RereleasePlayers ? this.source.players.cloakAlpha(actor, this.source.game.host.now()) : null;
   }
-  override weaponEvent(event: Q2WeaponEvent): boolean { this.source.players.weaponEvent(event); return true; }
-  override hasEnemy(target: ActorId): boolean { return (this.source.game.entity(target)?.enemy ?? null) !== null; }
+  override weaponEvent(event: Q2WeaponEvent): boolean {
+    this.source.players.weaponEvent(event);
+    return true;
+  }
+  override hasEnemy(target: ActorId): boolean {
+    return (this.source.game.entity(target)?.enemy ?? null) !== null;
+  }
   override teamDamageEnabled(matchProvider: string): boolean {
     return matchProvider === "q2:ctf" || matchProvider === "q2:lmctf" || (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0;
   }
-  override matchDamageEffects(): Q2MatchDamageEffects { return this.source.product.match.sourceEffects(this.source.game); }
-  override pushed(actor: ActorId, velocity: Vec3): void { const state = this.source.players.states.get(actor); if (state !== undefined) state.oldVelocity = velocity; }
-  override setEntityGravity(actor: ActorId, gravity: number): void { const entity = this.source.game.entity(actor); if (entity !== null) entity.gravity = gravity; }
+  override matchDamageEffects(): Q2MatchDamageEffects {
+    return this.source.product.match.sourceEffects(this.source.game);
+  }
+  override pushed(actor: ActorId, velocity: Vec3): void {
+    const state = this.source.players.states.get(actor);
+    if (state !== undefined) state.oldVelocity = velocity;
+  }
+  override setEntityGravity(actor: ActorId, gravity: number): void {
+    const entity = this.source.game.entity(actor);
+    if (entity !== null) entity.gravity = gravity;
+  }
   override monstersSearching(player: ActorId | null): boolean {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     for (const entity of source.game.entities.values()) {
       if ((entity.serverFlags & 4) === 0 || host.health(entity.actor.id) <= 0) continue;
       const state = source.monsters.context(entity.actor.id)?.state;
-      if (player === null ? entity.enemy !== null && !source.game.host.isPlayer(entity.enemy) : entity.enemy === null || !sameActor(entity.enemy, player)) continue;
+      if (player === null ? entity.enemy !== null && !source.game.host.isPlayer(entity.enemy) : entity.enemy === null || !sameActor(entity.enemy, player))
+        continue;
       if (state?.lostSight && host.timeSeconds > state.trailTime + 5) continue;
       return true;
-    } return false;
+    }
+    return false;
   }
 
   override checkpointProviders(add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, providers: SaveProvider[]): void {
@@ -1739,28 +2867,49 @@ class Q2Strategy extends LoadedStrategy {
   }
   override travelSource(context: TravelContext): SimulationTravel["source"] {
     const source = this.source;
-    return { kind: "q2", serverFlags: context.serverFlags ?? source.game.counters.serverFlags,
+    return {
+      kind: "q2",
+      serverFlags: context.serverFlags ?? source.game.counters.serverFlags,
       ...(source.product.match.source instanceof Q2Lmctf ? { lmctf: source.product.match.source.captureTravel() } : {}),
       ...(source.product.rerelease === null ? {} : { rerelease: structuredClone(source.product.rerelease.entities.campaign) }),
-      landmark: context.landmark };
+      landmark: context.landmark,
+    };
   }
   override travelPlayerState(actor: ActorId): CarriedPlayerState {
     const source = this.source;
     this.host.requireOwned(actor);
-    const entity = source.game.entity(actor); if (entity === null) throw new Error("Q2 travel player entity is missing");
-    return { kind: "q2", carry: source.product.match.source instanceof Q2Lmctf ? { ...source.players.saveCarry(entity, source.game), score: 0 } : source.players.saveCarry(entity, source.game) };
+    const entity = source.game.entity(actor);
+    if (entity === null) throw new Error("Q2 travel player entity is missing");
+    return {
+      kind: "q2",
+      carry:
+        source.product.match.source instanceof Q2Lmctf
+          ? { ...source.players.saveCarry(entity, source.game), score: 0 }
+          : source.players.saveCarry(entity, source.game),
+    };
   }
 }
 
 class Q2NativeStrategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"q2-native">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"q2-native">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "q2-native" as const;
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
-    if (channels.includes("body-shape") && this.source.edition === "rerelease" && this.source.game.source.host.module.requireWorldProfile().movement.body === undefined)
+    if (
+      channels.includes("body-shape") &&
+      this.source.edition === "rerelease" &&
+      this.source.game.source.host.module.requireWorldProfile().movement.body === undefined
+    )
       throw new Error("Selected original rerelease movement has no admitted body trace interface");
   }
-  override guestGrounded(actor: ActorId): boolean { return this.source.game.services.playerGrounded(this.host.nativeQ2Client(actor).slot + 1, actor); }
+  override guestGrounded(actor: ActorId): boolean {
+    return this.source.game.services.playerGrounded(this.host.nativeQ2Client(actor).slot + 1, actor);
+  }
   override guestClientView(actor: ActorId): { readonly viewOffset: Vec3; readonly crouched: boolean } {
     return this.source.game.services.playerView(this.host.nativeQ2Client(actor).slot + 1, actor);
   }
@@ -1770,7 +2919,10 @@ class Q2NativeStrategy extends LoadedStrategy {
   override handoff(actor: ActorId): PrimaryWeaponHandoff {
     const host = this.host;
     let holstered = false;
-    const accepts = (item: ItemId) => { const ui = this.guestUi(actor); return ui.activeWeapon === item || ui.items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned); };
+    const accepts = (item: ItemId) => {
+      const ui = this.guestUi(actor);
+      return ui.activeWeapon === item || ui.items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned);
+    };
     const select = (item: ItemId): boolean => {
       if (!accepts(item)) return false;
       const ui = this.guestUi(actor);
@@ -1780,29 +2932,55 @@ class Q2NativeStrategy extends LoadedStrategy {
       this.source.game.command(host.nativeQ2Client(actor).slot + 1, ["use", itemName], itemName);
       return true;
     };
-    return { kind: "immediate", provider: host.weaponProvider.provider, accepts, select, holster: () => { holstered = true; }, isHolstered: () => holstered,
-      resume: item => { holstered = false; return item === null || select(item); } };
+    return {
+      kind: "immediate",
+      provider: host.weaponProvider.provider,
+      accepts,
+      select,
+      holster: () => {
+        holstered = true;
+      },
+      isHolstered: () => holstered,
+      resume: item => {
+        holstered = false;
+        return item === null || select(item);
+      },
+    };
   }
-  override equipmentPowerups(): { readonly quadUntil: number; readonly hasteUntil: number } { return { quadUntil: 0, hasteUntil: 0 }; }
+  override equipmentPowerups(): { readonly quadUntil: number; readonly hasteUntil: number } {
+    return { quadUntil: 0, hasteUntil: 0 };
+  }
   override guestWeaponAnimation(actor: ActorId, priority: "attack" | "reverse"): boolean {
     if (priority === "attack") this.host.nativeWeapons().attackAnimation(actor);
     return true;
   }
-  override stepRoute(): "native" { return "native"; }
+  override stepRoute(): "native" {
+    return "native";
+  }
   override teamGame(): boolean {
     const registry = this.host.q2ServerRegistry;
     return registry !== null && (registry.variableValue("ctf") !== 0 || (registry.variableValue("dmflags") & (64 | 128)) !== 0);
   }
-  override serverCvars(): ServerCvarRegistry | null { return this.host.q2ServerRegistry; }
-  override clientOf(actor: ActorId): ClientId | null { return [...this.source.clients].find(([, owner]) => owner.id.equals(actor))?.[0] ?? null; }
+  override serverCvars(): ServerCvarRegistry | null {
+    return this.host.q2ServerRegistry;
+  }
+  override clientOf(actor: ActorId): ClientId | null {
+    return [...this.source.clients].find(([, owner]) => owner.id.equals(actor))?.[0] ?? null;
+  }
   override disconnect(actor: ActorId): "done" {
     const client = this.host.nativeQ2Client(actor);
-    this.host.releaseGrapple(actor); this.host.removeHandGrenade(actor);
-    this.source.game.disconnect(client.slot + 1); this.source.clients.delete(client);
+    this.host.releaseGrapple(actor);
+    this.host.removeHandGrenade(actor);
+    this.source.game.disconnect(client.slot + 1);
+    this.source.clients.delete(client);
     return "done";
   }
-  override admitsGuestMonsters(): boolean { return true; }
-  override guestEdition(): "classic" | "rerelease" { return this.source.edition; }
+  override admitsGuestMonsters(): boolean {
+    return true;
+  }
+  override guestEdition(): "classic" | "rerelease" {
+    return this.source.edition;
+  }
   override assertSavable(): void {
     const registry = this.host.q2ServerRegistry;
     if (this.source.edition === "rerelease" && (registry === null || registry.variableValue("deathmatch") !== 0))
@@ -1812,29 +2990,53 @@ class Q2NativeStrategy extends LoadedStrategy {
     return this.source.edition === "rerelease" ? this.source.game.writeSaveLoading(false, nextFrame) : Promise.resolve(undefined);
   }
   override originalSave(rereleaseSave?: RereleaseGuestSave): SaveProvider | null {
-    const source = this.source, host = this.host, cvars = host.q2ServerRegistry, map = host.recipe.map.geometry.requestedPath;
+    const source = this.source,
+      host = this.host,
+      cvars = host.q2ServerRegistry,
+      map = host.recipe.map.geometry.requestedPath;
     if (cvars === null || cvars.variableValue("deathmatch") !== 0) throw new Error("Native Quake II original saves require a non-deathmatch source game");
     const portals = [...host.areaPortals].map(([portal, open]) => ({ portal, open }));
-    if (source.edition === "rerelease") return encodeQ2RereleaseNativeSave({ module: source.game.module, map,
-      api: { kind: "q2-rerelease-game", version: 2023 }, abi: "windows-x86-64", autosave: false,
-      server: { configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })), portals, cvars: encodeCheckpointValue(cvars.captureSaveState()) },
-      ...(rereleaseSave ?? source.game.writeSave(false)), visitedLevels: [...source.visited.values()].filter(level => level.map !== map) });
-    const captured = source.files.capture({ module: source.game.module, map }, () => ({
-      configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })),
-      portals, cvars: encodeCheckpointValue(cvars.captureSaveState()),
-    }), (game, level, autosave) => source.game.writeOriginal(game, level, autosave));
+    if (source.edition === "rerelease")
+      return encodeQ2RereleaseNativeSave({
+        module: source.game.module,
+        map,
+        api: { kind: "q2-rerelease-game", version: 2023 },
+        abi: "windows-x86-64",
+        autosave: false,
+        server: {
+          configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })),
+          portals,
+          cvars: encodeCheckpointValue(cvars.captureSaveState()),
+        },
+        ...(rereleaseSave ?? source.game.writeSave(false)),
+        visitedLevels: [...source.visited.values()].filter(level => level.map !== map),
+      });
+    const captured = source.files.capture(
+      { module: source.game.module, map },
+      () => ({
+        configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })),
+        portals,
+        cvars: encodeCheckpointValue(cvars.captureSaveState()),
+      }),
+      (game, level, autosave) => source.game.writeOriginal(game, level, autosave),
+    );
     return encodeQ2ClassicOriginalSave({ ...captured, visitedLevels: [...source.visited.values()].filter(level => level.map !== map) });
   }
   override async restoreLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void> {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     if (source.edition === "rerelease") {
-      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => {
+        for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      });
       await source.game.initLoading(nextFrame);
       plan.afterInit();
       await source.game.readSaveLoading(plan.original, plan.request, plan.applyServerState, nextFrame);
       return;
     }
-    const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+    const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => {
+      for (const level of original.visitedLevels) source.visited.set(level.map, level);
+    });
     await source.game.initLoading(nextFrame);
     plan.afterInit();
     await source.files.restoreLoading(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, async (game, level) => {
@@ -1842,15 +3044,20 @@ class Q2NativeStrategy extends LoadedStrategy {
     });
   }
   override restoreGuest(save: SaveImage, nativeRestored: boolean): void {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     if (!nativeRestored && source.edition === "rerelease") {
-      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => {
+        for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      });
       source.game.init();
       plan.afterInit();
       source.game.readSave(plan.original, plan.request, plan.applyServerState);
     }
     if (!nativeRestored && source.edition === "classic") {
-      const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => {
+        for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      });
       source.game.init();
       plan.afterInit();
       source.files.restore(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, (game, level) => {
@@ -1866,27 +3073,41 @@ class Q2NativeStrategy extends LoadedStrategy {
       if (saved.phase === "active") source.game.begin(client.slot + 1);
     }
     host.actors.rebindRestoredSource(source.game.module.id);
-    if (source.game.services.hasSourceInventory) for (const actor of source.clients.values()) {
-      const saved = save.inventories.find(entry => host.actors.resolveSaved(entry.actor) === actor);
-      host.bindEquipmentInventory(actor, saved?.entries ?? []);
-    }
+    if (source.game.services.hasSourceInventory)
+      for (const actor of source.clients.values()) {
+        const saved = save.inventories.find(entry => host.actors.resolveSaved(entry.actor) === actor);
+        host.bindEquipmentInventory(actor, saved?.entries ?? []);
+      }
   }
   override monsterProxy(): GuestMonsterProxy | null {
     const source = this.source;
     if (source.edition !== "classic") return null;
     const game = source.game;
-    return { allocate: () => game.allocateMonsterProxy(), bind: (slot, actor) => { game.bindMonsterProxy(slot, actor); } };
+    return {
+      allocate: () => game.allocateMonsterProxy(),
+      bind: (slot, actor) => {
+        game.bindMonsterProxy(slot, actor);
+      },
+    };
   }
-  override asQ2Native(): Of<"q2-native"> { return this.source; }
-  override primaryWeaponStep(_player: MovementPlayer, input: WeaponStepInput): WeaponStepResult { return { arsenal: input.arsenal, animation: input.animation, effects: [] }; }
-  override forwardsCommands(): boolean { return true; }
+  override asQ2Native(): Of<"q2-native"> {
+    return this.source;
+  }
+  override primaryWeaponStep(_player: MovementPlayer, input: WeaponStepInput): WeaponStepResult {
+    return { arsenal: input.arsenal, animation: input.animation, effects: [] };
+  }
+  override forwardsCommands(): boolean {
+    return true;
+  }
   override preCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
-    const game = this.source.game, slot = this.host.nativeQ2Client(actor).slot + 1;
+    const game = this.source.game,
+      slot = this.host.nativeQ2Client(actor).slot + 1;
     q2GameCallback(() => game.command(slot, [name, ...args], args.join(" ")));
     return true;
   }
   override setFieldOfView(actor: ActorId, fieldOfView: number, mode: "change" | "restore"): boolean {
-    const slot = this.host.nativeQ2Client(actor).slot + 1, game = this.source.game;
+    const slot = this.host.nativeQ2Client(actor).slot + 1,
+      game = this.source.game;
     const client = game.clients.find(client => client.slot === slot);
     if (client === undefined) throw new Error("Native player has no source userinfo");
     if (mode === "restore") return true;
@@ -1895,31 +3116,54 @@ class Q2NativeStrategy extends LoadedStrategy {
     game.userinfo(slot, joinInfo(info));
     return true;
   }
-  override commandMovement(client: ClientId): MovementState | undefined { return this.source.game.playerState(client.slot + 1).movement; }
-  override grantProfile(): PickupSupplyProfile | null { return this.host.selectedOriginalSupply; }
-  override hasGuestUi(): boolean { return true; }
+  override commandMovement(client: ClientId): MovementState | undefined {
+    return this.source.game.playerState(client.slot + 1).movement;
+  }
+  override grantProfile(): PickupSupplyProfile | null {
+    return this.host.selectedOriginalSupply;
+  }
+  override hasGuestUi(): boolean {
+    return true;
+  }
   override guestUi(actor: ActorId): PlayerUi {
-    const source = this.source, host = this.host, reference = host.recipe.map.entities, slot = host.nativeQ2Client(actor).slot + 1;
-    const original = source.edition === "classic"
-      ? classicGuestPlayerUi(source.game.playerState(slot), source.game.configstrings(), reference)
-      : rereleaseGuestPlayerUi(source.game.playerState(slot), source.game.configstrings(), reference);
-    const nativeInventory = host.nativeInventory(actor), arsenal = host.selectedArsenal;
-    if (arsenal?.has(actor) !== true) return nativeInventory == null ? original
-      : { ...original, nativeInventory, inventory: host.inventory.entries(actor) };
-    return { ...original, selectedArsenal: true, ...(nativeInventory == null ? {} : { nativeInventory }),
-      inventory: host.inventory.entries(actor), ...arsenal.ui(actor, host.weaponProvider) };
+    const source = this.source,
+      host = this.host,
+      reference = host.recipe.map.entities,
+      slot = host.nativeQ2Client(actor).slot + 1;
+    const original =
+      source.edition === "classic"
+        ? classicGuestPlayerUi(source.game.playerState(slot), source.game.configstrings(), reference)
+        : rereleaseGuestPlayerUi(source.game.playerState(slot), source.game.configstrings(), reference);
+    const nativeInventory = host.nativeInventory(actor),
+      arsenal = host.selectedArsenal;
+    if (arsenal?.has(actor) !== true) return nativeInventory == null ? original : { ...original, nativeInventory, inventory: host.inventory.entries(actor) };
+    return {
+      ...original,
+      selectedArsenal: true,
+      ...(nativeInventory == null ? {} : { nativeInventory }),
+      inventory: host.inventory.entries(actor),
+      ...arsenal.ui(actor, host.weaponProvider),
+    };
   }
   override guestView(actor: ActorId): PlayerView {
-    const source = this.source, slot = this.host.nativeQ2Client(actor).slot + 1;
+    const source = this.source,
+      slot = this.host.nativeQ2Client(actor).slot + 1;
     return source.edition === "classic" ? classicGuestPlayerView(source.game.playerState(slot)) : rereleaseGuestPlayerView(source.game.playerState(slot));
   }
-  override guestWeaponViews(): boolean { return true; }
-  override rendersOwnIntermission(): boolean { return false; }
+  override guestWeaponViews(): boolean {
+    return true;
+  }
+  override rendersOwnIntermission(): boolean {
+    return false;
+  }
   override weaponVisible(actor: ActorId): boolean {
     return this.source.game.playerState(this.host.nativeQ2Client(actor).slot + 1).gunIndex !== 0 && this.host.nativeWeapons().available(actor);
   }
   override presentations(fraction: number, backLerp: number): readonly SimulationPresentation[] {
-    const source = this.source, host = this.host, content = host.recipe.map.entities.content, result: SimulationPresentation[] = [];
+    const source = this.source,
+      host = this.host,
+      content = host.recipe.map.entities.content,
+      result: SimulationPresentation[] = [];
     for (const state of source.game.entityStates()) {
       const info = source.game.entityInfo(state.number);
       if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
@@ -1929,49 +3173,113 @@ class Q2NativeStrategy extends LoadedStrategy {
       const appearance = source.game.modelAppearance(state.number);
       const delta = { x: state.origin.x - state.oldOrigin.x, y: state.origin.y - state.oldOrigin.y, z: state.origin.z - state.oldOrigin.z };
       const continuous = fraction < 1 && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 512 * 512;
-      const model = { actor: info.actor, content, family: "q2", frame: state.frame, oldFrame: "oldFrame" in state ? state.oldFrame : state.frame,
+      const model = {
+        actor: info.actor,
+        content,
+        family: "q2",
+        frame: state.frame,
+        oldFrame: "oldFrame" in state ? state.oldFrame : state.frame,
         ...(continuous ? { backLerp } : {}),
-        skin: appearance.skin, skinPath: appearance.skinPath, effects: Number(state.effects), renderFlags: state.renderEffects,
-        origin: continuous ? { x: state.oldOrigin.x + delta.x * fraction, y: state.oldOrigin.y + delta.y * fraction, z: state.oldOrigin.z + delta.z * fraction } : state.origin,
-        previousOrigin: state.oldOrigin, angles: state.angles,
-        scale: "scale" in state && state.scale !== 0 ? state.scale : 1, alpha: "alpha" in state ? state.alpha !== 0 ? state.alpha : (state.renderEffects & 32) !== 0 ? 0.3 : 1 : 1, visible: true, viewWeapon: false } satisfies Omit<SimulationPresentation, "path">;
+        skin: appearance.skin,
+        skinPath: appearance.skinPath,
+        effects: Number(state.effects),
+        renderFlags: state.renderEffects,
+        origin: continuous
+          ? { x: state.oldOrigin.x + delta.x * fraction, y: state.oldOrigin.y + delta.y * fraction, z: state.oldOrigin.z + delta.z * fraction }
+          : state.origin,
+        previousOrigin: state.oldOrigin,
+        angles: state.angles,
+        scale: "scale" in state && state.scale !== 0 ? state.scale : 1,
+        alpha: "alpha" in state ? (state.alpha !== 0 ? state.alpha : (state.renderEffects & 32) !== 0 ? 0.3 : 1) : 1,
+        visible: true,
+        viewWeapon: false,
+      } satisfies Omit<SimulationPresentation, "path">;
       // A body-queue corpse copies the guest player model (modelindex 255). With a Quake 1 character selected it is
       // drawn as that character's last death frame; Quake III characters keep the guest corpse model.
       if (appearance.path.startsWith("players/") && host.foreignNativeCharacter() && providerFamily(host.recipe.character.definition.provider) === "q1") {
-        result.push({ ...model, content: host.recipe.character.definition.content, family: "q1", path: "progs/player.mdl", frame: Q1_CORPSE_FRAME, oldFrame: Q1_CORPSE_FRAME,
-          skin: 0, skinPath: null, effects: 0, renderFlags: 0, playerColors: { top: host.options.playerColors?.top ?? 0, bottom: host.options.playerColors?.bottom ?? 0 } });
+        result.push({
+          ...model,
+          content: host.recipe.character.definition.content,
+          family: "q1",
+          path: "progs/player.mdl",
+          frame: Q1_CORPSE_FRAME,
+          oldFrame: Q1_CORPSE_FRAME,
+          skin: 0,
+          skinPath: null,
+          effects: 0,
+          renderFlags: 0,
+          playerColors: { top: host.options.playerColors?.top ?? 0, bottom: host.options.playerColors?.bottom ?? 0 },
+        });
         continue;
       }
       if (appearance.path !== "") result.push({ ...model, path: appearance.path });
-      for (const [index, path] of appearance.attachedModels.entries()) if (path !== "") result.push({ ...model, path, skin: 0, skinPath: null,
-        ...(index === 0 && host.selectedArsenal?.has(info.actor) === true ? { nativeHeldWeapon: true } : {}) });
+      for (const [index, path] of appearance.attachedModels.entries())
+        if (path !== "")
+          result.push({
+            ...model,
+            path,
+            skin: 0,
+            skinPath: null,
+            ...(index === 0 && host.selectedArsenal?.has(info.actor) === true ? { nativeHeldWeapon: true } : {}),
+          });
     }
     for (const [client, actor] of source.clients) {
       if (host.selectedArsenal?.has(actor.id) === true) continue;
-      const state = source.game.playerState(client.slot + 1), view = host.playerView(actor.id), path = source.game.configstrings().get((source.edition === "classic" ? 32 : 62) + state.gunIndex);
+      const state = source.game.playerState(client.slot + 1),
+        view = host.playerView(actor.id),
+        path = source.game.configstrings().get((source.edition === "classic" ? 32 : 62) + state.gunIndex);
       if (state.gunIndex === 0 || path === undefined || path === "") continue;
-      result.push({ actor: actor.id, content, family: "q2", path, frame: state.gunFrame, oldFrame: state.gunFrame, skin: "gunSkin" in state ? state.gunSkin : 0, effects: 0, renderFlags: 0,
-        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), state.gunOffset), viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), viewAngles: view.angles, angles: add(view.angles, state.gunAngles), scale: 1, visible: true, viewWeapon: true });
+      result.push({
+        actor: actor.id,
+        content,
+        family: "q2",
+        path,
+        frame: state.gunFrame,
+        oldFrame: state.gunFrame,
+        skin: "gunSkin" in state ? state.gunSkin : 0,
+        effects: 0,
+        renderFlags: 0,
+        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), state.gunOffset),
+        viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }),
+        viewAngles: view.angles,
+        angles: add(view.angles, state.gunAngles),
+        scale: 1,
+        visible: true,
+        viewWeapon: true,
+      });
     }
     return result;
   }
   override canonicalTeam(original: string | null): string | null {
-    const mapping = this.host.nativeMatch()?.teams.find(value => value.source === original); return mapping === undefined ? original : mapping.team;
+    const mapping = this.host.nativeMatch()?.teams.find(value => value.source === original);
+    return mapping === undefined ? original : mapping.team;
   }
-  override declaresMatch(): boolean { return this.host.nativeMatch() !== undefined; }
-  override matchScore(actor: ActorId): number { return this.host.nativePlayer().score(actor); }
-  override setMatchScore(actor: ActorId, value: number): void { this.host.nativePlayer().setScore(actor, value); }
+  override declaresMatch(): boolean {
+    return this.host.nativeMatch() !== undefined;
+  }
+  override matchScore(actor: ActorId): number {
+    return this.host.nativePlayer().score(actor);
+  }
+  override setMatchScore(actor: ActorId, value: number): void {
+    this.host.nativePlayer().setScore(actor, value);
+  }
   override setMatchTeam(actor: ActorId, requested: string | null): void {
-    const profile = this.host.nativeMatch(); if (profile === undefined) throw new Error("Original native team commands have no declaration");
-    const args = sourceTeamCommand(profile, requested), name = args[0]; if (name === undefined) throw new Error("Original team command is empty");
-    const client = this.host.playerClient(actor); if (client === null) throw new Error("Original team command has no client");
+    const profile = this.host.nativeMatch();
+    if (profile === undefined) throw new Error("Original native team commands have no declaration");
+    const args = sourceTeamCommand(profile, requested),
+      name = args[0];
+    if (name === undefined) throw new Error("Original team command is empty");
+    const client = this.host.playerClient(actor);
+    if (client === null) throw new Error("Original team command has no client");
     q2GameCallback(() => this.source.game.command(client.slot + 1, args, args.slice(1).join(" ")));
   }
   override userinfo(actor: ActorId): string | null {
     const slot = this.host.nativeQ2Client(actor).slot + 1;
     return this.source.game.clients.find(client => client.slot === slot)?.userinfo ?? null;
   }
-  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void { this.source.game.setUserinfoStorage(client.slot + 1, userinfo); }
+  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void {
+    this.source.game.setUserinfoStorage(client.slot + 1, userinfo);
+  }
   override updateUserinfo(actor: ActorId, userinfo: string, previous: string | null): void {
     const slot = this.host.nativeQ2Client(actor).slot + 1;
     if (this.source.game.clients.find(client => client.slot === slot)?.userinfo !== userinfo) this.source.game.userinfo(slot, userinfo);
@@ -1983,55 +3291,111 @@ class Q2NativeStrategy extends LoadedStrategy {
     return this.host.admitQ2NativePlayer(client, userinfo ?? `\\name\\Player ${client.slot + 1}\\skin\\male/grunt\\fov\\90`);
   }
 
-  override selectedPlayer(actor: ActorId): SelectedPlayerStats { return { maxHealth: this.host.nativePlayer().maxHealth(actor), team: null, quadUntil: 0, hasteUntil: 0 }; }
-  override hasEquipmentEffects(): boolean { return true; }
-  override weaponDamageFactor(actor: ActorId): number { return this.host.nativeWeapons().damageFactor(actor); }
+  override selectedPlayer(actor: ActorId): SelectedPlayerStats {
+    return { maxHealth: this.host.nativePlayer().maxHealth(actor), team: null, quadUntil: 0, hasteUntil: 0 };
+  }
+  override hasEquipmentEffects(): boolean {
+    return true;
+  }
+  override weaponDamageFactor(actor: ActorId): number {
+    return this.host.nativeWeapons().damageFactor(actor);
+  }
   override equipmentFiringDelay(actor: ActorId, milliseconds: number, persistent: number): number {
     return q3WeaponDelay(this.host.nativeWeaponDelay(actor, milliseconds / 1000) * 1000, persistent, false);
   }
-  override weaponDelay(actor: ActorId, seconds: number): number { return this.host.nativeWeaponDelay(actor, seconds); }
-  override equipmentDelay(actor: ActorId, provider: ProviderId, seconds: number): number { return this.host.nativeEquipmentDelay(actor, provider, seconds); }
-  override teleportSpawn(actor: OwnedActor): SpawnPoint { return this.host.nativePlayer().spawnPoint(actor.id); }
-  override dropObjectives(actor: OwnedActor): void { this.host.nativePlayer().dropObjectives(actor.id); }
+  override weaponDelay(actor: ActorId, seconds: number): number {
+    return this.host.nativeWeaponDelay(actor, seconds);
+  }
+  override equipmentDelay(actor: ActorId, provider: ProviderId, seconds: number): number {
+    return this.host.nativeEquipmentDelay(actor, provider, seconds);
+  }
+  override teleportSpawn(actor: OwnedActor): SpawnPoint {
+    return this.host.nativePlayer().spawnPoint(actor.id);
+  }
+  override dropObjectives(actor: OwnedActor): void {
+    this.host.nativePlayer().dropObjectives(actor.id);
+  }
   override originalPlayer(): OriginalPlayer {
     const player = this.host.nativePlayer();
-    return { setMaxHealth: (actor, health) => player.setMaxHealth(actor, health), teleport: (actor, origin, velocity, angles, hold) => player.teleport(actor, origin, velocity, angles, hold) };
+    return {
+      setMaxHealth: (actor, health) => player.setMaxHealth(actor, health),
+      teleport: (actor, origin, velocity, angles, hold) => player.teleport(actor, origin, velocity, angles, hold),
+    };
   }
-  override supplyFamily(): SupplyFamily { return "q2"; }
-  override animatesWeaponFire(): boolean { return true; }
-  override equipmentSuppression(): EquipmentSuppression { return NATIVE_SUPPRESSION; }
-  override ownsEquipmentPlayers(): boolean { return true; }
-  override sourceInventory(actor: ActorId): InventoryStateBinding | null { return this.source.game.services.sourceInventory(this.host.nativeQ2Client(actor).slot + 1); }
-  override playerAvailable(actor: ActorId): boolean { return this.host.playerClient(actor) !== null && this.host.nativeAvailable(actor); }
-  override stepsHandGrenades(): boolean { return false; }
+  override supplyFamily(): SupplyFamily {
+    return "q2";
+  }
+  override animatesWeaponFire(): boolean {
+    return true;
+  }
+  override equipmentSuppression(): EquipmentSuppression {
+    return NATIVE_SUPPRESSION;
+  }
+  override ownsEquipmentPlayers(): boolean {
+    return true;
+  }
+  override sourceInventory(actor: ActorId): InventoryStateBinding | null {
+    return this.source.game.services.sourceInventory(this.host.nativeQ2Client(actor).slot + 1);
+  }
+  override playerAvailable(actor: ActorId): boolean {
+    return this.host.playerClient(actor) !== null && this.host.nativeAvailable(actor);
+  }
+  override stepsHandGrenades(): boolean {
+    return false;
+  }
   override notarget(actor: ActorId): boolean | null {
     const source = this.host.sourceOf(actor);
     return source?.provider === this.source.game.module.id ? this.source.game.services.notarget(source.slot) : null;
   }
-  override connectedClients(): readonly ClientId[] { return [...this.source.clients.keys()]; }
-  override playerActors(): readonly ActorId[] { return [...this.source.clients.values()].map(actor => actor.id); }
-  override teleportBits(actor: ActorId): number { return this.source.game.playerState(this.host.nativeQ2Client(actor).slot + 1).movement.flags & 32; }
+  override connectedClients(): readonly ClientId[] {
+    return [...this.source.clients.keys()];
+  }
+  override playerActors(): readonly ActorId[] {
+    return [...this.source.clients.values()].map(actor => actor.id);
+  }
+  override teleportBits(actor: ActorId): number {
+    return this.source.game.playerState(this.host.nativeQ2Client(actor).slot + 1).movement.flags & 32;
+  }
 
-  override projectsMonsters(): boolean { return true; }
-  override usesGuestMonsters(): boolean { return true; }
-  override reconstructsActor(actor: ActorId): boolean { return this.host.sourceOf(actor)?.provider === this.source.game.module.id; }
-  override checkpointExtras(): Readonly<Record<string, number | string | null>> { return this.source.game.services.hasSourceInventory ? { nativeInventoryProjection: 1 } : {}; }
-  override nativeClients() { return this.source.game.clients.map(client => ({ clientSlot: client.slot - 1, phase: client.phase, userinfo: client.userinfo })); }
-  override requireInventoryProjection(): void { if (!this.source.game.services.hasSourceInventory) throw new Error("Saved native inventory requires qualified source storage"); }
+  override projectsMonsters(): boolean {
+    return true;
+  }
+  override usesGuestMonsters(): boolean {
+    return true;
+  }
+  override reconstructsActor(actor: ActorId): boolean {
+    return this.host.sourceOf(actor)?.provider === this.source.game.module.id;
+  }
+  override checkpointExtras(): Readonly<Record<string, number | string | null>> {
+    return this.source.game.services.hasSourceInventory ? { nativeInventoryProjection: 1 } : {};
+  }
+  override nativeClients() {
+    return this.source.game.clients.map(client => ({ clientSlot: client.slot - 1, phase: client.phase, userinfo: client.userinfo }));
+  }
+  override requireInventoryProjection(): void {
+    if (!this.source.game.services.hasSourceInventory) throw new Error("Saved native inventory requires qualified source storage");
+  }
   override inventoryCoverage(projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null {
     return this.source.game.services.hasSourceInventory ? { actors: [...this.source.clients.values()], legacy: !projected.native } : null;
   }
 }
 
 class Q3Strategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"q3">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"q3">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "q3" as const;
   override ammoTimer(actor: ActorId, weapon: number): number | null {
     const client = this.source.game.records.nativeByActor(actor)?.client;
     return client == null ? null : client.ammoTimes.get(weapon);
   }
   override restoreContinuation(save: SaveImage): void {
-    const host = this.host, game = this.source.game, native = nativeQ3RuntimeReader(save);
+    const host = this.host,
+      game = this.source.game,
+      native = nativeQ3RuntimeReader(save);
     for (const entry of native.arsenals) {
       const actor = host.actors.resolveSaved(entry.actor);
       if (actor === null || !host.playerStates.has(actor) || host.q3Arsenals.has(actor) || entry.state.product !== game.options.product)
@@ -2040,40 +3404,73 @@ class Q3Strategy extends LoadedStrategy {
     }
     const movement = new Set<OwnedActor>();
     for (const entry of native.movement) {
-      const actor = host.actors.resolveSaved(entry.actor), player = actor === null ? undefined : host.playerStates.get(actor);
+      const actor = host.actors.resolveSaved(entry.actor),
+        player = actor === null ? undefined : host.playerStates.get(actor);
       if (actor === null || player === undefined || movement.has(actor)) throw new Error("Saved Q3 movement has no unique matching player");
-      movement.add(actor); player.sourceMovement = entry.state;
+      movement.add(actor);
+      player.sourceMovement = entry.state;
     }
-    if (movement.size !== host.playerStates.size || host.q3Arsenals.size !== host.playerStates.size) throw new Error("Saved Q3 player continuation is incomplete");
+    if (movement.size !== host.playerStates.size || host.q3Arsenals.size !== host.playerStates.size)
+      throw new Error("Saved Q3 player continuation is incomplete");
     for (const entry of native.lastAttacks) {
       const actor = host.actors.resolveSaved(entry.actor);
       if (actor === null || host.lastAttack.has(actor)) throw new Error("Saved Q3 attack has no unique matching actor");
-      host.lastAttack.set(actor, restoreQ2Attack(entry.attack, saved => host.actors.referenceSaved(saved)));
+      host.lastAttack.set(
+        actor,
+        restoreQ2Attack(entry.attack, saved => host.actors.referenceSaved(saved)),
+      );
     }
     if (providerFamily(host.recipe.combat.provider) === "q3") host.setSourceCombatDisposer(host.combatAuthority.register(game.bridge.policy()));
     game.finishNativeRestore();
   }
-  override reactionStart(actor: OwnedActor, decision: DamageDecision): void { this.source.game.beforeReaction(actor, decision); }
+  override reactionStart(actor: OwnedActor, decision: DamageDecision): void {
+    this.source.game.beforeReaction(actor, decision);
+  }
   override handoff(actor: ActorId): PrimaryWeaponHandoff {
-    const host = this.host, player = host.requirePlayer(actor);
-    const runtime = () => { const state = host.q3Arsenals.get(player.actor); if (state === undefined) throw new Error("Missing Q3 primary continuation"); return state; };
-    const select = (item: ItemId): boolean => { const weapon = Q3_WEAPON_ITEMS.find(value => value.item === item);
-      if (weapon === undefined || host.inventory.count(actor, item) <= 0 || runtime().product === "baseq3" && weapon.weapon > 10) return false;
-      host.q3Arsenals.set(player.actor, q3RequestWeapon(runtime(), weapon.weapon)); return true; };
-    return { kind: "immediate", provider: host.weaponProvider.provider, accepts: item => Q3_WEAPON_ITEMS.some(weapon => weapon.item === item && (runtime().product === "missionpack" || weapon.weapon <= 10)) && host.inventory.count(actor, item) > 0,
-      select, holster: () => { host.q3Arsenals.set(player.actor, q3RequestWeaponHolster(runtime())); }, isHolstered: () => runtime().externalSlot === "holstered",
-      resume: item => { host.q3Arsenals.set(player.actor, q3RequestWeaponResume(runtime())); return item === null || select(item); } };
+    const host = this.host,
+      player = host.requirePlayer(actor);
+    const runtime = () => {
+      const state = host.q3Arsenals.get(player.actor);
+      if (state === undefined) throw new Error("Missing Q3 primary continuation");
+      return state;
+    };
+    const select = (item: ItemId): boolean => {
+      const weapon = Q3_WEAPON_ITEMS.find(value => value.item === item);
+      if (weapon === undefined || host.inventory.count(actor, item) <= 0 || (runtime().product === "baseq3" && weapon.weapon > 10)) return false;
+      host.q3Arsenals.set(player.actor, q3RequestWeapon(runtime(), weapon.weapon));
+      return true;
+    };
+    return {
+      kind: "immediate",
+      provider: host.weaponProvider.provider,
+      accepts: item =>
+        Q3_WEAPON_ITEMS.some(weapon => weapon.item === item && (runtime().product === "missionpack" || weapon.weapon <= 10)) &&
+        host.inventory.count(actor, item) > 0,
+      select,
+      holster: () => {
+        host.q3Arsenals.set(player.actor, q3RequestWeaponHolster(runtime()));
+      },
+      isHolstered: () => runtime().externalSlot === "holstered",
+      resume: item => {
+        host.q3Arsenals.set(player.actor, q3RequestWeaponResume(runtime()));
+        return item === null || select(item);
+      },
+    };
   }
   override equipmentPowerups(actor: ActorId): { readonly quadUntil: number; readonly hasteUntil: number } {
     const ps = this.source.game.records.byActor(actor)?.client?.ps;
     return { quadUntil: (ps?.powerups.get(Powerup.PW_QUAD) ?? 0) / 1000, hasteUntil: ps?.powerups.get(Powerup.PW_HASTE) ?? 0 };
   }
   override writeCharacterAnimation(actor: ActorId, animation: import("../../../contracts/movement.ts").ActorAnimationState): void {
-    const entity = this.source.game.records.byActor(actor); if (entity !== null) writeQ3CharacterAnimation(entity, animation);
+    const entity = this.source.game.records.byActor(actor);
+    if (entity !== null) writeQ3CharacterAnimation(entity, animation);
   }
-  override settles(game: Q3Game): boolean { return this.source.game === game; }
+  override settles(game: Q3Game): boolean {
+    return this.source.game === game;
+  }
   override finishFrame(): void {
-    const host = this.host, game = this.source.game;
+    const host = this.host,
+      game = this.source.game;
     for (const player of host.playerStates.values()) {
       const entity = game.records.nativeByActor(player.actor.id);
       if (entity?.client !== null && entity?.client !== undefined && !player.intermission && player.character === "q3" && host.health(player.actor.id) <= 0)
@@ -2081,29 +3478,51 @@ class Q3Strategy extends LoadedStrategy {
     }
     game.endFrame();
   }
-  override teamGame(): boolean { return this.source.game.gameType >= 3; }
-  override serverCvars(): ServerCvarRegistry { return this.source.game.host.cvars; }
+  override teamGame(): boolean {
+    return this.source.game.gameType >= 3;
+  }
+  override serverCvars(): ServerCvarRegistry {
+    return this.source.game.host.cvars;
+  }
   override serverSettingsOwner(owner: ServerSettingsOwner): ServerSettingsOwner {
     const settings = this.source.game.settings;
-    return { write: owner.write, read: target => ({ ...owner.read(target), effective: target.kind === "value" ? settings.snapshot(target.name).value : owner.read(target).effective }) };
+    return {
+      write: owner.write,
+      read: target => ({ ...owner.read(target), effective: target.kind === "value" ? settings.snapshot(target.name).value : owner.read(target).effective }),
+    };
   }
-  override disconnect(actor: ActorId): "release" { this.source.game.disconnectPlayer(actor); return "release"; }
+  override disconnect(actor: ActorId): "release" {
+    this.source.game.disconnectPlayer(actor);
+    return "release";
+  }
   override respawn(player: MovementPlayer): void {
     const entity = this.source.game.records.nativeByActor(player.actor.id);
     if (entity !== null) this.source.game.spawns.respawn(entity);
   }
-  override keepsAngleDeltas(): boolean { return true; }
-  override admitsGuestMonsters(): boolean { return true; }
+  override keepsAngleDeltas(): boolean {
+    return true;
+  }
+  override admitsGuestMonsters(): boolean {
+    return true;
+  }
   override grantQuad(actor: ActorId): void {
     const client = this.source.game.records.nativeByActor(actor)?.client;
     if (client != null) client.ps.powerups.set(Powerup.PW_QUAD, this.source.game.level.time + 30000);
   }
   override foreignPowerups(actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } {
     const powers = this.source.game.records.nativeByActor(actor)?.client?.ps.powerups;
-    return { quadUntil: (powers?.get(Powerup.PW_QUAD) ?? 0) / 1000, doubleUntil: 0, invulnerabilityUntil: (powers?.get(Powerup.PW_INVULNERABILITY) ?? 0) / 1000 };
+    return {
+      quadUntil: (powers?.get(Powerup.PW_QUAD) ?? 0) / 1000,
+      doubleUntil: 0,
+      invulnerabilityUntil: (powers?.get(Powerup.PW_INVULNERABILITY) ?? 0) / 1000,
+    };
   }
-  override asQ3(): Of<"q3"> { return this.source; }
-  override baseArsenal(player: MovementPlayer): ArsenalState { return { ...player.arsenal, ammo: this.host.inventory.entries(player.actor.id) }; }
+  override asQ3(): Of<"q3"> {
+    return this.source;
+  }
+  override baseArsenal(player: MovementPlayer): ArsenalState {
+    return { ...player.arsenal, ammo: this.host.inventory.entries(player.actor.id) };
+  }
   override stepSelectedHoldable(player: MovementPlayer, input: WeaponStepInput): boolean {
     const client = this.source.game.records.nativeByActor(player.actor.id)?.client;
     if (client == null) throw new Error("Selected primary on Q3 map has no admitted source client");
@@ -2112,15 +3531,25 @@ class Q3Strategy extends LoadedStrategy {
     return !this.host.ownsQ3Equipment() && this.source.game.stepHoldable(player.actor.id, useHoldable);
   }
   override primaryWeaponStep(player: MovementPlayer, input: WeaponStepInput): WeaponStepResult {
-    const host = this.host, entity = this.source.game.records.byActor(player.actor.id), runtime = host.q3Arsenals.get(player.actor);
+    const host = this.host,
+      entity = this.source.game.records.byActor(player.actor.id),
+      runtime = host.q3Arsenals.get(player.actor);
     if (entity?.client == null || runtime === undefined) throw new Error("Q3 arsenal has no source client state");
     const ps = entity.client.ps;
-    const result = stepQ3Arsenal({ ...input, arsenal: host.arsenal(player), gauntletHit: player.sourceMovement?.gauntletHit ?? input.gauntletHit }, readQ3ArsenalRuntime(entity, runtime),
-      resolveQ3ArsenalControls(host.arsenal(player), player.arsenalIntent, input.command, runtime.product));
-    host.q3Arsenals.set(player.actor, result.runtime); player.arsenal = result.arsenal;
+    const result = stepQ3Arsenal(
+      { ...input, arsenal: host.arsenal(player), gauntletHit: player.sourceMovement?.gauntletHit ?? input.gauntletHit },
+      readQ3ArsenalRuntime(entity, runtime),
+      resolveQ3ArsenalControls(host.arsenal(player), player.arsenalIntent, input.command, runtime.product),
+    );
+    host.q3Arsenals.set(player.actor, result.runtime);
+    player.arsenal = result.arsenal;
     writeQ3ArsenalRuntime(entity, result.runtime);
     for (const entry of result.arsenal.ammo) host.inventory.configure(player.actor, entry);
-    if (result.arsenal.state.kind === "q3") { ps.weapon = result.arsenal.state.sourceWeapon; ps.weaponState = result.arsenal.state.state; ps.weaponTime = result.arsenal.state.timeMilliseconds; }
+    if (result.arsenal.state.kind === "q3") {
+      ps.weapon = result.arsenal.state.sourceWeapon;
+      ps.weaponState = result.arsenal.state.state;
+      ps.weaponTime = result.arsenal.state.timeMilliseconds;
+    }
     host.commitCharacterAnimation(player.actor, result.animation);
     host.reconcileSlot(player.actor.id);
     return result;
@@ -2129,7 +3558,9 @@ class Q3Strategy extends LoadedStrategy {
     const ps = this.source.game.records.nativeByActor(actor)?.client?.ps;
     return { q3Ps: ps, spectator: false, hand: "right", quadUntil: (ps?.powerups.get(Powerup.PW_QUAD) ?? 0) / 1000, infiniteAmmo: false };
   }
-  override ownsContacts(): boolean { return true; }
+  override ownsContacts(): boolean {
+    return true;
+  }
   override jumpVoice(actor: OwnedActor, player: MovementPlayer): boolean {
     if (player.character !== "q3") return false;
     if (player.profile.kind !== "q3") {
@@ -2141,9 +3572,14 @@ class Q3Strategy extends LoadedStrategy {
   }
   override preCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
     if (name !== "fly") return false;
-    const source = this.source, player = this.host.requirePlayer(actor), entity = source.game.records.byActor(actor);
+    const source = this.source,
+      player = this.host.requirePlayer(actor),
+      entity = source.game.records.byActor(actor);
     if (entity === null || entity.client === null) throw new Error("Q3 player entity missing");
-    if (source.game.level.intermissionTime !== 0) { source.game.playerCommand(actor, name, args); return true; }
+    if (source.game.level.intermissionTime !== 0) {
+      source.game.playerCommand(actor, name, args);
+      return true;
+    }
     if (!source.game.commands.cheatsOk(entity)) return true;
     const enabled = player.setFlight(!player.flight);
     if (enabled) entity.client.noclip = false;
@@ -2159,88 +3595,157 @@ class Q3Strategy extends LoadedStrategy {
     return native === undefined ? undefined : [native.x, native.y, native.z];
   }
   override grantProfile(arsenal: SelectedArsenal): PickupSupplyProfile {
-    return arsenal.family === "q2" ? Q3_Q2_SUPPLY_PROFILE : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser") ? Q3_HIPNOTIC_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE;
+    return arsenal.family === "q2"
+      ? Q3_Q2_SUPPLY_PROFILE
+      : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser")
+        ? Q3_HIPNOTIC_SUPPLY_PROFILE
+        : Q3_Q1_SUPPLY_PROFILE;
   }
   override uiPowerups(actor: ActorId): PlayerUi["powerups"] {
-    const source = this.source, client = source.game.records.nativeByActor(actor)?.client;
+    const source = this.source,
+      client = source.game.records.nativeByActor(actor)?.client;
     return client == null ? [] : q3PowerupTimers(client, source.game.level.time, clientNumber => source.game.pool.clientAt(clientNumber));
   }
   override arsenalUi(actor: ActorId, arsenal: ArsenalState): ArsenalUiParts {
-    const inventory = this.host.inventory, items: PlayerUiItem[] = [];
+    const inventory = this.host.inventory,
+      items: PlayerUiItem[] = [];
     let ammo: PlayerUi["ammo"] = null;
     for (const definition of Q3_WEAPON_ITEMS) {
       const count = definition.ammo === null ? null : inventory.count(actor, definition.ammo);
-      items.push({ id: definition.item, label: definition.item.slice("q3:weapon/".length), kind: "weapon", sourceOrdinal: definition.weapon,
-        owned: inventory.count(actor, definition.item) > 0, hasAmmo: count === null || count > 0, count, warningCount: 0 });
+      items.push({
+        id: definition.item,
+        label: definition.item.slice("q3:weapon/".length),
+        kind: "weapon",
+        sourceOrdinal: definition.weapon,
+        owned: inventory.count(actor, definition.item) > 0,
+        hasAmmo: count === null || count > 0,
+        count,
+        warningCount: 0,
+      });
     }
     const definition = arsenal.state.kind === "q3" ? q3WeaponItem(arsenal.state.sourceWeapon) : null;
     if (definition?.ammo != null) ammo = { item: definition.ammo, count: inventory.count(actor, definition.ammo) };
     const product = this.source.game.options.product;
-    return { items, ammo, weaponStatus: q3WeaponStatus(arsenal.activeWeapon, product, item => inventory.count(actor, item), this.host.weaponProvider),
-      arsenalWarning: q3ArsenalWarning(product, item => inventory.count(actor, item)) };
+    return {
+      items,
+      ammo,
+      weaponStatus: q3WeaponStatus(arsenal.activeWeapon, product, item => inventory.count(actor, item), this.host.weaponProvider),
+      arsenalWarning: q3ArsenalWarning(product, item => inventory.count(actor, item)),
+    };
   }
-  override presentations(): readonly SimulationPresentation[] { return this.source.game.presentations(); }
-  override foreignCharacterDeath(): boolean { return true; }
-  override rendersOwnIntermission(): boolean { return true; }
-  override canonicalTeam(original: string | null): string | null { return original === "q3-team:1" ? "team:red" : original === "q3-team:2" ? "team:blue" : original; }
-  override declaresMatch(): boolean { return true; }
+  override presentations(): readonly SimulationPresentation[] {
+    return this.source.game.presentations();
+  }
+  override foreignCharacterDeath(): boolean {
+    return true;
+  }
+  override rendersOwnIntermission(): boolean {
+    return true;
+  }
+  override canonicalTeam(original: string | null): string | null {
+    return original === "q3-team:1" ? "team:red" : original === "q3-team:2" ? "team:blue" : original;
+  }
+  override declaresMatch(): boolean {
+    return true;
+  }
   override matchScore(actor: ActorId): number {
-    const native = this.source.game.records.nativeByActor(actor)?.client; if (native == null) throw new Error("Original Q3 score has no player");
+    const native = this.source.game.records.nativeByActor(actor)?.client;
+    if (native == null) throw new Error("Original Q3 score has no player");
     return native.ps.persistant.get(PersistentIndex.PERS_SCORE);
   }
   override setMatchScore(actor: ActorId, value: number): void {
-    const native = this.source.game.records.nativeByActor(actor)?.client; if (native == null) throw new Error("Original Q3 score has no player");
+    const native = this.source.game.records.nativeByActor(actor)?.client;
+    if (native == null) throw new Error("Original Q3 score has no player");
     native.ps.persistant.set(PersistentIndex.PERS_SCORE, sourceScore(value));
   }
   override setMatchTeam(actor: ActorId, requested: string | null): void {
-    const values = [{ team: "team:red", argument: "red" }, { team: "team:blue", argument: "blue" }, { team: null, argument: "free" }];
-    const command = values.find(value => value.team === requested); if (command === undefined) throw new Error("Team has no original Q3 command");
+    const values = [
+      { team: "team:red", argument: "red" },
+      { team: "team:blue", argument: "blue" },
+      { team: null, argument: "free" },
+    ];
+    const command = values.find(value => value.team === requested);
+    if (command === undefined) throw new Error("Team has no original Q3 command");
     this.source.game.playerCommand(actor, "team", [command.argument]);
   }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
     return client === null ? null : this.source.game.host.engine.getUserinfo(client.slot);
   }
-  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void { this.source.game.host.engine.setUserinfo(client.slot, userinfo); }
+  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void {
+    this.source.game.host.engine.setUserinfo(client.slot, userinfo);
+  }
   override updateUserinfo(actor: ActorId, userinfo: string, previous: string | null): void {
-    const client = this.host.playerClient(actor); if (client === null) throw new Error("Q3 userinfo has no admitted client");
+    const client = this.host.playerClient(actor);
+    if (client === null) throw new Error("Q3 userinfo has no admitted client");
     this.source.game.host.engine.setUserinfo(client.slot, userinfo);
     this.source.game.admission.userinfoChanged(client.slot);
     this.host.userinfoChanged(actor, previous);
   }
 
-  override admitClient(client: ClientId): PlayerAdmission { return this.host.admitQ3Player(client, this.source.game); }
+  override admitClient(client: ClientId): PlayerAdmission {
+    return this.host.admitQ3Player(client, this.source.game);
+  }
   override prepareBot(client: ClientId): OwnedActor {
     if (!this.host.botSlotAvailable(client)) throw new Error("Bot client is not an available session slot");
-    const actor = this.host.prepareQ3Client(client, this.source.game, true); this.source.game.prepareClient(actor, client.slot); return actor;
+    const actor = this.host.prepareQ3Client(client, this.source.game, true);
+    this.source.game.prepareClient(actor, client.slot);
+    return actor;
   }
-  override q3Client(actor: ActorId): Q3NativeClient | undefined { return this.source.game.records.nativeByActor(actor)?.client; }
-  override skipsTriggerTouch(): boolean { return true; }
-  override beginActorTurns(frame: FrameContext): void { this.source.game.beginFrame(frame); }
+  override q3Client(actor: ActorId): Q3NativeClient | undefined {
+    return this.source.game.records.nativeByActor(actor)?.client;
+  }
+  override skipsTriggerTouch(): boolean {
+    return true;
+  }
+  override beginActorTurns(frame: FrameContext): void {
+    this.source.game.beginFrame(frame);
+  }
   override playerThink(player: MovementPlayer, command: ActorCommand): boolean {
     this.host.setQ3Command(player.actor, command);
-    try { this.source.game.playerThink(command); } finally { this.host.setQ3Command(player.actor, null); }
+    try {
+      this.source.game.playerThink(command);
+    } finally {
+      this.host.setQ3Command(player.actor, null);
+    }
     this.host.syncQ3Player(player);
     return true;
   }
   override runPlayerActor(actor: OwnedActor): boolean {
-    const game = this.source.game, host = this.host;
+    const game = this.source.game,
+      host = this.host;
     if (!(host.playerStates.has(actor) || game.records.byActor(actor.id) !== null)) return false;
-    game.runActor(actor); host.commitAttachments();
-    const player = host.playerStates.get(actor); if (player !== undefined) host.syncQ3Player(player);
+    game.runActor(actor);
+    host.commitAttachments();
+    const player = host.playerStates.get(actor);
+    if (player !== undefined) host.syncQ3Player(player);
     return true;
   }
 
-  private client(actor: ActorId) { return this.source.game.records.nativeByActor(actor)?.client; }
+  private client(actor: ActorId) {
+    return this.source.game.records.nativeByActor(actor)?.client;
+  }
   override selectedPlayer(actor: ActorId): SelectedPlayerStats {
     const client = this.client(actor);
-    return { maxHealth: client?.ps.stats.get(statSchema(client.ps.product).maxHealth) ?? 100, team: client?.sess.sessionTeam ?? null,
-      quadUntil: client?.ps.powerups.get(Powerup.PW_QUAD) ?? 0, hasteUntil: client?.ps.powerups.get(Powerup.PW_HASTE) ?? 0 };
+    return {
+      maxHealth: client?.ps.stats.get(statSchema(client.ps.product).maxHealth) ?? 100,
+      team: client?.sess.sessionTeam ?? null,
+      quadUntil: client?.ps.powerups.get(Powerup.PW_QUAD) ?? 0,
+      hasteUntil: client?.ps.powerups.get(Powerup.PW_HASTE) ?? 0,
+    };
   }
-  override q3GameType(): number { return this.source.game.gameType; }
-  override q3ServerInfo(): string { return this.source.game.host.serverState.serverInfo(); }
-  override primaryEquipment(): boolean { return this.source.game.options.product === "missionpack"; }
-  override hasEquipmentEffects(): boolean { return this.primaryEquipment(); }
+  override q3GameType(): number {
+    return this.source.game.gameType;
+  }
+  override q3ServerInfo(): string {
+    return this.source.game.host.serverState.serverInfo();
+  }
+  override primaryEquipment(): boolean {
+    return this.source.game.options.product === "missionpack";
+  }
+  override hasEquipmentEffects(): boolean {
+    return this.primaryEquipment();
+  }
   override weaponDamageFactor(actor: ActorId, quad: boolean): number {
     const client = this.client(actor);
     return client == null ? 1 : q3WeaponDamageFactor(client, quad ? this.source.game.quadDamageFactor() : 1, client.ps.product);
@@ -2257,51 +3762,81 @@ class Q3Strategy extends LoadedStrategy {
   override weaponDelay(actor: ActorId, seconds: number): number {
     const client = this.client(actor);
     if (client == null) return seconds;
-    const schema = statSchema(client.ps.product), persistent = schema.product === "missionpack" ? itemAt(client.ps.product, client.ps.stats.get(schema.persistentPowerup)).tag : 0;
-    const milliseconds = seconds * 1000, delay = q3WeaponDelay(milliseconds, persistent, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
+    const schema = statSchema(client.ps.product),
+      persistent = schema.product === "missionpack" ? itemAt(client.ps.product, client.ps.stats.get(schema.persistentPowerup)).tag : 0;
+    const milliseconds = seconds * 1000,
+      delay = q3WeaponDelay(milliseconds, persistent, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
     return delay === milliseconds ? seconds : delay / 1000;
   }
-  override curvesEnabled(): boolean { return this.source.game.host.cvars.variableValue("cm_noCurves") === 0; }
-  override playerCurveClip(): boolean { return this.source.game.host.cvars.variableValue("cm_playerCurveClip") !== 0; }
-  override friendlyFire(): boolean { return this.source.game.host.cvars.variableValue("g_friendlyFire") !== 0; }
-  override knockback(): number { return this.source.game.host.cvars.variableValue("g_knockback"); }
-  override intermissionQueued(): number { return this.source.game.level.intermissionQueued; }
+  override curvesEnabled(): boolean {
+    return this.source.game.host.cvars.variableValue("cm_noCurves") === 0;
+  }
+  override playerCurveClip(): boolean {
+    return this.source.game.host.cvars.variableValue("cm_playerCurveClip") !== 0;
+  }
+  override friendlyFire(): boolean {
+    return this.source.game.host.cvars.variableValue("g_friendlyFire") !== 0;
+  }
+  override knockback(): number {
+    return this.source.game.host.cvars.variableValue("g_knockback");
+  }
+  override intermissionQueued(): number {
+    return this.source.game.level.intermissionQueued;
+  }
   override checkHurtCarrier(target: ActorId, attacker: ActorId): void {
-    const nativeTarget = this.source.game.records.nativeByActor(target), nativeAttacker = this.source.game.records.nativeByActor(attacker);
+    const nativeTarget = this.source.game.records.nativeByActor(target),
+      nativeAttacker = this.source.game.records.nativeByActor(attacker);
     if (nativeTarget !== null && nativeAttacker !== null) this.source.game.team.checkHurtCarrier(nativeTarget, nativeAttacker);
   }
   override checkObeliskAttack(target: ActorId, attacker: ActorId): boolean {
-    const nativeTarget = this.source.game.records.nativeByActor(target), nativeAttacker = this.source.game.records.nativeByActor(attacker);
+    const nativeTarget = this.source.game.records.nativeByActor(target),
+      nativeAttacker = this.source.game.records.nativeByActor(attacker);
     return nativeTarget !== null && nativeAttacker !== null && this.source.game.team.checkObeliskAttack(nativeTarget, nativeAttacker);
   }
-  override quadFactor(): number { return this.source.game.quadDamageFactor(); }
-  override proximityTimeout(): number { return this.source.game.host.cvars.variableValue("g_proxMineTimeout"); }
+  override quadFactor(): number {
+    return this.source.game.quadDamageFactor();
+  }
+  override proximityTimeout(): number {
+    return this.source.game.host.cvars.variableValue("g_proxMineTimeout");
+  }
   override returnPickup(actor: ActorId): void {
     const pickup = this.source.game.records.nativeByActor(actor);
     if (pickup === null || !pickup.inuse) throw new Error("Borrowed persistent pickup was retired");
     returnQ3PersistentPowerup(pickup, this.source.game.world);
   }
   override teleportSpawn(actor: OwnedActor): SpawnPoint {
-    const body = this.host.body(actor.id); if (body === null) throw new Error("Selected teleporter lost its body");
+    const body = this.host.body(actor.id);
+    if (body === null) throw new Error("Selected teleporter lost its body");
     return this.source.game.spawns.selectSpawnPoint(body.origin);
   }
   override dropObjectives(actor: OwnedActor): void {
-    const entity = this.source.game.records.nativeByActor(actor.id); if (entity === null) throw new Error("Selected objective drop has no map player");
+    const entity = this.source.game.records.nativeByActor(actor.id);
+    if (entity === null) throw new Error("Selected objective drop has no map player");
     dropQ3TeleportObjectives({ product: this.source.game.options.product, combat: this.source.game.bridge.context, drops: this.source.game.drops }, entity);
   }
   override setMaxHealth(actor: ActorId, health: number): void {
-    const target = this.client(actor); if (target == null) throw new Error("Selected max health has no Q3 client");
-    target.pers.maxHealth = health; target.ps.stats.set(statSchema(target.ps.product).maxHealth, health);
+    const target = this.client(actor);
+    if (target == null) throw new Error("Selected max health has no Q3 client");
+    target.pers.maxHealth = health;
+    target.ps.stats.set(statSchema(target.ps.product).maxHealth, health);
   }
-  override cvars(): CvarRegistry { return this.source.game.host.cvars; }
+  override cvars(): CvarRegistry {
+    return this.source.game.host.cvars;
+  }
   override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number {
     const client = this.client(actor);
     const key = powerup === "quad" ? Powerup.PW_QUAD : powerup === "invisibility" ? Powerup.PW_INVIS : powerup === "suit" ? Powerup.PW_BATTLESUIT : null;
     return powerup === "invulnerability" ? (client?.invulnerabilityTime ?? 0) / 1000 : key === null ? 0 : (client?.ps.powerups.get(key) ?? 0) / 1000;
   }
-  override runsQ3Powerups(): boolean { return true; }
-  override equipmentSuppression(): EquipmentSuppression { return { quad: false, quadFire: false, haste: true }; }
-  override notarget(actor: ActorId): boolean { return ((this.source.game.records.byActor(actor)?.flags ?? 0) & 32) !== 0; }
+  override runsQ3Powerups(): boolean {
+    return true;
+  }
+  override equipmentSuppression(): EquipmentSuppression {
+    return { quad: false, quadFire: false, haste: true };
+  }
+  override notarget(actor: ActorId): boolean {
+    return ((this.source.game.records.byActor(actor)?.flags ?? 0) & 32) !== 0;
+  }
 
   override assertSaveReady(): void {
     this.host.assertOutputConsumed();
@@ -2311,18 +3846,29 @@ class Q3Strategy extends LoadedStrategy {
     add("q3:native", this.source.game.captureNativeBytes());
     add("world:q3-runtime", this.host.q3RuntimeBytes());
   }
-  override travelSource(): SimulationTravel["source"] { return { kind: "shared" }; }
-  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
+  override travelSource(): SimulationTravel["source"] {
+    return { kind: "shared" };
+  }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState {
+    return this.host.sharedTravelState(actor) ?? { kind: "quakec" };
+  }
 }
 
 class Q3QvmStrategy extends LoadedStrategy {
-  constructor(private readonly source: Of<"q3-qvm">, private readonly host: SourceStrategyHost) { super(); }
+  constructor(
+    private readonly source: Of<"q3-qvm">,
+    private readonly host: SourceStrategyHost,
+  ) {
+    super();
+  }
   override readonly kind = "q3-qvm" as const;
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     const options = this.host.options.q3Guest?.prepared.primary;
-    if (channels.includes("movement-mode") && options?.input?.movementModes === undefined) throw new Error("Original QVM movement modes require an artifact-qualified input declaration");
-    if (channels.includes("body-shape") && options?.weapons?.equipmentMovement.bodyTrace === undefined) throw new Error("Selected original QVM movement has no admitted body trace interface");
+    if (channels.includes("movement-mode") && options?.input?.movementModes === undefined)
+      throw new Error("Original QVM movement modes require an artifact-qualified input declaration");
+    if (channels.includes("body-shape") && options?.weapons?.equipmentMovement.bodyTrace === undefined)
+      throw new Error("Selected original QVM movement has no admitted body trace interface");
   }
   override guestGrounded(actor: ActorId): boolean {
     const slot = this.source.game.records.slot(actor);
@@ -2336,23 +3882,40 @@ class Q3QvmStrategy extends LoadedStrategy {
     return { viewOffset: { x: 0, y: 0, z: state.viewHeight }, crouched: (state.movementFlags & 1) !== 0 };
   }
   override outputsSuspended(actor: ActorId): boolean {
-    const slot = this.source.game.records.slot(actor), input = this.host.options.q3Guest?.prepared.primary.input;
+    const slot = this.source.game.records.slot(actor),
+      input = this.host.options.q3Guest?.prepared.primary.input;
     return slot === null || input?.intermission.includes(this.source.game.records.player(slot).movementType) === true;
   }
   override handoff(actor: ActorId): PrimaryWeaponHandoff {
     const host = this.host;
     let holstered = false;
-    const accepts = (item: ItemId) => { const ui = this.guestUi(actor); return ui.activeWeapon === item || ui.items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned); };
+    const accepts = (item: ItemId) => {
+      const ui = this.guestUi(actor);
+      return ui.activeWeapon === item || ui.items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned);
+    };
     const select = (item: ItemId): boolean => {
       if (!accepts(item)) return false;
       const ui = this.guestUi(actor);
       if (ui.activeWeapon === item) return true;
-      const weapon = ui.items.find(entry => entry.id === item && entry.kind === "weapon"); if (weapon === undefined) return false;
+      const weapon = ui.items.find(entry => entry.id === item && entry.kind === "weapon");
+      if (weapon === undefined) return false;
       host.nativeWeaponRequests.set(actor, weapon.sourceOrdinal);
       return true;
     };
-    return { kind: "immediate", provider: host.weaponProvider.provider, accepts, select, holster: () => { holstered = true; }, isHolstered: () => holstered,
-      resume: item => { holstered = false; return item === null || select(item); } };
+    return {
+      kind: "immediate",
+      provider: host.weaponProvider.provider,
+      accepts,
+      select,
+      holster: () => {
+        holstered = true;
+      },
+      isHolstered: () => holstered,
+      resume: item => {
+        holstered = false;
+        return item === null || select(item);
+      },
+    };
   }
   override equipmentPowerups(actor: ActorId): { readonly quadUntil: number; readonly hasteUntil: number } {
     const state = this.source.game.records.player(this.source.game.records.requireSlot(actor));
@@ -2362,16 +3925,28 @@ class Q3QvmStrategy extends LoadedStrategy {
     if (priority === "attack") this.host.qvmWeapons().attackAnimation(actor, melee);
     return true;
   }
-  override stepRoute(): "awaited" { return "awaited"; }
-  override teamGame(): boolean { return this.source.game.state.cvars.variableValue("g_gametype") >= 3; }
-  override serverCvars(): ServerCvarRegistry { return this.source.game.state.cvars; }
-  override clientOf(actor: ActorId): ClientId | null { return this.source.game.players().find(player => player.actor.equals(actor))?.client ?? null; }
-  override keepsAngleDeltas(): boolean { return true; }
-  override admitsGuestMonsters(): boolean { return true; }
+  override stepRoute(): "awaited" {
+    return "awaited";
+  }
+  override teamGame(): boolean {
+    return this.source.game.state.cvars.variableValue("g_gametype") >= 3;
+  }
+  override serverCvars(): ServerCvarRegistry {
+    return this.source.game.state.cvars;
+  }
+  override clientOf(actor: ActorId): ClientId | null {
+    return this.source.game.players().find(player => player.actor.equals(actor))?.client ?? null;
+  }
+  override keepsAngleDeltas(): boolean {
+    return true;
+  }
+  override admitsGuestMonsters(): boolean {
+    return true;
+  }
   override monsterProxy(): GuestMonsterProxy {
     const source = this.source;
     return {
-      allocate: () => source.combat === null ? null : source.combat.spawnProxyEntity(),
+      allocate: () => (source.combat === null ? null : source.combat.spawnProxyEntity()),
       bind: (slot, actor) => {
         if (source.combat === null) return;
         source.game.records.registerForeign(slot, actor);
@@ -2379,19 +3954,32 @@ class Q3QvmStrategy extends LoadedStrategy {
       },
     };
   }
-  override asQ3Qvm(): Of<"q3-qvm"> { return this.source; }
-  override angleDelta(_actor: ActorId, client: ClientId): readonly number[] { return this.source.game.records.player(client.slot).deltaAngleWords; }
-  override guestGrantExclusions(): ReadonlySet<ItemId> {
-    return new Set(this.source.catalog.weapons().flatMap(weapon => weapon.ammo === null ? [weapon.item] : [weapon.item, weapon.ammo]));
+  override asQ3Qvm(): Of<"q3-qvm"> {
+    return this.source;
   }
-  override hasGuestUi(): boolean { return true; }
+  override angleDelta(_actor: ActorId, client: ClientId): readonly number[] {
+    return this.source.game.records.player(client.slot).deltaAngleWords;
+  }
+  override guestGrantExclusions(): ReadonlySet<ItemId> {
+    return new Set(this.source.catalog.weapons().flatMap(weapon => (weapon.ammo === null ? [weapon.item] : [weapon.item, weapon.ammo])));
+  }
+  override hasGuestUi(): boolean {
+    return true;
+  }
   override guestUi(actor: ActorId): PlayerUi {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     const player = source.game.players().find(player => player.actor.equals(actor));
     if (player === undefined) throw new Error("Actor has no Q3 guest client UI");
-    const original = q3GuestPlayerUi(source.game.records.player(player.sourceEntity), host.recipe.map.entities, host.timeSeconds * 1000,
-      source.catalog.weapons(), host.options.q3Guest?.prepared.product,
-      source.inventory === null ? undefined : host.inventory.entries(actor), source.weapons?.active(actor));
+    const original = q3GuestPlayerUi(
+      source.game.records.player(player.sourceEntity),
+      host.recipe.map.entities,
+      host.timeSeconds * 1000,
+      source.catalog.weapons(),
+      host.options.q3Guest?.prepared.product,
+      source.inventory === null ? undefined : host.inventory.entries(actor),
+      source.weapons?.active(actor),
+    );
     const arsenal = host.selectedArsenal;
     const ui = arsenal?.has(actor) === true ? { ...original, inventory: host.inventory.entries(actor), ...arsenal.ui(actor, host.weaponProvider) } : original;
     if (source.combat === null) return ui;
@@ -2405,99 +3993,203 @@ class Q3QvmStrategy extends LoadedStrategy {
     const state = this.source.game.records.player(player.sourceEntity);
     return { origin: state.origin, angles: state.viewAngles, viewHeight: state.viewHeight };
   }
-  override guestWeaponViews(): boolean { return true; }
-  override weaponVisible(): boolean { return true; }
-  override guestBobCycle(actor: ActorId): number { return this.source.game.records.player(this.source.game.records.requireSlot(actor)).bobCycle; }
-  override rendersOwnIntermission(): boolean { return true; }
-  override canonicalTeam(original: string | null): string | null {
-    const mapping = this.source.weapons?.match?.teams.find(value => value.source === original); return mapping === undefined ? original : mapping.team;
+  override guestWeaponViews(): boolean {
+    return true;
   }
-  override declaresMatch(): boolean { return this.source.weapons?.match != null; }
-  override matchScore(actor: ActorId): number { return this.host.qvmWeapons().score(actor); }
-  override setMatchScore(actor: ActorId, value: number): void { this.host.qvmWeapons().setScore(actor, value); }
+  override weaponVisible(): boolean {
+    return true;
+  }
+  override guestBobCycle(actor: ActorId): number {
+    return this.source.game.records.player(this.source.game.records.requireSlot(actor)).bobCycle;
+  }
+  override rendersOwnIntermission(): boolean {
+    return true;
+  }
+  override canonicalTeam(original: string | null): string | null {
+    const mapping = this.source.weapons?.match?.teams.find(value => value.source === original);
+    return mapping === undefined ? original : mapping.team;
+  }
+  override declaresMatch(): boolean {
+    return this.source.weapons?.match != null;
+  }
+  override matchScore(actor: ActorId): number {
+    return this.host.qvmWeapons().score(actor);
+  }
+  override setMatchScore(actor: ActorId, value: number): void {
+    this.host.qvmWeapons().setScore(actor, value);
+  }
   override setMatchTeam(actor: ActorId, requested: string | null): void {
-    const profile = this.source.weapons?.match, player = this.source.game.players().find(value => value.actor.equals(actor));
+    const profile = this.source.weapons?.match,
+      player = this.source.game.players().find(value => value.actor.equals(actor));
     if (profile == null || player === undefined) throw new Error("Original QVM team commands have no declaration");
     this.source.game.commandImmediate(player, sourceTeamCommand(profile, requested));
   }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
-    return client === null ? null : this.source.game.state.getUserinfo(client.slot) ?? null;
+    return client === null ? null : (this.source.game.state.getUserinfo(client.slot) ?? null);
   }
-  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void { this.source.game.state.setUserinfo(client.slot, userinfo); }
+  override storeUserinfo(_actor: ActorId, client: ClientId, userinfo: string): void {
+    this.source.game.state.setUserinfo(client.slot, userinfo);
+  }
   override updateUserinfo(actor: ActorId, userinfo: string, _previous: string | null): void | Promise<void> {
     const player = this.source.game.players().find(player => player.actor.equals(actor));
     if (player === undefined) throw new Error("Q3 guest userinfo has no admitted client");
     return this.source.game.userinfo(player, userinfo);
   }
 
-  override admitClient(): PlayerAdmission { throw new Error("Q3 guest admission requires the awaited native network lifecycle"); }
+  override admitClient(): PlayerAdmission {
+    throw new Error("Q3 guest admission requires the awaited native network lifecycle");
+  }
 
   override selectedPlayer(actor: ActorId): SelectedPlayerStats {
     const weapons = this.host.qvmWeapons();
-    return { maxHealth: weapons.maxHealth(actor), team: null, quadUntil: weapons.powerupUntil(actor, "quad"), hasteUntil: weapons.powerupUntil(actor, "haste") };
+    return {
+      maxHealth: weapons.maxHealth(actor),
+      team: null,
+      quadUntil: weapons.powerupUntil(actor, "quad"),
+      hasteUntil: weapons.powerupUntil(actor, "haste"),
+    };
   }
-  override q3GameType(): number { return this.source.game.state.cvars.variableValue("g_gametype"); }
-  override hasEquipmentEffects(): boolean { return true; }
-  override weaponDamageFactor(actor: ActorId): number { return this.host.qvmWeapons().damageFactor(actor); }
+  override q3GameType(): number {
+    return this.source.game.state.cvars.variableValue("g_gametype");
+  }
+  override hasEquipmentEffects(): boolean {
+    return true;
+  }
+  override weaponDamageFactor(actor: ActorId): number {
+    return this.host.qvmWeapons().damageFactor(actor);
+  }
   override equipmentFiringDelay(actor: ActorId, milliseconds: number, persistent: number): number {
-    return persistent === Powerup.PW_SCOUT || persistent === Powerup.PW_AMMOREGEN ? q3WeaponDelay(milliseconds, persistent, false) : this.host.qvmWeapons().weaponDelay(actor, milliseconds);
+    return persistent === Powerup.PW_SCOUT || persistent === Powerup.PW_AMMOREGEN
+      ? q3WeaponDelay(milliseconds, persistent, false)
+      : this.host.qvmWeapons().weaponDelay(actor, milliseconds);
   }
-  override weaponDelay(actor: ActorId, seconds: number): number { return this.host.qvmWeapons().weaponDelay(actor, Math.trunc(seconds * 1000)) / 1000; }
-  override equipmentDelay(actor: ActorId, provider: ProviderId, seconds: number): number { return this.host.qvmWeapons().equipmentDelay(actor, provider, Math.round(seconds * 1000)) / 1000; }
-  override teleportSpawn(actor: OwnedActor): SpawnPoint { return this.host.qvmWeapons().spawnPoint(actor.id); }
-  override dropObjectives(actor: OwnedActor): void { this.host.qvmWeapons().dropObjectives(actor.id); }
+  override weaponDelay(actor: ActorId, seconds: number): number {
+    return this.host.qvmWeapons().weaponDelay(actor, Math.trunc(seconds * 1000)) / 1000;
+  }
+  override equipmentDelay(actor: ActorId, provider: ProviderId, seconds: number): number {
+    return this.host.qvmWeapons().equipmentDelay(actor, provider, Math.round(seconds * 1000)) / 1000;
+  }
+  override teleportSpawn(actor: OwnedActor): SpawnPoint {
+    return this.host.qvmWeapons().spawnPoint(actor.id);
+  }
+  override dropObjectives(actor: OwnedActor): void {
+    this.host.qvmWeapons().dropObjectives(actor.id);
+  }
   override originalPlayer(): OriginalPlayer {
     const weapons = this.host.qvmWeapons();
-    return { setMaxHealth: (actor, health) => weapons.setMaxHealth(actor, health), teleport: (actor, origin, velocity, angles, hold) => weapons.teleportState(actor, origin, velocity, angles, hold) };
+    return {
+      setMaxHealth: (actor, health) => weapons.setMaxHealth(actor, health),
+      teleport: (actor, origin, velocity, angles, hold) => weapons.teleportState(actor, origin, velocity, angles, hold),
+    };
   }
-  override identitySupply(): boolean { return true; }
-  override ownsSupply(): boolean { return true; }
-  override animatesWeaponFire(): boolean { return true; }
-  override cvars(): CvarRegistry { return this.source.game.state.cvars; }
-  override runsQ3Powerups(): boolean { return true; }
-  override equipmentSuppression(): EquipmentSuppression { return NATIVE_SUPPRESSION; }
-  override ownsEquipmentPlayers(): boolean { return true; }
-  override notarget(actor: ActorId): boolean | null { return this.source.combat?.notarget(actor) ?? null; }
-  override connectedClients(): readonly ClientId[] { return this.source.game.players().map(player => player.client); }
-  override playerActors(): readonly ActorId[] { return this.source.game.players().map(player => player.actor); }
-  override teleportBits(actor: ActorId): number { return this.source.game.records.player(this.source.game.records.requireSlot(actor)).flags & 4; }
+  override identitySupply(): boolean {
+    return true;
+  }
+  override ownsSupply(): boolean {
+    return true;
+  }
+  override animatesWeaponFire(): boolean {
+    return true;
+  }
+  override cvars(): CvarRegistry {
+    return this.source.game.state.cvars;
+  }
+  override runsQ3Powerups(): boolean {
+    return true;
+  }
+  override equipmentSuppression(): EquipmentSuppression {
+    return NATIVE_SUPPRESSION;
+  }
+  override ownsEquipmentPlayers(): boolean {
+    return true;
+  }
+  override notarget(actor: ActorId): boolean | null {
+    return this.source.combat?.notarget(actor) ?? null;
+  }
+  override connectedClients(): readonly ClientId[] {
+    return this.source.game.players().map(player => player.client);
+  }
+  override playerActors(): readonly ActorId[] {
+    return this.source.game.players().map(player => player.actor);
+  }
+  override teleportBits(actor: ActorId): number {
+    return this.source.game.records.player(this.source.game.records.requireSlot(actor)).flags & 4;
+  }
   override playerAvailable(actor: ActorId): boolean {
-    const player = this.source.game.players().find(entry => entry.actor.equals(actor)); if (player === undefined) return false;
+    const player = this.source.game.players().find(entry => entry.actor.equals(actor));
+    if (player === undefined) return false;
     const state = this.source.game.records.player(player.sourceEntity);
-    return this.source.weapons?.available(actor) ?? ((state.stats[0] ?? 0) > 0 && state.movementType !== MoveType.PM_SPECTATOR && state.movementType !== MoveType.PM_INTERMISSION && state.movementType !== MoveType.PM_SPINTERMISSION);
+    return (
+      this.source.weapons?.available(actor) ??
+      ((state.stats[0] ?? 0) > 0 &&
+        state.movementType !== MoveType.PM_SPECTATOR &&
+        state.movementType !== MoveType.PM_INTERMISSION &&
+        state.movementType !== MoveType.PM_SPINTERMISSION)
+    );
   }
-  override assertSaveReady(): void { this.host.assertOutputConsumed(); }
-  override projectsMonsters(): boolean { return true; }
-  override usesGuestMonsters(): boolean { return true; }
-  override checkpointGuests(): SaveImage["guests"] { return [this.source.game.checkpoint()]; }
+  override assertSaveReady(): void {
+    this.host.assertOutputConsumed();
+  }
+  override projectsMonsters(): boolean {
+    return true;
+  }
+  override usesGuestMonsters(): boolean {
+    return true;
+  }
+  override checkpointGuests(): SaveImage["guests"] {
+    return [this.source.game.checkpoint()];
+  }
   override checkpointExtras(): Readonly<Record<string, number | string | null>> {
-    return { qvmPrimaryDeclaration: this.host.qvmDeclaration(), ...(this.source.combat !== null ? { qvmArmorProjection: 1 } : {}), ...(this.source.inventory !== null ? { qvmInventoryProjection: 1 } : {}) };
+    return {
+      qvmPrimaryDeclaration: this.host.qvmDeclaration(),
+      ...(this.source.combat !== null ? { qvmArmorProjection: 1 } : {}),
+      ...(this.source.inventory !== null ? { qvmInventoryProjection: 1 } : {}),
+    };
   }
-  override expectedDeclaration(): string | null { return this.host.qvmDeclaration(); }
-  override legacyCombat(): Of<"q3-qvm">["combat"] { return this.source.combat; }
-  override setMaxHealth(actor: ActorId, health: number): void { this.host.qvmWeapons().setMaxHealth(actor, health); }
-  override requireInventoryProjection(): void { if (this.source.inventory === null) throw new Error("Saved QVM inventory requires qualified source storage"); }
+  override expectedDeclaration(): string | null {
+    return this.host.qvmDeclaration();
+  }
+  override legacyCombat(): Of<"q3-qvm">["combat"] {
+    return this.source.combat;
+  }
+  override setMaxHealth(actor: ActorId, health: number): void {
+    this.host.qvmWeapons().setMaxHealth(actor, health);
+  }
+  override requireInventoryProjection(): void {
+    if (this.source.inventory === null) throw new Error("Saved QVM inventory requires qualified source storage");
+  }
   override inventoryCoverage(projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null {
-    const source = this.source, host = this.host;
+    const source = this.source,
+      host = this.host;
     if (projected.qvm || source.inventory === null) return null;
-    return { legacy: true, actors: host.entityActors().filter(actor => {
-      const slot = source.game.records.slot(actor.id);
-      return slot !== null && slot < source.game.engine.data.numClients && host.hasInventory(actor.id);
-    }) };
+    return {
+      legacy: true,
+      actors: host.entityActors().filter(actor => {
+        const slot = source.game.records.slot(actor.id);
+        return slot !== null && slot < source.game.engine.data.numClients && host.hasInventory(actor.id);
+      }),
+    };
   }
-  override travelSource(): SimulationTravel["source"] { return { kind: "shared" }; }
-  override travelers(): readonly { readonly client: ClientId; readonly actor: ActorId }[] { return this.source.game.players().map(player => ({ client: player.client, actor: player.actor })); }
-  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
+  override travelSource(): SimulationTravel["source"] {
+    return { kind: "shared" };
+  }
+  override travelers(): readonly { readonly client: ClientId; readonly actor: ActorId }[] {
+    return this.source.game.players().map(player => ({ client: player.client, actor: player.actor }));
+  }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState {
+    return this.host.sharedTravelState(actor) ?? { kind: "quakec" };
+  }
   override guestHealth(actor: ActorId): number | null {
     const slot = this.source.game.records.slot(actor);
-    return slot === null ? null : this.source.game.records.player(slot).stats[0] ?? null;
+    return slot === null ? null : (this.source.game.records.player(slot).stats[0] ?? null);
   }
   override setGuestHealth(actor: ActorId, health: number): void {
-    const game = this.source.game, slot = game.records.slot(actor);
+    const game = this.source.game,
+      slot = game.records.slot(actor);
     if (slot === null) return;
     const state = game.records.player(slot);
-    game.engine.data.writePlayerState(slot, { ...state, stats: state.stats.map((value, index) => index === 0 ? health : value) });
+    game.engine.data.writePlayerState(slot, { ...state, stats: state.stats.map((value, index) => (index === 0 ? health : value)) });
   }
   override guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[] {
     const game = this.source.game;
@@ -2507,12 +4199,19 @@ class Q3QvmStrategy extends LoadedStrategy {
 
 export function createSourceStrategy(source: SourceRuntime, host: SourceStrategyHost): SourceStrategy {
   switch (source.kind) {
-    case "loading": return new LoadingStrategy();
-    case "quakec": return new QuakeCStrategy(source, host);
-    case "q1": return new Q1Strategy(source, host);
-    case "q3": return new Q3Strategy(source, host);
-    case "q3-qvm": return new Q3QvmStrategy(source, host);
-    case "q2-native": return new Q2NativeStrategy(source, host);
-    case "q2": return new Q2Strategy(source, host);
+    case "loading":
+      return new LoadingStrategy();
+    case "quakec":
+      return new QuakeCStrategy(source, host);
+    case "q1":
+      return new Q1Strategy(source, host);
+    case "q3":
+      return new Q3Strategy(source, host);
+    case "q3-qvm":
+      return new Q3QvmStrategy(source, host);
+    case "q2-native":
+      return new Q2NativeStrategy(source, host);
+    case "q2":
+      return new Q2Strategy(source, host);
   }
 }

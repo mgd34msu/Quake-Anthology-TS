@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { NativeAbi, Q2CgameApiIdentity, Q2GameApiIdentity, Q3ApiIdentity, QuakeCApiIdentity } from "./execution.ts";
 import type { ProviderId } from "./identity.ts";
 import type { NumericProfile } from "./numeric.ts";
@@ -120,8 +121,13 @@ export interface ResolvedResourceReference {
 }
 
 function resourcePath(value: string): string {
-  if (value.length === 0 || value.includes("\0") || value.startsWith("/") || value.includes("\\")
-    || value.split("/").some(part => part === "" || part === "." || part === "..")) {
+  if (
+    value.length === 0 ||
+    value.includes("\0") ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    value.split("/").some(part => part === "" || part === "." || part === "..")
+  ) {
     throw new RangeError(`Expected a relative resource path: ${value}`);
   }
   return value;
@@ -129,9 +135,12 @@ function resourcePath(value: string): string {
 
 function resolutionKey(resolution: ResourceResolution): string {
   switch (resolution.kind) {
-    case "default-order": return `${resolution.plan}:default:${resolution.rank}`;
-    case "prefix-order": return `${resolution.plan}:prefix:${encodeURIComponent(resolution.prefix)}:${resolution.rank}`;
-    case "link": return `${resolution.plan}:link:${encodeURIComponent(resolution.sourcePrefix)}:${encodeURIComponent(resolution.targetPath)}`;
+    case "default-order":
+      return `${resolution.plan}:default:${resolution.rank}`;
+    case "prefix-order":
+      return `${resolution.plan}:prefix:${encodeURIComponent(resolution.prefix)}:${resolution.rank}`;
+    case "link":
+      return `${resolution.plan}:link:${encodeURIComponent(resolution.sourcePrefix)}:${encodeURIComponent(resolution.targetPath)}`;
   }
 }
 
@@ -148,9 +157,10 @@ export function createResourceId(resource: Omit<ResolvedResourceReference, "id">
   if (provenance.kind === "archive" && (!Number.isSafeInteger(provenance.memberIndex) || provenance.memberIndex < 0)) {
     throw new RangeError("Archive member index must be a nonnegative safe integer");
   }
-  const source = provenance.kind === "archive"
-    ? `${encodeURIComponent(provenance.mount.archivePath)}:${provenance.mount.archiveDigest}:${provenance.memberIndex}`
-    : encodeURIComponent(provenance.mount.rootPath);
+  const source =
+    provenance.kind === "archive"
+      ? `${encodeURIComponent(provenance.mount.archivePath)}:${provenance.mount.archiveDigest}:${provenance.memberIndex}`
+      : encodeURIComponent(provenance.mount.rootPath);
   return `resource:${identity.content}:${identity.id}:${identity.generation}:${source}:${encodeURIComponent(provenance.memberPath)}:${resource.digest}:${resolutionKey(resolution)}`;
 }
 
@@ -164,9 +174,7 @@ export interface ResourceRequest {
   readonly path: string;
 }
 
-export type LaunchSelection<T> =
-  | { readonly kind: "preset" }
-  | { readonly kind: "selected"; readonly value: T };
+export type LaunchSelection<T> = { readonly kind: "preset" } | { readonly kind: "selected"; readonly value: T };
 
 export interface MapSelection {
   readonly geometry: ResourceRequest;
@@ -192,24 +200,29 @@ export type MonsterSelectionTarget = MonsterDefinitionReference | { readonly kin
 
 export type EnemySelection =
   | { readonly kind: "map-defined" }
-  | { readonly kind: "replace"; readonly default: MonsterSelectionTarget;
-      readonly byClassname: Readonly<Record<string, MonsterSelectionTarget>> }
+  | { readonly kind: "replace"; readonly default: MonsterSelectionTarget; readonly byClassname: Readonly<Record<string, MonsterSelectionTarget>> }
   /** Multiplayer-player enemies (Q3 arena bots): character family for bot clients. */
   | { readonly kind: "players"; readonly character: ProviderReference };
 
 export type GrappleSelection =
   | { readonly kind: "disabled" }
   | ({ readonly kind: "enabled"; readonly source: ProviderReference; readonly binding: "slot" | "offhand" } & (
-    | { readonly mechanic: "q1-threewave"; readonly edition: "classic" | "rerelease" }
-    | { readonly mechanic: "q2-ctf"; readonly edition: "classic" | "rerelease" }
-    | { readonly mechanic: "q2-lmctf"; readonly edition: "classic" }
-    | { readonly mechanic: "q3-qvm"; readonly edition: "classic"; readonly profile: QvmGrappleDefinition }
-  ));
+      | { readonly mechanic: "q1-threewave"; readonly edition: "classic" | "rerelease" }
+      | { readonly mechanic: "q2-ctf"; readonly edition: "classic" | "rerelease" }
+      | { readonly mechanic: "q2-lmctf"; readonly edition: "classic" }
+      | { readonly mechanic: "q3-qvm"; readonly edition: "classic"; readonly profile: QvmGrappleDefinition }
+    ));
 
 export type HandGrenadeSelection =
   | { readonly kind: "disabled" }
-  | { readonly kind: "enabled"; readonly source: ProviderReference; readonly edition: "classic" | "rerelease";
-      readonly binding: "offhand"; readonly initialAmmo: number; readonly capacity: number };
+  | {
+      readonly kind: "enabled";
+      readonly source: ProviderReference;
+      readonly edition: "classic" | "rerelease";
+      readonly binding: "offhand";
+      readonly initialAmmo: number;
+      readonly capacity: number;
+    };
 
 /** Equipment selection never changes map mechanisms, campaign gamecode or the primary arsenal. */
 export interface EquipmentSelection {
@@ -238,12 +251,12 @@ type Q3ModuleApi =
   | { readonly role: "client-game"; readonly api: Extract<Q3ApiIdentity, { readonly kind: "q3-cgame" }> }
   | { readonly role: "ui"; readonly api: Extract<Q3ApiIdentity, { readonly kind: "q3-ui" }> };
 
-type NativeModuleApi = Q3ModuleApi
+type NativeModuleApi =
+  | Q3ModuleApi
   | { readonly role: "server-game"; readonly api: Q2GameApiIdentity }
   | { readonly role: "client-game"; readonly api: Q2CgameApiIdentity };
 
-type SourceModuleApi = NativeModuleApi
-  | { readonly role: "server-game"; readonly api: QuakeCApiIdentity };
+type SourceModuleApi = NativeModuleApi | { readonly role: "server-game"; readonly api: QuakeCApiIdentity };
 
 export type NativeModuleProfile = NativeAbi;
 
@@ -290,7 +303,12 @@ export interface ProviderTiming {
 }
 
 export interface ResolvedWeaponBehaviorSelection {
-  readonly component?: { readonly kind: "qvm"; readonly abiProfile: import("./execution.ts").QvmAbiProfile; readonly layout: import("./weapon-behavior.ts").QvmWeaponBehaviorLayout }
+  readonly component?:
+    | {
+        readonly kind: "qvm";
+        readonly abiProfile: import("./execution.ts").QvmAbiProfile;
+        readonly layout: import("./weapon-behavior.ts").QvmWeaponBehaviorLayout;
+      }
     | { readonly kind: "rerelease-native"; readonly declaration: import("./native-weapon-behavior.ts").NativeWeaponBehaviorDeclaration };
   readonly source: ProviderReference;
   readonly artifact: ResolvedResourceReference;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/game/g_misc.c spawn wrappers and shooters.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -32,12 +33,26 @@ class MiscSpawns {
     }
 
     this.bindSaveCallbacks();
-    bindPortalSaveCallbacks({ pool: this.pool, world: this.world, time: this.time, randomInt: () => this.host.random.rand(), warn: message => { this.host.warn(message); } });
+    bindPortalSaveCallbacks({
+      pool: this.pool,
+      world: this.world,
+      time: this.time,
+      randomInt: () => this.host.random.rand(),
+      warn: message => {
+        this.host.warn(message);
+      },
+    });
   }
 
-  private get pool(): EntityPool { return this.host.missiles.host.combat.entities; }
-  private get world(): ServerWorld { return this.host.missiles.host.world; }
-  private get time(): number { return this.host.missiles.host.combat.time; }
+  private get pool(): EntityPool {
+    return this.host.missiles.host.combat.entities;
+  }
+  private get world(): ServerWorld {
+    return this.host.missiles.host.world;
+  }
+  private get time(): number {
+    return this.host.missiles.host.combat.time;
+  }
 
   private owned(entity: GameEntity): void {
     if (this.pool.get(entity.slot) !== entity) {
@@ -46,8 +61,13 @@ class MiscSpawns {
   }
 
   private selection(): TargetSelectionContext {
-    return { pool: this.pool, randomInt: () => this.host.random.rand(),
-      warn: (message: string): void => { this.host.warn(message); } };
+    return {
+      pool: this.pool,
+      randomInt: () => this.host.random.rand(),
+      warn: (message: string): void => {
+        this.host.warn(message);
+      },
+    };
   }
 
   infoCamp(entity: GameEntity): void {
@@ -82,8 +102,18 @@ class MiscSpawns {
 
   portalSurface(entity: GameEntity): void {
     this.owned(entity);
-    spawnPortalSurface({ pool: this.pool, world: this.world, time: this.time,
-      randomInt: () => this.host.random.rand(), warn: message => { this.host.warn(message); } }, entity);
+    spawnPortalSurface(
+      {
+        pool: this.pool,
+        world: this.world,
+        time: this.time,
+        randomInt: () => this.host.random.rand(),
+        warn: message => {
+          this.host.warn(message);
+        },
+      },
+      entity,
+    );
   }
 
   portalCamera(entity: GameEntity, variables: SpawnVariables): void {
@@ -101,9 +131,15 @@ class MiscSpawns {
 
   private fire(entity: GameEntity, direction: MissileDirection): void {
     switch (entity.s.weapon) {
-      case Weapon.WP_GRENADE_LAUNCHER: this.host.missiles.fireGrenade(entity, entity.s.origin, direction); break;
-      case Weapon.WP_ROCKET_LAUNCHER: this.host.missiles.fireRocket(entity, entity.s.origin, direction); break;
-      case Weapon.WP_PLASMAGUN: this.host.missiles.firePlasma(entity, entity.s.origin, direction); break;
+      case Weapon.WP_GRENADE_LAUNCHER:
+        this.host.missiles.fireGrenade(entity, entity.s.origin, direction);
+        break;
+      case Weapon.WP_ROCKET_LAUNCHER:
+        this.host.missiles.fireRocket(entity, entity.s.origin, direction);
+        break;
+      case Weapon.WP_PLASMAGUN:
+        this.host.missiles.firePlasma(entity, entity.s.origin, direction);
+        break;
     }
   }
 
@@ -145,8 +181,12 @@ class MiscSpawns {
   }
 
   bindSaveCallbacks(): void {
-    this.pool.callbacks.use.intern("q3.base.game.misc-spawn.shooter.use", self => { this.useShooter(self); });
-    this.pool.callbacks.think.intern("q3.base.game.misc-spawn.shooter.think", self => { this.finishShooter(self); });
+    this.pool.callbacks.use.intern("q3.base.game.misc-spawn.shooter.use", self => {
+      this.useShooter(self);
+    });
+    this.pool.callbacks.think.intern("q3.base.game.misc-spawn.shooter.think", self => {
+      this.finishShooter(self);
+    });
   }
 }
 
@@ -154,16 +194,71 @@ class MiscSpawns {
 export function miscSpawnHandlers(host: MiscSpawnHost): ReadonlyMap<string, SpawnHandler> {
   const spawns = new MiscSpawns(host);
   return new Map<string, SpawnHandler>([
-    ["info_camp", entity => { spawns.infoCamp(entity); }],
-    ["info_null", entity => { spawns.infoNull(entity); }],
-    ["info_notnull", entity => { spawns.infoNotNull(entity); }],
-    ["light", entity => { spawns.light(entity); }],
-    ["misc_teleporter_dest", entity => { spawns.teleporterDestination(entity); }],
-    ["misc_model", entity => { spawns.model(entity); }],
-    ["misc_portal_surface", entity => { spawns.portalSurface(entity); }],
-    ["misc_portal_camera", (entity, variables) => { spawns.portalCamera(entity, variables); }],
-    ["shooter_rocket", entity => { spawns.shooter(entity, Weapon.WP_ROCKET_LAUNCHER); }],
-    ["shooter_plasma", entity => { spawns.shooter(entity, Weapon.WP_PLASMAGUN); }],
-    ["shooter_grenade", entity => { spawns.shooter(entity, Weapon.WP_GRENADE_LAUNCHER); }],
+    [
+      "info_camp",
+      entity => {
+        spawns.infoCamp(entity);
+      },
+    ],
+    [
+      "info_null",
+      entity => {
+        spawns.infoNull(entity);
+      },
+    ],
+    [
+      "info_notnull",
+      entity => {
+        spawns.infoNotNull(entity);
+      },
+    ],
+    [
+      "light",
+      entity => {
+        spawns.light(entity);
+      },
+    ],
+    [
+      "misc_teleporter_dest",
+      entity => {
+        spawns.teleporterDestination(entity);
+      },
+    ],
+    [
+      "misc_model",
+      entity => {
+        spawns.model(entity);
+      },
+    ],
+    [
+      "misc_portal_surface",
+      entity => {
+        spawns.portalSurface(entity);
+      },
+    ],
+    [
+      "misc_portal_camera",
+      (entity, variables) => {
+        spawns.portalCamera(entity, variables);
+      },
+    ],
+    [
+      "shooter_rocket",
+      entity => {
+        spawns.shooter(entity, Weapon.WP_ROCKET_LAUNCHER);
+      },
+    ],
+    [
+      "shooter_plasma",
+      entity => {
+        spawns.shooter(entity, Weapon.WP_PLASMAGUN);
+      },
+    ],
+    [
+      "shooter_grenade",
+      entity => {
+        spawns.shooter(entity, Weapon.WP_GRENADE_LAUNCHER);
+      },
+    ],
   ]);
 }

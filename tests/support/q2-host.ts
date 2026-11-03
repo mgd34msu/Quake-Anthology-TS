@@ -36,21 +36,67 @@ const zero = { x: 0, y: 0, z: 0 };
  * Anything a test needs differently is an explicit override.
  */
 export function q2TestHost(parts: Q2HostParts, overrides: Partial<Q2FoundationHost> = {}): Q2TestHost {
-  const scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [], diagnostics: string[] = [], transitions: TransitionIntent[] = [];
+  const scheduled = new Map<OwnedActor, number>(),
+    events: Q2PresentationEvent[] = [],
+    diagnostics: string[] = [],
+    transitions: TransitionIntent[] = [];
   const host: Q2FoundationHost = {
-    actors: parts.actors, callbacks: parts.callbacks, bodies: parts.bodies, combat: parts.combat, inventory: parts.inventory,
-    now: () => 0, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
+    actors: parts.actors,
+    callbacks: parts.callbacks,
+    bodies: parts.bodies,
+    combat: parts.combat,
+    inventory: parts.inventory,
+    now: () => 0,
+    gravity: () => 800,
+    frameSeconds: () => 0.1,
+    random: () => 0.5,
+    schedule: (actor, due) => {
+      if (due === null) scheduled.delete(actor);
+      else scheduled.set(actor, due);
+      return undefined;
+    },
     touchTriggers: () => undefined,
-    trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0,
-      surface: null, sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 }, secondary: null }),
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],
-    players: parts.players, worldActor: () => typeof parts.world === "function" ? parts.world() : parts.world, isPlayer: actor => parts.players().some(player => player.equals(actor)),
+    trace: request => ({
+      kind: "q2",
+      fraction: 1,
+      startSolid: false,
+      allSolid: false,
+      end: request.end,
+      hit: { kind: "none" },
+      contact: { kind: "none" },
+      contents: 0,
+      surface: null,
+      sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 },
+      secondary: null,
+    }),
+    pointContents: () => 0,
+    inPvs: () => true,
+    inPhs: () => true,
+    areasConnected: () => true,
+    nearby: () => [],
+    players: parts.players,
+    worldActor: () => (typeof parts.world === "function" ? parts.world() : parts.world),
+    isPlayer: actor => parts.players().some(player => player.equals(actor)),
     isMonster: actor => ((parts.entity(actor)?.serverFlags ?? 0) & 4) !== 0,
-    inlineModelBounds: () => ({ min: zero, max: zero }), setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
-    emit: event => { events.push(event); return undefined; },
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), keyConsumed: () => undefined, prepareLevelChange: () => undefined,
-    transition: intent => { transitions.push(intent); return undefined; }, diagnostic: message => { diagnostics.push(message); return undefined; },
+    inlineModelBounds: () => ({ min: zero, max: zero }),
+    setSolid: () => undefined,
+    setMotion: () => undefined,
+    setAreaPortal: () => undefined,
+    emit: event => {
+      events.push(event);
+      return undefined;
+    },
+    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }),
+    keyConsumed: () => undefined,
+    prepareLevelChange: () => undefined,
+    transition: intent => {
+      transitions.push(intent);
+      return undefined;
+    },
+    diagnostic: message => {
+      diagnostics.push(message);
+      return undefined;
+    },
     ...overrides,
   };
   return { host, scheduled, events, diagnostics, transitions };

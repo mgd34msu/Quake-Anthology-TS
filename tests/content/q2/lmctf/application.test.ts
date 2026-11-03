@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,16 +18,20 @@ test("LMCTF referee match survives a saved pending map transition in one applica
     const mode = source.product.match.source;
     const clients = [application.session.createClient(0), application.session.createClient(1)];
     const players = clients.map(client => ({ client: client.id, admission: application.simulation.admitPlayer(client.id) }));
-    const first = players[0]; if (first === undefined) throw new Error("Missing first client");
+    const first = players[0];
+    if (first === undefined) throw new Error("Missing first client");
     for (const [index, player] of players.entries()) application.simulation.playerCommand(player.admission.actor, "team", [index === 0 ? "red" : "blue"]);
-    mode.rules.refPassword = "test-ref"; mode.rules.countdownSeconds = 15; mode.rules.autoLock = true;
+    mode.rules.refPassword = "test-ref";
+    mode.rules.countdownSeconds = 15;
+    mode.rules.autoLock = true;
     expect(mode.rules.mapList).toContain("lmctf09");
     application.simulation.playerCommand(first.admission.actor, "match", ["lmctf09"]);
     expect(mode.match.pendingMap).toBeNull();
     application.simulation.playerCommand(first.admission.actor, "referee", ["test-ref"]);
     application.simulation.playerCommand(first.admission.actor, "match", ["not-a-map"]);
     expect(mode.match.pendingMap).toBeNull();
-    const state = mode.states.get(first.admission.actor); if (state === undefined) throw new Error("Missing source state");
+    const state = mode.states.get(first.admission.actor);
+    if (state === undefined) throw new Error("Missing source state");
     state.statistics.set("score", 123);
     application.simulation.playerCommand(first.admission.actor, "match", ["lmctf09"]);
     expect(mode.match.pendingMap).toEqual({ map: "lmctf09", countdown: true });
@@ -49,5 +54,8 @@ test("LMCTF referee match survives a saved pending map transition in one applica
       expect(next.players.states.get(actor)?.score).toBe(0);
       if (index === 0) expect((carried?.extraFlags ?? 0) & 2).toBe(2);
     }
-  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 }, 30000);

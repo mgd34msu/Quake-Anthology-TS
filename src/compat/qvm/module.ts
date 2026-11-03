@@ -1,4 +1,19 @@
-import type { ExecutionProfile, GuestCallbackReference, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestPrivateState, ModuleIdentity, Q3ApiIdentity, QvmCheckpoint, SavedGuestCallbackBinding, QvmAbiProfile } from "../../contracts/execution.ts";
+// SPDX-License-Identifier: GPL-2.0-or-later
+import type {
+  ExecutionProfile,
+  GuestCallbackReference,
+  GuestCallContext,
+  GuestCallResult,
+  GuestCallValue,
+  GuestCheckpoint,
+  GuestExecutor,
+  GuestPrivateState,
+  ModuleIdentity,
+  Q3ApiIdentity,
+  QvmCheckpoint,
+  SavedGuestCallbackBinding,
+  QvmAbiProfile,
+} from "../../contracts/execution.ts";
 import type { NumericProfile, RandomState } from "../../contracts/numeric.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -7,7 +22,18 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmEvaluationStack, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall, QvmFunctionCall, QvmSystemCall, QvmSystemCallResult } from "./interpreter.ts";
+import type {
+  QvmArguments,
+  QvmEvaluationStack,
+  QvmCancellationScope,
+  QvmFunctionHook,
+  QvmFunctionObserver,
+  QvmFunctionResolver,
+  QvmSyscall,
+  QvmFunctionCall,
+  QvmSystemCall,
+  QvmSystemCallResult,
+} from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import type { QvmCvarServices } from "./cvar-syscalls.ts";
 import type { QvmSemantics } from "./interpreter.ts";
@@ -18,14 +44,20 @@ import { createQvmSystemCall } from "./syscalls.ts";
 import type { QvmHost, QvmRole } from "./syscalls.ts";
 
 export const qvmNumericProfile: NumericProfile = {
-  id: "q3:qvm-binary32", arithmetic: { kind: "binary32", round: "each-operation" },
-  scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32",
+  id: "q3:qvm-binary32",
+  arithmetic: { kind: "binary32", round: "each-operation" },
+  scalarStorage: "binary32",
+  floatToInt: "qvm-indefinite",
+  integerOverflow: "wrap32",
 };
 export function qvmApi(role: QvmRole, profile: QvmAbiProfile = "q3-modern"): Q3ApiIdentity {
   switch (role) {
-    case "qagame": return { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 };
-    case "cgame": return { kind: "q3-cgame", version: profile === "q3-modern" ? 4 : 3 };
-    case "ui": return { kind: "q3-ui", version: profile === "q3-modern" ? 6 : 4 };
+    case "qagame":
+      return { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 };
+    case "cgame":
+      return { kind: "q3-cgame", version: profile === "q3-modern" ? 4 : 3 };
+    case "ui":
+      return { kind: "q3-ui", version: profile === "q3-modern" ? 6 : 4 };
   }
 }
 export interface QvmHostCheckpoint {
@@ -54,8 +86,7 @@ export interface QvmModuleOptions {
 }
 export function qvmArguments(words: readonly number[]): QvmArguments {
   if (words.length > 10) throw new RangeError("QVM entry accepts at most ten argument words");
-  return [words[0] ?? 0, words[1] ?? 0, words[2] ?? 0, words[3] ?? 0, words[4] ?? 0,
-    words[5] ?? 0, words[6] ?? 0, words[7] ?? 0, words[8] ?? 0, words[9] ?? 0];
+  return [words[0] ?? 0, words[1] ?? 0, words[2] ?? 0, words[3] ?? 0, words[4] ?? 0, words[5] ?? 0, words[6] ?? 0, words[7] ?? 0, words[8] ?? 0, words[9] ?? 0];
 }
 function sameModule(left: ModuleIdentity, right: ModuleIdentity): boolean {
   return left.id === right.id && left.digest === right.digest && left.artifactPath === right.artifactPath && left.revision === right.revision;
@@ -66,8 +97,12 @@ const deferredUiInitialization = Symbol("deferred UI API validation");
 /** One source VM instance. Reentry is scoped to the suspended host call. */
 export class QvmModule implements GuestExecutor {
   private executionProfile: Extract<ExecutionProfile, { readonly kind: "qvm" }>;
-  get abiProfile(): QvmAbiProfile { return this.options.artifact.abiProfile ?? "q3-modern"; }
-  get profile(): Extract<ExecutionProfile, { readonly kind: "qvm" }> { return this.executionProfile; }
+  get abiProfile(): QvmAbiProfile {
+    return this.options.artifact.abiProfile ?? "q3-modern";
+  }
+  get profile(): Extract<ExecutionProfile, { readonly kind: "qvm" }> {
+    return this.executionProfile;
+  }
   readonly interpreter: QvmInterpreter;
   readonly memory: QvmMemory;
   readonly guestMemory: QvmGuestMemory;
@@ -81,25 +116,53 @@ export class QvmModule implements GuestExecutor {
     return this.currentEntry.cancelFunction(scope);
   }
 
-  constructor(private readonly options: QvmModuleOptions, initialization?: typeof deferredUiInitialization) {
+  constructor(
+    private readonly options: QvmModuleOptions,
+    initialization?: typeof deferredUiInitialization,
+  ) {
     const artifact = options.artifact;
-    this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role, this.abiProfile), magic: 0x12721444, numeric: qvmNumericProfile };
+    this.executionProfile = {
+      kind: "qvm",
+      module: artifact.module,
+      api: qvmApi(artifact.role, this.abiProfile),
+      magic: 0x12721444,
+      numeric: qvmNumericProfile,
+    };
     const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments, this.abiProfile);
     this.sourceSystemCall = systemCall;
-    this.interpreter = new QvmInterpreter(artifact.image, call => {
-      const previous = this.currentEntry;
-      this.currentEntry = call;
-      try { return systemCall(call); }
-      finally { this.currentEntry = previous; }
-    }, options.allocation, options.registration, options.semantics ?? "compiled", (scope, perform) => {
-      const previous = this.currentEntry; this.currentEntry = scope;
-      try { return perform(); } finally { this.currentEntry = previous; }
-    });
+    this.interpreter = new QvmInterpreter(
+      artifact.image,
+      call => {
+        const previous = this.currentEntry;
+        this.currentEntry = call;
+        try {
+          return systemCall(call);
+        } finally {
+          this.currentEntry = previous;
+        }
+      },
+      options.allocation,
+      options.registration,
+      options.semantics ?? "compiled",
+      (scope, perform) => {
+        const previous = this.currentEntry;
+        this.currentEntry = scope;
+        try {
+          return perform();
+        } finally {
+          this.currentEntry = previous;
+        }
+      },
+    );
     this.memory = this.interpreter.addressSpace;
     this.guestMemory = new QvmGuestMemory(artifact.module, this.memory);
     if (artifact.role === "ui" && initialization !== deferredUiInitialization) {
-      try { this.validateUiVersion(this.call([QvmUiExport.UI_GETAPIVERSION])); }
-      catch (error) { this.retire(); throw error; }
+      try {
+        this.validateUiVersion(this.call([QvmUiExport.UI_GETAPIVERSION]));
+      } catch (error) {
+        this.retire();
+        throw error;
+      }
     }
   }
 
@@ -109,7 +172,10 @@ export class QvmModule implements GuestExecutor {
       if (options.artifact.role === "ui") module.validateUiVersion(await module.callAsync([QvmUiExport.UI_GETAPIVERSION], 0, validate));
       else validate();
       return module;
-    } catch (error) { module.retire(); throw error; }
+    } catch (error) {
+      module.retire();
+      throw error;
+    }
   }
 
   private validateUiVersion(version: number): void {
@@ -143,23 +209,34 @@ export class QvmModule implements GuestExecutor {
       this.live();
       const previous = this.currentEntry;
       this.currentEntry = call;
-      try { return hook(call); }
-      finally { this.currentEntry = previous; }
+      try {
+        return hook(call);
+      } finally {
+        this.currentEntry = previous;
+      }
     };
-    return scope === "calls" ? this.interpreter.bindFunction(reference.instructionIndex, wrapped) : this.interpreter.bindInvocation(reference.instructionIndex, wrapped);
+    return scope === "calls"
+      ? this.interpreter.bindFunction(reference.instructionIndex, wrapped)
+      : this.interpreter.bindInvocation(reference.instructionIndex, wrapped);
   }
 
   bindFunctionResolver(resolve: QvmFunctionResolver): () => void {
     this.live();
     const wrappers = new WeakMap<QvmFunctionHook, QvmFunctionHook>();
     return this.interpreter.bindFunctionResolver((entry, firstArgument, words) => {
-      const hook = resolve(entry, firstArgument, words); if (hook === undefined) return undefined;
+      const hook = resolve(entry, firstArgument, words);
+      if (hook === undefined) return undefined;
       let wrapped = wrappers.get(hook);
       if (wrapped === undefined) {
         wrapped = call => {
           this.live();
-          const previous = this.currentEntry; this.currentEntry = call;
-          try { return hook(call); } finally { this.currentEntry = previous; }
+          const previous = this.currentEntry;
+          this.currentEntry = call;
+          try {
+            return hook(call);
+          } finally {
+            this.currentEntry = previous;
+          }
         };
         wrappers.set(hook, wrapped);
       }
@@ -172,9 +249,13 @@ export class QvmModule implements GuestExecutor {
     if (!sameModule(reference.module, this.profile.module)) throw new Error("QVM function observer belongs to a different module artifact");
     return this.interpreter.observeFunction(reference.instructionIndex, call => {
       this.live();
-      const previous = this.currentEntry; this.currentEntry = call;
-      try { return observe(call); }
-      finally { this.currentEntry = previous; }
+      const previous = this.currentEntry;
+      this.currentEntry = call;
+      try {
+        return observe(call);
+      } finally {
+        this.currentEntry = previous;
+      }
     });
   }
 
@@ -188,27 +269,52 @@ export class QvmModule implements GuestExecutor {
   /** The original OP_CALL convention permits both source functions and negative syscall pointers. */
   invokeSourceCallback(call: QvmFunctionCall, pointer: number, args: readonly number[]): QvmSystemCallResult {
     this.live();
-    if (!Number.isInteger(pointer) || pointer < -0x80000000 || pointer > 0x7fffffff
-      || args.some(value => !Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff)) throw new Error("Invalid original QVM callback words");
+    if (
+      !Number.isInteger(pointer) ||
+      pointer < -0x80000000 ||
+      pointer > 0x7fffffff ||
+      args.some(value => !Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff)
+    )
+      throw new Error("Invalid original QVM callback words");
     if (pointer >= 0) return call.execution === "synchronous" ? call.invoke(args, pointer) : call.invokeAsync(args, pointer);
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
-    words.setInt32(0, -1 - pointer, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
+    words.setInt32(0, -1 - pointer, true);
+    args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
     let result: QvmSystemCallResult = 0;
     call.effect(() => {
       this.live();
-      const previous = this.currentEntry, syscall: QvmSyscall = { words, memory: call.memory, guest: call.guest,
-        invoke: call.invoke, invokeAsync: call.invokeAsync, cancelFunction: call.cancelFunction };
+      const previous = this.currentEntry,
+        syscall: QvmSyscall = {
+          words,
+          memory: call.memory,
+          guest: call.guest,
+          invoke: call.invoke,
+          invokeAsync: call.invokeAsync,
+          cancelFunction: call.cancelFunction,
+        };
       this.currentEntry = syscall;
-      try { result = this.sourceSystemCall(syscall); } finally { this.currentEntry = previous; }
+      try {
+        result = this.sourceSystemCall(syscall);
+      } finally {
+        this.currentEntry = previous;
+      }
       return undefined;
     });
     return result;
   }
 
-  evaluateRegion(words: readonly number[], instructionIndex: number, region: QvmRegionEvaluation, inputs: readonly number[], stack?: QvmEvaluationStack): number {
+  evaluateRegion(
+    words: readonly number[],
+    instructionIndex: number,
+    region: QvmRegionEvaluation,
+    inputs: readonly number[],
+    stack?: QvmEvaluationStack,
+  ): number {
     this.live();
-    const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words, evaluation = { region, inputs, ...(stack === undefined ? {} : { stack }) };
-    return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex, evaluation)
+    const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words,
+      evaluation = { region, inputs, ...(stack === undefined ? {} : { stack }) };
+    return this.currentEntry === null
+      ? this.interpreter.invoke(arguments_, instructionIndex, evaluation)
       : this.currentEntry.invoke(arguments_, instructionIndex, evaluation);
   }
 
@@ -222,11 +328,15 @@ export class QvmModule implements GuestExecutor {
     this.live();
     this.options.registration?.called();
     const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words;
-    const current = (): void => { this.live(); validate(); };
+    const current = (): void => {
+      this.live();
+      validate();
+    };
     current();
-    const result = this.currentEntry === null
-      ? await this.interpreter.invokeAsync(arguments_, instructionIndex, current)
-      : await this.currentEntry.invokeAsync(arguments_, instructionIndex, current);
+    const result =
+      this.currentEntry === null
+        ? await this.interpreter.invokeAsync(arguments_, instructionIndex, current)
+        : await this.currentEntry.invokeAsync(arguments_, instructionIndex, current);
     current();
     return result;
   }
@@ -235,15 +345,21 @@ export class QvmModule implements GuestExecutor {
     if (this.interpreter.isActive && this.currentEntry === null) throw new Error("QVM is already active; command arguments belong to the current invocation");
     const previous = this.currentCommandArguments;
     this.currentCommandArguments = arguments_;
-    try { return await this.callAsync(words, 0, validate); }
-    finally { this.currentCommandArguments = previous; }
+    try {
+      return await this.callAsync(words, 0, validate);
+    } finally {
+      this.currentCommandArguments = previous;
+    }
   }
 
   command(words: readonly number[], arguments_: readonly string[]): number {
     const previous = this.currentCommandArguments;
     this.currentCommandArguments = arguments_;
-    try { return this.call(words); }
-    finally { this.currentCommandArguments = previous; }
+    try {
+      return this.call(words);
+    } finally {
+      this.currentCommandArguments = previous;
+    }
   }
 
   invoke(context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult {
@@ -253,12 +369,14 @@ export class QvmModule implements GuestExecutor {
     }
     const words = arguments_.map(value => {
       switch (value.kind) {
-        case "int32": return value.value;
+        case "int32":
+          return value.value;
         case "uint32": {
           if (!Number.isInteger(value.value) || value.value < 0 || value.value > 0xffffffff) throw new RangeError("Invalid QVM unsigned word");
           return value.value | 0;
         }
-        case "float32": return float32ToBits(value.value) | 0;
+        case "float32":
+          return float32ToBits(value.value) | 0;
         case "pointer": {
           if (value.value === null) return 0;
           this.guestMemory.borrow(value.value, 0);
@@ -266,7 +384,10 @@ export class QvmModule implements GuestExecutor {
           const offset = Number(value.value.byteOffset);
           return offset === 0 ? this.memory.bytes.length : offset;
         }
-        case "int64": case "uint64": case "float64": case "aggregate":
+        case "int64":
+        case "uint64":
+        case "float64":
+        case "aggregate":
           throw new Error(`QVM callback requires ABI lowering for ${value.kind}`);
       }
     });
@@ -286,9 +407,16 @@ export class QvmModule implements GuestExecutor {
     const host = state.checkpoint();
     if (!sameModule(host.state.module, this.profile.module)) throw new Error("QVM host checkpoint belongs to another module");
     return {
-      kind: "qvm", module: this.profile.module, api: this.profile.api, abiProfile: this.abiProfile,
-      data: this.memory.bytes.slice(), instructionIndex: 0, programStack: this.interpreter.stackPointer,
-      operandStack: [], random: host.random, callbacks: host.callbacks,
+      kind: "qvm",
+      module: this.profile.module,
+      api: this.profile.api,
+      abiProfile: this.abiProfile,
+      data: this.memory.bytes.slice(),
+      instructionIndex: 0,
+      programStack: this.interpreter.stackPointer,
+      operandStack: [],
+      random: host.random,
+      callbacks: host.callbacks,
       hostState: { ...host.state, bytes: host.state.bytes.slice() },
     };
   }
@@ -296,9 +424,15 @@ export class QvmModule implements GuestExecutor {
   restore(checkpoint: GuestCheckpoint): undefined {
     this.live();
     if (this.interpreter.isActive) throw new Error("Cannot restore an active QVM");
-    if (checkpoint.kind !== "qvm" || (checkpoint.abiProfile ?? "q3-modern") !== this.abiProfile || !sameModule(checkpoint.module, this.profile.module)
-      || checkpoint.api.kind !== this.profile.api.kind || checkpoint.api.version !== this.profile.api.version
-      || !sameModule(checkpoint.hostState.module, this.profile.module)) throw new Error("QVM checkpoint artifact or API mismatch");
+    if (
+      checkpoint.kind !== "qvm" ||
+      (checkpoint.abiProfile ?? "q3-modern") !== this.abiProfile ||
+      !sameModule(checkpoint.module, this.profile.module) ||
+      checkpoint.api.kind !== this.profile.api.kind ||
+      checkpoint.api.version !== this.profile.api.version ||
+      !sameModule(checkpoint.hostState.module, this.profile.module)
+    )
+      throw new Error("QVM checkpoint artifact or API mismatch");
     if (checkpoint.instructionIndex !== 0 || checkpoint.operandStack.length !== 0 || checkpoint.programStack !== this.memory.bytes.length) {
       throw new Error("QVM checkpoint contains a suspended execution stack");
     }
@@ -308,5 +442,9 @@ export class QvmModule implements GuestExecutor {
     state.restore({ state: checkpoint.hostState, random: checkpoint.random, callbacks: checkpoint.callbacks });
   }
 
-  retire(): void { this.memory.close(); this.retired = true; this.options.registration?.free(); }
+  retire(): void {
+    this.memory.close();
+    this.retired = true;
+    this.options.registration?.free();
+  }
 }

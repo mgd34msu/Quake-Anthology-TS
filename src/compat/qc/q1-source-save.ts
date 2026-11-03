@@ -1,16 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { QuakeCSource } from "../../app/bootstrap/simulation/quakec-source.ts";
 import type { Q1SaveData } from "../../persistence/q1.ts";
 import { captureQ1QuakeCSave, restoreQ1QuakeCSave, type Q1SaveHeader, type Q1UnknownSaveFields } from "./q1-save.ts";
 
-export function captureQ1SourceSave(source: QuakeCSource, format: Q1SaveData["format"], comment: string,
-  spawnParameters: readonly number[], extensionText = ""): Q1SaveData {
+export function captureQ1SourceSave(
+  source: QuakeCSource,
+  format: Q1SaveData["format"],
+  comment: string,
+  spawnParameters: readonly number[],
+  extensionText = "",
+): Q1SaveData {
   source.checkpoint();
   if (source.kind !== "netquake" || source.options.maxClients !== 1 || source.options.mode !== "singleplayer")
     throw new Error("Original Quake saves require a singleplayer NetQuake source");
-  return captureQ1QuakeCSave(source.machine, { format, comment: comment.replace(/\s/g, "_"), spawnParameters,
-    skill: source.options.skill, map: source.options.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
-    time: source.timeSeconds, lightStyles: Array.from({ length: 64 }, (_, index) => source.options.events.lightStyle(index) || "m"), extensionText },
-  slot => source.slots.options.storage.read(slot).free);
+  return captureQ1QuakeCSave(
+    source.machine,
+    {
+      format,
+      comment: comment.replace(/\s/g, "_"),
+      spawnParameters,
+      skill: source.options.skill,
+      map: source.options.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+      time: source.timeSeconds,
+      lightStyles: Array.from({ length: 64 }, (_, index) => source.options.events.lightStyle(index) || "m"),
+      extensionText,
+    },
+    slot => source.slots.options.storage.read(slot).free,
+  );
 }
 
 /** Called only on a staged, precached map with its one local client already bound. */
@@ -41,10 +57,13 @@ export function restoreQ1SourceSave(source: QuakeCSource, save: Q1SaveData, fini
       }
       return undefined;
     },
-    entity: (slot, free) => { if (!free) source.worldHost.link(slot); return undefined; },
+    entity: (slot, free) => {
+      if (!free) source.worldHost.link(slot);
+      return undefined;
+    },
     finish: header => {
-      for (const [style, pattern] of header.lightStyles.entries()) source.options.events.emit(source.prepared.execution.owner.content,
-        { kind: "q1", event: { kind: "lightstyle", style, pattern } });
+      for (const [style, pattern] of header.lightStyles.entries())
+        source.options.events.emit(source.prepared.execution.owner.content, { kind: "q1", event: { kind: "lightstyle", style, pattern } });
       return finish(header);
     },
   });

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Quake net_wipx.c sequencing and Q2/Q3 net_wins.c datagrams. GPL-2.0-or-later.
 import type { IpxAddress } from "./endpoint.ts";
 import { portNumber } from "./endpoint.ts";
@@ -10,18 +11,29 @@ export type IpxGame = "quake1" | "quake2" | "quake3";
 /** Raw AF_IPX socket payloads: host owns nonblocking I/O, broadcast and packet type. */
 export type NativeIpxCapability =
   | { readonly kind: "unavailable"; readonly reason: string }
-  | { readonly kind: "available"; bind(options: { readonly port: number; readonly packetType: number; readonly broadcast: true }): Promise<DatagramTransport<IpxAddress>> };
+  | {
+      readonly kind: "available";
+      bind(options: { readonly port: number; readonly packetType: number; readonly broadcast: true }): Promise<DatagramTransport<IpxAddress>>;
+    };
 
-export type IpxHost = { readonly kind: "native"; readonly capability: NativeIpxCapability }
-  | { readonly kind: "dosbox"; readonly network: DosBoxIpxNetwork };
+export type IpxHost = { readonly kind: "native"; readonly capability: NativeIpxCapability } | { readonly kind: "dosbox"; readonly network: DosBoxIpxNetwork };
 
 /** Applies only the game payload contract; the selected host retains its real IPX addresses. */
 export class IpxGameTransport implements DatagramTransport<IpxAddress> {
   private sequence = 0;
-  constructor(private readonly socket: DatagramTransport<IpxAddress>, readonly game: IpxGame) {}
-  get maxDatagramBytes(): number { return (this.socket.maxDatagramBytes ?? 65507) - (this.game === "quake1" ? 4 : 0); }
-  get address(): IpxAddress { return this.socket.address; }
-  get closed(): boolean { return this.socket.closed; }
+  constructor(
+    private readonly socket: DatagramTransport<IpxAddress>,
+    readonly game: IpxGame,
+  ) {}
+  get maxDatagramBytes(): number {
+    return (this.socket.maxDatagramBytes ?? 65507) - (this.game === "quake1" ? 4 : 0);
+  }
+  get address(): IpxAddress {
+    return this.socket.address;
+  }
+  get closed(): boolean {
+    return this.socket.closed;
+  }
   send(to: IpxAddress, payload: Uint8Array): boolean {
     if (this.game !== "quake1") return this.socket.send(to, payload);
     const packet = new Uint8Array(payload.length + 4);
@@ -36,8 +48,12 @@ export class IpxGameTransport implements DatagramTransport<IpxAddress> {
       if (event.payload.length >= 4) return { ...event, payload: event.payload.slice(4) };
     }
   }
-  subscribeReadable(listener: () => void): () => void { return this.socket.subscribeReadable(listener); }
-  close(): void { this.socket.close(); }
+  subscribeReadable(listener: () => void): () => void {
+    return this.socket.subscribeReadable(listener);
+  }
+  close(): void {
+    this.socket.close();
+  }
 }
 
 export async function bindIpxTransport(host: IpxHost, game: IpxGame, port: number): Promise<DatagramTransport<IpxAddress>> {

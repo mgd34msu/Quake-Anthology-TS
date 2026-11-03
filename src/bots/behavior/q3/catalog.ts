@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../../persistence/value.ts";
 import { BotCvar } from "./ai-context.ts";
 /*
@@ -19,8 +20,11 @@ import type { GameMemory, GameMemoryAllocation } from "../../../content/q3/base/
 import { gameAtof, gameAtoi } from "../../../content/q3/base/game/numeric.ts";
 import type { SourceBotGame } from "./game-host.ts";
 
-const MAX_INFOS = 1024, MAX_TEXT = 8192, MAX_INFO = 1024;
-const BOT_BEGIN_DELAY_BASE = 2000, BOT_BEGIN_DELAY_INCREMENT = 1500;
+const MAX_INFOS = 1024,
+  MAX_TEXT = 8192,
+  MAX_INFO = 1024;
+const BOT_BEGIN_DELAY_BASE = 2000,
+  BOT_BEGIN_DELAY_INCREMENT = 1500;
 const BOT_SPAWN_QUEUE_DEPTH = 16;
 
 function equal(left: string, right: string): boolean {
@@ -34,25 +38,44 @@ function clean(text: string): string {
   let result = "";
   for (let i = 0; i < input.length; i++) {
     const character = input.charCodeAt(i);
-    if (character === 94 && i + 1 < input.length && input.charCodeAt(i + 1) !== 94) { i++; continue; }
+    if (character === 94 && i + 1 < input.length && input.charCodeAt(i + 1) !== 94) {
+      i++;
+      continue;
+    }
     if (character >= 32 && character <= 126) result += input.charAt(i);
   }
   return result;
 }
 
 /** G_ParseInfos uses the same COM_ParseExt state as other source game text. */
-export function parseGameInfos(cursor: CommonParseCursor, maximum: number, parser: CommonParseState,
-  print: (text: string) => void, memory: GameMemory, infos: GameMemoryAllocation[], start = infos.length): number {
+export function parseGameInfos(
+  cursor: CommonParseCursor,
+  maximum: number,
+  parser: CommonParseState,
+  print: (text: string) => void,
+  memory: GameMemory,
+  infos: GameMemoryAllocation[],
+  start = infos.length,
+): number {
   let count = 0;
   while (true) {
     const token = parser.parse(cursor);
     if (token.length === 0) break;
-    if (token !== "{") { print("Missing { in info file\n"); break; }
-    if (count === maximum) { print("Max infos exceeded\n"); break; }
+    if (token !== "{") {
+      print("Missing { in info file\n");
+      break;
+    }
+    if (count === maximum) {
+      print("Max infos exceeded\n");
+      break;
+    }
     let info = "";
     while (true) {
       const key = parser.parse(cursor);
-      if (key.length === 0) { print("Unexpected end of info file\n"); break; }
+      if (key.length === 0) {
+        print("Unexpected end of info file\n");
+        break;
+      }
       if (key === "}") break;
       const value = parser.parse(cursor, false);
       info = infoSetValueForKey(info, key, value.length === 0 ? "<NULL>" : value, print);
@@ -70,7 +93,10 @@ export interface BotCatalogFiles {
   list(directory: string, extension: string): readonly string[];
 }
 
-interface GameInfoCatalog { readonly infos: GameMemoryAllocation[]; count: number }
+interface GameInfoCatalog {
+  readonly infos: GameMemoryAllocation[];
+  count: number;
+}
 
 function catalogInfo(catalog: GameInfoCatalog, index: number): GameMemoryAllocation {
   const allocation = catalog.infos[index];
@@ -92,48 +118,92 @@ export class GameBotCatalog {
   private minimumPlayers: BotCvar | null = null;
   private checkMinimumTime = 0;
 
-  constructor(readonly game: SourceBotGame, private readonly files: BotCatalogFiles,
-    private readonly parser: CommonParseState, private readonly host: GameBotCatalogHost) {}
+  constructor(
+    readonly game: SourceBotGame,
+    private readonly files: BotCatalogFiles,
+    private readonly parser: CommonParseState,
+    private readonly host: GameBotCatalogHost,
+  ) {}
 
   captureSaveState() {
     const catalog = (value: GameInfoCatalog) => ({ count: value.count, infos: value.infos.map(allocation => this.game.memory.captureAllocation(allocation)) });
-    return { bots: catalog(this.bots), arenas: catalog(this.arenas), queue: this.queue.map(value => ({ ...value })), minimumPlayers: this.minimumPlayers?.captureSaveState() ?? null, checkMinimumTime: this.checkMinimumTime, parser: this.parser.captureSaveState() };
+    return {
+      bots: catalog(this.bots),
+      arenas: catalog(this.arenas),
+      queue: this.queue.map(value => ({ ...value })),
+      minimumPlayers: this.minimumPlayers?.captureSaveState() ?? null,
+      checkMinimumTime: this.checkMinimumTime,
+      parser: this.parser.captureSaveState(),
+    };
   }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "bot.catalog");
     const catalog = (target: GameInfoCatalog, cell: SaveReader): void => {
-      const infos = cell.field("infos").list(entry => this.game.memory.restoreAllocation(entry.value)), count = cell.field("count").integer(0);
+      const infos = cell.field("infos").list(entry => this.game.memory.restoreAllocation(entry.value)),
+        count = cell.field("count").integer(0);
       if (count > infos.length || infos.length > MAX_INFOS) cell.fail("invalid catalog extent");
-      target.infos.splice(0, target.infos.length, ...infos); target.count = count;
+      target.infos.splice(0, target.infos.length, ...infos);
+      target.count = count;
     };
-    catalog(this.bots, reader.field("bots")); catalog(this.arenas, reader.field("arenas"));
+    catalog(this.bots, reader.field("bots"));
+    catalog(this.arenas, reader.field("arenas"));
     const queue = reader.field("queue").list(cell => ({ clientNum: cell.field("clientNum").integer(), spawnTime: cell.field("spawnTime").number() }));
     if (queue.length !== this.queue.length) reader.fail("incorrect spawn queue extent");
     this.queue.splice(0, this.queue.length, ...queue);
-    this.minimumPlayers = reader.field("minimumPlayers").nullable(cell => { const cvar = new BotCvar(this.game.options.cvars); cvar.restoreSaveState(cell.value); return cvar; });
-    this.checkMinimumTime = reader.field("checkMinimumTime").number(); this.parser.restoreSaveState(reader.field("parser").value);
+    this.minimumPlayers = reader.field("minimumPlayers").nullable(cell => {
+      const cvar = new BotCvar(this.game.options.cvars);
+      cvar.restoreSaveState(cell.value);
+      return cvar;
+    });
+    this.checkMinimumTime = reader.field("checkMinimumTime").number();
+    this.parser.restoreSaveState(reader.field("parser").value);
   }
 
-  get numBots(): number { return this.bots.count; }
-  get numArenas(): number { return this.arenas.count; }
-  private print(text: string): void { this.game.options.engine.print(text); }
+  get numBots(): number {
+    return this.bots.count;
+  }
+  get numArenas(): number {
+    return this.arenas.count;
+  }
+  private print(text: string): void {
+    this.game.options.engine.print(text);
+  }
   private cvarString(name: string, capacity = MAX_INFO): string {
     return (this.game.options.cvars.find(name)?.value ?? "").slice(0, capacity - 1);
   }
-  private cvarInteger(name: string): number { return this.game.options.cvars.find(name)?.integerValue ?? 0; }
-  private cvarValue(name: string): number { return gameAtof(this.cvarString(name, 128)); }
-  private setCvar(name: string, value: string): void { this.game.options.cvars.set(name, value, true); }
+  private cvarInteger(name: string): number {
+    return this.game.options.cvars.find(name)?.integerValue ?? 0;
+  }
+  private cvarValue(name: string): number {
+    return gameAtof(this.cvarString(name, 128));
+  }
+  private setCvar(name: string, value: string): void {
+    this.game.options.cvars.set(name, value, true);
+  }
   private setInfo(info: string, key: string, value: string): string {
     return infoSetValueForKey(info, key, value, text => this.print(text));
   }
 
   private loadFile(filename: string, destination: GameInfoCatalog): void {
     const bytes = this.files.read(filename);
-    if (bytes === null) { this.print(`^1file not found: ${filename}\n`); return; }
-    if (bytes.length >= MAX_TEXT) { this.print(`^1file too large: ${filename} is ${bytes.length}, max allowed is ${MAX_TEXT}`); return; }
+    if (bytes === null) {
+      this.print(`^1file not found: ${filename}\n`);
+      return;
+    }
+    if (bytes.length >= MAX_TEXT) {
+      this.print(`^1file too large: ${filename} is ${bytes.length}, max allowed is ${MAX_TEXT}`);
+      return;
+    }
     const cursor = new CommonParseCursor(String.fromCharCode(...bytes));
-    const parsed = parseGameInfos(cursor, MAX_INFOS - destination.count, this.parser,
-      text => this.print(text), this.game.memory, destination.infos, destination.count);
+    const parsed = parseGameInfos(
+      cursor,
+      MAX_INFOS - destination.count,
+      this.parser,
+      text => this.print(text),
+      this.game.memory,
+      destination.infos,
+      destination.count,
+    );
     destination.count += parsed;
   }
 
@@ -151,7 +221,10 @@ export class GameBotCatalog {
   }
 
   getBotInfoByNumber(number: number): string | null {
-    if (number < 0 || number >= this.bots.count) { this.print(`^1Invalid bot number: ${number}\n`); return null; }
+    if (number < 0 || number >= this.bots.count) {
+      this.print(`^1Invalid bot number: ${number}\n`);
+      return null;
+    }
     return catalogInfo(this.bots, number).readString();
   }
   getBotInfoByName(name: string): string | null {
@@ -182,11 +255,16 @@ export class GameBotCatalog {
     const serverinfo = this.game.options.cvars.infoString(CvarFlag.ServerInfo);
     const arena = this.getArenaInfoByMap(infoValueForKey(serverinfo, "mapname").slice(0, 63));
     if (arena === null) return;
-    const frag = infoValueForKey(arena, "fraglimit"), time = infoValueForKey(arena, "timelimit");
-    const fragLimit = gameAtoi(frag), timeLimit = gameAtoi(time);
+    const frag = infoValueForKey(arena, "fraglimit"),
+      time = infoValueForKey(arena, "timelimit");
+    const fragLimit = gameAtoi(frag),
+      timeLimit = gameAtoi(time);
     this.setCvar("fraglimit", fragLimit !== 0 ? frag : "0");
     this.setCvar("timelimit", timeLimit !== 0 ? time : "0");
-    if (fragLimit === 0 && timeLimit === 0) { this.setCvar("fraglimit", "10"); this.setCvar("timelimit", "0"); }
+    if (fragLimit === 0 && timeLimit === 0) {
+      this.setCvar("fraglimit", "10");
+      this.setCvar("timelimit", "0");
+    }
     const delay = BOT_BEGIN_DELAY_BASE + (equal(infoValueForKey(arena, "special"), "training") ? 10000 : 0);
     if (!restart) this.spawnBots(infoValueForKey(arena, "bots"), delay);
   }
@@ -194,10 +272,16 @@ export class GameBotCatalog {
   private spawnBots(botList: string, baseDelay: number): void {
     this.game.resetPodiumPlayers();
     let skill = this.cvarValue("g_spSkill");
-    if (skill < 1) { this.setCvar("g_spSkill", "1"); skill = 1; }
-    else if (skill > 5) { this.setCvar("g_spSkill", "5"); skill = 5; }
+    if (skill < 1) {
+      this.setCvar("g_spSkill", "1");
+      skill = 1;
+    } else if (skill > 5) {
+      this.setCvar("g_spSkill", "5");
+      skill = 5;
+    }
     const list = sourceCommandText(botList).slice(0, 1023);
-    let position = 0, delay = baseDelay;
+    let position = 0,
+      delay = baseDelay;
     while (position < list.length) {
       while (list.charAt(position) === " ") position++;
       const start = position;
@@ -223,27 +307,41 @@ export class GameBotCatalog {
     return true;
   }
 
-  shutdownClient(clientNum: number, restart: boolean): void { this.host.shutdownClient(clientNum, restart); }
+  shutdownClient(clientNum: number, restart: boolean): void {
+    this.host.shutdownClient(clientNum, restart);
+  }
 
   private addBot(name: string, skill: number, requestedTeam: string, delay: number, alternateName: string): void {
     skill = Math.fround(skill);
     const info = this.getBotInfoByName(name);
-    if (info === null) { this.print(`^1Error: Bot '${name}' not defined\n`); return; }
+    if (info === null) {
+      this.print(`^1Error: Bot '${name}' not defined\n`);
+      return;
+    }
     let userinfo = "";
-    const set = (key: string, value: string): void => { userinfo = this.setInfo(userinfo, key, value); };
+    const set = (key: string, value: string): void => {
+      userinfo = this.setInfo(userinfo, key, value);
+    };
     set("name", alternateName || infoValueForKey(info, "funname") || infoValueForKey(info, "name"));
-    set("rate", "25000"); set("snaps", "20"); set("skill", gameFormat("%1.2f", [skill]));
+    set("rate", "25000");
+    set("snaps", "20");
+    set("skill", gameFormat("%1.2f", [skill]));
     if (skill >= 1 && skill < 2) set("handicap", "50");
     else if (skill >= 2 && skill < 3) set("handicap", "70");
     else if (skill >= 3 && skill < 4) set("handicap", "90");
     const model = infoValueForKey(info, "model") || "visor/default";
-    set("model", model); set("team_model", model);
+    set("model", model);
+    set("team_model", model);
     const headmodel = infoValueForKey(info, "headmodel") || model;
-    set("headmodel", headmodel); set("team_headmodel", headmodel);
+    set("headmodel", headmodel);
+    set("team_headmodel", headmodel);
     set("sex", infoValueForKey(info, "gender") || "male");
     set("color1", infoValueForKey(info, "color1") || "4");
     set("color2", infoValueForKey(info, "color2") || "5");
-    if (!infoValueForKey(info, "aifile")) { this.print("^1Error: bot has no aifile specified\n"); return; }
+    if (!infoValueForKey(info, "aifile")) {
+      this.print("^1Error: bot has no aifile specified\n");
+      return;
+    }
     const clientNum = this.host.allocateClient();
     if (clientNum === -1) {
       this.print("^1Unable to add bot.  All player slots are in use.\n");
@@ -252,12 +350,11 @@ export class GameBotCatalog {
     }
     let team = requestedTeam;
     if (!team) {
-      team = this.game.gameType >= GameType.GT_TEAM
-        ? this.game.chooseTeam(clientNum) === Team.TEAM_RED ? "red" : "blue"
-        : "red";
+      team = this.game.gameType >= GameType.GT_TEAM ? (this.game.chooseTeam(clientNum) === Team.TEAM_RED ? "red" : "blue") : "red";
     }
     set("characterfile", infoValueForKey(info, "aifile"));
-    set("skill", gameFormat("%5.2f", [skill])); set("team", team);
+    set("skill", gameFormat("%5.2f", [skill]));
+    set("team", team);
     this.game.activateBot(clientNum);
     this.game.options.engine.setUserinfo(clientNum, userinfo);
     if (this.game.clientConnect(clientNum, true, true) !== null) return;
@@ -273,12 +370,19 @@ export class GameBotCatalog {
 
   consoleCommand(argv: readonly string[]): void {
     const command = argv[0] ?? "";
-    if (equal(command, "botlist")) { this.listBots(); return; }
+    if (equal(command, "botlist")) {
+      this.listBots();
+      return;
+    }
     if (!equal(command, "addbot") || this.cvarInteger("bot_enable") === 0) return;
     const argument = (index: number): string => sourceCommandText(argv[index] ?? "").slice(0, 1023);
     const name = argument(1);
-    if (!name) { this.print("Usage: Addbot <botname> [skill 1-5] [team] [msec delay] [altname]\n"); return; }
-    const skill = argument(2), delay = argument(4);
+    if (!name) {
+      this.print("Usage: Addbot <botname> [skill 1-5] [team] [msec delay] [altname]\n");
+      return;
+    }
+    const skill = argument(2),
+      delay = argument(4);
     this.addBot(name, skill ? gameAtof(skill) : 4, argument(3), delay ? gameAtoi(delay) : 0, argument(5));
   }
 
@@ -286,25 +390,34 @@ export class GameBotCatalog {
     this.print("^1name             model            aifile              funname\n");
     for (let index = 0; index < this.bots.count; index++) {
       const info = catalogInfo(this.bots, index).readString();
-      this.print(gameFormat("%-16s %-16s %-20s %-20s\n", [
-        infoValueForKey(info, "name") || "UnnamedPlayer", infoValueForKey(info, "model") || "visor/default",
-        infoValueForKey(info, "aifile") || "bots/default_c.c", infoValueForKey(info, "funname"),
-      ]));
+      this.print(
+        gameFormat("%-16s %-16s %-20s %-20s\n", [
+          infoValueForKey(info, "name") || "UnnamedPlayer",
+          infoValueForKey(info, "model") || "visor/default",
+          infoValueForKey(info, "aifile") || "bots/default_c.c",
+          infoValueForKey(info, "funname"),
+        ]),
+      );
     }
   }
 
   private addToSpawnQueue(clientNum: number, delay: number): void {
-    for (const slot of this.queue) if (slot.spawnTime === 0) {
-      slot.spawnTime = (this.game.clock.time + delay) | 0;
-      slot.clientNum = clientNum;
-      return;
-    }
+    for (const slot of this.queue)
+      if (slot.spawnTime === 0) {
+        slot.spawnTime = (this.game.clock.time + delay) | 0;
+        slot.clientNum = clientNum;
+        return;
+      }
     this.print("^3Unable to delay spawn\n");
     this.game.clientBegin(clientNum);
   }
 
   removeQueuedBegin(clientNum: number): void {
-    for (const slot of this.queue) if (slot.clientNum === clientNum) { slot.spawnTime = 0; return; }
+    for (const slot of this.queue)
+      if (slot.clientNum === clientNum) {
+        slot.spawnTime = 0;
+        return;
+      }
   }
 
   checkSpawn(): void {
@@ -325,7 +438,8 @@ export class GameBotCatalog {
   }
 
   private eligibleClient(number: number, team: number, bot: boolean): boolean {
-    const entity = this.game.entity(number), client = entity.player;
+    const entity = this.game.entity(number),
+      client = entity.player;
     return client !== null && client.connected && entity.bot === bot && (team < 0 || client.team === team);
   }
 
@@ -344,7 +458,7 @@ export class GameBotCatalog {
 
   private nameInUse(name: string, team: number): boolean {
     for (let i = 0; i < this.game.maxClients; i++) {
-      if (this.eligibleClient(i, team, true) && equal(name, (this.game.entity(i).player?.name ?? ""))) return true;
+      if (this.eligibleClient(i, team, true) && equal(name, this.game.entity(i).player?.name ?? "")) return true;
     }
     return false;
   }
@@ -382,7 +496,7 @@ export class GameBotCatalog {
   removeRandomBot(team: number): boolean {
     for (let i = 0; i < this.game.maxClients; i++) {
       if (!this.eligibleClient(i, team, true)) continue;
-      const name = (this.game.entity(i).player?.name ?? "");
+      const name = this.game.entity(i).player?.name ?? "";
       if (name.length >= 36) throw new RangeError("Bot netname exceeds source 36-byte storage");
       this.game.options.engine.insertConsoleCommand(gameFormat("kick %s\n", [clean(name)]));
       return true;
@@ -401,7 +515,8 @@ export class GameBotCatalog {
     if (minimum <= 0) return;
     const maxClients = this.game.maxClients;
     const check = (countTeam: number, addTeam: number, removeTeam: number, tournament: boolean): void => {
-      const humans = this.countHumanPlayers(countTeam), bots = this.countBotPlayers(countTeam);
+      const humans = this.countHumanPlayers(countTeam),
+        bots = this.countBotPlayers(countTeam);
       if (humans + bots < minimum) this.addRandomBot(addTeam);
       else if (humans + bots > minimum && bots !== 0) {
         if (!tournament || !this.removeRandomBot(Team.TEAM_SPECTATOR)) this.removeRandomBot(removeTeam);

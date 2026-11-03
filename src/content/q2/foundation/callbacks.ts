@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 import type { Q2Die, Q2Entity, Q2Pain, Q2Think, Q2Touch, Q2Use } from "./host.ts";
 
@@ -58,8 +59,12 @@ export class Q2SourceCallbacks {
   readonly blocked = new SourceCallbacks<NonNullable<Q2Entity["blocked"]>>();
 
   register(definitions: Q2CallbackDefinitions): undefined {
-    this.think.register(definitions.think); this.use.register(definitions.use); this.touch.register(definitions.touch);
-    this.pain.register(definitions.pain); this.die.register(definitions.die); this.blocked.register(definitions.blocked);
+    this.think.register(definitions.think);
+    this.use.register(definitions.use);
+    this.touch.register(definitions.touch);
+    this.pain.register(definitions.pain);
+    this.die.register(definitions.die);
+    this.blocked.register(definitions.blocked);
     for (const projection of definitions.trajectory ?? []) {
       const name = this.touch.name(projection.touch);
       if (name === null) throw new Error("Trajectory projection requires a named source touch callback");

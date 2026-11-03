@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { Q2MatchSelection } from "./types.ts";
 import type { LmctfTravel } from "../../q2/multiplayer/lmctf/types.ts";
@@ -7,7 +8,18 @@ export function sourceQ2MatchSelection(provider: string, cvars: CvarRegistry, tr
   if (provider === "q2:ctf") return { kind: "ctf" };
   if (provider === "q2:tag") return { kind: "tag" };
   if (provider === "q2:horde") return { kind: "horde" };
-  if (provider === "q2:deathball") return { kind: "deathball", get team1Skin() { return cvars.variableString("dball_team1_skin"); },
-    get team2Skin() { return cvars.variableString("dball_team2_skin"); }, get goalLimit() { return cvars.variableValue("goallimit"); } };
+  if (provider === "q2:deathball")
+    return {
+      kind: "deathball",
+      get team1Skin() {
+        return cvars.variableString("dball_team1_skin");
+      },
+      get team2Skin() {
+        return cvars.variableString("dball_team2_skin");
+      },
+      get goalLimit() {
+        return cvars.variableValue("goallimit");
+      },
+    };
   return { kind: "standard" };
 }

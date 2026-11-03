@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Source AAS sampling and entity queries over shared assets. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { add3, angleVectors, cross3, dot3, length3, normalize3, scale3, sub3, vec3 } from "../../core/math.ts";
@@ -10,9 +11,13 @@ import type { AasReachabilityOptions } from "./aas-reachability.ts";
 import type { AasClientMove, AasMovementSettings, AasReachabilityWorld } from "./aas-reachability-types.ts";
 import type { BotMovementPrediction } from "../behavior/q3/navigation-types.ts";
 
-const f = Math.fround, zero = vec3(0, 0, 0);
+const f = Math.fround,
+  zero = vec3(0, 0, 0);
 const ma = (start: Vec3, amount: number, direction: Vec3): Vec3 => add3(start, scale3(direction, amount));
-interface AreaLink { readonly area: number; readonly nextArea: AreaLink | null; }
+interface AreaLink {
+  readonly area: number;
+  readonly nextArea: AreaLink | null;
+}
 
 function decimalInteger(text: string): number {
   const prefix = /^[\t\n\v\f\r ]*([+-]?)([0-9]+)/.exec(text);
@@ -32,8 +37,7 @@ function digit(character: string | undefined): boolean {
 }
 
 function hexDigit(character: string | undefined): boolean {
-  return digit(character) || (character !== undefined
-    && ((character >= "a" && character <= "f") || (character >= "A" && character <= "F")));
+  return digit(character) || (character !== undefined && ((character >= "a" && character <= "f") || (character >= "A" && character <= "F")));
 }
 
 interface ScannedFloat {
@@ -67,10 +71,16 @@ function scanFloat(text: string, start: number): ScannedFloat | null {
     if (hexadecimal) cursor += 2;
     const isDigit = hexadecimal ? hexDigit : digit;
     let digits = 0;
-    while (isDigit(text[cursor])) { cursor++; digits++; }
+    while (isDigit(text[cursor])) {
+      cursor++;
+      digits++;
+    }
     if (text[cursor] === ".") {
       cursor++;
-      while (isDigit(text[cursor])) { cursor++; digits++; }
+      while (isDigit(text[cursor])) {
+        cursor++;
+        digits++;
+      }
     }
     if (digits === 0) return null;
     const exponent = text.charAt(cursor).toLowerCase();
@@ -91,7 +101,10 @@ export class AasReachabilityEntities {
     this.records = parseEntities(text);
     if (this.records.length >= 2048) throw new RangeError("Too many BSP entities for AAS generation");
   }
-  nextEntity(previous: number): number { const next = previous + 1; return next > 0 && next <= this.records.length ? next : 0; }
+  nextEntity(previous: number): number {
+    const next = previous + 1;
+    return next > 0 && next <= this.records.length ? next : 0;
+  }
   value(entity: number, key: string, output: Uint8Array): boolean {
     if (output.length === 0) throw new RangeError("Empty BSP epair output");
     output[0] = 0;
@@ -101,38 +114,61 @@ export class AasReachabilityEntities {
     for (let i = 0; i < Math.min(value.length, output.length - 1); i++) output[i] = value.charCodeAt(i);
     return true;
   }
-  private text(entity: number, key: string): string | null { return this.records[entity - 1]?.get(key)?.split("\0", 1)[0]?.slice(0, 127) ?? null; }
+  private text(entity: number, key: string): string | null {
+    return this.records[entity - 1]?.get(key)?.split("\0", 1)[0]?.slice(0, 127) ?? null;
+  }
   int(entity: number, key: string): { readonly found: boolean; readonly value: number } {
-    const text = this.text(entity, key); return { found: text !== null, value: text === null ? 0 : decimalInteger(text) };
+    const text = this.text(entity, key);
+    return { found: text !== null, value: text === null ? 0 : decimalInteger(text) };
   }
   float(entity: number, key: string): { readonly found: boolean; readonly value: number } {
-    const text = this.text(entity, key); return { found: text !== null, value: text === null ? 0 : f(nativeAtof(text)) };
+    const text = this.text(entity, key);
+    return { found: text !== null, value: text === null ? 0 : f(nativeAtof(text)) };
   }
   vector(entity: number, key: string): { readonly found: boolean; readonly value: Vec3 } {
-    const text = this.text(entity, key), value = { x: 0, y: 0, z: 0 };
+    const text = this.text(entity, key),
+      value = { x: 0, y: 0, z: 0 };
     let cursor = 0;
-    if (text !== null) for (const axis of ["x", "y", "z"] satisfies readonly (keyof Vec3)[]) {
-      const scanned = scanFloat(text, cursor); if (scanned === null) break;
-      value[axis] = f(scanned.value); cursor = scanned.end;
-    }
+    if (text !== null)
+      for (const axis of ["x", "y", "z"] satisfies readonly (keyof Vec3)[]) {
+        const scanned = scanFloat(text, cursor);
+        if (scanned === null) break;
+        value[axis] = f(scanned.value);
+        cursor = scanned.end;
+      }
     return { found: text !== null, value };
   }
 }
 
 export class AasReachabilitySpatial {
-  constructor(private readonly options: AasReachabilityOptions, private readonly world: AasReachabilityWorld,
-    private readonly entities: AasReachabilityEntities, private readonly settings: Readonly<AasMovementSettings>) {}
+  constructor(
+    private readonly options: AasReachabilityOptions,
+    private readonly world: AasReachabilityWorld,
+    private readonly entities: AasReachabilityEntities,
+    private readonly settings: Readonly<AasMovementSettings>,
+  ) {}
   readonly host = {
     pointContents: (point: Vec3): number => {
-      const value = this.options.scene.pointContents({ point, target: { kind: "world" },
-        policy: { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true }, numeric: this.options.profile.movement.numeric, passActor: null });
+      const value = this.options.scene.pointContents({
+        point,
+        target: { kind: "world" },
+        policy: { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true },
+        numeric: this.options.profile.movement.numeric,
+        passActor: null,
+      });
       return value.kind === "q2" ? convertContents(value.merged, "q2", "q3") : convertContents(value.contents, value.kind, "q3");
     },
     trace: (start: Vec3, end: Vec3, bounds: Bounds | null, _passEntity: number, mask: number) => {
-      const trace = this.options.scene.trace({ start, end, shape: bounds === null ? { kind: "point" } : { kind: "box", bounds },
-        target: { kind: "world" }, policy: { kind: "q3", contentsMask: mask, curves: true, playerCurveClip: true },
-        numeric: this.options.profile.movement.numeric, passActor: null });
-      const flags = trace.kind === "q2" ? trace.surface?.flags ?? 0 : trace.surfaceFlags ?? 0;
+      const trace = this.options.scene.trace({
+        start,
+        end,
+        shape: bounds === null ? { kind: "point" } : { kind: "box", bounds },
+        target: { kind: "world" },
+        policy: { kind: "q3", contentsMask: mask, curves: true, playerCurveClip: true },
+        numeric: this.options.profile.movement.numeric,
+        passActor: null,
+      });
+      const flags = trace.kind === "q2" ? (trace.surface?.flags ?? 0) : (trace.surfaceFlags ?? 0);
       return { ...trace, surfaceFlags: convertSurfaceFlags(flags, trace.kind, "q3") };
     },
     modelBounds: (model: number, angles: Vec3): { readonly bounds: Bounds; readonly origin: Vec3 } => {
@@ -140,7 +176,13 @@ export class AasReachabilitySpatial {
       if (record === undefined) throw new RangeError(`AAS reachability index ${model} outside ${this.options.geometry.models.length}`);
       let bounds = record.bounds;
       if (angles.x !== 0 || angles.y !== 0 || angles.z !== 0) {
-        const radius = length3(vec3(Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)), Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)), Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z))));
+        const radius = length3(
+          vec3(
+            Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)),
+            Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)),
+            Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)),
+          ),
+        );
         bounds = { min: vec3(-radius, -radius, -radius), max: vec3(radius, radius, radius) };
       }
       return { bounds, origin: zero };
@@ -151,34 +193,49 @@ export class AasReachabilitySpatial {
       const result = this.options.predictClientMovement({ ...request, entityNum: this.options.predictionClient });
       if (result.endArea === null) throw new Error("AAS generation prediction requires an AAS end area");
       const frames = result.stopEvent === 0 ? result.frames : Math.max(0, result.frames - 1);
-      return { success: true, move: { end: result.end, velocity: result.velocity, frames, time: f(frames * request.frameTime),
-        stopEvent: result.stopEvent, endArea: result.endArea } };
+      return {
+        success: true,
+        move: { end: result.end, velocity: result.velocity, frames, time: f(frames * request.frameTime), stopEvent: result.stopEvent, endArea: result.endArea },
+      };
     },
     horizontalVelocityForJump: (zVelocity: number, start: Vec3, end: Vec3): { readonly success: boolean; readonly velocity: number } => {
-      const gravity = this.settings.gravity, maximum = this.settings.maxVelocity, ascent = f(zVelocity / gravity);
-      const maximumJump = f(0.5 * gravity * ascent * ascent), height = f(f(start.z + maximumJump) - end.z);
+      const gravity = this.settings.gravity,
+        maximum = this.settings.maxVelocity,
+        ascent = f(zVelocity / gravity);
+      const maximumJump = f(0.5 * gravity * ascent * ascent),
+        height = f(f(start.z + maximumJump) - end.z);
       if (height < 0) return { success: false, velocity: maximum };
-      const time = f(Math.sqrt(height / (0.5 * gravity))), denominator = f(time + ascent);
+      const time = f(Math.sqrt(height / (0.5 * gravity))),
+        denominator = f(time + ascent);
       if (denominator === 0) return { success: false, velocity: maximum };
-      const direction = sub3(end, start), speed = f(Math.sqrt(f(f(direction.x * direction.x) + f(direction.y * direction.y))) / denominator);
+      const direction = sub3(end, start),
+        speed = f(Math.sqrt(f(f(direction.x * direction.x) + f(direction.y * direction.y))) / denominator);
       return speed > maximum ? { success: false, velocity: maximum } : { success: true, velocity: speed };
     },
     rocketJumpZVelocity: (origin: Vec3): number => {
       const { forward, right } = angleVectors(vec3(90, 0, 0));
-      const start = vec3(f(origin.x + f(f(forward.x * 8) + f(right.x * 8))), f(origin.y + f(f(forward.y * 8) + f(right.y * 8))), f(f(origin.z + 8) + f(f(f(forward.z * 8) + f(right.z * 8)) - 8)));
+      const start = vec3(
+        f(origin.x + f(f(forward.x * 8) + f(right.x * 8))),
+        f(origin.y + f(f(forward.y * 8) + f(right.y * 8))),
+        f(f(origin.z + 8) + f(f(f(forward.z * 8) + f(right.z * 8)) - 8)),
+      );
       const trace = this.host.trace(start, ma(start, 500, forward), null, 1, 1);
-      const distance = length3(sub3(trace.end, vec3(origin.x, origin.y, origin.z + 4))), points = f(Math.max(0, f(120 - 0.5 * distance)) * 0.5);
+      const distance = length3(sub3(trace.end, vec3(origin.x, origin.y, origin.z + 4))),
+        points = f(Math.max(0, f(120 - 0.5 * distance)) * 0.5);
       const direction = normalize3(sub3(origin, trace.end));
-      return f(f(direction.z * (1600 * points / 200)) + this.settings.jumpVelocity);
+      return f(f(direction.z * ((1600 * points) / 200)) + this.settings.jumpVelocity);
     },
   };
-  traceAreas(start: Vec3, end: Vec3, maximum: number) { return aasTraceAreas(this.world, start, end, maximum); }
+  traceAreas(start: Vec3, end: Vec3, maximum: number) {
+    return aasTraceAreas(this.world, start, end, maximum);
+  }
   traceClientBBox(start: Vec3, end: Vec3, presence: number, _passEntity: number): AasTrace {
     return aasTraceClientBBox(this.world, start, end, presence, text => this.options.print?.(3, text));
   }
   linkClientBounds(_entity: number, bounds: Bounds, presence: 2 | 4): AreaLink | null {
-    const client = this.world.bboxes.find(box => box.presence === presence)?.bounds
-      ?? (presence === 4 ? this.options.profile.crouchedShape?.bounds : this.options.profile.shape.bounds);
+    const client =
+      this.world.bboxes.find(box => box.presence === presence)?.bounds ??
+      (presence === 4 ? this.options.profile.crouchedShape?.bounds : this.options.profile.shape.bounds);
     if (client === undefined) throw new Error(`Missing AAS presence bounds ${presence}`);
     const areas = aasBBoxAreas(this.world, { min: sub3(bounds.min, client.max), max: sub3(bounds.max, client.min) });
     let head: AreaLink | null = null;
@@ -186,16 +243,22 @@ export class AasReachabilitySpatial {
     return head;
   }
   bestReachableArea(origin: Vec3, bounds: Bounds): { readonly area: number; readonly origin: Vec3 } {
-    let start = origin, area = this.world.pointArea(start);
-    for (let i = 0; i < 5 && area === 0; i++) for (let j = 0; j < 5 && area === 0; j++)
-      for (let k = -1; k <= 1 && area === 0; k++) for (let l = -1; l <= 1 && area === 0; l++) {
-        start = vec3(origin.x + j * 4 * k, origin.y + j * 4 * l, origin.z + i * 4); area = this.world.pointArea(start);
-      }
+    let start = origin,
+      area = this.world.pointArea(start);
+    for (let i = 0; i < 5 && area === 0; i++)
+      for (let j = 0; j < 5 && area === 0; j++)
+        for (let k = -1; k <= 1 && area === 0; k++)
+          for (let l = -1; l <= 1 && area === 0; l++) {
+            start = vec3(origin.x + j * 4 * k, origin.y + j * 4 * l, origin.z + i * 4);
+            area = this.world.pointArea(start);
+          }
     if (area !== 0) {
-      const end = vec3(start.x, start.y, start.z - 50); start = vec3(start.x, start.y, start.z + 0.25);
+      const end = vec3(start.x, start.y, start.z - 50);
+      start = vec3(start.x, start.y, start.z + 0.25);
       const trace = this.traceClientBBox(start, end, 4, -1);
       if (trace.startSolid) return { area, origin: start };
-      area = this.world.pointArea(trace.end); if (area !== 0) return { area, origin: trace.end };
+      area = this.world.pointArea(trace.end);
+      if (area !== 0) return { area, origin: trace.end };
     }
     const head = this.linkClientBounds(-1, { min: add3(origin, bounds.min), max: add3(origin, bounds.max) }, 4);
     for (let link = head; link !== null; link = link.nextArea) if ((aasAt(this.world.settings, link.area).flags & 5) !== 0) return { area: link.area, origin };
@@ -207,9 +270,11 @@ export class AasReachabilitySpatial {
     return trace.startSolid ? { success: false, origin } : { success: true, origin: trace.end };
   }
   pointInsideFace(number: number, point: Vec3, epsilon: number): boolean {
-    const face = aasAt(this.world.faces, number), normal = aasAt(this.world.planes, face.plane).normal;
+    const face = aasAt(this.world.faces, number),
+      normal = aasAt(this.world.planes, face.plane).normal;
     for (let i = 0; i < face.edgeCount; i++) {
-      const number = aasAt(this.world.edgeIndexes, face.firstEdge + i), edge = aasAt(this.world.edges, Math.abs(number));
+      const number = aasAt(this.world.edgeIndexes, face.firstEdge + i),
+        edge = aasAt(this.world.edges, Math.abs(number));
       const origin = aasAt(this.world.vertices, edge.vertices[number < 0 ? 1 : 0]);
       const direction = sub3(aasAt(this.world.vertices, edge.vertices[number < 0 ? 0 : 1]), origin);
       if (dot3(sub3(point, origin), cross3(direction, normal)) < -f(epsilon)) return false;
@@ -217,23 +282,36 @@ export class AasReachabilitySpatial {
     return true;
   }
   getJumpPadInfo(entity: number): { readonly start: Vec3; readonly bounds: Bounds; readonly velocity: Vec3 } | null {
-    const modelBuffer = new Uint8Array(128), targetBuffer = new Uint8Array(128), nameBuffer = new Uint8Array(128);
-    const text = (bytes: Uint8Array): string => Array.from(bytes.subarray(0, bytes.indexOf(0) < 0 ? bytes.length : bytes.indexOf(0)), byte => String.fromCharCode(byte)).join("");
+    const modelBuffer = new Uint8Array(128),
+      targetBuffer = new Uint8Array(128),
+      nameBuffer = new Uint8Array(128);
+    const text = (bytes: Uint8Array): string =>
+      Array.from(bytes.subarray(0, bytes.indexOf(0) < 0 ? bytes.length : bytes.indexOf(0)), byte => String.fromCharCode(byte)).join("");
     this.entities.value(entity, "model", modelBuffer);
-    const modelName = text(modelBuffer), model = this.host.modelBounds(modelName === "" ? 0 : nativeAtoi(modelName.slice(1)), zero);
-    const bounds = { min: add3(model.origin, model.bounds.min), max: add3(model.origin, model.bounds.max) }, center = scale3(add3(bounds.min, bounds.max), 0.5);
+    const modelName = text(modelBuffer),
+      model = this.host.modelBounds(modelName === "" ? 0 : nativeAtoi(modelName.slice(1)), zero);
+    const bounds = { min: add3(model.origin, model.bounds.min), max: add3(model.origin, model.bounds.max) },
+      center = scale3(add3(bounds.min, bounds.max), 0.5);
     const trace = this.traceClientBBox(vec3(center.x, center.y, center.z + 64), center, 4, -1);
-    const bottom = trace.startSolid ? center : trace.end, start = vec3(bottom.x, bottom.y, bottom.z + 0.125);
+    const bottom = trace.startSolid ? center : trace.end,
+      start = vec3(bottom.x, bottom.y, bottom.z + 0.125);
     this.entities.value(entity, "target", targetBuffer);
     const targetName = text(targetBuffer);
     let target = this.entities.nextEntity(0);
-    for (; target !== 0; target = this.entities.nextEntity(target)) if (this.entities.value(target, "targetname", nameBuffer) && text(nameBuffer) === targetName) break;
-    if (target === 0) { this.options.print?.(1, `trigger_push without target entity ${targetName}\n`); return null; }
-    const destination = this.entities.vector(target, "origin").value, height = f(destination.z - center.z);
+    for (; target !== 0; target = this.entities.nextEntity(target))
+      if (this.entities.value(target, "targetname", nameBuffer) && text(nameBuffer) === targetName) break;
+    if (target === 0) {
+      this.options.print?.(1, `trigger_push without target entity ${targetName}\n`);
+      return null;
+    }
+    const destination = this.entities.vector(target, "origin").value,
+      height = f(destination.z - center.z);
     const time = f(Math.sqrt(height / (0.5 * f(this.settings.gravity))));
     if (time === 0) return null;
     if (!Number.isFinite(time)) throw new RangeError("Jump-pad target produces a non-finite source flight time");
-    const delta = sub3(destination, center), distance = length3(delta), forward = f(f(distance / time) * f(1.1));
+    const delta = sub3(destination, center),
+      distance = length3(delta),
+      forward = f(f(distance / time) * f(1.1));
     const push = scale3(normalize3(delta), forward);
     return { start, bounds, velocity: vec3(push.x, push.y, time * f(this.settings.gravity)) };
   }

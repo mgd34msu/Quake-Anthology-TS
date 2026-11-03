@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /**
  * Runs `bun test` in one of three tiers so a missing environment is a named
  * choice and not a silent skip:
@@ -7,7 +8,8 @@
  *            (SDL_VIDEODRIVER=offscreen by default); enables the native opt-in gates.
  * Extra arguments go to `bun test` (paths, -t filters).
  */
-const tier = process.argv[2], rest = process.argv.slice(3);
+const tier = process.argv[2],
+  rest = process.argv.slice(3);
 if (tier !== "unit" && tier !== "corpus" && tier !== "gl") {
   console.error("Usage: bun tools/test-tier.ts <unit|corpus|gl> [bun test arguments]");
   process.exit(2);
@@ -15,9 +17,21 @@ if (tier !== "unit" && tier !== "corpus" && tier !== "gl") {
 
 const env: Record<string, string | undefined> = { ...process.env };
 const corpusVariables: readonly string[] = ["QTS_TEST_CORPUS"];
-const nativeGates: readonly string[] = ["QUAKE_GL_SMOKE", "QUAKE_UI_NATIVE_SMOKE", "QUAKE_STARTUP_NATIVE_TEST", "QUAKE_PLATFORM_NATIVE_TEST", "QUAKE_MEDIA_NATIVE",
-  "QUAKE_FLARE_RENDER", "QUAKE_DEBUG_SHAPES_NATIVE", "QUAKE_Q2_NATIVE_APP", "QUAKE_STARTUP_RETAIL_TEST", "QUAKE_VIEWWEAPON_RENDER",
-  "QUAKE_WORLD_TEXT_APP", "QUAKE_DOWNLOAD_WORKFLOW_TEST", "QUAKE_DEATH_APPLICATION_TEST"];
+const nativeGates: readonly string[] = [
+  "QUAKE_GL_SMOKE",
+  "QUAKE_UI_NATIVE_SMOKE",
+  "QUAKE_STARTUP_NATIVE_TEST",
+  "QUAKE_PLATFORM_NATIVE_TEST",
+  "QUAKE_MEDIA_NATIVE",
+  "QUAKE_FLARE_RENDER",
+  "QUAKE_DEBUG_SHAPES_NATIVE",
+  "QUAKE_Q2_NATIVE_APP",
+  "QUAKE_STARTUP_RETAIL_TEST",
+  "QUAKE_VIEWWEAPON_RENDER",
+  "QUAKE_WORLD_TEXT_APP",
+  "QUAKE_DOWNLOAD_WORKFLOW_TEST",
+  "QUAKE_DEATH_APPLICATION_TEST",
+];
 
 if (tier === "unit") {
   for (const name of corpusVariables) delete env[name];
@@ -38,7 +52,10 @@ const child = Bun.spawn(["bun", "test", ...rest], { env, stdin: "inherit", stdou
 let transcript = "";
 async function forward(stream: ReadableStream<Uint8Array>, sink: NodeJS.WriteStream): Promise<void> {
   const decoder = new TextDecoder();
-  for await (const chunk of stream) { sink.write(chunk); transcript += decoder.decode(chunk, { stream: true }); }
+  for await (const chunk of stream) {
+    sink.write(chunk);
+    transcript += decoder.decode(chunk, { stream: true });
+  }
 }
 await Promise.all([forward(child.stdout, process.stdout), forward(child.stderr, process.stderr)]);
 const code = await child.exited;

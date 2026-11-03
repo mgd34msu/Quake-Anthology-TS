@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Q2 g_misc.c / rerelease g_misc.cpp organic and metallic gibs. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch, Q2Die } from "../host.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { add, scale, zero } from "../fields.ts";
-
 
 export interface Q2GibOptions {
   readonly head?: boolean;
@@ -22,7 +22,7 @@ const animateMeat: Q2Think = (entity, game) => {
 
 const gibDie: Q2Die = (entity, game) => {
   const cause = entity.lastAttack?.cause;
-  if (game.options.edition === "classic" || cause?.kind === "q2" && cause.meansOfDeath === 20) game.remove(entity);
+  if (game.options.edition === "classic" || (cause?.kind === "q2" && cause.meansOfDeath === 20)) game.remove(entity);
   return undefined;
 };
 const uprightTouch: Q2Touch = (entity, game, contact) => {
@@ -38,12 +38,18 @@ const organicTouch: Q2Touch = (entity, game, contact) => {
   if (contact.plane !== null) {
     game.sound(entity, "misc/fhit3.wav", 2);
     game.move(entity, { angles: vectorToAnglesRule(angleVectorsRule(vectorToAnglesRule(contact.plane.normal, "native-ai"), "native").right, "native-ai") });
-    if (entity.model === "models/objects/gibs/sm_meat/tris.md2") { entity.frame++; game.show(entity); game.schedule(entity, 0.1, animateMeat); }
+    if (entity.model === "models/objects/gibs/sm_meat/tris.md2") {
+      entity.frame++;
+      game.show(entity);
+      game.schedule(entity, 0.1, animateMeat);
+    }
   }
   return undefined;
 };
 export const q2GibCallbacks: Q2CallbackDefinitions = {
-  think: { gib_free: freeGib, gib_think: animateMeat }, die: { gib_die: gibDie }, touch: { gib_touch: organicTouch, gib_touch_upright: uprightTouch },
+  think: { gib_free: freeGib, gib_think: animateMeat },
+  die: { gib_die: gibDie },
+  touch: { gib_touch: organicTouch, gib_touch_upright: uprightTouch },
 };
 
 /** A head reuses the dying actor, as ThrowHead/ThrowGib(GIB_HEAD) do. */
@@ -62,15 +68,24 @@ export function throwGib(self: Q2Entity, game: Q2GameServices, model: string, da
       origin = add(center, { x: crandom() * half.x, y: crandom() * half.y, z: crandom() * half.z });
       tries++;
     } while (rerelease && tries < 3 && (game.host.pointContents(origin) & 3) !== 0);
-    if (rerelease && (game.host.pointContents(origin) & 3) !== 0 && options.head !== true) { game.remove(gib); return null; }
+    if (rerelease && (game.host.pointContents(origin) & 3) !== 0 && options.head !== true) {
+      game.remove(gib);
+      return null;
+    }
   }
   const impulse = scale({ x: 100 * crandom(), y: 100 * crandom(), z: 200 + 100 * game.host.random() }, damage < 50 ? 0.7 : 1.2);
   const velocity = add(body.velocity, scale(impulse, options.metallic === true ? 1 : 0.5));
-  const clipped: Vec3 = { x: Math.max(-300, Math.min(300, velocity.x)), y: Math.max(-300, Math.min(300, velocity.y)), z: Math.max(200, Math.min(500, velocity.z)) };
+  const clipped: Vec3 = {
+    x: Math.max(-300, Math.min(300, velocity.x)),
+    y: Math.max(-300, Math.min(300, velocity.y)),
+    z: Math.max(200, Math.min(500, velocity.z)),
+  };
   gib.model = model;
   if (options.head === true) {
     // ThrowHead drops the attached models and the looping sound of the dying actor.
-    gib.model2 = ""; gib.model3 = ""; gib.model4 = "";
+    gib.model2 = "";
+    gib.model3 = "";
+    gib.model4 = "";
     game.host.emit({ kind: "sound", actor: gib.actor.id, origin: body.origin, path: "", channel: 0, volume: 0, attenuation: 1, reliable: false, loop: "stop" });
   }
   if (rerelease) gib.classname = "gib";
@@ -83,17 +98,26 @@ export function throwGib(self: Q2Entity, game: Q2GameServices, model: string, da
   gib.serverFlags = (gib.serverFlags & ~4) | (rerelease ? 2 : 0);
   gib.clipMask = 3;
   gib.scale = rerelease ? self.scale : 1;
-  gib.angularVelocity = options.head === true && !rerelease
-    ? { ...gib.angularVelocity, y: crandom() * 600 }
-    : { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
+  gib.angularVelocity =
+    options.head === true && !rerelease
+      ? { ...gib.angularVelocity, y: crandom() * 600 }
+      : { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
   const angles = rerelease ? { x: game.host.random() * 359, y: game.host.random() * 359, z: game.host.random() * 359 } : game.body(gib).angles;
   game.move(gib, { origin, velocity: clipped, angles, bounds: { min: zero, max: zero }, ground: null }, false);
-  if (game.host.combat.read(gib.actor.id) === null) game.host.combat.create(gib.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+  if (game.host.combat.read(gib.actor.id) === null)
+    game.host.combat.create(gib.actor, {
+      health: 0,
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } },
+      mass: 0,
+      canTakeDamage: true,
+      invulnerable: false,
+      team: null,
+    });
   else game.host.combat.setTraits(gib.actor, { canTakeDamage: true });
   gib.die = gibDie;
   gib.pain = null;
   gib.use = null;
-  gib.touch = rerelease ? options.upright === true ? uprightTouch : null : options.metallic === true ? null : organicTouch;
+  gib.touch = rerelease ? (options.upright === true ? uprightTouch : null) : options.metallic === true ? null : organicTouch;
   game.solid(gib, "none");
   game.motion(gib, options.metallic === true ? "bounce" : "toss");
   game.schedule(gib, 10 + game.host.random() * 10, freeGib);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Game-side formatting translated from id Software's code/game/bg_lib.c
  * AddInt, AddFloat, AddString and vsprintf, with code/game/q_shared.c
@@ -60,11 +61,7 @@ function byteLength(value: string, limit: number): number {
   return end;
 }
 
-function argumentAt(
-  args: readonly GameFormatArgument[],
-  index: number,
-  specifier: string,
-): GameFormatArgument {
+function argumentAt(args: readonly GameFormatArgument[], index: number, specifier: string): GameFormatArgument {
   const value = args[index];
   if (value === undefined) {
     throw new RangeError(`missing argument ${index} for %${specifier}`);
@@ -98,7 +95,7 @@ function reversedIntegerBytes(value: number): number[] {
   let remaining = value < 0 ? int32(-value) : value;
   const bytes: number[] = [];
   do {
-    bytes.push(48 + remaining % 10);
+    bytes.push(48 + (remaining % 10));
     remaining = Math.trunc(remaining / 10);
   } while (remaining !== 0);
   if (signedValue < 0) bytes.push(45);
@@ -149,7 +146,7 @@ function addFloat(output: FormatOutput, value: number, width: number, precision:
   for (let index = 0; index < digits; index++) {
     remaining = Math.fround(remaining - Math.trunc(remaining));
     remaining = Math.fround(remaining * 10);
-    output.appendByte(48 + Math.trunc(remaining) % 10);
+    output.appendByte(48 + (Math.trunc(remaining) % 10));
   }
 }
 
@@ -173,11 +170,7 @@ function formatByte(format: string, index: number): number | null {
 }
 
 /** Formats byte strings with the QVM bg_lib.c rules, then applies Q_strncpyz bounds. */
-export function gameFormat(
-  format: string,
-  args: readonly GameFormatArgument[],
-  maxBytes = BIG_BUFFER_BYTES,
-): string {
+export function gameFormat(format: string, args: readonly GameFormatArgument[], maxBytes = BIG_BUFFER_BYTES): string {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new RangeError("game format destination capacity must be a positive safe integer");
   }

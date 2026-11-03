@@ -1,9 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 export class SaveFormatError extends Error {
-  constructor(readonly path: string, message: string) { super(`${path}: ${message}`); this.name = "SaveFormatError"; }
+  constructor(
+    readonly path: string,
+    message: string,
+  ) {
+    super(`${path}: ${message}`);
+    this.name = "SaveFormatError";
+  }
 }
 
 type JsonValue = null | boolean | string | number | readonly JsonValue[] | { readonly [key: string]: JsonValue };
-function unknownArray(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
+function unknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
 
 function canonicalBase64(value: string): boolean {
   if (value.length % 4 !== 0) return false;
@@ -74,30 +83,64 @@ function unpack(value: unknown, path: string): unknown {
   return result;
 }
 
-export function encodeCheckpointValue(value: unknown): Uint8Array { return new TextEncoder().encode(JSON.stringify(pack(value, "checkpoint"))); }
+export function encodeCheckpointValue(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(pack(value, "checkpoint")));
+}
 export function decodeCheckpointValue(bytes: Uint8Array): unknown {
   let parsed: unknown;
-  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-  catch (error) { throw new SaveFormatError("checkpoint", error instanceof Error ? error.message : "undecodable bytes"); }
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch (error) {
+    throw new SaveFormatError("checkpoint", error instanceof Error ? error.message : "undecodable bytes");
+  }
   return unpack(parsed, "checkpoint");
 }
 
 /** Small boundary reader used by the save schemas; every returned type is constructed from checked fields. */
 export class SaveReader {
-  constructor(readonly value: unknown, readonly path = "save") {}
+  constructor(
+    readonly value: unknown,
+    readonly path = "save",
+  ) {}
   field(name: string): SaveReader {
     if (this.value === null || typeof this.value !== "object" || Array.isArray(this.value) || this.value instanceof Uint8Array) this.fail("expected a record");
     const value: unknown = Reflect.get(this.value, name);
     return new SaveReader(value, `${this.path}.${name}`);
   }
-  string(): string { if (typeof this.value !== "string") this.fail("expected a string"); return this.value; }
-  boolean(): boolean { if (typeof this.value !== "boolean") this.fail("expected a boolean"); return this.value; }
-  number(): number { if (typeof this.value !== "number") this.fail("expected a number"); return this.value; }
-  finite(): number { const value = this.number(); if (!Number.isFinite(value)) this.fail("expected a finite number"); return value; }
-  integer(minimum = Number.MIN_SAFE_INTEGER): number { const value = this.number(); if (!Number.isSafeInteger(value) || value < minimum) this.fail("expected an integer in range"); return value; }
-  bigint(): bigint { if (typeof this.value !== "bigint") this.fail("expected a bigint"); return this.value; }
-  bytes(): Uint8Array { if (!(this.value instanceof Uint8Array)) this.fail("expected raw checkpoint bytes"); return this.value; }
-  literal<T extends string | number | boolean>(expected: T): T { if (this.value !== expected) this.fail(`expected ${String(expected)}`); return expected; }
+  string(): string {
+    if (typeof this.value !== "string") this.fail("expected a string");
+    return this.value;
+  }
+  boolean(): boolean {
+    if (typeof this.value !== "boolean") this.fail("expected a boolean");
+    return this.value;
+  }
+  number(): number {
+    if (typeof this.value !== "number") this.fail("expected a number");
+    return this.value;
+  }
+  finite(): number {
+    const value = this.number();
+    if (!Number.isFinite(value)) this.fail("expected a finite number");
+    return value;
+  }
+  integer(minimum = Number.MIN_SAFE_INTEGER): number {
+    const value = this.number();
+    if (!Number.isSafeInteger(value) || value < minimum) this.fail("expected an integer in range");
+    return value;
+  }
+  bigint(): bigint {
+    if (typeof this.value !== "bigint") this.fail("expected a bigint");
+    return this.value;
+  }
+  bytes(): Uint8Array {
+    if (!(this.value instanceof Uint8Array)) this.fail("expected raw checkpoint bytes");
+    return this.value;
+  }
+  literal<T extends string | number | boolean>(expected: T): T {
+    if (this.value !== expected) this.fail(`expected ${String(expected)}`);
+    return expected;
+  }
   choice<T extends string | number>(...choices: readonly T[]): T {
     const match = choices.find(choice => choice === this.value);
     if (match === undefined) this.fail(`expected ${choices.join(" or ")}`);
@@ -107,8 +150,12 @@ export class SaveReader {
     if (!unknownArray(this.value)) this.fail("expected an array");
     return this.value.map((entry, index) => read(new SaveReader(entry, `${this.path}[${index}]`)));
   }
-  nullable<T>(read: (item: SaveReader) => T): T | null { return this.value === null ? null : read(this); }
-  fail(message: string): never { throw new SaveFormatError(this.path, message); }
+  nullable<T>(read: (item: SaveReader) => T): T | null {
+    return this.value === null ? null : read(this);
+  }
+  fail(message: string): never {
+    throw new SaveFormatError(this.path, message);
+  }
 }
 
 export function namespaced(reader: SaveReader): `${string}:${string}` {

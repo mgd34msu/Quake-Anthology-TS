@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable } from "../../src/world/actors/index.ts";
@@ -8,15 +9,28 @@ import { decodeUnifiedPresentationEvents, encodeUnifiedPresentationEvents } from
 import { UnifiedAudio } from "../../src/audio/engine.ts";
 import type { SoundAsset } from "../../src/audio/types.ts";
 
-const content = "q1:classic:id1:installed", modContent = "q1:classic:hipnotic:installed";
+const content = "q1:classic:id1:installed",
+  modContent = "q1:classic:hipnotic:installed";
 function world() {
-  const ids = createIdentityOwner("presentation-owners"), actors = new SessionActorRegistry(ids);
+  const ids = createIdentityOwner("presentation-owners"),
+    actors = new SessionActorRegistry(ids);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => body.bounds, onLink: () => undefined, onUnlink: () => undefined });
-  return { ids, actors, events: new SimulationEvents(bodies, () => ({ kind: "seconds", value: 1 }), () => null, actor => actor.slot) };
+  return {
+    ids,
+    actors,
+    events: new SimulationEvents(
+      bodies,
+      () => ({ kind: "seconds", value: 1 }),
+      () => null,
+      actor => actor.slot,
+    ),
+  };
 }
 
 test("local music retains silence and saved chronology without entering replication", () => {
-  const first = world(), one = first.events.bindOwner("mod:one", modContent, false), two = first.events.bindOwner("mod:two", modContent, false);
+  const first = world(),
+    one = first.events.bindOwner("mod:one", modContent, false),
+    two = first.events.bindOwner("mod:two", modContent, false);
   first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 2 } });
   first.events.publishLocalMedia(one.owner, modContent, { kind: "music", intro: "music/one.wav", loop: "music/loop.wav" }, false);
   first.events.publishLocalMedia(two.owner, modContent, { kind: "music-stop" }, false);
@@ -25,7 +39,8 @@ test("local music retains silence and saved chronology without entering replicat
   expect(() => first.events.assertLocalMediaConsumed()).toThrow("completed local");
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
   first.events.assertLocalMediaConsumed();
-  const state = decodeCheckpointValue(encodeCheckpointValue(first.events.capture())), restored = world();
+  const state = decodeCheckpointValue(encodeCheckpointValue(first.events.capture())),
+    restored = world();
   restored.events.restore(new SaveReader(state), actor => restored.ids.actor(actor.slot, actor.generation));
   restored.events.bindOwner("mod:one", modContent, true);
   const restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
@@ -34,37 +49,47 @@ test("local music retains silence and saved chronology without entering replicat
   expect(restored.events.pendingLocalMedia()).toHaveLength(0);
   restored.events.enableLocalMedia();
   const queued = restored.events.pendingLocalMedia();
-  expect(queued.map(request => request.kind === "local-media" ? request.event.kind : request.kind)).toEqual(["music", "music-stop"]);
+  expect(queued.map(request => (request.kind === "local-media" ? request.event.kind : request.kind))).toEqual(["music", "music-stop"]);
   restored.events.publishLocalMedia(restoredTwo.owner, modContent, { kind: "music", intro: "default.wav", loop: "" }, true);
   expect(restored.events.pendingLocalMedia()).toEqual(queued);
   for (const request of queued) restored.events.acknowledgeLocalMedia(request);
-  restored.events.takePresentation(); restoredTwo.close();
+  restored.events.takePresentation();
+  restoredTwo.close();
   expect(restored.events.takePresentation().map(value => value.kind)).toEqual(["presentation-owner"]);
-  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([{ kind: "music", intro: "music/one.wav", loop: "music/loop.wav" }]);
+  expect(restored.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([
+    { kind: "music", intro: "music/one.wav", loop: "music/loop.wav" },
+  ]);
 });
 
 test("retiring local music reveals a later gameplay cue only locally", () => {
-  const first = world(), one = first.events.bindOwner("mod:one", modContent, false);
+  const first = world(),
+    one = first.events.bindOwner("mod:one", modContent, false);
   first.events.publishLocalMedia(one.owner, modContent, { kind: "music-stop" }, false);
-  const pending = first.events.pendingLocalMedia()[0]; if (pending === undefined) throw new Error("Missing local cue");
+  const pending = first.events.pendingLocalMedia()[0];
+  if (pending === undefined) throw new Error("Missing local cue");
   first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 7 } });
-  first.events.takePresentation(); one.close();
+  first.events.takePresentation();
+  one.close();
   expect(first.events.localMediaCurrent(pending)).toBe(false);
   expect(first.events.takePresentation().map(value => value.kind)).toEqual(["presentation-owner"]);
-  expect(first.events.pendingLocalMedia().map(value => value.kind === "music" ? value.event : null)).toEqual([{ kind: "cd-track", track: 7 }]);
+  expect(first.events.pendingLocalMedia().map(value => (value.kind === "music" ? value.event : null))).toEqual([{ kind: "cd-track", track: 7 }]);
   expect(() => first.events.publishLocalMedia(one.owner, modContent, { kind: "music-stop" }, false)).toThrow("active presentation owner");
   const next = first.events.bindOwner("mod:one", modContent, false);
   expect(() => first.events.publishLocalMedia(next.owner, content, { kind: "music-stop" }, false)).toThrow("active presentation owner");
 });
 
 test("awaited local media keeps failures pending and older delayed controls cannot replace a newer cue", async () => {
-  const first = world(), owner = first.events.bindOwner("mod:one", modContent, false), played: string[] = [];
+  const first = world(),
+    owner = first.events.bindOwner("mod:one", modContent, false),
+    played: string[] = [];
   first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 2 } });
   const older = first.events.takePresentation();
   first.events.publishLocalMedia(owner.owner, modContent, { kind: "music-stop" }, false);
   let fail = true;
   const audio: Parameters<typeof preparePresentationAudio>[1] = {
-    receive: async events => { for (const event of events) if (event.kind === "music") played.push(event.event.kind); },
+    receive: async events => {
+      for (const event of events) if (event.kind === "music") played.push(event.event.kind);
+    },
     playComponentMedia: async (request, current) => {
       if (fail) throw new Error("Media unavailable");
       if (current()) played.push(request.event.kind);
@@ -72,7 +97,8 @@ test("awaited local media keeps failures pending and older delayed controls cann
   };
   await expect(preparePresentationAudio(first.events, audio)).rejects.toThrow("Media unavailable");
   expect(() => first.events.assertLocalMediaConsumed()).toThrow("completed local");
-  fail = false; await preparePresentationAudio(first.events, audio);
+  fail = false;
+  await preparePresentationAudio(first.events, audio);
   first.events.assertLocalMediaConsumed();
   await preparePresentationAudio(first.events, audio, older);
   expect(played).toEqual(["music-stop"]);
@@ -82,8 +108,16 @@ test("awaited local media keeps failures pending and older delayed controls cann
 });
 
 test("shader ownership restores saved precedence and original material without entering server output", () => {
-  const first = world(), one = first.events.bindOwner("mod:one", modContent, false), two = first.events.bindOwner("mod:two", modContent, false);
-  const cue = (replacement: string) => ({ kind: "shader-remap", original: "textures/wall.tga", replacement, timeOffset: 2 } satisfies import("../../src/contracts/presentation.ts").ComponentPresentationMediaRequest);
+  const first = world(),
+    one = first.events.bindOwner("mod:one", modContent, false),
+    two = first.events.bindOwner("mod:two", modContent, false);
+  const cue = (replacement: string) =>
+    ({
+      kind: "shader-remap",
+      original: "textures/wall.tga",
+      replacement,
+      timeOffset: 2,
+    }) satisfies import("../../src/contracts/presentation.ts").ComponentPresentationMediaRequest;
   first.events.publishLocalMedia(undefined, content, cue("textures/base"), false);
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
   first.events.publishLocalMedia(one.owner, modContent, cue("textures/one"), false);
@@ -92,30 +126,42 @@ test("shader ownership restores saved precedence and original material without e
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
   expect(first.events.takePresentation()).toEqual([]);
   expect(first.events.persistentPresentation()).toEqual([]);
-  const restored = world(); restored.events.restore(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(first.events.capture()))), value => restored.ids.actor(value.slot, value.generation));
-  const restoredOne = restored.events.bindOwner("mod:one", modContent, true), restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
-  restored.events.finishOwnerRestore(); restored.events.enableLocalMedia();
+  const restored = world();
+  restored.events.restore(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(first.events.capture()))), value =>
+    restored.ids.actor(value.slot, value.generation),
+  );
+  const restoredOne = restored.events.bindOwner("mod:one", modContent, true),
+    restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
+  restored.events.finishOwnerRestore();
+  restored.events.enableLocalMedia();
   const saved = restored.events.pendingLocalMedia();
   restored.events.publishLocalMedia(undefined, content, cue("textures/default"), true);
   expect(restored.events.pendingLocalMedia()).toEqual(saved);
   expect(saved.map(value => restored.events.localMediaCurrent(value))).toEqual([true, true, true]);
   for (const request of saved) restored.events.acknowledgeLocalMedia(request);
   restoredTwo.close();
-  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([cue("textures/one")]);
+  expect(restored.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([cue("textures/one")]);
   for (const request of restored.events.pendingLocalMedia()) restored.events.acknowledgeLocalMedia(request);
   restoredOne.close();
-  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([cue("textures/base")]);
-  const bare = world(), owner = bare.events.bindOwner("mod:bare", modContent, false);
+  expect(restored.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([cue("textures/base")]);
+  const bare = world(),
+    owner = bare.events.bindOwner("mod:bare", modContent, false);
   bare.events.publishLocalMedia(owner.owner, modContent, cue("textures/one"), false);
   for (const request of bare.events.pendingLocalMedia()) bare.events.acknowledgeLocalMedia(request);
   owner.close();
-  expect(bare.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([{ ...cue("textures/wall.tga"), timeOffset: 0 }]);
-  first.actors.close(); restored.actors.close(); bare.actors.close();
+  expect(bare.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([
+    { ...cue("textures/wall.tga"), timeOffset: 0 },
+  ]);
+  first.actors.close();
+  restored.actors.close();
+  bare.actors.close();
 });
 
 test("failed and source-refused shader requests preserve earlier owner cues and unrelated material ordering", () => {
-  const first = world(), owner = first.events.bindOwner("mod:one", modContent, false);
-  const cue = (original: string, replacement: string) => ({ kind: "shader-remap", original, replacement, timeOffset: 0 } satisfies import("../../src/contracts/presentation.ts").ComponentPresentationMediaRequest);
+  const first = world(),
+    owner = first.events.bindOwner("mod:one", modContent, false);
+  const cue = (original: string, replacement: string) =>
+    ({ kind: "shader-remap", original, replacement, timeOffset: 0 }) satisfies import("../../src/contracts/presentation.ts").ComponentPresentationMediaRequest;
   first.events.publishLocalMedia(owner.owner, modContent, cue("wall", "base"), false);
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
   first.events.publishLocalMedia(owner.owner, modContent, cue("wall", "missing"), false);
@@ -123,77 +169,158 @@ test("failed and source-refused shader requests preserve earlier owner cues and 
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request, false);
   first.events.publishLocalMedia(owner.owner, modContent, cue("other", "other-skin"), false);
   for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
-  const restored = world(); restored.events.restore(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(first.events.capture()))), value => restored.ids.actor(value.slot, value.generation));
-  restored.events.bindOwner("mod:one", modContent, true); restored.events.finishOwnerRestore(); restored.events.enableLocalMedia();
-  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([cue("wall", "base"), cue("other", "other-skin")]);
+  const restored = world();
+  restored.events.restore(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(first.events.capture()))), value =>
+    restored.ids.actor(value.slot, value.generation),
+  );
+  restored.events.bindOwner("mod:one", modContent, true);
+  restored.events.finishOwnerRestore();
+  restored.events.enableLocalMedia();
+  expect(restored.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([
+    cue("wall", "base"),
+    cue("other", "other-skin"),
+  ]);
   expect(restored.events.pendingLocalMedia().every(value => restored.events.localMediaCurrent(value))).toBe(true);
   for (const request of restored.events.pendingLocalMedia()) restored.events.acknowledgeLocalMedia(request);
   const added = restored.events.bindOwner("mod:added-after-load", modContent, false);
   restored.events.publishLocalMedia(added.owner, modContent, cue("wall", "new-mod"), true);
-  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([cue("wall", "new-mod")]);
-  first.actors.close(); restored.actors.close();
+  expect(restored.events.pendingLocalMedia().map(value => (value.kind === "local-media" ? value.event : null))).toEqual([cue("wall", "new-mod")]);
+  first.actors.close();
+  restored.actors.close();
 });
 
 test("persistent component output retires its activation and restores prior source overrides across save and wire", () => {
-  const first = world(), style = (pattern: string) => ({ kind: "q1", event: { kind: "lightstyle", style: 0, pattern } } satisfies import("../../src/app/bootstrap/simulation/types.ts").SourcePresentationEvent);
+  const first = world(),
+    style = (pattern: string) =>
+      ({
+        kind: "q1",
+        event: { kind: "lightstyle", style: 0, pattern },
+      }) satisfies import("../../src/app/bootstrap/simulation/types.ts").SourcePresentationEvent;
   first.events.emit(content, style("m"));
-  const one = first.events.bindOwner("mod:one", modContent, false), two = first.events.bindOwner("mod:two", modContent, false);
-  one.emit(modContent, style("a")); two.emit(modContent, style("z"));
-  one.emit(modContent, { kind: "q1", event: { kind: "static-model", path: "progs/flame.mdl", origin: { x: 1, y: 2, z: 3 }, angles: { x: 0, y: 0, z: 0 }, frame: 0, skin: 0, colorMap: 0 } });
+  const one = first.events.bindOwner("mod:one", modContent, false),
+    two = first.events.bindOwner("mod:two", modContent, false);
+  one.emit(modContent, style("a"));
+  two.emit(modContent, style("z"));
+  one.emit(modContent, {
+    kind: "q1",
+    event: { kind: "static-model", path: "progs/flame.mdl", origin: { x: 1, y: 2, z: 3 }, angles: { x: 0, y: 0, z: 0 }, frame: 0, skin: 0, colorMap: 0 },
+  });
   expect(first.events.lightStyle(0)).toBe("z");
   const state = decodeCheckpointValue(encodeCheckpointValue(first.events.capture()));
-  first.events.takePresentation(); first.events.take();
-  const restored = world(); restored.events.restore(new SaveReader(state), saved => restored.ids.actor(saved.slot, saved.generation));
+  first.events.takePresentation();
+  first.events.take();
+  const restored = world();
+  restored.events.restore(new SaveReader(state), saved => restored.ids.actor(saved.slot, saved.generation));
   expect(() => restored.events.finishOwnerRestore()).toThrow("was not restored");
-  const restoredOne = restored.events.bindOwner("mod:one", modContent, true), restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
+  const restoredOne = restored.events.bindOwner("mod:one", modContent, true),
+    restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
   restored.events.finishOwnerRestore();
   expect(() => restored.events.bindOwner("mod:one", modContent, true)).toThrow("already active");
-  restored.events.takePresentation(); restoredTwo.close();
+  restored.events.takePresentation();
+  restoredTwo.close();
   expect(restored.events.lightStyle(0)).toBe("a");
   const output = restored.events.takePresentation();
-  const wire = decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents(output), { session: restored.ids.session, actor: restored.ids.actor, client: restored.ids.client, seat: restored.ids.seat, resourceId: id => id });
+  const wire = decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents(output), {
+    session: restored.ids.session,
+    actor: restored.ids.actor,
+    client: restored.ids.client,
+    seat: restored.ids.seat,
+    resourceId: id => id,
+  });
   expect(wire.filter(event => event.kind !== "presentation-owner")).toEqual(output.filter(event => event.kind !== "presentation-owner"));
   const retired = wire.find(event => event.kind === "presentation-owner");
   if (retired?.kind !== "presentation-owner") throw new Error("Missing retirement");
   expect(output.find(event => event.kind === "presentation-owner")?.event).toEqual(retired.event);
   expect(() => restoredTwo.emit(modContent, style("b"))).toThrow("retired");
-  const newTwo = restored.events.bindOwner("mod:two", modContent, false); newTwo.emit(modContent, style("c"));
+  const newTwo = restored.events.bindOwner("mod:two", modContent, false);
+  newTwo.emit(modContent, style("c"));
   expect(restored.events.takePresentation()[0]?.owner?.generation).toBeGreaterThan(retired.event.owner.generation);
-  restoredOne.close(); expect(restored.events.persistentPresentation().some(event => event.kind === "q1" && event.event.kind === "static-model")).toBe(false);
-  expect(restored.events.lightStyle(0)).toBe("c"); newTwo.close(); expect(restored.events.lightStyle(0)).toBe("m");
-  one.close(); two.close(); first.actors.close(); restored.actors.close();
+  restoredOne.close();
+  expect(restored.events.persistentPresentation().some(event => event.kind === "q1" && event.event.kind === "static-model")).toBe(false);
+  expect(restored.events.lightStyle(0)).toBe("c");
+  newTwo.close();
+  expect(restored.events.lightStyle(0)).toBe("m");
+  one.close();
+  two.close();
+  first.actors.close();
+  restored.actors.close();
 });
 
 test("static voice removal preserves another owner and ambient channel", () => {
-  const ids = createIdentityOwner("owned-static-audio"), seat = ids.seat(0), origin = { x: 0, y: 0, z: 0 };
-  const sound = (value: number): SoundAsset => ({ name: "loop.wav", resource: `resource:tone:${value}`, pcm: { samples: new Int16Array(128).fill(value), sampleRate: 44100, channels: 1, frameCount: 128, loopStart: 0 } });
-  using audio = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 }); audio.setEffectsVolume(1);
-  audio.setListeners([{ seat, actor: null, origin, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false }]);
-  audio.addStaticSound(seat, sound(1000), origin, 255, 0, 1); audio.addStaticSound(seat, sound(2000), origin, 255, 0, 2);
-  const both = audio.mix(1)[0]; audio.removeStaticSound(seat, 1); const remaining = audio.mix(1)[0];
-  expect(both).toBeGreaterThan(remaining ?? 0); expect(remaining).toBeGreaterThan(0);
-  audio.removeStaticSound(seat, 2); expect(audio.mix(1)).toEqual(new Int16Array(2));
+  const ids = createIdentityOwner("owned-static-audio"),
+    seat = ids.seat(0),
+    origin = { x: 0, y: 0, z: 0 };
+  const sound = (value: number): SoundAsset => ({
+    name: "loop.wav",
+    resource: `resource:tone:${value}`,
+    pcm: { samples: new Int16Array(128).fill(value), sampleRate: 44100, channels: 1, frameCount: 128, loopStart: 0 },
+  });
+  using audio = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  audio.setEffectsVolume(1);
+  audio.setListeners([
+    {
+      seat,
+      actor: null,
+      origin,
+      axis: [
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      gain: 1,
+      underwater: false,
+    },
+  ]);
+  audio.addStaticSound(seat, sound(1000), origin, 255, 0, 1);
+  audio.addStaticSound(seat, sound(2000), origin, 255, 0, 2);
+  const both = audio.mix(1)[0];
+  audio.removeStaticSound(seat, 1);
+  const remaining = audio.mix(1)[0];
+  expect(both).toBeGreaterThan(remaining ?? 0);
+  expect(remaining).toBeGreaterThan(0);
+  audio.removeStaticSound(seat, 2);
+  expect(audio.mix(1)).toEqual(new Int16Array(2));
 });
 
 test("legacy persistence stays primary unless restoring a component makes provenance ambiguous", () => {
-  const source = world(); source.events.emit(content, { kind: "q1", event: { kind: "lightstyle", style: 2, pattern: "abc" } });
-  const saved = source.events.capture(), legacy = { sequence: saved.sequence, presentationSequence: saved.presentationSequence, styles: saved.styles, persistent: saved.persistent };
-  const target = world(); target.events.restore(new SaveReader(legacy), actor => target.ids.actor(actor.slot, actor.generation));
-  const unrelated = target.events.bindOwner("mod:unrelated", modContent, true); unrelated.close(); expect(target.events.lightStyle(2)).toBe("abc");
+  const source = world();
+  source.events.emit(content, { kind: "q1", event: { kind: "lightstyle", style: 2, pattern: "abc" } });
+  const saved = source.events.capture(),
+    legacy = { sequence: saved.sequence, presentationSequence: saved.presentationSequence, styles: saved.styles, persistent: saved.persistent };
+  const target = world();
+  target.events.restore(new SaveReader(legacy), actor => target.ids.actor(actor.slot, actor.generation));
+  const unrelated = target.events.bindOwner("mod:unrelated", modContent, true);
+  unrelated.close();
+  expect(target.events.lightStyle(2)).toBe("abc");
   expect(() => target.events.bindOwner("mod:ambiguous", content, true)).toThrow("without recorded ownership");
-  const fresh = target.events.bindOwner("mod:fresh", content, false); fresh.close(); expect(target.events.lightStyle(2)).toBe("abc");
-  target.events.finishOwnerRestore(); source.actors.close(); target.actors.close();
+  const fresh = target.events.bindOwner("mod:fresh", content, false);
+  fresh.close();
+  expect(target.events.lightStyle(2)).toBe("abc");
+  target.events.finishOwnerRestore();
+  source.actors.close();
+  target.actors.close();
 });
 
 test("retiring a global override replays still-live recipient overrides in source order", async () => {
   const { Q1ServicePresentation } = await import("../../src/app/bootstrap/q1-service-presentation.ts");
-  const state = world(), recipient = state.ids.actor(4, 0), presentation = new Q1ServicePresentation();
-  const source = (value: number) => ({ kind: "q1-client", event: { kind: "frags", slot: 0, value } } satisfies import("../../src/app/bootstrap/simulation/types.ts").SourcePresentationEvent);
+  const state = world(),
+    recipient = state.ids.actor(4, 0),
+    presentation = new Q1ServicePresentation();
+  const source = (value: number) =>
+    ({ kind: "q1-client", event: { kind: "frags", slot: 0, value } }) satisfies import("../../src/app/bootstrap/simulation/types.ts").SourcePresentationEvent;
   state.events.emit(content, source(0));
-  const first = state.events.bindOwner("mod:first", content, false), second = state.events.bindOwner("mod:second", content, false);
-  first.emit(content, source(1)); second.emit(content, source(2), undefined, recipient);
-  presentation.receive(state.events.takePresentation()); expect(presentation.clients(content, recipient)[0]?.frags).toBe(2);
-  first.close(); presentation.receive(state.events.takePresentation()); expect(presentation.clients(content, recipient)[0]?.frags).toBe(2);
-  second.close(); presentation.receive(state.events.takePresentation()); expect(presentation.clients(content, recipient)[0]?.frags).toBe(0);
-  presentation.close(); state.actors.close();
+  const first = state.events.bindOwner("mod:first", content, false),
+    second = state.events.bindOwner("mod:second", content, false);
+  first.emit(content, source(1));
+  second.emit(content, source(2), undefined, recipient);
+  presentation.receive(state.events.takePresentation());
+  expect(presentation.clients(content, recipient)[0]?.frags).toBe(2);
+  first.close();
+  presentation.receive(state.events.takePresentation());
+  expect(presentation.clients(content, recipient)[0]?.frags).toBe(2);
+  second.close();
+  presentation.receive(state.events.takePresentation());
+  expect(presentation.clients(content, recipient)[0]?.frags).toBe(0);
+  presentation.close();
+  state.actors.close();
 });

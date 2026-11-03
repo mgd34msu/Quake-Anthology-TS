@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { float64Bits } from "../../foundation/binary.ts";
 import type { ScriptMemoryAllocation } from "./memory.ts";
 import { SaveReader } from "../../persistence/value.ts";
@@ -36,7 +37,10 @@ import { asciiFold, sourceCommandText } from "../../core/commands/index.ts";
 export type { ScriptTokenRecord } from "./lexer.ts";
 
 /** Finite defaults, far above retail scripts, so a macro cycle in mod content fails instead of hanging the process. */
-const DEFAULT_INCLUDE_DEPTH = 64, DEFAULT_MACRO_EXPANSIONS = 1_000_000, DEFAULT_TOKENS = 16_000_000, DEFAULT_DEFINES = 1_000_000;
+const DEFAULT_INCLUDE_DEPTH = 64,
+  DEFAULT_MACRO_EXPANSIONS = 1_000_000,
+  DEFAULT_TOKENS = 16_000_000,
+  DEFAULT_DEFINES = 1_000_000;
 const MAX_DEFINE_PARAMETERS = 128;
 
 export interface ScriptSource {
@@ -51,17 +55,17 @@ export interface ScriptSourcePosition {
 
 export type IncludeRequest =
   | {
-    readonly kind: "quoted";
-    readonly fromPath: string;
-    readonly requestedPath: string;
-    /** Omitted by diagnostic callers to select the source's empty include path. */
-    readonly includePath?: string;
-  }
+      readonly kind: "quoted";
+      readonly fromPath: string;
+      readonly requestedPath: string;
+      /** Omitted by diagnostic callers to select the source's empty include path. */
+      readonly includePath?: string;
+    }
   | {
-    readonly kind: "system";
-    readonly fromPath: string;
-    readonly requestedPath: string;
-  };
+      readonly kind: "system";
+      readonly fromPath: string;
+      readonly requestedPath: string;
+    };
 
 export interface IncludeResolver {
   resolve(request: IncludeRequest): ScriptSource | undefined;
@@ -100,12 +104,17 @@ export interface ScriptGlobalSnapshot {
 class MacroTable {
   private readonly entries = new Set<number>();
 
-  constructor(private readonly source: SourceRecord, private readonly memory: PrecompMemory) {}
+  constructor(
+    private readonly source: SourceRecord,
+    private readonly memory: PrecompMemory,
+  ) {}
 
-  get size(): number { return this.entries.size; }
+  get size(): number {
+    return this.entries.size;
+  }
   get(name: string): PrecompDefine | undefined {
     let remaining = this.entries.size + 1;
-    for (let id = this.source.hashHead(this.hash(name)); id !== 0;) {
+    for (let id = this.source.hashHead(this.hash(name)); id !== 0; ) {
       if (--remaining === 0) throw new RangeError("source define hash contains a cycle");
       const entry = this.memory.define(id);
       if (entry.name === name) return entry;
@@ -113,7 +122,9 @@ class MacroTable {
     }
     return undefined;
   }
-  has(name: string): boolean { return this.get(name) !== undefined; }
+  has(name: string): boolean {
+    return this.get(name) !== undefined;
+  }
   prepend(macro: PrecompDefine): void {
     const bucket = this.hash(macro.name);
     macro.hashnext = this.source.hashHead(bucket);
@@ -124,7 +135,7 @@ class MacroTable {
     const bucket = this.hash(name);
     let previous: PrecompDefine | undefined;
     let remaining = this.entries.size + 1;
-    for (let id = this.source.hashHead(bucket); id !== 0;) {
+    for (let id = this.source.hashHead(bucket); id !== 0; ) {
       if (--remaining === 0) throw new RangeError("source define hash contains a cycle");
       const entry = this.memory.define(id);
       if (entry.name === name) {
@@ -156,10 +167,17 @@ class MacroTable {
       }
     }
   }
-  captureSaveState() { return [...this.entries]; }
+  captureSaveState() {
+    return [...this.entries];
+  }
   restoreSaveState(value: unknown): void {
-    const reader = new SaveReader(value, "script.macros"); this.entries.clear();
-    for (const id of reader.list(cell => cell.integer(1))) { if (this.entries.has(id)) reader.fail("duplicate macro identity"); this.memory.define(id); this.entries.add(id); }
+    const reader = new SaveReader(value, "script.macros");
+    this.entries.clear();
+    for (const id of reader.list(cell => cell.integer(1))) {
+      if (this.entries.has(id)) reader.fail("duplicate macro identity");
+      this.memory.define(id);
+      this.entries.add(id);
+    }
   }
   private hash(name: string): number {
     let hash = 0;
@@ -187,11 +205,11 @@ interface SourceFrame {
 
 type TokenMetadata =
   | {
-    readonly kind: "defined";
-    readonly subtype: number;
-    readonly integerValue: number;
-    readonly floatValue: number;
-  }
+      readonly kind: "defined";
+      readonly subtype: number;
+      readonly integerValue: number;
+      readonly floatValue: number;
+    }
   | { readonly kind: "uninitialized"; readonly reason: string };
 
 interface Limits {
@@ -242,8 +260,10 @@ function evaluationDecimal(magnitude: number, precision = 2): string {
   let rounded: bigint;
   if (shift >= 0) rounded = scaled << BigInt(shift);
   else {
-    const divisor = 1n << BigInt(-shift), lower = scaled / divisor, remainder = scaled % divisor;
-    rounded = remainder * 2n > divisor || remainder * 2n === divisor && lower % 2n !== 0n ? lower + 1n : lower;
+    const divisor = 1n << BigInt(-shift),
+      lower = scaled / divisor,
+      remainder = scaled % divisor;
+    rounded = remainder * 2n > divisor || (remainder * 2n === divisor && lower % 2n !== 0n) ? lower + 1n : lower;
   }
   return `${rounded / scale}.${String(rounded % scale).padStart(precision, "0")}`;
 }
@@ -311,15 +331,30 @@ class ExpressionParser {
   }
 
   evaluate(): EvalValue {
-    interface Value { value: EvalValue; previous: Value | null; next: Value | null }
-    interface Operator { readonly token: PunctuationToken; readonly parentheses: number; readonly priority: number; previous: Operator | null; next: Operator | null }
+    interface Value {
+      value: EvalValue;
+      previous: Value | null;
+      next: Value | null;
+    }
+    interface Operator {
+      readonly token: PunctuationToken;
+      readonly parentheses: number;
+      readonly priority: number;
+      previous: Operator | null;
+      next: Operator | null;
+    }
     const values: { first: Value | null; last: Value | null } = { first: null, last: null };
     const operators: { first: Operator | null; last: Operator | null } = { first: null, last: null };
-    let numValues = 0, numOperators = 0, parentheses = 0, lastWasValue = false, negative = false;
+    let numValues = 0,
+      numOperators = 0,
+      parentheses = 0,
+      lastWasValue = false,
+      negative = false;
     const addValue = (value: EvalValue): void => {
       if (numValues++ >= 64) this.fail("out of value space\n", this.fallbackLocation);
       const entry: Value = { value, previous: values.last, next: null };
-      if (values.last === null) values.first = entry; else values.last.next = entry;
+      if (values.last === null) values.first = entry;
+      else values.last.next = entry;
       values.last = entry;
       lastWasValue = true;
     };
@@ -339,32 +374,56 @@ class ExpressionParser {
         if (brace && this.tokens[++index]?.text !== ")") this.fail("defined without ) in #if/#elif", token.location);
       } else if (token.kind === "number") {
         if (lastWasValue) this.fail("syntax error in #if/#elif", token.location);
-        addValue({ integerValue: negative ? signedExpressionValue(-(token.integerValue | 0)) : token.integerValue | 0, floatValue: negative ? -token.floatValue : token.floatValue });
+        addValue({
+          integerValue: negative ? signedExpressionValue(-(token.integerValue | 0)) : token.integerValue | 0,
+          floatValue: negative ? -token.floatValue : token.floatValue,
+        });
         negative = false;
       } else if (token.kind === "punctuation") {
         if (negative) this.fail("misplaced minus sign in #if/#elif", token.location);
         const op = token.punctuation;
-        if (op === Punctuation.ParenthesisOpen) { parentheses++; continue; }
-        if (op === Punctuation.ParenthesisClose) { if (--parentheses < 0) this.fail("too many ) in #if/#elsif", token.location); continue; }
-        if (!this.integerMode && (op === Punctuation.BinaryNot || op === Punctuation.Modulo || op === Punctuation.RightShift
-          || op === Punctuation.LeftShift || op === Punctuation.BinaryAnd || op === Punctuation.BinaryOr || op === Punctuation.BinaryXor)) {
+        if (op === Punctuation.ParenthesisOpen) {
+          parentheses++;
+          continue;
+        }
+        if (op === Punctuation.ParenthesisClose) {
+          if (--parentheses < 0) this.fail("too many ) in #if/#elsif", token.location);
+          continue;
+        }
+        if (
+          !this.integerMode &&
+          (op === Punctuation.BinaryNot ||
+            op === Punctuation.Modulo ||
+            op === Punctuation.RightShift ||
+            op === Punctuation.LeftShift ||
+            op === Punctuation.BinaryAnd ||
+            op === Punctuation.BinaryOr ||
+            op === Punctuation.BinaryXor)
+        ) {
           this.fail(`illigal operator ${token.text} on floating point operands\n`, token.location);
         }
         if (op === Punctuation.LogicalNot || op === Punctuation.BinaryNot) {
           if (lastWasValue) this.fail("! or ~ after value in #if/#elif", token.location);
-        } else if (op === Punctuation.Subtract && !lastWasValue) { negative = true; continue; }
-        else if (op === Punctuation.Increment || op === Punctuation.Decrement) {
+        } else if (op === Punctuation.Subtract && !lastWasValue) {
+          negative = true;
+          continue;
+        } else if (op === Punctuation.Increment || op === Punctuation.Decrement) {
           this.report("++ or -- used in #if/#elif", token.location);
         } else {
           if (this.precedence(op) === undefined) this.fail(`invalid operator ${token.text} in #if/#elif`, token.location);
           if (!lastWasValue) this.fail(`operator ${token.text} after operator in #if/#elif`, token.location);
         }
         if (numOperators++ >= 64) this.fail("out of operator space\n", token.location);
-        const priority = op === Punctuation.LogicalNot || op === Punctuation.BinaryNot ? 16
-          : op === Punctuation.Increment || op === Punctuation.Decrement ? 0 : this.precedence(op);
+        const priority =
+          op === Punctuation.LogicalNot || op === Punctuation.BinaryNot
+            ? 16
+            : op === Punctuation.Increment || op === Punctuation.Decrement
+              ? 0
+              : this.precedence(op);
         if (priority === undefined) throw new Error("source expression priority is missing");
         const entry: Operator = { token, parentheses, priority, previous: operators.last, next: null };
-        if (operators.last === null) operators.first = entry; else operators.last.next = entry;
+        if (operators.last === null) operators.first = entry;
+        else operators.last.next = entry;
         operators.last = entry;
         lastWasValue = false;
       } else this.fail(`unknown ${token.text} in #if/#elif`, token.location);
@@ -373,9 +432,14 @@ class ExpressionParser {
     if (parentheses !== 0) this.fail("too many ( in #if/#elif", this.fallbackLocation);
     let question: EvalValue | null = null;
     while (operators.first !== null) {
-      let operator: Operator = operators.first, value: Value | null = values.first;
+      let operator: Operator = operators.first,
+        value: Value | null = values.first;
       while (operator.next !== null) {
-        if (operator.parentheses > operator.next.parentheses || operator.parentheses === operator.next.parentheses && operator.priority >= operator.next.priority) break;
+        if (
+          operator.parentheses > operator.next.parentheses ||
+          (operator.parentheses === operator.next.parentheses && operator.priority >= operator.next.priority)
+        )
+          break;
         if (operator.token.punctuation !== Punctuation.LogicalNot && operator.token.punctuation !== Punctuation.BinaryNot) value = value?.next ?? null;
         if (value === null) this.fail("mising values in #if/#elif", operator.token.location);
         operator = operator.next;
@@ -387,7 +451,8 @@ class ExpressionParser {
         if (value.next !== null) this.debugEval(`value2 = ${debugEvaluationValue(value.next.value, this.integerMode)}`);
       }
       try {
-        if (op === Punctuation.LogicalNot) value.value = { integerValue: Number(value.value.integerValue === 0), floatValue: Number(value.value.floatValue === 0) };
+        if (op === Punctuation.LogicalNot)
+          value.value = { integerValue: Number(value.value.integerValue === 0), floatValue: Number(value.value.floatValue === 0) };
         else if (op === Punctuation.BinaryNot) value.value = { integerValue: ~value.value.integerValue, floatValue: value.value.floatValue };
         else {
           const next = value.next;
@@ -406,8 +471,10 @@ class ExpressionParser {
           }
           const removed = op === Punctuation.Question ? value : next;
           if (removed === null) throw new RangeError("source expression removes a missing value");
-          if (removed.previous === null) values.first = removed.next; else removed.previous.next = removed.next;
-          if (removed.next === null) values.last = removed.previous; else removed.next.previous = removed.previous;
+          if (removed.previous === null) values.first = removed.next;
+          else removed.previous.next = removed.next;
+          if (removed.next === null) values.last = removed.previous;
+          else removed.next.previous = removed.previous;
         }
       } catch (error) {
         if (this.isSourceFailure(error) && this.debugEval !== undefined) {
@@ -416,13 +483,14 @@ class ExpressionParser {
         throw error;
       }
       if (this.debugEval !== undefined) this.debugEval(`result value = ${debugEvaluationValue(value.value, this.integerMode)}`);
-      if (operator.previous === null) operators.first = operator.next; else operator.previous.next = operator.next;
-      if (operator.next === null) operators.last = operator.previous; else operator.next.previous = operator.previous;
+      if (operator.previous === null) operators.first = operator.next;
+      else operator.previous.next = operator.next;
+      if (operator.next === null) operators.last = operator.previous;
+      else operator.next.previous = operator.previous;
     }
     if (values.first === null) throw new RangeError("source expression has no result value");
     return values.first.value;
   }
-
 
   private binary(operator: PunctuationToken, left: EvalValue, right: EvalValue): EvalValue {
     switch (operator.punctuation) {
@@ -581,7 +649,6 @@ class ExpressionParser {
         return undefined;
     }
   }
-
 }
 
 class SourceReadFalse extends Error {}
@@ -590,7 +657,12 @@ type SourceOperation<T> = Generator<Promise<ScriptSource | undefined>, T, Script
 function synchronousSource<T>(operation: SourceOperation<T>): T {
   const result = operation.next();
   if (result.done) return result.value;
-  void result.value.then(source => { if (source instanceof SourceScriptStorage) source.dispose(); }, () => {});
+  void result.value.then(
+    source => {
+      if (source instanceof SourceScriptStorage) source.dispose();
+    },
+    () => {},
+  );
   const error = new Error("Synchronous script read requires synchronous includes");
   operation.throw(error);
   throw error;
@@ -623,8 +695,14 @@ class PreprocessorEngine {
   private disposed = false;
   private readingAsync = false;
 
-  constructor(root: ScriptSource | null, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions,
-    private readonly lifetime: "source" | "global" = "source", heap?: PrecompMemory, saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore }) {
+  constructor(
+    root: ScriptSource | null,
+    resolver: AsyncIncludeResolver,
+    options: ScriptPreprocessorOptions,
+    private readonly lifetime: "source" | "global" = "source",
+    heap?: PrecompMemory,
+    saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore },
+  ) {
     if (root !== null && root.path.length === 0) throw new RangeError("root source path cannot be empty");
     this.resolver = { resolve: request => this.invokeCallback(() => resolver.resolve(request)) };
     const now = options.now ?? (() => new Date());
@@ -644,7 +722,8 @@ class PreprocessorEngine {
       expressionTokens: positiveInteger(options.maxExpressionTokens, DEFAULT_TOKENS, "maxExpressionTokens"),
     });
     if (saved !== undefined) {
-      const reader = new SaveReader(saved.value, "script.preprocessor"), limits = reader.field("limits");
+      const reader = new SaveReader(saved.value, "script.preprocessor"),
+        limits = reader.field("limits");
       this.limits = {
         includeDepth: limits.field("includeDepth").integer(1),
         macroExpansions: limits.field("macroExpansions").integer(1),
@@ -656,16 +735,26 @@ class PreprocessorEngine {
       };
       this.heap.restoreSaveState(reader.field("heap").value, saved.restore);
       this.source = SourceRecord.restoreSaveState(reader.field("source").value, this.memory, saved.restore);
-      this.macros = new MacroTable(this.source, this.heap); this.macros.restoreSaveState(reader.field("macros").value);
+      this.macros = new MacroTable(this.source, this.heap);
+      this.macros.restoreSaveState(reader.field("macros").value);
       this.nextFrame = reader.field("nextFrame").integer(1);
       for (const cell of reader.field("frames").list(cell => cell)) {
-        const id = cell.field("id").integer(1); if (id >= this.nextFrame || this.frames.has(id)) cell.fail("invalid frame identity");
+        const id = cell.field("id").integer(1);
+        if (id >= this.nextFrame || this.frames.has(id)) cell.fail("invalid frame identity");
         const lexer = ScriptLexer.restoreSaveState(cell.field("lexer").value, this.memory, saved.restore, diagnostic => this.recordDiagnostic(diagnostic));
-        this.frames.set(id, { id, lexer, storage: lexer.sourceStorage, diagnosticNext: cell.field("diagnosticNext").integer(0), tokenCount: cell.field("tokenCount").integer(0) });
+        this.frames.set(id, {
+          id,
+          lexer,
+          storage: lexer.sourceStorage,
+          diagnosticNext: cell.field("diagnosticNext").integer(0),
+          tokenCount: cell.field("tokenCount").integer(0),
+        });
       }
       this.rootFrame = this.frame(reader.field("rootFrame").integer(1));
-      this.cursorToken.restoreSaveState(reader.field("cursorToken").value); this.output.restoreSaveState(reader.field("output").value);
-      this.expansionCount = reader.field("expansionCount").integer(0); this.outputCount = reader.field("outputCount").integer(0);
+      this.cursorToken.restoreSaveState(reader.field("cursorToken").value);
+      this.output.restoreSaveState(reader.field("output").value);
+      this.expansionCount = reader.field("expansionCount").integer(0);
+      this.outputCount = reader.field("outputCount").integer(0);
       this.reported.push(...reader.field("reported").list(readScriptDiagnostic));
       return;
     }
@@ -683,12 +772,33 @@ class PreprocessorEngine {
   captureSaveState(capture: ScriptMemoryCapture) {
     this.requireLive();
     if (this.readingAsync) throw new Error("Cannot checkpoint an in-flight asynchronous script read");
-    return { lifetime: this.lifetime, limits: { ...this.limits }, heap: this.heap.captureSaveState(capture), source: this.source.captureSaveState(capture), macros: this.macros.captureSaveState(),
-      nextFrame: this.nextFrame, rootFrame: this.rootFrame.id, frames: [...this.frames.values()].map(frame => ({ id: frame.id, lexer: frame.lexer.captureSaveState(capture), diagnosticNext: frame.diagnosticNext, tokenCount: frame.tokenCount })),
-      cursorToken: this.cursorToken.captureSaveState(), output: this.output.captureSaveState(), expansionCount: this.expansionCount, outputCount: this.outputCount,
-      reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) };
+    return {
+      lifetime: this.lifetime,
+      limits: { ...this.limits },
+      heap: this.heap.captureSaveState(capture),
+      source: this.source.captureSaveState(capture),
+      macros: this.macros.captureSaveState(),
+      nextFrame: this.nextFrame,
+      rootFrame: this.rootFrame.id,
+      frames: [...this.frames.values()].map(frame => ({
+        id: frame.id,
+        lexer: frame.lexer.captureSaveState(capture),
+        diagnosticNext: frame.diagnosticNext,
+        tokenCount: frame.tokenCount,
+      })),
+      cursorToken: this.cursorToken.captureSaveState(),
+      output: this.output.captureSaveState(),
+      expansionCount: this.expansionCount,
+      outputCount: this.outputCount,
+      reported: this.reported.map(value => ({ ...value, location: { ...value.location } })),
+    };
   }
-  static restoreSaveState(value: unknown, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions, restore: ScriptMemoryRestore): PreprocessorEngine {
+  static restoreSaveState(
+    value: unknown,
+    resolver: AsyncIncludeResolver,
+    options: ScriptPreprocessorOptions,
+    restore: ScriptMemoryRestore,
+  ): PreprocessorEngine {
     const lifetime = new SaveReader(value, "script.preprocessor").field("lifetime").choice("source", "global");
     return new PreprocessorEngine(null, resolver, options, lifetime, undefined, { value, restore });
   }
@@ -705,9 +815,14 @@ class PreprocessorEngine {
     });
   }
 
-  get currentScriptFilename(): string { this.requireLive(); return this.currentFrame.lexer.currentLocation.path; }
+  get currentScriptFilename(): string {
+    this.requireLive();
+    return this.currentFrame.lexer.currentLocation.path;
+  }
 
-  private get currentFrame(): SourceFrame { return this.frame(this.source.script); }
+  private get currentFrame(): SourceFrame {
+    return this.frame(this.source.script);
+  }
 
   nextToken(): ScriptToken | undefined {
     if (this.readingAsync) throw new Error("Script source already has a pending token read");
@@ -725,13 +840,22 @@ class PreprocessorEngine {
       while (!next.done) {
         try {
           const source = await next.value;
-          try { this.requireLive(); validate(); }
-          catch (error) { if (source instanceof SourceScriptStorage) source.dispose(); throw error; }
+          try {
+            this.requireLive();
+            validate();
+          } catch (error) {
+            if (source instanceof SourceScriptStorage) source.dispose();
+            throw error;
+          }
           next = operation.next(source);
-        } catch (error) { next = operation.throw(error); }
+        } catch (error) {
+          next = operation.throw(error);
+        }
       }
       return next.value === undefined ? undefined : this.currentRecord;
-    } finally { this.readingAsync = false; }
+    } finally {
+      this.readingAsync = false;
+    }
   }
 
   private *tokenOperation(): SourceOperation<ScriptToken | undefined> {
@@ -739,9 +863,13 @@ class PreprocessorEngine {
     const output = localToken();
     this.output = output;
     let token: ScriptToken | undefined;
-    try { token = yield* this.readToken(output); }
-    catch (error) {
-      if (error instanceof SourceReadFalse) { this.output = output; return undefined; }
+    try {
+      token = yield* this.readToken(output);
+    } catch (error) {
+      if (error instanceof SourceReadFalse) {
+        this.output = output;
+        return undefined;
+      }
       if (this.isSourceFailure(error)) this.output = output;
       throw error;
     }
@@ -769,12 +897,15 @@ class PreprocessorEngine {
 
   unread(record: ScriptTokenRecord): void {
     this.requireLive();
-    this.tokenMetadata.set(record.token, Object.freeze({
-      kind: "defined",
-      subtype: record.subtype,
-      integerValue: record.integerValue,
-      floatValue: record.floatValue,
-    }));
+    this.tokenMetadata.set(
+      record.token,
+      Object.freeze({
+        kind: "defined",
+        subtype: record.subtype,
+        integerValue: record.integerValue,
+        floatValue: record.floatValue,
+      }),
+    );
     this.cursor.unread(record.token);
   }
 
@@ -818,9 +949,13 @@ class PreprocessorEngine {
     this.disposed = true;
   }
 
-  setIncludePath(path: string): void { this.requireLive(); this.source.setIncludePath(path); }
+  setIncludePath(path: string): void {
+    this.requireLive();
+    this.source.setIncludePath(path);
+  }
   setPunctuations(punctuations: readonly ScriptPunctuation[] | null): void {
-    this.requireLive(); this.source.setPunctuations(punctuations);
+    this.requireLive();
+    this.source.setPunctuations(punctuations);
   }
 
   addDefine(text: string): boolean {
@@ -831,13 +966,16 @@ class PreprocessorEngine {
     return true;
   }
 
-  addBuiltinDefines(): void { this.requireLive(); this.installBuiltins(); }
+  addBuiltinDefines(): void {
+    this.requireLive();
+    this.installBuiltins();
+  }
 
   printDefineHashTable(write: (text: string) => void): void {
     this.requireLive();
     for (let bucket = 0; bucket < SOURCE_DEFINE_HASH_BUCKETS; bucket++) {
       write(`${String(bucket).padStart(4, " ")}:`);
-      for (let id = this.source.hashHead(bucket); id !== 0;) {
+      for (let id = this.source.hashHead(bucket); id !== 0; ) {
         const define = this.heap.define(id);
         write(` ${define.name}`);
         id = define.hashnext;
@@ -848,9 +986,13 @@ class PreprocessorEngine {
 
   expectTokenString(text: string): boolean {
     const record = this.readExpected();
-    if (record === undefined) { this.error(`couldn't find expected ${text}`, this.currentFrame.lexer.currentLocation); return false; }
+    if (record === undefined) {
+      this.error(`couldn't find expected ${text}`, this.currentFrame.lexer.currentLocation);
+      return false;
+    }
     if (record.token.text !== text) {
-      this.error(`expected ${text}, found ${record.token.text}`, this.currentFrame.lexer.currentLocation); return false;
+      this.error(`expected ${text}, found ${record.token.text}`, this.currentFrame.lexer.currentLocation);
+      return false;
     }
     return true;
   }
@@ -913,19 +1055,25 @@ class PreprocessorEngine {
       output.copyFrom(current.token);
       return result !== undefined;
     } catch (error) {
-      if (this.isSourceFailure(error)) { output.copyFrom(current.token); return false; }
+      if (this.isSourceFailure(error)) {
+        output.copyFrom(current.token);
+        return false;
+      }
       throw error;
     }
   }
 
   private readExpected(): ScriptTokenRecord | undefined {
-    try { return this.nextRecord(); }
-    catch (error) { if (this.isSourceFailure(error)) return undefined; throw error; }
+    try {
+      return this.nextRecord();
+    } catch (error) {
+      if (this.isSourceFailure(error)) return undefined;
+      throw error;
+    }
   }
 
   isSourceFailure(error: unknown): boolean {
-    return error instanceof ScriptLanguageError && !this.callbackAborts.has(error)
-      && this.reported.includes(error.diagnostic);
+    return error instanceof ScriptLanguageError && !this.callbackAborts.has(error) && this.reported.includes(error.diagnostic);
   }
 
   private requireLive(): void {
@@ -982,7 +1130,9 @@ class PreprocessorEngine {
     return frame;
   }
 
-  private nextFrameId(frame: SourceFrame): number { return frame.storage === null ? frame.diagnosticNext : frame.storage.nextScript; }
+  private nextFrameId(frame: SourceFrame): number {
+    return frame.storage === null ? frame.diagnosticNext : frame.storage.nextScript;
+  }
   private setNextFrame(frame: SourceFrame, next: number): void {
     if (frame.storage === null) frame.diagnosticNext = next;
     else frame.storage.nextScript = next;
@@ -1048,8 +1198,9 @@ class PreprocessorEngine {
       }
       if (token.kind === "string") {
         let next: ScriptToken | undefined;
-        try { next = yield* this.readToken(localToken()); }
-        catch (error) {
+        try {
+          next = yield* this.readToken(localToken());
+        } catch (error) {
           if (!(error instanceof SourceReadFalse) && !this.isSourceFailure(error)) throw error;
         }
         if (next?.kind === "string") {
@@ -1077,9 +1228,12 @@ class PreprocessorEngine {
 
   private snapshotToken(stored: PrecompToken): ScriptToken {
     const record = stored.token.readRecord(stored.context);
-    this.tokenMetadata.set(record.token, stored.unsupported === undefined
-      ? { kind: "defined", subtype: record.subtype, integerValue: record.integerValue, floatValue: record.floatValue }
-      : { kind: "uninitialized", reason: stored.unsupported });
+    this.tokenMetadata.set(
+      record.token,
+      stored.unsupported === undefined
+        ? { kind: "defined", subtype: record.subtype, integerValue: record.integerValue, floatValue: record.floatValue }
+        : { kind: "uninitialized", reason: stored.unsupported },
+    );
     return record.token;
   }
 
@@ -1135,10 +1289,7 @@ class PreprocessorEngine {
     }
   }
 
-  private *directive(
-    cursor: LineTokenReader,
-    hashLocation: SourceLocation,
-  ): SourceOperation<void> {
+  private *directive(cursor: LineTokenReader, hashLocation: SourceLocation): SourceOperation<void> {
     const directive = cursor.next();
     if (directive === undefined || directive.linesCrossed > 0) {
       if (directive !== undefined) {
@@ -1209,11 +1360,7 @@ class PreprocessorEngine {
     this.source.pushIndent(SourceIndentType.If, !selected);
   }
 
-  private ifdefDirective(
-    cursor: LineTokenReader,
-    location: SourceLocation,
-    negate: boolean,
-  ): void {
+  private ifdefDirective(cursor: LineTokenReader, location: SourceLocation, negate: boolean): void {
     const name = this.readLineToken(cursor);
     if (name === undefined || name.kind !== "name") {
       if (name !== undefined) cursor.unread(name);
@@ -1370,11 +1517,7 @@ class PreprocessorEngine {
     this.macros.delete(name.value);
   }
 
-  private *includeDirective(
-    cursor: LineTokenReader,
-    sourcePath: string,
-    location: SourceLocation,
-  ): SourceOperation<void> {
+  private *includeDirective(cursor: LineTokenReader, sourcePath: string, location: SourceLocation): SourceOperation<void> {
     const first = cursor.next();
     if (first === undefined || first.linesCrossed > 0) {
       this.fail("#include without file name", location);
@@ -1382,8 +1525,7 @@ class PreprocessorEngine {
     let request: IncludeRequest;
     if (first.kind === "string") {
       const includePath = this.source.includePath;
-      request = Object.freeze({ kind: "quoted", fromPath: sourcePath, requestedPath: first.value,
-        ...(includePath.length === 0 ? {} : { includePath }) });
+      request = Object.freeze({ kind: "quoted", fromPath: sourcePath, requestedPath: first.value, ...(includePath.length === 0 ? {} : { includePath }) });
     } else if (this.isPunctuation(first, Punctuation.Less)) {
       const pieces: string[] = [];
       let closed = false;
@@ -1425,7 +1567,7 @@ class PreprocessorEngine {
     }
     const includedFrame = this.createFrame(included);
     let remaining = this.frames.size + 1;
-    for (let id = this.source.script; id !== 0;) {
+    for (let id = this.source.script; id !== 0; ) {
       if (--remaining === 0) throw new RangeError("source script stack contains a cycle");
       const frame = this.frame(id);
       if (asciiFold(sourceCommandText(frame.lexer.currentLocation.path).slice(0, 99999)) === asciiFold(sourceCommandText(included.path).slice(0, 99999))) {
@@ -1447,19 +1589,14 @@ class PreprocessorEngine {
     if (this.expansionCount > this.limits.macroExpansions) {
       this.fail(`macro expansion count exceeds ${this.limits.macroExpansions}`, invocation.location);
     }
-    const expanded = macro.builtin !== 0
-      ? this.expandBuiltin(macro, invocation)
-      : this.expandDefine(macro, invocation.location);
+    const expanded = macro.builtin !== 0 ? this.expandBuiltin(macro, invocation) : this.expandDefine(macro, invocation.location);
     if (expanded.first === 0 || expanded.last === 0) return false;
     this.heap.token(expanded.last).token.next = this.source.tokens;
     this.source.tokens = expanded.first;
     return true;
   }
 
-  private readMacroArguments(
-    macro: PrecompDefine,
-    location: SourceLocation,
-  ): readonly number[] {
+  private readMacroArguments(macro: PrecompDefine, location: SourceLocation): readonly number[] {
     const opening = this.cursor.next();
     if (opening === undefined) this.fail(`define ${macro.name} missing parms`, location);
     if (macro.numparms > MAX_DEFINE_PARAMETERS) this.fail(`define with more than ${MAX_DEFINE_PARAMETERS} parameters`, location);
@@ -1475,8 +1612,11 @@ class PreprocessorEngine {
       for (let argument = 0; !done; argument++) {
         if (argument >= MAX_DEFINE_PARAMETERS) this.fail(`define ${macro.name} with too many parms`, location);
         if (argument >= macro.numparms) {
-          const diagnostic: ScriptDiagnostic = Object.freeze({ severity: "warning",
-            message: `define ${macro.name} has too many parms`, location: this.currentFrame.lexer.currentLocation });
+          const diagnostic: ScriptDiagnostic = Object.freeze({
+            severity: "warning",
+            message: `define ${macro.name} has too many parms`,
+            location: this.currentFrame.lexer.currentLocation,
+          });
           this.recordDiagnostic(diagnostic);
           throw new ScriptLanguageError(diagnostic, this.reported);
         }
@@ -1491,7 +1631,10 @@ class PreprocessorEngine {
             break;
           }
           lastComma = false;
-          if (token.text === "(") { depth++; continue; }
+          if (token.text === "(") {
+            depth++;
+            continue;
+          }
           if (token.text === ")" && --depth <= 0) {
             const lastArgument = argumentsList[macro.numparms - 1];
             if (lastArgument === undefined) throw new RangeError("define parameter count exceeds its local argument table");
@@ -1537,7 +1680,7 @@ class PreprocessorEngine {
     }
     const expanded: TokenChain = { first: 0, last: 0, count: 0 };
     try {
-      for (let id = macro.tokens; id !== 0;) {
+      for (let id = macro.tokens; id !== 0; ) {
         let defined = this.heap.token(id);
         const parameter = defined.token.type === 4 ? macro.parameterIndex(defined.token.string) : -1;
         if (parameter >= 0) {
@@ -1572,12 +1715,13 @@ class PreprocessorEngine {
         }
         id = defined.token.next;
       }
-      for (let id = expanded.first; id !== 0;) {
+      for (let id = expanded.first; id !== 0; ) {
         const first = this.heap.token(id);
         const merge = first.token.next === 0 ? undefined : this.heap.token(first.token.next);
         if (merge !== undefined && merge.token.string.startsWith("##") && merge.token.next !== 0) {
           const second = this.heap.token(merge.token.next);
-          const left = first.token, right = second.token;
+          const left = first.token,
+            right = second.token;
           if (left.type === 4 && (right.type === 4 || right.type === 3)) this.writeChecked(left, left.string + right.string, location);
           else if (left.type === 1 && right.type === 1) this.writeChecked(left, left.string.slice(0, -1) + right.string.slice(1), location);
           else this.fail(`can't merge ${left.string} with ${right.string}`, location);
@@ -1638,17 +1782,13 @@ class PreprocessorEngine {
         token.subtype = token.string.length;
         break;
       }
-      default: return { first: 0, last: 0, count: 0 };
+      default:
+        return { first: 0, last: 0, count: 0 };
     }
     return { first: copied.id, last: copied.id, count: 1 };
   }
 
-  private evaluateDirective(
-    cursor: LineTokenReader,
-    integerMode: boolean,
-    location: SourceLocation,
-    form: "hash" | "dollar",
-  ): void {
+  private evaluateDirective(cursor: LineTokenReader, integerMode: boolean, location: SourceLocation, form: "hash" | "dollar"): void {
     const value = this.evaluateExpression(cursor, integerMode, location, form);
     const numeric = integerMode ? value.integerValue : value.floatValue;
     const absolute = Math.abs(numeric);
@@ -1657,8 +1797,12 @@ class PreprocessorEngine {
     const emittedLocation = this.currentFrame.lexer.currentLocation;
     const number = makeNumber(text, absolute, flags, emittedLocation);
     // #eval leaves the numeric fields unset in the source and nothing reads them back, so they are read as zero.
-    this.tokenMetadata.set(number, { kind: "defined", subtype: flags,
-      integerValue: form === "hash" ? 0 : Math.trunc(numeric), floatValue: form === "hash" ? 0 : numeric });
+    this.tokenMetadata.set(number, {
+      kind: "defined",
+      subtype: flags,
+      integerValue: form === "hash" ? 0 : Math.trunc(numeric),
+      floatValue: form === "hash" ? 0 : numeric,
+    });
     this.unreadToken(number);
     if (numeric < 0) {
       const sign = makePunctuation("-", Punctuation.Subtract, emittedLocation);
@@ -1667,10 +1811,9 @@ class PreprocessorEngine {
     }
   }
 
-  private evaluateExpression(cursor: LineTokenReader, integerMode: boolean,
-    location: SourceLocation, form: "hash" | "dollar"): EvalValue {
+  private evaluateExpression(cursor: LineTokenReader, integerMode: boolean, location: SourceLocation, form: "hash" | "dollar"): EvalValue {
     if (form === "dollar") cursor.next();
-    const read = (): ScriptToken | undefined => form === "hash" ? this.readLineToken(cursor) : cursor.next();
+    const read = (): ScriptToken | undefined => (form === "hash" ? this.readLineToken(cursor) : cursor.next());
     let token = read();
     if (token === undefined) this.fail(form === "hash" ? "no value after #if/#elif" : "nothing to evaluate", location);
     const expression: TokenChain = { first: 0, last: 0, count: 0 };
@@ -1699,10 +1842,16 @@ class PreprocessorEngine {
         token = read();
       } while (token !== undefined);
       const tokens = Array.from(this.heap.chain(expression.first), token => this.snapshotToken(token));
-      const value = new ExpressionParser(tokens, integerMode, name => this.macros.has(name),
-        (message, failureLocation) => this.fail(message, failureLocation), location,
-        (message, failureLocation) => this.error(message, failureLocation), this.debugEval,
-        error => this.isSourceFailure(error)).evaluate();
+      const value = new ExpressionParser(
+        tokens,
+        integerMode,
+        name => this.macros.has(name),
+        (message, failureLocation) => this.fail(message, failureLocation),
+        location,
+        (message, failureLocation) => this.error(message, failureLocation),
+        this.debugEval,
+        error => this.isSourceFailure(error),
+      ).evaluate();
       if (this.debugEval !== undefined) {
         const label = form === "hash" ? "eval" : "$eval";
         this.debugEval(`${label}:`);
@@ -1710,7 +1859,9 @@ class PreprocessorEngine {
         this.debugEval(`${label} result: ${debugEvaluationValue(value, integerMode)}`);
       }
       return value;
-    } finally { this.heap.freeTokens(expression.first); }
+    } finally {
+      this.heap.freeTokens(expression.first);
+    }
   }
 
   private dollarDirective(cursor: LineTokenReader, location: SourceLocation): void {
@@ -1756,8 +1907,9 @@ class PreprocessorEngine {
   }
 
   private invokeCallback<T>(callback: () => T): T {
-    try { return callback(); }
-    catch (error) {
+    try {
+      return callback();
+    } catch (error) {
       if (error instanceof ScriptLanguageError) this.callbackAborts.add(error);
       throw error;
     }
@@ -1769,38 +1921,64 @@ export class ScriptGlobalDefines {
   private first = 0;
   private readonly reported: ScriptDiagnostic[] = [];
 
-  constructor(private readonly report?: (diagnostic: ScriptDiagnostic) => void, private readonly memory?: ScriptMemory) {
+  constructor(
+    private readonly report?: (diagnostic: ScriptDiagnostic) => void,
+    private readonly memory?: ScriptMemory,
+  ) {
     this.heap = new PrecompMemory(memory);
   }
 
   captureOwnedSaveState() {
-    const allocations: Uint8Array[] = [], references = new Map<ScriptMemoryAllocation, number>();
-    const state = this.captureSaveState({ reference: allocation => {
-      const prior = references.get(allocation); if (prior !== undefined) return prior;
-      const index = allocations.length; references.set(allocation, index); allocations.push(allocation.bytes.slice()); return index;
-    } });
+    const allocations: Uint8Array[] = [],
+      references = new Map<ScriptMemoryAllocation, number>();
+    const state = this.captureSaveState({
+      reference: allocation => {
+        const prior = references.get(allocation);
+        if (prior !== undefined) return prior;
+        const index = allocations.length;
+        references.set(allocation, index);
+        allocations.push(allocation.bytes.slice());
+        return index;
+      },
+    });
     return { allocations, state };
   }
   restoreOwnedSaveState(value: unknown): void {
     if (this.first !== 0) throw new Error("Global define restore requires an empty owner");
-    const r = new SaveReader(value, "script.globalOwner"), bytes = r.field("allocations").list(v => v.bytes());
+    const r = new SaveReader(value, "script.globalOwner"),
+      bytes = r.field("allocations").list(v => v.bytes());
     const allocations = new Map<number, ScriptMemoryAllocation>();
-    this.restoreSaveState(r.field("state").value, { allocation: id => {
-      const prior = allocations.get(id); if (prior !== undefined) return prior;
-      const saved = bytes[id]; if (saved === undefined) throw new Error("Invalid global define allocation");
-      const allocation = this.memory?.allocate(saved.length, "heap", false) ?? { bytes: new Uint8Array(saved.length) };
-      allocation.bytes.set(saved); allocations.set(id, allocation); return allocation;
-    } });
+    this.restoreSaveState(r.field("state").value, {
+      allocation: id => {
+        const prior = allocations.get(id);
+        if (prior !== undefined) return prior;
+        const saved = bytes[id];
+        if (saved === undefined) throw new Error("Invalid global define allocation");
+        const allocation = this.memory?.allocate(saved.length, "heap", false) ?? { bytes: new Uint8Array(saved.length) };
+        allocation.bytes.set(saved);
+        allocations.set(id, allocation);
+        return allocation;
+      },
+    });
   }
 
-  captureSaveState(capture: ScriptMemoryCapture) { return { first: this.first, heap: this.heap.captureSaveState(capture), reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) }; }
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return {
+      first: this.first,
+      heap: this.heap.captureSaveState(capture),
+      reported: this.reported.map(value => ({ ...value, location: { ...value.location } })),
+    };
+  }
   restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
     const reader = new SaveReader(value, "script.globals");
-    this.heap.restoreSaveState(reader.field("heap").value, restore); this.first = reader.field("first").integer(0);
+    this.heap.restoreSaveState(reader.field("heap").value, restore);
+    this.first = reader.field("first").integer(0);
     this.reported.splice(0, this.reported.length, ...reader.field("reported").list(readScriptDiagnostic));
   }
 
-  get diagnostics(): readonly ScriptDiagnostic[] { return Object.freeze([...this.reported]); }
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return Object.freeze([...this.reported]);
+  }
 
   add(text: string): boolean {
     const macro = defineFromString(text, this.memory, this.heap, diagnostic => {
@@ -1815,10 +1993,14 @@ export class ScriptGlobalDefines {
 
   /** PC_RemoveGlobalDefine frees without unlinking; later traversal reaches the dangling ID. */
   remove(name: string): boolean {
-    const zero = name.indexOf("\0"), text = zero < 0 ? name : name.slice(0, zero);
-    for (let id = this.first; id !== 0;) {
+    const zero = name.indexOf("\0"),
+      text = zero < 0 ? name : name.slice(0, zero);
+    for (let id = this.first; id !== 0; ) {
       const define = this.heap.define(id);
-      if (define.name === text) { this.heap.freeDefine(define); return true; }
+      if (define.name === text) {
+        this.heap.freeDefine(define);
+        return true;
+      }
       id = define.next;
     }
     return false;
@@ -1827,7 +2009,7 @@ export class ScriptGlobalDefines {
   snapshot(): ScriptGlobalSnapshot {
     const copied = new PrecompMemory(undefined);
     const definitions: PrecompDefine[] = [];
-    for (let id = this.first; id !== 0;) {
+    for (let id = this.first; id !== 0; ) {
       const define = this.heap.define(id);
       definitions.push(copied.copyDefine(define));
       id = define.next;
@@ -1836,7 +2018,7 @@ export class ScriptGlobalDefines {
   }
 
   copyTo(memory: PrecompMemory, publish: (define: PrecompDefine) => void): void {
-    for (let id = this.first; id !== 0;) {
+    for (let id = this.first; id !== 0; ) {
       const define = this.heap.define(id);
       publish(memory.copyDefine(define));
       id = define.next;
@@ -1852,15 +2034,27 @@ export class ScriptGlobalDefines {
   }
 }
 
-function defineFromString(text: string, memory: ScriptMemory | undefined, heap: PrecompMemory,
-  report: (diagnostic: ScriptDiagnostic) => void): PrecompDefine | undefined {
+function defineFromString(
+  text: string,
+  memory: ScriptMemory | undefined,
+  heap: PrecompMemory,
+  report: (diagnostic: ScriptDiagnostic) => void,
+): PrecompDefine | undefined {
   const zero = text.indexOf("\0");
-  const engine = new PreprocessorEngine({ path: "*extern", text: zero < 0 ? text : text.slice(0, zero) }, { resolve: () => undefined }, {
-    ...(memory === undefined ? {} : { memory }), report,
-  }, "global", heap);
+  const engine = new PreprocessorEngine(
+    { path: "*extern", text: zero < 0 ? text : text.slice(0, zero) },
+    { resolve: () => undefined },
+    {
+      ...(memory === undefined ? {} : { memory }),
+      report,
+    },
+    "global",
+    heap,
+  );
   let define: PrecompDefine | undefined;
-  try { define = engine.parseGlobal(); }
-  catch (error) {
+  try {
+    define = engine.parseGlobal();
+  } catch (error) {
     if (!(error instanceof SourceReadFalse) && !engine.isSourceFailure(error)) throw error;
   }
   engine.dispose();
@@ -1870,43 +2064,94 @@ function defineFromString(text: string, memory: ScriptMemory | undefined, heap: 
 export class ScriptSourceReader {
   private constructor(private readonly engine: PreprocessorEngine) {}
 
-  static open(
-    root: ScriptSource,
-    resolver: AsyncIncludeResolver,
-    options: ScriptPreprocessorOptions = {},
-  ): ScriptSourceReader {
+  static open(root: ScriptSource, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions = {}): ScriptSourceReader {
     return new ScriptSourceReader(new PreprocessorEngine(root, resolver, options));
   }
 
-  captureSaveState(capture: ScriptMemoryCapture) { return this.engine.captureSaveState(capture); }
-  static restoreSaveState(value: unknown, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions, restore: ScriptMemoryRestore): ScriptSourceReader {
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return this.engine.captureSaveState(capture);
+  }
+  static restoreSaveState(
+    value: unknown,
+    resolver: AsyncIncludeResolver,
+    options: ScriptPreprocessorOptions,
+    restore: ScriptMemoryRestore,
+  ): ScriptSourceReader {
     return new ScriptSourceReader(PreprocessorEngine.restoreSaveState(value, resolver, options, restore));
   }
 
-  next(): ScriptTokenRecord | undefined { return this.engine.nextRecord(); }
-  nextAsync(validate: () => void = () => {}): Promise<ScriptTokenRecord | undefined> { return this.engine.nextRecordAsync(validate); }
-  get rawToken(): SourceTokenMemory { return this.engine.rawToken; }
-  get currentRecord(): ScriptTokenRecord { return this.engine.currentRecord; }
-  unread(record: ScriptTokenRecord): void { this.engine.unread(record); }
-  unreadLast(): void { this.engine.unreadLast(); }
-  dispose(): void { this.engine.dispose(); }
-  disposeRecordOnly(): void { this.engine.disposeRecordOnly(); }
-  setIncludePath(path: string): void { this.engine.setIncludePath(path); }
-  setPunctuations(punctuations: readonly ScriptPunctuation[] | null): void { this.engine.setPunctuations(punctuations); }
-  addDefine(text: string): boolean { return this.engine.addDefine(text); }
-  addBuiltinDefines(): void { this.engine.addBuiltinDefines(); }
-  printDefineHashTable(write: (text: string) => void): void { this.engine.printDefineHashTable(write); }
-  expectTokenString(text: string): boolean { return this.engine.expectTokenString(text); }
-  expectAnyToken(output: SourceTokenMemory): boolean { return this.engine.expectAnyToken(output); }
-  expectTokenType(type: number, subtype: number, output: SourceTokenMemory): boolean { return this.engine.expectTokenType(type, subtype, output); }
-  checkTokenString(text: string): boolean { return this.engine.checkTokenString(text); }
-  checkTokenType(type: number, subtype: number, output: SourceTokenMemory): boolean { return this.engine.checkTokenType(type, subtype, output); }
-  skipUntilString(text: string): boolean { return this.engine.skipUntilString(text); }
-  readLineInto(output: SourceTokenMemory): boolean { return this.engine.readLineInto(output); }
-  isSourceFailure(error: unknown): boolean { return this.engine.isSourceFailure(error); }
-  get position(): ScriptSourcePosition { return this.engine.position; }
-  get currentScriptFilename(): string { return this.engine.currentScriptFilename; }
-  get diagnostics(): readonly ScriptDiagnostic[] { return this.engine.diagnostics; }
+  next(): ScriptTokenRecord | undefined {
+    return this.engine.nextRecord();
+  }
+  nextAsync(validate: () => void = () => {}): Promise<ScriptTokenRecord | undefined> {
+    return this.engine.nextRecordAsync(validate);
+  }
+  get rawToken(): SourceTokenMemory {
+    return this.engine.rawToken;
+  }
+  get currentRecord(): ScriptTokenRecord {
+    return this.engine.currentRecord;
+  }
+  unread(record: ScriptTokenRecord): void {
+    this.engine.unread(record);
+  }
+  unreadLast(): void {
+    this.engine.unreadLast();
+  }
+  dispose(): void {
+    this.engine.dispose();
+  }
+  disposeRecordOnly(): void {
+    this.engine.disposeRecordOnly();
+  }
+  setIncludePath(path: string): void {
+    this.engine.setIncludePath(path);
+  }
+  setPunctuations(punctuations: readonly ScriptPunctuation[] | null): void {
+    this.engine.setPunctuations(punctuations);
+  }
+  addDefine(text: string): boolean {
+    return this.engine.addDefine(text);
+  }
+  addBuiltinDefines(): void {
+    this.engine.addBuiltinDefines();
+  }
+  printDefineHashTable(write: (text: string) => void): void {
+    this.engine.printDefineHashTable(write);
+  }
+  expectTokenString(text: string): boolean {
+    return this.engine.expectTokenString(text);
+  }
+  expectAnyToken(output: SourceTokenMemory): boolean {
+    return this.engine.expectAnyToken(output);
+  }
+  expectTokenType(type: number, subtype: number, output: SourceTokenMemory): boolean {
+    return this.engine.expectTokenType(type, subtype, output);
+  }
+  checkTokenString(text: string): boolean {
+    return this.engine.checkTokenString(text);
+  }
+  checkTokenType(type: number, subtype: number, output: SourceTokenMemory): boolean {
+    return this.engine.checkTokenType(type, subtype, output);
+  }
+  skipUntilString(text: string): boolean {
+    return this.engine.skipUntilString(text);
+  }
+  readLineInto(output: SourceTokenMemory): boolean {
+    return this.engine.readLineInto(output);
+  }
+  isSourceFailure(error: unknown): boolean {
+    return this.engine.isSourceFailure(error);
+  }
+  get position(): ScriptSourcePosition {
+    return this.engine.position;
+  }
+  get currentScriptFilename(): string {
+    return this.engine.currentScriptFilename;
+  }
+  get diagnostics(): readonly ScriptDiagnostic[] {
+    return this.engine.diagnostics;
+  }
 }
 
 export class ScriptPreprocessor {
@@ -1915,16 +2160,16 @@ export class ScriptPreprocessor {
   private index = 0;
   private unreadToken: ScriptToken | undefined;
 
-  private constructor(tokens: readonly ScriptToken[], diagnostics: readonly ScriptDiagnostic[], private readonly engine: PreprocessorEngine) {
+  private constructor(
+    tokens: readonly ScriptToken[],
+    diagnostics: readonly ScriptDiagnostic[],
+    private readonly engine: PreprocessorEngine,
+  ) {
     this.tokens = Object.freeze([...tokens]);
     this.reported = Object.freeze([...diagnostics]);
   }
 
-  static create(
-    root: ScriptSource,
-    resolver: IncludeResolver,
-    options: ScriptPreprocessorOptions = {},
-  ): ScriptPreprocessor {
+  static create(root: ScriptSource, resolver: IncludeResolver, options: ScriptPreprocessorOptions = {}): ScriptPreprocessor {
     const engine = new PreprocessorEngine(root, resolver, options);
     const tokens: ScriptToken[] = [];
     while (true) {
@@ -1935,7 +2180,9 @@ export class ScriptPreprocessor {
     return new ScriptPreprocessor(tokens, engine.diagnostics, engine);
   }
 
-  dispose(): void { this.engine.dispose(); }
+  dispose(): void {
+    this.engine.dispose();
+  }
 
   get diagnostics(): readonly ScriptDiagnostic[] {
     return this.reported;

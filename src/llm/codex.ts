@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { createHash } from "node:crypto";
 import { arch, platform, release } from "node:os";
 import type { SubscriptionCredential } from "./auth.ts";
@@ -16,32 +17,51 @@ export function subscriptionAccountId(token: string): string {
     const id = auth["chatgpt_account_id"];
     if (typeof id !== "string" || id.trim() === "" || /[\x00-\x20\x7f]/.test(id)) throw new Error();
     return id;
-  } catch { throw new LlmSettingsError("Subscription credential has no valid ChatGPT account ID. Sign in again."); }
+  } catch {
+    throw new LlmSettingsError("Subscription credential has no valid ChatGPT account ID. Sign in again.");
+  }
 }
 
 /** Stable per-model cache key so the server can reuse the large static instruction prefix across turns. */
 export function promptCacheKey(model: string): string {
-  return createHash("sha256").update(`quake-typescript:${model.replace(/^openai[:/]/, "")}`).digest("hex");
+  return createHash("sha256")
+    .update(`quake-typescript:${model.replace(/^openai[:/]/, "")}`)
+    .digest("hex");
 }
 
 export async function requestCodex(input: TransportRequest, credential: SubscriptionCredential, fetcher: LlmFetch): Promise<string> {
-  const id = subscriptionAccountId(credential.accessToken), session = input.sessionId ?? crypto.randomUUID();
+  const id = subscriptionAccountId(credential.accessToken),
+    session = input.sessionId ?? crypto.randomUUID();
   const model = input.model.replace(/^openai[:/]/, "");
-  const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/responses", {
-    method: "POST", signal: input.signal,
-    headers: {
-      authorization: `Bearer ${credential.accessToken}`, "chatgpt-account-id": id,
-      originator: "pi", "OpenAI-Beta": "responses=experimental", accept: "text/event-stream",
-      "content-type": "application/json", "User-Agent": `pi (${platform()} ${release()}; ${arch()})`, session_id: session,
+  const response = await fetchLlmResponse(
+    "https://chatgpt.com/backend-api/codex/responses",
+    {
+      method: "POST",
+      signal: input.signal,
+      headers: {
+        authorization: `Bearer ${credential.accessToken}`,
+        "chatgpt-account-id": id,
+        originator: "pi",
+        "OpenAI-Beta": "responses=experimental",
+        accept: "text/event-stream",
+        "content-type": "application/json",
+        "User-Agent": `pi (${platform()} ${release()}; ${arch()})`,
+        session_id: session,
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        stream: true,
+        instructions: input.instructions.trim() || "You are a helpful assistant.",
+        input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
+        ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }),
+        text: { verbosity: "low" },
+        prompt_cache_key: promptCacheKey(model),
+      }),
     },
-    body: JSON.stringify({
-      model, store: false, stream: true,
-      instructions: input.instructions.trim() || "You are a helpful assistant.",
-      input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
-      ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }),
-      text: { verbosity: "low" }, prompt_cache_key: promptCacheKey(model),
-    }),
-  }, fetcher, input.signal);
+    fetcher,
+    input.signal,
+  );
   if (!response.ok) {
     cancelResponseBody(response);
     throw new LlmHttpError(response.status);

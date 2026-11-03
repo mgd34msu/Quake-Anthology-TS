@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
@@ -34,31 +35,61 @@ test("Q2 base and expansion source messages use their mounted catalog and select
   const archiveDigest = await digestFile(archivePath);
   const sources: readonly ContentId[] = ["q2:rerelease:baseq2:retail", "q2:rerelease:xatrix:retail", "q2:rerelease:rogue:retail", "q2:rerelease:mg1:retail"];
   for (const source of sources) {
-    const archive: ContentMount = { kind: "archive", identity: createMountIdentity(`mount:test:${source}`, source, 0), format: "kpf", archivePath, archiveDigest };
+    const archive: ContentMount = {
+      kind: "archive",
+      identity: createMountIdentity(`mount:test:${source}`, source, 0),
+      format: "kpf",
+      archivePath,
+      archiveDigest,
+    };
     using mounts = await openMountPlan({ id: `mount-plan:test:${source}`, mounts: [archive], defaultOrder: [archive.identity.id], prefixOrders: [] });
     const images = new SceneImageRegistry({ identity: Symbol(source), session: identity.session, generation: 0 });
     const textures = new SceneTextureLoader(images, { read: async () => null });
     try {
-      const provider: ProviderSceneAssets = { family: "q2", mounts, palette: null, textures,
-        shaders: new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider(source)), modelPolicy: DEFAULT_MODEL_REPLACEMENT_POLICY };
+      const provider: ProviderSceneAssets = {
+        family: "q2",
+        mounts,
+        palette: null,
+        textures,
+        shaders: new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider(source)),
+        modelPolicy: DEFAULT_MODEL_REPLACEMENT_POLICY,
+      };
       const opened: ContentId[] = [];
-      const presentation = new ApplicationRereleasePresentation({ provider: async content => { opened.push(content); return provider; } }, [
-        { seat: identity.seat(0), actor: identity.actor(0, 0) }, { seat: identity.seat(1), actor: identity.actor(1, 0), language: "french" },
-      ]);
+      const presentation = new ApplicationRereleasePresentation(
+        {
+          provider: async content => {
+            opened.push(content);
+            return provider;
+          },
+        },
+        [
+          { seat: identity.seat(0), actor: identity.actor(0, 0) },
+          { seat: identity.seat(1), actor: identity.actor(1, 0), language: "french" },
+        ],
+      );
       const raw = await mounts.open("localization/loc_english.txt");
       if (raw === null) throw new Error("Installed Q2Game.kpf has no English catalog");
       expect(new TextDecoder().decode(raw.bytes)).toContain("map_establish_communication");
-      expect(await presentation.localizeMessage(identity.seat(0), source, "$map_establish_communication")).toBe("Establish communication\nlink to command ship.");
+      expect(await presentation.localizeMessage(identity.seat(0), source, "$map_establish_communication")).toBe(
+        "Establish communication\nlink to command ship.",
+      );
       for (const key of ["$map_locate_base_installation", "$map_you_have_found_a_secret_area_1", "$item_blaster"]) {
         const english = await presentation.localizeMessage(identity.seat(0), source, key);
         const french = await presentation.localizeMessage(identity.seat(1), source, key);
-        expect(english).not.toStartWith("$"); expect(french).not.toStartWith("$");
-        expect(english.length).toBeGreaterThan(0); expect(french.length).toBeGreaterThan(0);
+        expect(english).not.toStartWith("$");
+        expect(french).not.toStartWith("$");
+        expect(english.length).toBeGreaterThan(0);
+        expect(french.length).toBeGreaterThan(0);
       }
-      expect(await presentation.localizeMessage(identity.seat(1), source, "$map_establish_communication")).not.toBe(await presentation.localizeMessage(identity.seat(0), source, "$map_establish_communication"));
+      expect(await presentation.localizeMessage(identity.seat(1), source, "$map_establish_communication")).not.toBe(
+        await presentation.localizeMessage(identity.seat(0), source, "$map_establish_communication"),
+      );
       expect(await presentation.localizeMessage(identity.seat(0), source, "$g_exited_level", ["Player"])).toBe("Player exited the level.\n");
       expect(await presentation.localizeMessage(identity.seat(0), source, "$mod_unknown")).toBe("$mod_unknown");
       expect(opened.every(content => content === source)).toBe(true);
-    } finally { textures.close(); images.close(); }
+    } finally {
+      textures.close();
+      images.close();
+    }
   }
 });

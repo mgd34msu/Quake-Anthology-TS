@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { closeSync, fstatSync, openSync, read } from "node:fs";
 import { ArchiveError, checkRange } from "./types.ts";
 
@@ -6,11 +7,16 @@ export class MemorySource {
   private readonly bytes: Uint8Array;
   private closed = false;
 
-  constructor(bytes: Uint8Array, readonly source = "<memory>") {
+  constructor(
+    bytes: Uint8Array,
+    readonly source = "<memory>",
+  ) {
     this.bytes = new Uint8Array(bytes);
   }
 
-  get byteLength(): number { return this.bytes.byteLength; }
+  get byteLength(): number {
+    return this.bytes.byteLength;
+  }
 
   readSync(offset: number, length: number): Uint8Array {
     if (this.closed) throw new ArchiveError(this.source, offset, "archive is closed");
@@ -18,8 +24,12 @@ export class MemorySource {
     return this.bytes.slice(offset, offset + length);
   }
 
-  async read(offset: number, length: number): Promise<Uint8Array> { return this.readSync(offset, length); }
-  close(): void { this.closed = true; }
+  async read(offset: number, length: number): Promise<Uint8Array> {
+    return this.readSync(offset, length);
+  }
+  close(): void {
+    this.closed = true;
+  }
 }
 
 /** A retained descriptor keeps path replacements from changing an open archive. */

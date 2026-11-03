@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,9 +25,16 @@ async function receive<TAddress extends NetworkAddress>(transport: DatagramTrans
   return new Promise((resolve, reject) => {
     const unsubscribe = transport.subscribeReadable(() => {
       const event = transport.poll();
-      if (event !== null) { unsubscribe(); clearTimeout(timer); resolve(event); }
+      if (event !== null) {
+        unsubscribe();
+        clearTimeout(timer);
+        resolve(event);
+      }
     });
-    const timer = setTimeout(() => { unsubscribe(); reject(new Error("Local UDP exchange timed out")); }, 2000);
+    const timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error("Local UDP exchange timed out"));
+    }, 2000);
   });
 }
 
@@ -36,7 +44,8 @@ describe("shared network transports", () => {
     const client = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
     try {
       const bytes = Uint8Array.of(255, 255, 255, 255, 112, 105, 110, 103);
-      expect(client.send(server.address, bytes)).toBe(true); bytes.fill(0);
+      expect(client.send(server.address, bytes)).toBe(true);
+      bytes.fill(0);
       const packet = await receive(server);
       expect(packet.kind).toBe("packet");
       if (packet.kind !== "packet") throw new Error("UDP did not produce a packet");
@@ -47,35 +56,52 @@ describe("shared network transports", () => {
       if (reply.kind !== "packet") throw new Error("UDP did not produce a reply");
       expect(new TextDecoder().decode(reply.payload)).toBe("ack");
       expect(addressKey(await resolveAddress("localhost", server.address.port, 4))).toBe(addressKey(server.address));
-    } finally { client.close(); server.close(); }
+    } finally {
+      client.close();
+      server.close();
+    }
   });
   test("several local clients have separate return paths", () => {
-    const hub = new LoopbackHub(), server = hub.bind("server"), first = hub.bind("seat-0"), second = hub.bind("seat-1");
+    const hub = new LoopbackHub(),
+      server = hub.bind("server"),
+      first = hub.bind("seat-0"),
+      second = hub.bind("seat-1");
     try {
-      first.send(server.address, Uint8Array.of(1)); second.send(server.address, Uint8Array.of(2));
-      const one = server.poll(), two = server.poll();
+      first.send(server.address, Uint8Array.of(1));
+      second.send(server.address, Uint8Array.of(2));
+      const one = server.poll(),
+        two = server.poll();
       if (one?.kind !== "packet" || two?.kind !== "packet") throw new Error("Missing local packets");
       server.send(two.from, Uint8Array.of(9));
-      expect(first.poll()).toBeNull(); expect(second.poll()).toMatchObject({ kind: "packet", payload: Uint8Array.of(9) });
-    } finally { hub.close(); }
+      expect(first.poll()).toBeNull();
+      expect(second.poll()).toMatchObject({ kind: "packet", payload: Uint8Array.of(9) });
+    } finally {
+      hub.close();
+    }
   });
   test("IPX tunnel exchanges Quake payloads on real UDP links", async () => {
-    const firstSocket = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }), secondSocket = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
+    const firstSocket = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }),
+      secondSocket = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
     const first = new IpxUdpTransport(ipxAddress(0, [0, 0, 0, 0, 0, 1], 26000), firstSocket, { kind: "quake1" });
     const second = new IpxUdpTransport(ipxAddress(0, [0, 0, 0, 0, 0, 2], 26000), secondSocket, { kind: "quake1" });
-    first.addPeer(second.address, secondSocket.address); second.addPeer(first.address, firstSocket.address);
+    first.addPeer(second.address, secondSocket.address);
+    second.addPeer(first.address, firstSocket.address);
     try {
       expect(first.send(second.address, Uint8Array.of(1, 2, 3))).toBe(true);
       const packet = await receive(second);
       expect(packet).toMatchObject({ kind: "packet", from: first.address, payload: Uint8Array.of(1, 2, 3) });
       expect(second.send(ipxAddress(0, [255, 255, 255, 255, 255, 255], 26000), Uint8Array.of(8))).toBe(true);
       expect(await receive(first)).toMatchObject({ kind: "packet", from: second.address, payload: Uint8Array.of(8) });
-    } finally { first.close(); second.close(); }
+    } finally {
+      first.close();
+      second.close();
+    }
   });
 });
 
 test("reliable source protocols and exact-multiple fragmentation", () => {
-  const sender = new ToggleReliableChannel(1400), receiver = new ToggleReliableChannel(1400);
+  const sender = new ToggleReliableChannel(1400),
+    receiver = new ToggleReliableChannel(1400);
   sender.queue(Uint8Array.of(11, 12));
   const first = sender.transmit(Uint8Array.of(13));
   expect(receiver.receive(first)).toMatchObject({ kind: "accepted", payload: Uint8Array.of(11, 12, 13) });
@@ -86,14 +112,19 @@ test("reliable source protocols and exact-multiple fragmentation", () => {
   nq.begin(Uint8Array.of(1, 2, 3, 4, 5));
   const fragment = nq.next(0);
   expect(fragment).toMatchObject({ sequence: 0, final: false });
-  expect(nq.next(1000)).toBeNull(); expect(nq.next(1001)).toEqual(fragment);
-  expect(nq.acknowledge(0)).toBe(true); expect(nq.next(1002)).toMatchObject({ sequence: 1, final: true, payload: Uint8Array.of(5) });
+  expect(nq.next(1000)).toBeNull();
+  expect(nq.next(1001)).toEqual(fragment);
+  expect(nq.acknowledge(0)).toBe(true);
+  expect(nq.next(1002)).toMatchObject({ sequence: 1, final: true, payload: Uint8Array.of(5) });
   const rate = new PacketRate(2500);
-  rate.sent(1000, 0); expect(rate.canSend(319)).toBe(false); expect(rate.canSend(321)).toBe(true);
+  rate.sent(1000, 0);
+  expect(rate.canSend(319)).toBe(false);
+  expect(rate.canSend(321)).toBe(true);
 });
 
 test("file downloads verify bytes before installation", () => {
-  const root = mkdtempSync(join(tmpdir(), "quake-network-")), bytes = new TextEncoder().encode("authored download fixture");
+  const root = mkdtempSync(join(tmpdir(), "quake-network-")),
+    bytes = new TextEncoder().encode("authored download fixture");
   const digest = createContentDigest(createHash("sha256").update(bytes).digest("hex"));
   writeFileSync(join(root, "source.dat"), bytes);
   const source = DownloadFile.open(root, "source.dat");
@@ -104,52 +135,108 @@ test("file downloads verify bytes before installation", () => {
     expect(new Uint8Array(readFileSync(join(root, "mods/udp.dat")))).toEqual(bytes);
     symlinkSync(tmpdir(), join(root, "outside"));
     expect(() => DownloadSink.create(root, "outside/nope.dat", { digest, byteLength: bytes.length })).toThrow("ENOTDIR: not a directory, open");
-  } finally { sink.close(); source.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    sink.close();
+    source.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("local account persistence and ranking reports are usable", async () => {
-  const accounts = new LocalAuthorization(), account = accounts.register("player", "secret");
-  const restored = new LocalAuthorization(); restored.restore(accounts.save());
+  const accounts = new LocalAuthorization(),
+    account = accounts.register("player", "secret");
+  const restored = new LocalAuthorization();
+  restored.restore(accounts.save());
   expect((await restored.authorize("player", "wrong")).kind).toBe("denied");
   const authorized = await restored.authorize("player", "secret");
   expect(authorized.kind).toBe("authorized");
   if (authorized.kind !== "authorized") throw new Error("Expected authorized account");
   expect(restored.account(authorized.token)).toEqual(account);
-  restored.revoke(authorized.token); expect(restored.account(authorized.token)).toBeNull();
+  restored.revoke(authorized.token);
+  expect(restored.account(authorized.token)).toBeNull();
   const rankings = new LocalRankingService();
-  const report = { match: "one", rules: "q3:ffa", players: [{ account: account.id, score: 12, won: true, statistics: new Map([["frags", 12]]) }] } satisfies Parameters<LocalRankingService["submit"]>[0];
-  expect(rankings.submit(report)).toBe(true); expect(rankings.submit(report)).toBe(false);
+  const report = {
+    match: "one",
+    rules: "q3:ffa",
+    players: [{ account: account.id, score: 12, won: true, statistics: new Map([["frags", 12]]) }],
+  } satisfies Parameters<LocalRankingService["submit"]>[0];
+  expect(rankings.submit(report)).toBe(true);
+  expect(rankings.submit(report)).toBe(false);
   expect(rankings.standings("q3:ffa")[0]).toMatchObject({ matches: 1, wins: 1, score: 12 });
-  const restoredRanks = new LocalRankingService(); restoredRanks.restore(rankings.save());
+  const restoredRanks = new LocalRankingService();
+  restoredRanks.restore(rankings.save());
   expect(restoredRanks.standings("q3:ffa")).toEqual(rankings.standings("q3:ffa"));
 });
 
 test("source address filters and private rcon replies", async () => {
-  const filters = new IpFilterList(), filter = sourceIpv4Filter("192.168.0");
+  const filters = new IpFilterList(),
+    filter = sourceIpv4Filter("192.168.0");
   if (filter === null) throw new Error("Expected parsed source filter");
-  filters.add(filter); expect(filters.rejects(ipAddress("192.168.1.4", 27960))).toBe(true);
+  filters.add(filter);
+  expect(filters.rejects(ipAddress("192.168.1.4", 27960))).toBe(true);
   expect(filters.rejects(ipAddress("10.0.0.1", 27960))).toBe(false);
-  const replies: string[] = [], executed: string[] = [];
-  const admin = new RconService({ password: () => "secret", async execute(command, output) { executed.push(command); output("map: start\n"); }, reply(to, text) { replies.push(`${addressKey(to)} ${text}`); } });
+  const replies: string[] = [],
+    executed: string[] = [];
+  const admin = new RconService({
+    password: () => "secret",
+    async execute(command, output) {
+      executed.push(command);
+      output("map: start\n");
+    },
+    reply(to, text) {
+      replies.push(`${addressKey(to)} ${text}`);
+    },
+  });
   const address = ipAddress("127.0.0.1", 3000);
   expect(await admin.handle(address, "bad", "status", 500)).toBe("denied");
   expect(await admin.handle(address, "secret", "status", 1000)).toBe("executed");
-  expect(executed).toEqual(["status"]); expect(replies[1]).toBe("127.0.0.1:3000 map: start\n");
+  expect(executed).toEqual(["status"]);
+  expect(replies[1]).toBe("127.0.0.1:3000 map: start\n");
 });
 
 test("composition offer and private remote seats retain separate identities", () => {
   const provider: ProviderReference = { provider: "q3:authored", content: "q3:test:authored:1" };
   const resource: ResolvedResourceReference = {
-    id: "resource:authored-map", requestedPath: "maps/authored.bsp", digest: createContentDigest("0".repeat(64)), byteLength: 0,
-    provenance: { kind: "loose", memberPath: "maps/authored.bsp", mount: { kind: "loose", identity: { id: "mount:test:maps", content: provider.content, generation: 0 }, rootPath: "/tmp/authored-map-fixture" } },
+    id: "resource:authored-map",
+    requestedPath: "maps/authored.bsp",
+    digest: createContentDigest("0".repeat(64)),
+    byteLength: 0,
+    provenance: {
+      kind: "loose",
+      memberPath: "maps/authored.bsp",
+      mount: { kind: "loose", identity: { id: "mount:test:maps", content: provider.content, generation: 0 }, rootPath: "/tmp/authored-map-fixture" },
+    },
     resolution: { kind: "default-order", plan: "mount-plan:test:1", rank: 0 },
   };
   const recipe: ExecutableRecipe = {
-    schemaVersion: 3, id: "recipe:test:1", preset: "recipe:test:1", map: { geometryContent: provider.content, geometry: resource, entities: provider }, campaign: { kind: "none" },
-    movement: provider, character: { definition: provider, appearance: provider }, weapons: [provider], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider }, engineBehavior: provider, combat: provider, inventory: provider,
-    match: provider, transition: provider, execution: [], mounts: { id: "mount-plan:test:1", mounts: [resource.provenance.mount], defaultOrder: [resource.provenance.mount.identity.id], prefixOrders: [] },
-    resources: [resource], timing: [], ordering: { kind: "mixed", providers: [provider.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" },
+    schemaVersion: 3,
+    id: "recipe:test:1",
+    preset: "recipe:test:1",
+    map: { geometryContent: provider.content, geometry: resource, entities: provider },
+    campaign: { kind: "none" },
+    movement: provider,
+    character: { definition: provider, appearance: provider },
+    weapons: [provider],
+    equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } },
+    enemies: { kind: "map-defined" },
+    presentation: {
+      doppler: { kind: "source" },
+      environment: { kind: "audio-content" },
+      assets: provider.content,
+      hud: provider,
+      effects: provider,
+      audio: provider,
+    },
+    engineBehavior: provider,
+    combat: provider,
+    inventory: provider,
+    match: provider,
+    transition: provider,
+    execution: [],
+    mounts: { id: "mount-plan:test:1", mounts: [resource.provenance.mount], defaultOrder: [resource.provenance.mount.identity.id], prefixOrders: [] },
+    resources: [resource],
+    timing: [],
+    ordering: { kind: "mixed", providers: [provider.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" },
   };
   const identity = compositionIdentity({ schemaVersion: 1, recipe, snapshotSchema: "unified:snapshot-v1", actorConfigurations: [] });
   const offer = encodeCompositionOffer(identity);

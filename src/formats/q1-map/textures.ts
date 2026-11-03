@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from the reference port miptex reading and FTE external mip textures.
  * GPL-2.0-or-later. */
 import type { Q1MipTexture } from "../../contracts/scene.ts";
@@ -22,7 +23,11 @@ export function readTextures(reader: BinaryReader, quake64 = false): Q1TextureLu
   const textures: (Q1MipTexture | null)[] = [];
   const mipOffsets: (readonly [number, number, number, number] | null)[] = [];
   for (const offset of offsets) {
-    if (offset === null) { textures.push(null); mipOffsets.push(null); continue; }
+    if (offset === null) {
+      textures.push(null);
+      mipOffsets.push(null);
+      continue;
+    }
     const headerSize = quake64 ? 44 : 40;
     const header = reader.section(offset, headerSize);
     const name = header.fixedByteString(16);
@@ -32,7 +37,7 @@ export function readTextures(reader: BinaryReader, quake64 = false): Q1TextureLu
     const mips: [number, number, number, number] = [header.u32(), header.u32(), header.u32(), header.u32()];
     mipOffsets.push(mips);
     if (width === 0 || height === 0) throw new BinaryError(reader.source, offset, "zero-sized mip texture");
-    if (!quake64 && mips.every((value) => value === 0)) {
+    if (!quake64 && mips.every(value => value === 0)) {
       textures.push({ kind: "external", name, width, height });
       continue;
     }
@@ -43,7 +48,11 @@ export function readTextures(reader: BinaryReader, quake64 = false): Q1TextureLu
       return reader.section(offset + mipOffset, length).bytes(length);
     };
     textures.push({
-      kind: "embedded", name, width, height, ...metadata,
+      kind: "embedded",
+      name,
+      width,
+      height,
+      ...metadata,
       levels: [level(quake64 ? headerSize : mips[0], 1), level(mips[1], 2), level(mips[2], 4), level(mips[3], 8)],
     });
   }

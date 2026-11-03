@@ -9,18 +9,26 @@ const allowed: ReadonlySet<string> = new Set(["map", "gamemap", "kick", "say", "
  */
 export function filterGuestConsole(text: string): { readonly text: string; readonly refused: readonly string[] } {
   const commands: string[] = [];
-  let current = "", quoted = false;
+  let current = "",
+    quoted = false;
   for (const character of text) {
-    if (character === "\"") quoted = !quoted;
-    if ((character === ";" && !quoted) || character === "\n") { commands.push(current); current = ""; quoted = false; continue; }
+    if (character === '"') quoted = !quoted;
+    if ((character === ";" && !quoted) || character === "\n") {
+      commands.push(current);
+      current = "";
+      quoted = false;
+      continue;
+    }
     current += character;
   }
   commands.push(current);
-  const kept: string[] = [], refused: string[] = [];
+  const kept: string[] = [],
+    refused: string[] = [];
   for (const command of commands) {
     const name = command.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
     if (name === "") continue;
-    if (allowed.has(name)) kept.push(command.trim()); else refused.push(name);
+    if (allowed.has(name)) kept.push(command.trim());
+    else refused.push(name);
   }
   return { text: kept.length === 0 ? "" : `${kept.join("\n")}\n`, refused };
 }

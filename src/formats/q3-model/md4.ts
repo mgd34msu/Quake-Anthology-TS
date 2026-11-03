@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MD4 v1 loading translated from Quake III Arena's qcommon/qfiles.h and
  * renderer/tr_model.c, with bone indexing from renderer/tr_animation.c.
@@ -28,8 +29,7 @@ function fail(reader: BinaryReader, offset: number, message: string): never {
 }
 
 function range(reader: BinaryReader, offset: number, length: number, start: number, end: number, field: number): void {
-  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)
-    || offset < start || length < 0 || offset > end - length) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < start || length < 0 || offset > end - length) {
     fail(reader, field, `MD4 range ${offset}+${length} exceeds ${start}..${end}`);
   }
 }
@@ -66,8 +66,14 @@ function row(reader: BinaryReader): Vec4 {
   return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32(), w: reader.finiteF32() };
 }
 
-function parseSurface(reader: BinaryReader, sourceOffset: number, lodEnd: number, numBones: number): {
-  readonly surface: Md4Surface; readonly nextOffset: number;
+function parseSurface(
+  reader: BinaryReader,
+  sourceOffset: number,
+  lodEnd: number,
+  numBones: number,
+): {
+  readonly surface: Md4Surface;
+  readonly nextOffset: number;
 } {
   range(reader, sourceOffset, SURFACE_SIZE, HEADER_SIZE, lodEnd, sourceOffset);
   reader.seek(sourceOffset);
@@ -94,7 +100,9 @@ function parseSurface(reader: BinaryReader, sourceOffset: number, lodEnd: number
   const triangles: Md4Triangle[] = [];
   if (numTriangles > 0) reader.seek(sourceOffset + ofsTriangles);
   for (let triangle = 0; triangle < numTriangles; triangle++) {
-    triangles.push({ indices: [index(reader, numVerts, "triangle vertex"), index(reader, numVerts, "triangle vertex"), index(reader, numVerts, "triangle vertex")] });
+    triangles.push({
+      indices: [index(reader, numVerts, "triangle vertex"), index(reader, numVerts, "triangle vertex"), index(reader, numVerts, "triangle vertex")],
+    });
   }
   const boneReferences: number[] = [];
   if (numBoneReferences > 0) reader.seek(sourceOffset + ofsBoneReferences);
@@ -183,13 +191,14 @@ export function parseMd4(bytes: Uint8Array, source = "<md4>"): DecodedMd4Model {
 
 /** RB_SurfaceAnim uses global bone indices, including when boneReferences is sparse. */
 export function skinMd4Surface(model: Md4Model, surface: Md4Surface, frame: number, previousFrame = frame, backLerp = 0): readonly ModelVertex[] {
-  if (!Number.isInteger(frame) || frame < 0 || !Number.isInteger(previousFrame) || previousFrame < 0 || !Number.isFinite(backLerp)) throw new RangeError("Invalid MD4 frame selection");
+  if (!Number.isInteger(frame) || frame < 0 || !Number.isInteger(previousFrame) || previousFrame < 0 || !Number.isFinite(backLerp))
+    throw new RangeError("Invalid MD4 frame selection");
   const current = at(model.frames, frame, "MD4 frame");
   const back = frame === previousFrame ? 0 : Math.fround(backLerp);
   const old = back === 0 ? current : at(model.frames, previousFrame, "MD4 previous frame");
   const front = Math.fround(1 - back);
   const f = Math.fround;
-  const blend = (a: number, b: number): number => back === 0 ? a : f(f(front * a) + f(back * b));
+  const blend = (a: number, b: number): number => (back === 0 ? a : f(f(front * a) + f(back * b)));
   const bones = current.bones.map((bone, index): Md4Bone => {
     const before = at(old.bones, index, "MD4 bone");
     const row = (a: Vec4, b: Vec4): Vec4 => ({ x: blend(a.x, b.x), y: blend(a.y, b.y), z: blend(a.z, b.z), w: blend(a.w, b.w) });
@@ -197,7 +206,12 @@ export function skinMd4Surface(model: Md4Model, surface: Md4Surface, frame: numb
   });
   const dot = (row: Vec4, value: Vec3): number => f(f(f(row.x * value.x) + f(row.y * value.y)) + f(row.z * value.z));
   return surface.vertices.map(vertex => {
-    let x = 0, y = 0, z = 0, nx = 0, ny = 0, nz = 0;
+    let x = 0,
+      y = 0,
+      z = 0,
+      nx = 0,
+      ny = 0,
+      nz = 0;
     for (const weight of vertex.weights) {
       const [a, b, c] = at(bones, weight.boneIndex, "MD4 weight bone").matrix;
       x = f(x + f(weight.boneWeight * f(dot(a, weight.offset) + a.w)));

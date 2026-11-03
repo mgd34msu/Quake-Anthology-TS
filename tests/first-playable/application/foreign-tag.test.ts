@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { expect } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -31,27 +32,59 @@ function tagOwner(sim: Simulation): ActorId | null {
 
 function teleport(sim: Simulation, actor: ActorId, origin: { x: number; y: number; z: number }): void {
   sim.diagnostics().movePlayer(actor, {
-    kind: "teleport", origin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
-    commandAngles: { x: 0, y: 0, z: 0 }, holdMilliseconds: 0, spectator: false,
+    kind: "teleport",
+    origin,
+    angles: { x: 0, y: 0, z: 0 },
+    velocity: { x: 0, y: 0, z: 0 },
+    commandAngles: { x: 0, y: 0, z: 0 },
+    holdMilliseconds: 0,
+    spectator: false,
   });
 }
 
 test("Tag plays on a Q3 world through the runtime match layer", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
-    "--map", "q3dm1", "--rules", "tag",
-    "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--rules",
+    "tag",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--mode",
+    "deathmatch",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     expect(sim.recipe.match.provider).toBe("q2:tag");
     expect(sim.diagnostics().modes.tag).toBe(true);
     const stepUntil = async (condition: () => boolean, label: string): Promise<void> => {
-      for (let index = 0; index < 400; index++) { await app.step(50); if (condition()) return; }
+      for (let index = 0; index < 400; index++) {
+        await app.step(50);
+        if (condition()) return;
+      }
       throw new Error(`Timed out waiting for ${label}`);
     };
-    for (let index = 0; index < 200 && sim.players().length < 2; index++) { sim.botServices.tryAddBot(); await app.step(50); }
+    for (let index = 0; index < 200 && sim.players().length < 2; index++) {
+      sim.botServices.tryAddBot();
+      await app.step(50);
+    }
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing bot");
     await stepUntil(() => tagTokenId(sim) !== null, "token to spawn");
@@ -71,9 +104,18 @@ test("Tag plays on a Q3 world through the runtime match layer", async () => {
       if (persistant === undefined) throw new Error("Missing native Q3 client score");
       return persistant.get(PersistentIndex.PERS_SCORE);
     };
-    const attack = (attacker: ActorId): AttackProvenance => ({ sequence: 424242, time: { kind: "milliseconds", value: 0 }, attacker, inflictor: attacker,
-      weapon: null, weaponProvider: "q3:official", combatProvider: "q3:official", inventoryProvider: "q3:official", movementProvider: "q3:official",
-      cause: { kind: "q3", meansOfDeath: 1, damageFlags: 0 } });
+    const attack = (attacker: ActorId): AttackProvenance => ({
+      sequence: 424242,
+      time: { kind: "milliseconds", value: 0 },
+      attacker,
+      inflictor: attacker,
+      weapon: null,
+      weaponProvider: "q3:official",
+      combatProvider: "q3:official",
+      inventoryProvider: "q3:official",
+      movementProvider: "q3:official",
+      cause: { kind: "q3", meansOfDeath: 1, damageFlags: 0 },
+    });
     const kill = async (victim: ActorId, attacker: ActorId): Promise<void> => {
       const owned = sim.actors.resolveOwned(victim);
       if (owned === null) throw new Error("Victim has no owned actor");
@@ -82,7 +124,8 @@ test("Tag plays on a Q3 world through the runtime match layer", async () => {
       await app.step(50);
       sim.diagnostics().recordAttack(owned, attack(attacker));
       sim.combat.setHealth(owned, 0);
-      await app.step(50); await app.step(50);
+      await app.step(50);
+      await app.step(50);
     };
     const localBefore = score(local.actor);
     // Exact deltas (measured 2 and 4) so a duplicated award fails; the header's 3 and 5 do not match the runtime.
@@ -93,24 +136,50 @@ test("Tag plays on a Q3 world through the runtime match layer", async () => {
 
     const botOwned = sim.actors.resolveOwned(bot);
     if (botOwned === null) throw new Error("Bot has no owned actor");
-    for (let index = 0; index < 100 && (sim.combat.read(bot)?.health ?? 0) <= 0; index++) { sim.combat.setHealth(botOwned, 100); await app.step(50); }
+    for (let index = 0; index < 100 && (sim.combat.read(bot)?.health ?? 0) <= 0; index++) {
+      sim.combat.setHealth(botOwned, 100);
+      await app.step(50);
+    }
     const botBefore = score(bot);
     await kill(local.actor, bot);
     expect(score(bot) - botBefore).toBe(4);
     expect(tagOwner(sim)?.equals(bot)).toBe(true);
     expect(sim.diagnostics().tag.count()).toBe(0);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 test("Tag token spawns and is picked up on a Q1 world", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1",
-    "--map", "dm3", "--rules", "tag",
-    "--movement", "q1", "--character", "q1", "--mode", "deathmatch", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q1-classic-id1",
+    "--map",
+    "dm3",
+    "--rules",
+    "tag",
+    "--movement",
+    "q1",
+    "--character",
+    "q1",
+    "--mode",
+    "deathmatch",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
     expect(sim.diagnostics().modes.tag).toBe(true);
     for (let index = 0; index < 400 && tagTokenId(sim) === null; index++) await app.step(50);
     const tokenId = tagTokenId(sim);
@@ -121,20 +190,46 @@ test("Tag token spawns and is picked up on a Q1 world", async () => {
     for (let index = 0; index < 200 && tagOwner(sim) === null; index++) await app.step(50);
     expect(tagOwner(sim)?.equals(local.actor)).toBe(true);
     expect(sim.playerUi(local.actor).armor.regular).toMatchObject({ kind: "q1", points: 100 });
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);
 
 // SIM-004, SIM-005, SIM-007: runtime Tag state is not saved, is replaced on restart, and forgets departed players.
 test("Tag refuses saves, asks for world replacement on restart and drops departed players", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
-    "--map", "q3dm1", "--rules", "tag",
-    "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand([
+    "--content-root",
+    testCorpusRoot(),
+    "--game",
+    "q3-baseq3",
+    "--map",
+    "q3dm1",
+    "--rules",
+    "tag",
+    "--movement",
+    "q3",
+    "--character",
+    "q3",
+    "--mode",
+    "deathmatch",
+    "--renderer",
+    "cpu",
+    "--hidden",
+    "--width",
+    "320",
+    "--height",
+    "240",
+  ]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
-    for (let index = 0; index < 200 && sim.players().length < 2; index++) { sim.botServices.tryAddBot(); await app.step(50); }
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
+    for (let index = 0; index < 200 && sim.players().length < 2; index++) {
+      sim.botServices.tryAddBot();
+      await app.step(50);
+    }
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing bot");
     for (let index = 0; index < 20; index++) await app.step(50);
@@ -145,5 +240,7 @@ test("Tag refuses saves, asks for world replacement on restart and drops departe
     if (owned === null) throw new Error("Bot actor missing");
     sim.actors.release(owned);
     expect(sim.diagnostics().tag.tracksHealth(bot)).toBe(false);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
 }, 240000);

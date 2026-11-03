@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // gameState_t and CL_ParseGamestate/CL_ConfigstringModified from id Software's
 // code/game/q_shared.h and code/client/cl_parse.c, cl_cgame.c, cl_main.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -16,8 +17,14 @@ export class ClientGameStateStorage {
 
   constructor(private readonly drop: (message: string) => never) {}
 
-  clear(): void { this.offsets.fill(0); this.data.fill(0); this.count = 0; }
-  beginEntries(): void { this.count = 1; }
+  clear(): void {
+    this.offsets.fill(0);
+    this.data.fill(0);
+    this.count = 0;
+  }
+  beginEntries(): void {
+    this.count = 1;
+  }
 
   copySourceRecord(): SourceGameStateRecord {
     return { stringOffsets: this.offsets.slice(), stringData: this.data.slice(), dataCount: this.count };

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { EventRing } from "../../foundation/event-ring.ts";
 import { accessibleColors } from "../common/accessibility.ts";
 import { captionCommands } from "../common/captions.ts";
@@ -23,34 +24,84 @@ export * from "./wheel.ts";
 export * from "./q1-wheel.ts";
 
 export function hudVitalRects(count: number, scale: number, height = 42): readonly Rect[] {
-  const width = Math.min(600 / scale / Math.max(1, count), 160), start = 320 - width * count / 2;
+  const width = Math.min(600 / scale / Math.max(1, count), 160),
+    start = 320 - (width * count) / 2;
   return Array.from({ length: count }, (_, index) => ({ x: start + index * width, y: 476 - height, width: width - 4, height }));
 }
 
-function statusLayout(context: UiDrawContext, count: number, hudScale: number, textScale: number, capHeight = 8): { readonly rects: readonly Rect[]; readonly transform: UiTransform; readonly minimumTextScale: number } {
-  const area = context.binding.safeArea, fitted = fitUi(area), group = hudScale * context.binding.hudScale;
+function statusLayout(
+  context: UiDrawContext,
+  count: number,
+  hudScale: number,
+  textScale: number,
+  capHeight = 8,
+): { readonly rects: readonly Rect[]; readonly transform: UiTransform; readonly minimumTextScale: number } {
+  const area = context.binding.safeArea,
+    fitted = fitUi(area),
+    group = hudScale * context.binding.hudScale;
   const requested = fitted.scale * group;
   if (requested * textScale * capHeight < 8) {
     const width = Math.min(180, (area.width - 8) / Math.max(1, count));
-    return { rects: Array.from({ length: count }, (_, index) => ({ x: area.x + (area.width - width * count) / 2 + index * width,
-      y: area.y + area.height - 36, width: width - 4, height: 32 })), transform: { scale: 1, x: 0, y: 0 }, minimumTextScale: 8 / capHeight };
+    return {
+      rects: Array.from({ length: count }, (_, index) => ({
+        x: area.x + (area.width - width * count) / 2 + index * width,
+        y: area.y + area.height - 36,
+        width: width - 4,
+        height: 32,
+      })),
+      transform: { scale: 1, x: 0, y: 0 },
+      minimumTextScale: 8 / capHeight,
+    };
   }
   const scale = requested;
-  return { rects: hudVitalRects(count, group, hudStatusRows(textScale, capHeight).height), minimumTextScale: 8 / capHeight / scale,
-    transform: { scale, x: fitted.x + 320 * fitted.scale * (1 - group), y: fitted.y + 480 * fitted.scale * (1 - group) } };
+  return {
+    rects: hudVitalRects(count, group, hudStatusRows(textScale, capHeight).height),
+    minimumTextScale: 8 / capHeight / scale,
+    transform: { scale, x: fitted.x + 320 * fitted.scale * (1 - group), y: fitted.y + 480 * fitted.scale * (1 - group) },
+  };
 }
 
 export function hudVitalOccupiedRects(context: UiDrawContext, count: number, hudScale: number, textScale = 1.5, capHeight = 8): readonly Rect[] {
   const layout = statusLayout(context, count, hudScale, textScale, capHeight);
-  return layout.rects.map(rect => ({ x: layout.transform.x + rect.x * layout.transform.scale, y: layout.transform.y + rect.y * layout.transform.scale,
-    width: rect.width * layout.transform.scale, height: rect.height * layout.transform.scale }));
+  return layout.rects.map(rect => ({
+    x: layout.transform.x + rect.x * layout.transform.scale,
+    y: layout.transform.y + rect.y * layout.transform.scale,
+    width: rect.width * layout.transform.scale,
+    height: rect.height * layout.transform.scale,
+  }));
 }
 
-export interface HudValue { readonly label: string; readonly value: number; readonly icon: ResourceId | null; readonly warning: boolean; }
-export interface HudInventoryItem { readonly id: string; readonly label: string; readonly count: number; readonly selected: boolean; readonly binding: string | null; readonly icon: ResourceId | null; }
-export interface HudPrompt { readonly action: string; readonly binding: string; readonly icon: ResourceId | null; }
-export interface HudHealthBar { readonly id: string; readonly label: string; readonly value: number; readonly maximum: number; readonly color: Vec4; }
-export interface HudHelp { readonly title: string; readonly lines: readonly string[]; readonly objectives: readonly { readonly text: string; readonly complete: boolean }[]; }
+export interface HudValue {
+  readonly label: string;
+  readonly value: number;
+  readonly icon: ResourceId | null;
+  readonly warning: boolean;
+}
+export interface HudInventoryItem {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number;
+  readonly selected: boolean;
+  readonly binding: string | null;
+  readonly icon: ResourceId | null;
+}
+export interface HudPrompt {
+  readonly action: string;
+  readonly binding: string;
+  readonly icon: ResourceId | null;
+}
+export interface HudHealthBar {
+  readonly id: string;
+  readonly label: string;
+  readonly value: number;
+  readonly maximum: number;
+  readonly color: Vec4;
+}
+export interface HudHelp {
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly objectives: readonly { readonly text: string; readonly complete: boolean }[];
+}
 export interface HudPointOfInterest {
   readonly id: number;
   readonly origin: Vec3;
@@ -61,7 +112,18 @@ export interface HudPointOfInterest {
   readonly hideOnAim: boolean;
   readonly expiresMilliseconds: number;
 }
-export type HudDamageIndicator = { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number } | { readonly picture?: { readonly image: ResourceId; readonly width: number; readonly height: number }; readonly direction: Vec3; readonly amount: number; readonly color: Vec3; readonly health: boolean; readonly armor: boolean; readonly shield: boolean; readonly expiresMilliseconds: number };
+export type HudDamageIndicator =
+  | { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number }
+  | {
+      readonly picture?: { readonly image: ResourceId; readonly width: number; readonly height: number };
+      readonly direction: Vec3;
+      readonly amount: number;
+      readonly color: Vec3;
+      readonly health: boolean;
+      readonly armor: boolean;
+      readonly shield: boolean;
+      readonly expiresMilliseconds: number;
+    };
 export interface CommonHudData {
   readonly powerups: readonly import("../../contracts/gameplay.ts").ActivePowerupTimer[];
   readonly weapon?: CommonWeaponHud;
@@ -82,12 +144,28 @@ export interface CommonHudData {
   readonly hitMarker: { readonly damage: number; readonly expiresMilliseconds: number } | null;
 }
 export function emptyHudData(seat: SeatId): CommonHudData {
-  return { seat, visible: true, powerups: [], vitals: [], inventory: null, prompts: [], healthBars: [], help: null, captions: [], wheel: null,
-    carousel: null, crosshair: { visible: true, color: { x: 1, y: 1, z: 1, w: 1 }, image: null }, hitMarker: null };
+  return {
+    seat,
+    visible: true,
+    powerups: [],
+    vitals: [],
+    inventory: null,
+    prompts: [],
+    healthBars: [],
+    help: null,
+    captions: [],
+    wheel: null,
+    carousel: null,
+    crosshair: { visible: true, color: { x: 1, y: 1, z: 1, w: 1 }, image: null },
+    hitMarker: null,
+  };
 }
-function milliseconds(time: SourceTime): number { return time.kind === "seconds" ? time.value * 1000 : time.value; }
+function milliseconds(time: SourceTime): number {
+  return time.kind === "seconds" ? time.value * 1000 : time.value;
+}
 function alive(starts: SourceTime, duration: SourceTime, now: number): boolean {
-  const start = milliseconds(starts); return now >= start && now < start + milliseconds(duration);
+  const start = milliseconds(starts);
+  return now >= start && now < start + milliseconds(duration);
 }
 /** Source private messages and POIs are stored on the recipient seat, never a global HUD. */
 export class SeatHudMessages {
@@ -97,50 +175,90 @@ export class SeatHudMessages {
   private readonly queuedCenters = new EventRing<CenterPrintState>(256);
   private readonly points: HudPointOfInterest[] = [];
   private sourcePoints: readonly HudPointOfInterest[] = [];
-  setSourcePoints(seat: SeatId, points: readonly HudPointOfInterest[]): void { this.requireSeat(seat); this.sourcePoints = points; }
+  setSourcePoints(seat: SeatId, points: readonly HudPointOfInterest[]): void {
+    this.requireSeat(seat);
+    this.sourcePoints = points;
+  }
   constructor(readonly seat: SeatId) {}
   notify(seat: SeatId, text: string, chat: boolean, starts: SourceTime, duration: SourceTime): void {
-    this.requireSeat(seat); this.notices.push({ sequence: this.sequence++, text, chat, starts, duration });
+    this.requireSeat(seat);
+    this.notices.push({ sequence: this.sequence++, text, chat, starts, duration });
   }
   centerPrint(seat: SeatId, text: string, starts: SourceTime, duration: SourceTime, instant = true, characterMilliseconds = 125): void {
     this.requireSeat(seat);
-    if (instant) { this.queuedCenters.reset(); this.center = { text, starts, duration, instant }; return; }
+    if (instant) {
+      this.queuedCenters.reset();
+      this.center = { text, starts, duration, instant };
+      return;
+    }
     const prior = this.queuedCenters.newest() ?? this.center;
     const start = Math.max(milliseconds(starts), prior === null ? 0 : milliseconds(prior.starts) + milliseconds(prior.duration));
-    const print: CenterPrintState = { text, starts: { kind: "milliseconds", value: start }, instant, characterMilliseconds,
-      duration: { kind: "milliseconds", value: milliseconds(duration) + Array.from(text).length * characterMilliseconds } };
-    if (this.center === null) this.center = print; else this.queuedCenters.admit(print);
+    const print: CenterPrintState = {
+      text,
+      starts: { kind: "milliseconds", value: start },
+      instant,
+      characterMilliseconds,
+      duration: { kind: "milliseconds", value: milliseconds(duration) + Array.from(text).length * characterMilliseconds },
+    };
+    if (this.center === null) this.center = print;
+    else this.queuedCenters.admit(print);
   }
-  clearNotify(): void { this.notices = []; }
-  clearCenterPrint(): void { this.center = null; this.queuedCenters.reset(); }
-  clear(): void { this.clearNotify(); this.clearCenterPrint(); this.points.length = 0; this.sourcePoints = []; }
+  clearNotify(): void {
+    this.notices = [];
+  }
+  clearCenterPrint(): void {
+    this.center = null;
+    this.queuedCenters.reset();
+  }
+  clear(): void {
+    this.clearNotify();
+    this.clearCenterPrint();
+    this.points.length = 0;
+    this.sourcePoints = [];
+  }
   /** Keyed POIs replace matching IDs; unkeyed POIs replace only expired or oldest unkeyed entries. */
   addPoint(seat: SeatId, point: HudPointOfInterest, nowMilliseconds: number, capacity = 64): boolean {
     this.requireSeat(seat);
     let index = point.id === 0 ? -1 : this.points.findIndex(existing => existing.id === point.id);
     if (index < 0) index = this.points.findIndex(existing => existing.expiresMilliseconds <= nowMilliseconds);
-    if (index < 0 && this.points.length < capacity) { this.points.push(point); return true; }
+    if (index < 0 && this.points.length < capacity) {
+      this.points.push(point);
+      return true;
+    }
     if (index < 0) {
       let oldest = Infinity;
-      for (const [candidate, existing] of this.points.entries()) if (existing.id === 0 && existing.expiresMilliseconds < oldest) {
-        oldest = existing.expiresMilliseconds; index = candidate;
-      }
+      for (const [candidate, existing] of this.points.entries())
+        if (existing.id === 0 && existing.expiresMilliseconds < oldest) {
+          oldest = existing.expiresMilliseconds;
+          index = candidate;
+        }
     }
     if (index < 0) return false;
-    this.points[index] = point; return true;
+    this.points[index] = point;
+    return true;
   }
   removePoint(id: number): void {
     if (id === 0) return;
-    const index = this.points.findIndex(point => point.id === id); if (index >= 0) this.points.splice(index, 1);
+    const index = this.points.findIndex(point => point.id === id);
+    if (index >= 0) this.points.splice(index, 1);
   }
-  active(nowMilliseconds: number): { readonly notifications: readonly UiNotification[]; readonly centerPrint: CenterPrintState | null; readonly points: readonly HudPointOfInterest[] } {
+  active(nowMilliseconds: number): {
+    readonly notifications: readonly UiNotification[];
+    readonly centerPrint: CenterPrintState | null;
+    readonly points: readonly HudPointOfInterest[];
+  } {
     this.notices = this.notices.filter(notice => milliseconds(notice.starts) + milliseconds(notice.duration) > nowMilliseconds);
-    while (this.center !== null && milliseconds(this.center.starts) + milliseconds(this.center.duration) <= nowMilliseconds) this.center = this.queuedCenters.shift() ?? null;
-    return { notifications: this.notices.filter(notice => alive(notice.starts, notice.duration, nowMilliseconds)),
+    while (this.center !== null && milliseconds(this.center.starts) + milliseconds(this.center.duration) <= nowMilliseconds)
+      this.center = this.queuedCenters.shift() ?? null;
+    return {
+      notifications: this.notices.filter(notice => alive(notice.starts, notice.duration, nowMilliseconds)),
       centerPrint: this.center !== null && alive(this.center.starts, this.center.duration, nowMilliseconds) ? this.center : null,
-      points: [...this.points, ...this.sourcePoints].filter(point => point.expiresMilliseconds > nowMilliseconds) };
+      points: [...this.points, ...this.sourcePoints].filter(point => point.expiresMilliseconds > nowMilliseconds),
+    };
   }
-  private requireSeat(seat: SeatId): void { if (!seat.equals(this.seat)) throw new Error("HUD message belongs to another seat"); }
+  private requireSeat(seat: SeatId): void {
+    if (!seat.equals(this.seat)) throw new Error("HUD message belongs to another seat");
+  }
 }
 
 export interface CommonHudDrawOptions {
@@ -154,33 +272,70 @@ export interface CommonHudDrawOptions {
 export function drawCommonHud(context: UiDrawContext, data: CommonHudData, options: CommonHudDrawOptions): readonly UiDrawCommand[] {
   if (!data.seat.equals(context.binding.seat) || !data.seat.equals(options.messages.seat)) throw new Error("HUD frame belongs to another seat");
   if (!data.visible) return [];
-  const preferences = options.preferences, skin = options.skin;
+  const preferences = options.preferences,
+    skin = options.skin;
   const commands: { readonly command: UiDrawCommand; readonly anchor: Vec2; readonly scale: number; readonly transform?: UiTransform }[] = [];
-  let anchor: Vec2 = { x: 320, y: 240 }, groupScale = preferences.hudScale * context.binding.hudScale;
+  let anchor: Vec2 = { x: 320, y: 240 },
+    groupScale = preferences.hudScale * context.binding.hudScale;
   const palette = accessibleColors(skin.colors, preferences);
-  const color = palette.text, accent = palette.accent, background = palette.panel;
-  const textScale = skin.fontScale * preferences.textScale, lineHeight = skin.lineHeight * preferences.textScale;
-  const status = statusLayout(context, data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1), preferences.hudScale, textScale, skin.capInk?.height);
-  const statusCommand = (command: UiDrawCommand): void => { commands.push({ command, anchor, scale: groupScale, transform: status.transform }); };
+  const color = palette.text,
+    accent = palette.accent,
+    background = palette.panel;
+  const textScale = skin.fontScale * preferences.textScale,
+    lineHeight = skin.lineHeight * preferences.textScale;
+  const status = statusLayout(
+    context,
+    data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1),
+    preferences.hudScale,
+    textScale,
+    skin.capInk?.height,
+  );
+  const statusCommand = (command: UiDrawCommand): void => {
+    commands.push({ command, anchor, scale: groupScale, transform: status.transform });
+  };
   const text = (value: string, x: number, y: number, tint: Vec4 = color, align: "left" | "center" | "right" = "left"): void => {
-    commands.push({ command: { kind: "text", origin: { x, y }, text: options.localize(value), font: skin.font, scale: textScale, color: tint, align, shadow: true }, anchor, scale: groupScale });
+    commands.push({
+      command: { kind: "text", origin: { x, y }, text: options.localize(value), font: skin.font, scale: textScale, color: tint, align, shadow: true },
+      anchor,
+      scale: groupScale,
+    });
   };
   const image = (resource: ResourceId, rect: Rect, tint: Vec4 = color): void => {
-    commands.push({ command: { kind: "image", resource, rect, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: tint }, anchor, scale: groupScale });
+    commands.push({
+      command: {
+        kind: "image",
+        resource,
+        rect,
+        texCoords: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+        color: tint,
+      },
+      anchor,
+      scale: groupScale,
+    });
   };
-  const fill = (rect: Rect, tint: Vec4): void => { commands.push({ command: { kind: "fill", rect, color: tint }, anchor, scale: groupScale }); };
+  const fill = (rect: Rect, tint: Vec4): void => {
+    commands.push({ command: { kind: "fill", rect, color: tint }, anchor, scale: groupScale });
+  };
   const state = options.messages.active(context.timeMilliseconds);
   if (preferences.crosshair && data.crosshair.visible && data.help === null && data.inventory === null && data.wheel === null) {
     const first = commands.length;
     const size = preferences.crosshairSize;
     if (data.crosshair.image !== null) image(data.crosshair.image, { x: 320 - size / 2, y: 240 - size / 2, width: size, height: size }, data.crosshair.color);
-    else { fill({ x: 320 - size / 2, y: 239, width: size, height: 2 }, data.crosshair.color); fill({ x: 319, y: 240 - size / 2, width: 2, height: size }, data.crosshair.color); }
+    else {
+      fill({ x: 320 - size / 2, y: 239, width: size, height: 2 }, data.crosshair.color);
+      fill({ x: 319, y: 240 - size / 2, width: 2, height: size }, data.crosshair.color);
+    }
     if (data.hitMarker !== null && data.hitMarker.expiresMilliseconds > context.timeMilliseconds && !preferences.reducedFlashes) {
       const opacity = Math.max(0, Math.min(1, (data.hitMarker.expiresMilliseconds - context.timeMilliseconds) / 150));
-      for (const x of [-1, 1]) for (const y of [-1, 1]) fill({ x: 320 + x * (size + 2) - 2, y: 240 + y * (size + 2) - 2, width: 4, height: 4 }, { ...accent, w: opacity });
+      for (const x of [-1, 1])
+        for (const y of [-1, 1]) fill({ x: 320 + x * (size + 2) - 2, y: 240 + y * (size + 2) - 2, width: 4, height: 4 }, { ...accent, w: opacity });
     }
     if (options.camera !== null) {
-      const area = options.camera.viewport, scale = fitUi(context.binding.safeArea).scale * groupScale;
+      const area = options.camera.viewport,
+        scale = fitUi(context.binding.safeArea).scale * groupScale;
       const transform = { x: area.x + area.width / 2 - 320 * scale, y: area.y + area.height / 2 - 240 * scale, scale };
       for (const [index, command] of commands.slice(first).entries()) commands[first + index] = { ...command, transform };
     }
@@ -194,39 +349,72 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
       const x = rect.x;
       const compact = rect.height === 32;
       statusCommand({ kind: "fill", rect, color: background });
-      if (vital.icon !== null) statusCommand({ kind: "image", resource: vital.icon, rect: { x: x + 6, y: rect.y + 8, width: 24, height: 24 }, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color });
+      if (vital.icon !== null)
+        statusCommand({
+          kind: "image",
+          resource: vital.icon,
+          rect: { x: x + 6, y: rect.y + 8, width: 24, height: 24 },
+          texCoords: [
+            { x: 0, y: 0 },
+            { x: 1, y: 1 },
+          ],
+          color,
+        });
       const scale = compact ? status.minimumTextScale : textScale;
-      const label = options.localize(vital.label), value = String(vital.value), full = label + " " + value;
-      const left = x + (vital.icon === null ? 4 : 34), available = rect.x + rect.width - 4 - left;
+      const label = options.localize(vital.label),
+        value = String(vital.value),
+        full = label + " " + value;
+      const left = x + (vital.icon === null ? 4 : 34),
+        available = rect.x + rect.width - 4 - left;
       const measure = (text: string): number => options.measureText?.(text, scale) ?? text.length * 8 * scale;
       const rows = hudStatusRows(textScale, skin.capInk?.height);
-      const lines = compact ? measure(full) <= available ? [full] : [label, value] : [value, label];
+      const lines = compact ? (measure(full) <= available ? [full] : [label, value]) : [value, label];
       for (const [row, line] of lines.entries()) {
         const requestedScale = compact ? scale : textScale * (row === 0 ? 1.5 : 0.8);
-        const rowScale = !compact && row === 0 ? Math.min(requestedScale, available / Math.max(1, options.measureText?.(line, 1) ?? line.length * 8)) : requestedScale;
+        const rowScale =
+          !compact && row === 0 ? Math.min(requestedScale, available / Math.max(1, options.measureText?.(line, 1) ?? line.length * 8)) : requestedScale;
         const measureRow = (text: string): number => options.measureText?.(text, rowScale) ?? text.length * 8 * rowScale;
         const chars = Array.from(line);
         while (chars.length > 0 && measureRow(chars.join("")) > available) chars.pop();
-        statusCommand({ kind: "text", origin: { x: left, y: rect.y + (compact ? 4 + row * 14 - (skin.capInk?.top ?? 0) * scale : (row === 0 ? 4 : rows.labelTop) - (skin.capInk?.top ?? 0) * rowScale) }, text: chars.join(""), font: skin.font,
-          scale: rowScale, color: vital.warning ? accent : color, align: "left", shadow: true });
+        statusCommand({
+          kind: "text",
+          origin: {
+            x: left,
+            y: rect.y + (compact ? 4 + row * 14 - (skin.capInk?.top ?? 0) * scale : (row === 0 ? 4 : rows.labelTop) - (skin.capInk?.top ?? 0) * rowScale),
+          },
+          text: chars.join(""),
+          font: skin.font,
+          scale: rowScale,
+          color: vital.warning ? accent : color,
+          align: "left",
+          shadow: true,
+        });
       }
     }
   }
   if (data.weapon !== undefined) {
     const nativeHeight = hudStatusRows(textScale, skin.capInk?.height).height;
-    const rect = data.weapon.nativeStatus ? { x: 8, y: 476 - nativeHeight, width: 152, height: nativeHeight }
-      : status.rects[data.vitals.length];
+    const rect = data.weapon.nativeStatus ? { x: 8, y: 476 - nativeHeight, width: 152, height: nativeHeight } : status.rects[data.vitals.length];
     if (rect !== undefined) {
       anchor = { x: data.weapon.nativeStatus ? 0 : 320, y: 480 };
-      for (const command of drawWeaponHud(data.weapon, rect, { ...skin, colors: { ...skin.colors, text: color, accent, panel: background } }, textScale, data.weapon.nativeStatus ? 0 : status.minimumTextScale)) {
-        if (data.weapon.nativeStatus) commands.push({ command, anchor, scale: groupScale }); else statusCommand(command);
+      for (const command of drawWeaponHud(
+        data.weapon,
+        rect,
+        { ...skin, colors: { ...skin.colors, text: color, accent, panel: background } },
+        textScale,
+        data.weapon.nativeStatus ? 0 : status.minimumTextScale,
+      )) {
+        if (data.weapon.nativeStatus) commands.push({ command, anchor, scale: groupScale });
+        else statusCommand(command);
       }
     }
   }
   anchor = { x: 320, y: 0 };
   for (const [index, bar] of data.healthBars.entries()) {
-    const x = 160, y = 24 + index * (lineHeight + 16);
-    text(bar.label, 320, y, color, "center"); fill({ x, y: y + lineHeight + 2, width: 320, height: 8 }, background);
+    const x = 160,
+      y = 24 + index * (lineHeight + 16);
+    text(bar.label, 320, y, color, "center");
+    fill({ x, y: y + lineHeight + 2, width: 320, height: 8 }, background);
     fill({ x, y: y + lineHeight + 2, width: 320 * Math.max(0, Math.min(1, bar.maximum <= 0 ? 0 : bar.value / bar.maximum)), height: 8 }, bar.color);
   }
   anchor = { x: 0, y: 0 };
@@ -235,26 +423,41 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   if (state.centerPrint !== null) {
     const print = state.centerPrint;
     const elapsed = context.timeMilliseconds - milliseconds(print.starts);
-    const value = print.instant ? print.text : Array.from(print.text).slice(0, Math.max(0, Math.floor(elapsed / (print.characterMilliseconds ?? 125)))).join("");
-    const lines = value.split("\n"), start = 160 - lines.length * lineHeight / 2;
+    const value = print.instant
+      ? print.text
+      : Array.from(print.text)
+          .slice(0, Math.max(0, Math.floor(elapsed / (print.characterMilliseconds ?? 125))))
+          .join("");
+    const lines = value.split("\n"),
+      start = 160 - (lines.length * lineHeight) / 2;
     lines.forEach((line, index) => text(line, 320, start + index * lineHeight, color, "center"));
   }
   if (options.camera !== null && !preferences.reducedFlashes) {
     const camera = options.camera;
     for (const damage of data.damageIndicators ?? []) {
       if (damage.expiresMilliseconds <= context.timeMilliseconds) continue;
-      const delta = "direction" in damage ? { x: -damage.direction.x, y: -damage.direction.y, z: -damage.direction.z } : { x: damage.origin.x - camera.origin.x, y: damage.origin.y - camera.origin.y, z: damage.origin.z - camera.origin.z };
+      const delta =
+        "direction" in damage
+          ? { x: -damage.direction.x, y: -damage.direction.y, z: -damage.direction.z }
+          : { x: damage.origin.x - camera.origin.x, y: damage.origin.y - camera.origin.y, z: damage.origin.z - camera.origin.z };
       const dot = (axis: Vec3): number => delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
-      const horizontal = -dot(camera.axis[1]), vertical = dot(camera.axis[0]), length = Math.hypot(horizontal, vertical) || 1;
-      const tint = { ...("color" in damage ? damage.color : { x: 1, y: 0.15, z: 0.05 }), w: Math.min(1, (damage.expiresMilliseconds - context.timeMilliseconds) / ("direction" in damage ? 1000 : 400)) };
+      const horizontal = -dot(camera.axis[1]),
+        vertical = dot(camera.axis[0]),
+        length = Math.hypot(horizontal, vertical) || 1;
+      const tint = {
+        ...("color" in damage ? damage.color : { x: 1, y: 0.15, z: 0.05 }),
+        w: Math.min(1, (damage.expiresMilliseconds - context.timeMilliseconds) / ("direction" in damage ? 1000 : 400)),
+      };
       if ("direction" in damage && damage.picture !== undefined) {
         const yaw = Math.atan2(camera.axis[0].y, camera.axis[0].x) - Math.atan2(damage.direction.y, damage.direction.x) - Math.PI;
-        const width = Math.min(damage.picture.width, 3 * damage.amount), height = damage.picture.height;
+        const width = Math.min(damage.picture.width, 3 * damage.amount),
+          height = damage.picture.height;
         const radius = (preferences.crosshair ? preferences.crosshairSize : 0) + height / 2;
         image(damage.picture.image, { x: 320 + radius * Math.sin(yaw) - width / 2, y: 240 - radius * Math.cos(yaw) - height / 2, width, height }, tint);
         continue;
       }
-      for (let step = 0; step < 3; step++) fill({ x: 317 + horizontal / length * (55 + step * 7), y: 237 - vertical / length * (55 + step * 7), width: 6, height: 6 }, tint);
+      for (let step = 0; step < 3; step++)
+        fill({ x: 317 + (horizontal / length) * (55 + step * 7), y: 237 - (vertical / length) * (55 + step * 7), width: 6, height: 6 }, tint);
     }
   }
   if (data.pickup !== undefined && data.pickup !== null && data.pickup.expiresMilliseconds > context.timeMilliseconds) {
@@ -265,14 +468,19 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   if (data.inventory !== null) {
     fill({ x: 128, y: 72, width: 384, height: 328 }, background);
     text("Inventory", 320, 88, accent, "center");
-    const selected = Math.max(0, data.inventory.findIndex(item => item.selected)), rows = Math.max(1, Math.floor(270 / lineHeight));
+    const selected = Math.max(
+        0,
+        data.inventory.findIndex(item => item.selected),
+      ),
+      rows = Math.max(1, Math.floor(270 / lineHeight));
     const start = Math.max(0, Math.min(data.inventory.length - rows, selected - Math.floor(rows / 2)));
     data.inventory.slice(start, start + rows).forEach((item, index) => {
       const y = 114 + index * lineHeight;
       if (item.selected) fill({ x: 136, y, width: 368, height: lineHeight }, skin.colors.focused);
       text(item.binding ?? "", 144, y, accent);
       if (item.icon !== null) image(item.icon, { x: 188, y, width: lineHeight, height: lineHeight });
-      text(item.label, 212, y, item.selected ? accent : color); text(String(item.count), 494, y, color, "right");
+      text(item.label, 212, y, item.selected ? accent : color);
+      text(String(item.count), 494, y, color, "right");
     });
   }
   anchor = { x: 320, y: 480 };
@@ -282,21 +490,34 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
     text(`${prompt.binding === "" ? "" : `[${prompt.binding}] `}${options.localize(prompt.action)}`, 320, y, accent, "center");
   }
   if (data.help !== null) {
-    anchor = { x: 320, y: 240 }; groupScale = 1;
-    fill({ x: 48, y: 48, width: 544, height: 360 }, background); text(data.help.title, 320, 68, accent, "center");
+    anchor = { x: 320, y: 240 };
+    groupScale = 1;
+    fill({ x: 48, y: 48, width: 544, height: 360 }, background);
+    text(data.help.title, 320, 68, accent, "center");
     let y = 104;
-    for (const line of data.help.lines) { text(line, 68, y); y += lineHeight; }
+    for (const line of data.help.lines) {
+      text(line, 68, y);
+      y += lineHeight;
+    }
     y += lineHeight;
-    for (const objective of data.help.objectives) { text(`${objective.complete ? "[x]" : "[ ]"} ${options.localize(objective.text)}`, 68, y, objective.complete ? color : accent); y += lineHeight; }
+    for (const objective of data.help.objectives) {
+      text(`${objective.complete ? "[x]" : "[ ]"} ${options.localize(objective.text)}`, 68, y, objective.complete ? color : accent);
+      y += lineHeight;
+    }
   }
   if (data.wheel !== null) {
-    anchor = { x: 320, y: 240 }; groupScale = Math.min(1, preferences.hudScale * context.binding.hudScale);
-    const wheel = data.wheel, opacity = preferences.reducedFlashes ? 1 : wheel.opacity;
+    anchor = { x: 320, y: 240 };
+    groupScale = Math.min(1, preferences.hudScale * context.binding.hudScale);
+    const wheel = data.wheel,
+      opacity = preferences.reducedFlashes ? 1 : wheel.opacity;
     fill({ x: 128, y: 48, width: 384, height: 384 }, { ...background, w: background.w * opacity });
     for (const [index, item] of wheel.items.entries()) {
-      const angle = index * 2 * Math.PI / wheel.items.length, x = 320 + Math.sin(angle) * 136, y = 240 - Math.cos(angle) * 136;
-      const selected = item.id === wheel.selected, tint = { ...(selected ? accent : item.owned ? color : skin.colors.disabled), w: opacity };
-      const icon = selected ? item.selectedIcon ?? item.icon : item.icon;
+      const angle = (index * 2 * Math.PI) / wheel.items.length,
+        x = 320 + Math.sin(angle) * 136,
+        y = 240 - Math.cos(angle) * 136;
+      const selected = item.id === wheel.selected,
+        tint = { ...(selected ? accent : item.owned ? color : skin.colors.disabled), w: opacity };
+      const icon = selected ? (item.selectedIcon ?? item.icon) : item.icon;
       if (icon !== null) image(icon, { x: x - 20, y: y - 20, width: 40, height: 40 }, tint);
       else text(item.label, x, y - 8, tint, "center");
       if (item.count !== null) text(String(item.count), x, y + 24, { ...(item.count <= item.warningCount ? accent : tint), w: opacity }, "center");
@@ -305,12 +526,15 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
     fill({ x: 318 + wheel.cursor.x * 150, y: 238 + wheel.cursor.y * 150, width: 4, height: 4 }, accent);
   }
   if (data.carousel !== null) {
-    anchor = { x: 320, y: 480 }; groupScale = preferences.hudScale * context.binding.hudScale;
-    const width = Math.min(48, 600 / Math.max(1, data.carousel.items.length)), start = 320 - data.carousel.items.length * width / 2;
+    anchor = { x: 320, y: 480 };
+    groupScale = preferences.hudScale * context.binding.hudScale;
+    const width = Math.min(48, 600 / Math.max(1, data.carousel.items.length)),
+      start = 320 - (data.carousel.items.length * width) / 2;
     for (const [index, item] of data.carousel.items.entries()) {
-      const x = start + index * width, selected = item.id === data.carousel.selected;
+      const x = start + index * width,
+        selected = item.id === data.carousel.selected;
       if (selected) fill({ x, y: 324, width: width - 2, height: 50 }, skin.colors.focused);
-      const icon = selected ? item.selectedIcon ?? item.icon : item.icon;
+      const icon = selected ? (item.selectedIcon ?? item.icon) : item.icon;
       if (icon !== null) image(icon, { x: x + 4, y: 328, width: width - 10, height: width - 10 });
       if (item.count !== null) text(String(item.count), x + width / 2, 358, selected ? accent : color, "center");
     }
@@ -319,35 +543,94 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];
   const area = context.binding.safeArea;
   const timerBottom = Math.min(area.y + area.height - 42, ...status.rects.map(rect => status.transform.y + rect.y * status.transform.scale - 4));
-  result.push(...drawPowerupTimers(data.powerups, area, timerBottom, { ...skin, colors: { ...skin.colors, text: color, panel: background } },
-    textScale * transform.scale * preferences.hudScale * context.binding.hudScale, options.measureText, options.localize));
-  result.push(...commands.map(item => transformUi(item.command, item.transform ?? { scale: transform.scale * item.scale,
-    x: transform.x + item.anchor.x * transform.scale * (1 - item.scale), y: transform.y + item.anchor.y * transform.scale * (1 - item.scale) })));
+  result.push(
+    ...drawPowerupTimers(
+      data.powerups,
+      area,
+      timerBottom,
+      { ...skin, colors: { ...skin.colors, text: color, panel: background } },
+      textScale * transform.scale * preferences.hudScale * context.binding.hudScale,
+      options.measureText,
+      options.localize,
+    ),
+  );
+  result.push(
+    ...commands.map(item =>
+      transformUi(
+        item.command,
+        item.transform ?? {
+          scale: transform.scale * item.scale,
+          x: transform.x + item.anchor.x * transform.scale * (1 - item.scale),
+          y: transform.y + item.anchor.y * transform.scale * (1 - item.scale),
+        },
+      ),
+    ),
+  );
   if (options.camera !== null) {
-    const project = createViewProjector(options.camera), area = options.camera.viewport;
+    const project = createViewProjector(options.camera),
+      area = options.camera.viewport;
     if (data.helpPath !== undefined && data.helpPath !== null) {
       for (const distance of [0, 24, 48]) {
-        const origin = data.helpPath.origin, direction = data.helpPath.direction;
+        const origin = data.helpPath.origin,
+          direction = data.helpPath.direction;
         const point = project({ x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance });
-        if (point.w > 0) result.push({ kind: "fill", rect: { x: area.x + (point.x / point.w * 0.5 + 0.5) * area.width - 3,
-          y: area.y + (-point.y / point.w * 0.5 + 0.5) * area.height - 3, width: 6, height: 6 }, color: accent });
+        if (point.w > 0)
+          result.push({
+            kind: "fill",
+            rect: {
+              x: area.x + ((point.x / point.w) * 0.5 + 0.5) * area.width - 3,
+              y: area.y + ((-point.y / point.w) * 0.5 + 0.5) * area.height - 3,
+              width: 6,
+              height: 6,
+            },
+            color: accent,
+          });
       }
     }
     for (const point of state.points) {
-      const clip = project(point.origin), divisor = clip.w === 0 ? 1 : clip.w;
-      let x = area.x + (clip.x / divisor * 0.5 + 0.5) * area.width, y = area.y + (-clip.y / divisor * 0.5 + 0.5) * area.height;
-      if (clip.w < 0) { x = area.x * 2 + area.width - x; y = area.y * 2 + area.height - y;
-        if (y > area.y) { x = x < area.x + area.width / 2 ? area.x : area.x + area.width; y = Math.min(y, area.y + area.height * 0.75); } }
-      const width = point.width * transform.scale, height = point.height * transform.scale;
+      const clip = project(point.origin),
+        divisor = clip.w === 0 ? 1 : clip.w;
+      let x = area.x + ((clip.x / divisor) * 0.5 + 0.5) * area.width,
+        y = area.y + ((-clip.y / divisor) * 0.5 + 0.5) * area.height;
+      if (clip.w < 0) {
+        x = area.x * 2 + area.width - x;
+        y = area.y * 2 + area.height - y;
+        if (y > area.y) {
+          x = x < area.x + area.width / 2 ? area.x : area.x + area.width;
+          y = Math.min(y, area.y + area.height * 0.75);
+        }
+      }
+      const width = point.width * transform.scale,
+        height = point.height * transform.scale;
       const distance = Math.hypot(x - area.x - area.width / 2, y - area.y - area.height / 2);
-      result.push({ kind: "image", resource: point.image,
-        rect: { x: Math.max(area.x, Math.min(area.x + area.width - width, x - width / 2)), y: Math.max(area.y, Math.min(area.y + area.height - height, y - height / 2)), width, height },
-        texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: { ...point.color,
-          w: point.color.w * (point.hideOnAim ? Math.max(0.25, Math.min(1, distance / Math.max(1, width * 3))) : 1) } });
+      result.push({
+        kind: "image",
+        resource: point.image,
+        rect: {
+          x: Math.max(area.x, Math.min(area.x + area.width - width, x - width / 2)),
+          y: Math.max(area.y, Math.min(area.y + area.height - height, y - height / 2)),
+          width,
+          height,
+        },
+        texCoords: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+        color: { ...point.color, w: point.color.w * (point.hideOnAim ? Math.max(0.25, Math.min(1, distance / Math.max(1, width * 3))) : 1) },
+      });
     }
   }
-  if (preferences.captions) result.push(...captionCommands(data.captions,
-    { x: area.x + 8, y: area.y + area.height * 0.6, width: area.width - 16, height: area.height * 0.22 }, skin.font,
-    textScale * transform.scale, options.measureText ?? ((text, scale) => Array.from(text).length * 8 * scale), skin.capInk));
-  result.push({ kind: "clip", rect: null }); return result;
+  if (preferences.captions)
+    result.push(
+      ...captionCommands(
+        data.captions,
+        { x: area.x + 8, y: area.y + area.height * 0.6, width: area.width - 16, height: area.height * 0.22 },
+        skin.font,
+        textScale * transform.scale,
+        options.measureText ?? ((text, scale) => Array.from(text).length * 8 * scale),
+        skin.capInk,
+      ),
+    );
+  result.push({ kind: "clip", rect: null });
+  return result;
 }

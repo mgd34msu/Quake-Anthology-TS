@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ogg framing (RFC 3533): packet lacing and logical stream sequence ownership.
 export interface OggPacket {
   readonly data: Uint8Array;
@@ -24,22 +25,31 @@ const checksumTable = Uint32Array.from({ length: 256 }, (_, index) => {
   return value >>> 0;
 });
 function join(parts: readonly Uint8Array[], length: number): Uint8Array {
-  const bytes = new Uint8Array(length); let offset = 0;
-  for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
   return bytes;
 }
 /** Checked against the input size before the whole file is read into memory. */
 export const MAX_OGG_MOVIE_BYTES = 512 * 1024 * 1024;
 export function decodeOggMovie(bytes: Uint8Array): OggMovie {
   if (bytes.length > MAX_OGG_MOVIE_BYTES) throw new RangeError("Ogg movie exceeds 512 MiB");
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), streams = new Map<number, LogicalStream>();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    streams = new Map<number, LogicalStream>();
   let offset = 0;
   while (offset < bytes.length) {
     if (offset + 27 > bytes.length || view.getUint32(offset, false) !== 0x4f676753 || bytes[offset + 4] !== 0) throw new Error("Invalid or truncated Ogg page");
-    const flags = bytes[offset + 5], segments = bytes[offset + 26];
-    if (flags === undefined || segments === undefined || (flags & ~7) !== 0 || offset + 27 + segments > bytes.length) throw new Error("Invalid Ogg page flags/lacing");
-    const lacing = bytes.subarray(offset + 27, offset + 27 + segments), payloadStart = offset + 27 + segments;
-    let payloadBytes = 0; for (const length of lacing) payloadBytes += length;
+    const flags = bytes[offset + 5],
+      segments = bytes[offset + 26];
+    if (flags === undefined || segments === undefined || (flags & ~7) !== 0 || offset + 27 + segments > bytes.length)
+      throw new Error("Invalid Ogg page flags/lacing");
+    const lacing = bytes.subarray(offset + 27, offset + 27 + segments),
+      payloadStart = offset + 27 + segments;
+    let payloadBytes = 0;
+    for (const length of lacing) payloadBytes += length;
     const end = payloadStart + payloadBytes;
     if (end > bytes.length) throw new Error("Truncated Ogg page payload");
     let crc = 0;
@@ -51,23 +61,35 @@ export function decodeOggMovie(bytes: Uint8Array): OggMovie {
       crc = ((crc << 8) ^ table) >>> 0;
     }
     if (crc !== view.getUint32(offset + 22, true)) throw new Error("Ogg page checksum mismatch");
-    const serial = view.getUint32(offset + 14, true), sequence = view.getUint32(offset + 18, true);
+    const serial = view.getUint32(offset + 14, true),
+      sequence = view.getUint32(offset + 18, true);
     let stream = streams.get(serial);
     if (stream === undefined) {
       if ((flags & 2) === 0 || sequence !== 0 || streams.size >= 8) throw new Error("Invalid Ogg logical stream start");
-      stream = { sequence: 0, packets: [], pages: [], pieces: [], pendingBytes: 0, ended: false }; streams.set(serial, stream);
+      stream = { sequence: 0, packets: [], pages: [], pieces: [], pendingBytes: 0, ended: false };
+      streams.set(serial, stream);
     } else if ((flags & 2) !== 0 || stream.ended) throw new Error("Ogg logical stream restarted after admission");
     if (sequence !== stream.sequence++ || Boolean(flags & 1) !== (stream.pieces.length !== 0)) throw new Error("Ogg packet sequence discontinuity");
     stream.pages.push(bytes.subarray(offset, end));
     let cursor = payloadStart;
     const completed: OggPacket[] = [];
     for (const length of lacing) {
-      stream.pieces.push(bytes.subarray(cursor, cursor + length)); stream.pendingBytes += length; cursor += length;
+      stream.pieces.push(bytes.subarray(cursor, cursor + length));
+      stream.pendingBytes += length;
+      cursor += length;
       if (stream.pendingBytes > 16 * 1024 * 1024) throw new Error("Ogg packet exceeds 16 MiB");
       if (length < 255) {
-        const packet: OggPacket = { data: stream.pieces.length === 1 ? stream.pieces[0] ?? new Uint8Array(0) : join(stream.pieces, stream.pendingBytes), first: stream.packets.length === 0,
-          last: false, granule: -1n, index: stream.packets.length };
-        stream.packets.push(packet); completed.push(packet); stream.pieces = []; stream.pendingBytes = 0;
+        const packet: OggPacket = {
+          data: stream.pieces.length === 1 ? (stream.pieces[0] ?? new Uint8Array(0)) : join(stream.pieces, stream.pendingBytes),
+          first: stream.packets.length === 0,
+          last: false,
+          granule: -1n,
+          index: stream.packets.length,
+        };
+        stream.packets.push(packet);
+        completed.push(packet);
+        stream.pieces = [];
+        stream.pendingBytes = 0;
       }
     }
     const last = completed.at(-1);
@@ -78,7 +100,8 @@ export function decodeOggMovie(bytes: Uint8Array): OggMovie {
     }
     offset = end;
   }
-  let video: readonly OggPacket[] | null = null, audio: Uint8Array | null = null;
+  let video: readonly OggPacket[] | null = null,
+    audio: Uint8Array | null = null;
   for (const stream of streams.values()) {
     if (!stream.ended) throw new Error("Truncated Ogg logical stream");
     const first = stream.packets[0]?.data;
@@ -89,7 +112,10 @@ export function decodeOggMovie(bytes: Uint8Array): OggMovie {
       video = stream.packets;
     } else if (first[0] === 1 && signature === "vorbis") {
       if (audio !== null) throw new Error("Multiple Vorbis soundtracks are unsupported");
-      audio = join(stream.pages, stream.pages.reduce((sum, page) => sum + page.length, 0));
+      audio = join(
+        stream.pages,
+        stream.pages.reduce((sum, page) => sum + page.length, 0),
+      );
     }
   }
   if (video === null || video.length < 4) throw new Error("Ogg movie has no complete Theora video");

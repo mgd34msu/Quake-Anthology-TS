@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { StampSet } from "../../../foundation/stamp.ts";
 /* Collision tracing translated from id Software's cm_trace.c and cm_test.c.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
@@ -18,25 +19,35 @@ import type { MediumBrush, TraceMedia } from "../media.ts";
 import { convertContents } from "../contents.ts";
 export type { BoxLeafList } from "./topology.ts";
 
-export type CollisionWorldProfile = {
-  readonly kind: "shared";
-  readonly owner: CollisionDebugSurface;
-  readonly settings: CollisionMapSettings;
-} | { readonly kind: "disabled" };
+export type CollisionWorldProfile =
+  | {
+      readonly kind: "shared";
+      readonly owner: CollisionDebugSurface;
+      readonly settings: CollisionMapSettings;
+    }
+  | { readonly kind: "disabled" };
 
-export type TraceShape = { readonly kind: "point" }
+export type TraceShape =
+  | { readonly kind: "point" }
   | { readonly kind: "box"; readonly mins: Vec3; readonly maxs: Vec3 }
   | { readonly kind: "capsule"; readonly mins: Vec3; readonly maxs: Vec3 };
 export interface TraceQuery {
-  readonly start: Vec3; readonly end: Vec3; readonly shape: TraceShape;
-  readonly mask: number; readonly modelIndex?: number;
-  readonly curves?: boolean; readonly playerCurveClip?: boolean;
+  readonly start: Vec3;
+  readonly end: Vec3;
+  readonly shape: TraceShape;
+  readonly mask: number;
+  readonly modelIndex?: number;
+  readonly curves?: boolean;
+  readonly playerCurveClip?: boolean;
 }
 export type TraceContact = { readonly kind: "none" } | { readonly kind: "plane"; readonly plane: Plane };
 export interface TraceResult {
-  readonly fraction: number; readonly end: Vec3;
+  readonly fraction: number;
+  readonly end: Vec3;
   readonly solidity: "clear" | "start-solid" | "all-solid";
-  readonly contact: TraceContact; readonly contents: number; readonly surfaceFlags: number;
+  readonly contact: TraceContact;
+  readonly contents: number;
+  readonly surfaceFlags: number;
 }
 
 export interface SourceTracePlane extends Plane {
@@ -68,34 +79,42 @@ interface CapsuleReplacementTrace {
 }
 
 export function emptySourceTrace(): SourceTraceResult {
-  return { allSolid: false, startSolid: false, fraction: 1, end: vec3(0, 0, 0),
+  return {
+    allSolid: false,
+    startSolid: false,
+    fraction: 1,
+    end: vec3(0, 0, 0),
     plane: { normal: vec3(0, 0, 0), distance: 0, type: 0, signbits: 0 },
-    surfaceFlags: 0, contents: 0 };
+    surfaceFlags: 0,
+    contents: 0,
+  };
 }
 
 /** Gameplay receives an impact plane only when the source plane is valid. */
 export function sourceTraceView(source: SourceTraceResult): TraceResult {
   const normal = source.plane.normal;
-  const contact: TraceContact = source.allSolid || source.fraction === 1
-    || (normal.x === 0 && normal.y === 0 && normal.z === 0)
-    ? { kind: "none" }
-    : { kind: "plane", plane: { normal, distance: source.plane.distance } };
-  return { fraction: source.fraction, end: source.end,
+  const contact: TraceContact =
+    source.allSolid || source.fraction === 1 || (normal.x === 0 && normal.y === 0 && normal.z === 0)
+      ? { kind: "none" }
+      : { kind: "plane", plane: { normal, distance: source.plane.distance } };
+  return {
+    fraction: source.fraction,
+    end: source.end,
     solidity: source.allSolid ? "all-solid" : source.startSolid ? "start-solid" : "clear",
-    contact, surfaceFlags: source.surfaceFlags, contents: source.contents };
+    contact,
+    surfaceFlags: source.surfaceFlags,
+    contents: source.contents,
+  };
 }
 
 /** CM_Trace and CM_TransformedBoxTrace store each source float operation. */
 export function sourceTraceEnd(start: Vec3, end: Vec3, fraction: number): Vec3 {
   const f32 = Math.fround;
-  return vec3(start.x + f32(fraction * f32(end.x - start.x)),
-    start.y + f32(fraction * f32(end.y - start.y)),
-    start.z + f32(fraction * f32(end.z - start.z)));
+  return vec3(start.x + f32(fraction * f32(end.x - start.x)), start.y + f32(fraction * f32(end.y - start.y)), start.z + f32(fraction * f32(end.z - start.z)));
 }
 
 function bspTracePlane(plane: CollisionPlane): SourceTracePlane {
-  return { normal: vec3(plane.normal.x, plane.normal.y, plane.normal.z), distance: plane.distance,
-    type: plane.type, signbits: plane.signbits };
+  return { normal: vec3(plane.normal.x, plane.normal.y, plane.normal.z), distance: plane.distance, type: plane.type, signbits: plane.signbits };
 }
 
 function at<T>(values: readonly T[], index: number): T {
@@ -103,15 +122,16 @@ function at<T>(values: readonly T[], index: number): T {
   if (value === undefined) throw new RangeError(`collision index ${index} out of range`);
   return value;
 }
-function finite(point: Vec3): boolean { return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z); }
+function finite(point: Vec3): boolean {
+  return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
+}
 /** CM_VectorDistanceSquared, including the stored binary32 displacement. */
 export function collisionVectorDistanceSquared(first: Vec3, second: Vec3): number {
   const delta = sub3(second, first);
   return dot3(delta, delta);
 }
 function shapeInfo(shape: TraceShape): { center: Vec3; mins: Vec3; shape: PatchShape } {
-  if (shape.kind === "point") return { center: vec3(0, 0, 0), mins: vec3(0, 0, 0),
-    shape: { kind: "point", mins: vec3(0, 0, 0), extents: vec3(0, 0, 0) } };
+  if (shape.kind === "point") return { center: vec3(0, 0, 0), mins: vec3(0, 0, 0), shape: { kind: "point", mins: vec3(0, 0, 0), extents: vec3(0, 0, 0) } };
   // CM_Trace derives offset and size from mins and maxs without ordering them, so a guest may pass reversed bounds.
   if (!finite(shape.mins) || !finite(shape.maxs)) throw new RangeError("trace shape requires finite bounds");
   const center = scale3(add3(shape.mins, shape.maxs), 0.5);
@@ -126,9 +146,12 @@ function shapeInfo(shape: TraceShape): { center: Vec3; mins: Vec3; shape: PatchS
 function expansion(shape: PatchShape, plane: CollisionPlane): number {
   if (shape.kind === "point") return 0;
   if (shape.kind === "capsule") return shape.radius + Math.abs(dot3(plane.normal, shape.offset));
-  const normal = plane.normal, signs = plane.signbits;
+  const normal = plane.normal,
+    signs = plane.signbits;
   if (signs >= 8) throw new RangeError("CM brush plane signbits outside trace offsets");
-  const x = (signs & 1) !== 0 ? shape.extents.x : shape.mins.x, y = (signs & 2) !== 0 ? shape.extents.y : shape.mins.y, z = (signs & 4) !== 0 ? shape.extents.z : shape.mins.z;
+  const x = (signs & 1) !== 0 ? shape.extents.x : shape.mins.x,
+    y = (signs & 2) !== 0 ? shape.extents.y : shape.mins.y,
+    z = (signs & 4) !== 0 ? shape.extents.z : shape.mins.z;
   return -Math.fround(Math.fround(Math.fround(normal.x * Math.fround(x)) + Math.fround(normal.y * Math.fround(y))) + Math.fround(normal.z * Math.fround(z)));
 }
 
@@ -140,8 +163,11 @@ export class CollisionWorld {
   #sourceModels: SourceClipModels | null = null;
   readonly #mediaBrushStamps: StampSet;
 
-  constructor(map: CollisionMapData, debug: CollisionWorldProfile = { kind: "disabled" },
-    readonly counters = new CollisionCounters()) {
+  constructor(
+    map: CollisionMapData,
+    debug: CollisionWorldProfile = { kind: "disabled" },
+    readonly counters = new CollisionCounters(),
+  ) {
     this.#debug = debug.kind === "shared" ? debug.owner : null;
     this.#settings = debug.kind === "shared" ? debug.settings : null;
     this.#map = map;
@@ -149,30 +175,62 @@ export class CollisionWorld {
     this.#topology = new CollisionTopology(map, counters);
   }
 
-  get areaCount(): number { return this.#topology.areaCount; }
+  get areaCount(): number {
+    return this.#topology.areaCount;
+  }
   bindSettings(settings: CollisionMapSettings): void {
     settings.registerMap();
     this.#settings = settings;
   }
-  get clusterCount(): number { return this.#topology.clusterCount; }
-  get modelCount(): number { return this.#map.models.length; }
-  get hasNodes(): boolean { return this.#map.nodes.length !== 0; }
-  get boxStorage(): CollisionBoxStorage | null { return this.#map.box; }
-  advanceCheckCount(): void { this.#map.checkCount = (this.#map.checkCount + 1) | 0; }
+  get clusterCount(): number {
+    return this.#topology.clusterCount;
+  }
+  get modelCount(): number {
+    return this.#map.models.length;
+  }
+  get hasNodes(): boolean {
+    return this.#map.nodes.length !== 0;
+  }
+  get boxStorage(): CollisionBoxStorage | null {
+    return this.#map.box;
+  }
+  advanceCheckCount(): void {
+    this.#map.checkCount = (this.#map.checkCount + 1) | 0;
+  }
   modelBounds(index: number): Bounds {
     const bounds = at(this.#map.models, index).bounds;
     return { min: vec3(bounds.min.x, bounds.min.y, bounds.min.z), max: vec3(bounds.max.x, bounds.max.y, bounds.max.z) };
   }
-  pointLeafnum(point: Vec3): number { return this.#topology.pointLeafnum(point); }
-  boxLeafnums(bounds: Bounds, maxLeaves = 1024): BoxLeafList { return this.#topology.boxLeafnums(bounds, maxLeaves); }
-  boxBrushes(bounds: Bounds, maxBrushes = 1024): ReturnType<CollisionTopology["boxBrushes"]> { return this.#topology.boxBrushes(bounds, maxBrushes); }
-  leafArea(index: number): number { return this.#topology.leafArea(index); }
-  leafCluster(index: number): number { return this.#topology.leafCluster(index); }
-  clusterPVS(cluster: number): SourceClusterPVS { return this.#topology.clusterPVS(cluster); }
-  clusterVisible(from: number, to: number): boolean { return this.#topology.clusterVisible(from, to); }
-  capturePortalCheckpoint(): ReturnType<CollisionTopology["capturePortalCheckpoint"]> { return this.#topology.capturePortalCheckpoint(); }
-  restorePortalCheckpoint(value: unknown): void { this.#topology.restorePortalCheckpoint(value); }
-  adjustAreaPortalState(area1: number, area2: number, open: boolean): void { this.#topology.adjustAreaPortalState(area1, area2, open); }
+  pointLeafnum(point: Vec3): number {
+    return this.#topology.pointLeafnum(point);
+  }
+  boxLeafnums(bounds: Bounds, maxLeaves = 1024): BoxLeafList {
+    return this.#topology.boxLeafnums(bounds, maxLeaves);
+  }
+  boxBrushes(bounds: Bounds, maxBrushes = 1024): ReturnType<CollisionTopology["boxBrushes"]> {
+    return this.#topology.boxBrushes(bounds, maxBrushes);
+  }
+  leafArea(index: number): number {
+    return this.#topology.leafArea(index);
+  }
+  leafCluster(index: number): number {
+    return this.#topology.leafCluster(index);
+  }
+  clusterPVS(cluster: number): SourceClusterPVS {
+    return this.#topology.clusterPVS(cluster);
+  }
+  clusterVisible(from: number, to: number): boolean {
+    return this.#topology.clusterVisible(from, to);
+  }
+  capturePortalCheckpoint(): ReturnType<CollisionTopology["capturePortalCheckpoint"]> {
+    return this.#topology.capturePortalCheckpoint();
+  }
+  restorePortalCheckpoint(value: unknown): void {
+    this.#topology.restorePortalCheckpoint(value);
+  }
+  adjustAreaPortalState(area1: number, area2: number, open: boolean): void {
+    this.#topology.adjustAreaPortalState(area1, area2, open);
+  }
   areasConnected(area1: number, area2: number): boolean {
     return this.#topology.areasConnected(area1, area2, this.#settings?.noAreas);
   }
@@ -195,7 +253,12 @@ export class CollisionWorld {
     if (modelIndex !== 0) brushes = model.brushes;
     else {
       const leaf = at(map.leaves, this.pointLeafnum(point));
-      brushes = { length: leaf.brushCount, at(index: number): number { return map.leafBrushes.at(leaf.firstBrush + index); } };
+      brushes = {
+        length: leaf.brushCount,
+        at(index: number): number {
+          return map.leafBrushes.at(leaf.firstBrush + index);
+        },
+      };
     }
     let contents = 0;
     for (let index = 0; index < brushes.length; index++) {
@@ -203,7 +266,10 @@ export class CollisionWorld {
       let inside = true;
       for (let i = 0; i < brush.sideCount; i++) {
         const plane = at(map.planes, at(map.brushSides, brush.firstSide + i).plane);
-        if (dot3(point, plane.normal) > plane.distance) { inside = false; break; }
+        if (dot3(point, plane.normal) > plane.distance) {
+          inside = false;
+          break;
+        }
       }
       if (inside) contents |= brush.contents;
     }
@@ -235,8 +301,7 @@ export class CollisionWorld {
 
   /** CM_TraceBoundingBoxThroughCapsule resolves handle255 back to a real leaf. */
   traceCapsuleReplacementSource(query: TraceQuery, prepared: CapsuleReplacementTrace): SourceTraceResult {
-    const shape: PatchShape = { kind: "capsule", extents: prepared.extents,
-      radius: prepared.radius, offset: prepared.offset };
+    const shape: PatchShape = { kind: "capsule", extents: prepared.extents, radius: prepared.radius, offset: prepared.offset };
     return this.#trace({ ...query, modelIndex: 255 }, prepared.start, prepared.end, shape, prepared.mins, prepared.stationary, prepared);
   }
 
@@ -246,10 +311,11 @@ export class CollisionWorld {
 
   transformedTraceSource(query: TraceQuery, origin: Vec3, angles: Vec3): SourceTraceResult {
     if (query.modelIndex === SOURCE_CAPSULE_MODEL_HANDLE) return this.sourceClipModels().transformedTrace(query, SOURCE_CAPSULE_MODEL_HANDLE, origin, angles);
-    if (!finite(origin) || (query.modelIndex !== SOURCE_BOX_MODEL_HANDLE && !finite(angles))) throw new RangeError("model transform requires finite coordinates");
+    if (!finite(origin) || (query.modelIndex !== SOURCE_BOX_MODEL_HANDLE && !finite(angles)))
+      throw new RangeError("model transform requires finite coordinates");
     const info = shapeInfo(query.shape);
     const axis = query.modelIndex !== SOURCE_BOX_MODEL_HANDLE && (angles.x !== 0 || angles.y !== 0 || angles.z !== 0) ? anglesToAxis(angles) : null;
-    const rotate = (point: Vec3): Vec3 => axis === null ? point : vec3(dot3(point, axis[0]), dot3(point, axis[1]), dot3(point, axis[2]));
+    const rotate = (point: Vec3): Vec3 => (axis === null ? point : vec3(dot3(point, axis[0]), dot3(point, axis[1]), dot3(point, axis[2])));
     const start = rotate(sub3(add3(query.start, info.center), origin));
     const finish = rotate(sub3(add3(query.end, info.center), origin));
     const stationary = start.x === finish.x && start.y === finish.y && start.z === finish.z;
@@ -273,55 +339,94 @@ export class CollisionWorld {
   }
 
   traceMedia(query: TraceQuery, fraction: number, transform: { readonly origin: Vec3; readonly angles: Vec3 } | null = null): TraceMedia {
-    const info = shapeInfo(query.shape), modelIndex = query.modelIndex ?? 0;
+    const info = shapeInfo(query.shape),
+      modelIndex = query.modelIndex ?? 0;
     const axis = transform !== null && modelIndex !== SOURCE_BOX_MODEL_HANDLE ? anglesToAxis(transform.angles) : null;
-    const rotate = (point: Vec3): Vec3 => axis === null ? point : vec3(dot3(point, axis[0]), dot3(point, axis[1]), dot3(point, axis[2]));
-    const local = (point: Vec3): Vec3 => transform === null ? add3(point, info.center) : rotate(sub3(add3(point, info.center), transform.origin));
-    let start = local(query.start), end = local(query.end), shape = info.shape, mins = info.mins;
+    const rotate = (point: Vec3): Vec3 => (axis === null ? point : vec3(dot3(point, axis[0]), dot3(point, axis[1]), dot3(point, axis[2])));
+    const local = (point: Vec3): Vec3 => (transform === null ? add3(point, info.center) : rotate(sub3(add3(point, info.center), transform.origin)));
+    let start = local(query.start),
+      end = local(query.end),
+      shape = info.shape,
+      mins = info.mins;
     if (transform !== null) {
-      const extents = shape.extents, center = scale3(add3(mins, extents), 0.5);
-      mins = sub3(mins, center); start = add3(start, center); end = add3(end, center);
-      if (shape.kind === "capsule") shape = { ...shape, extents: sub3(extents, center),
-        offset: axis === null ? shape.offset : vec3(axis[0].z * shape.offset.z, -axis[1].z * shape.offset.z, axis[2].z * shape.offset.z) };
+      const extents = shape.extents,
+        center = scale3(add3(mins, extents), 0.5);
+      mins = sub3(mins, center);
+      start = add3(start, center);
+      end = add3(end, center);
+      if (shape.kind === "capsule")
+        shape = {
+          ...shape,
+          extents: sub3(extents, center),
+          offset: axis === null ? shape.offset : vec3(axis[0].z * shape.offset.z, -axis[1].z * shape.offset.z, axis[2].z * shape.offset.z),
+        };
       else if (shape.kind === "box") shape = { ...shape, mins, extents: sub3(extents, center) };
     }
-    const sizeMax = shape.kind === "capsule" ? vec3(Math.abs(shape.offset.x) + shape.radius,
-      Math.abs(shape.offset.y) + shape.radius, Math.abs(shape.offset.z) + shape.radius) : shape.extents;
+    const sizeMax =
+      shape.kind === "capsule"
+        ? vec3(Math.abs(shape.offset.x) + shape.radius, Math.abs(shape.offset.y) + shape.radius, Math.abs(shape.offset.z) + shape.radius)
+        : shape.extents;
     const sizeMin = shape.kind === "capsule" ? scale3(sizeMax, -1) : mins;
     const reached = sourceTraceEnd(start, end, fraction);
-    const envelope: Bounds = { min: vec3(Math.min(start.x, reached.x) + sizeMin.x - 1,
-      Math.min(start.y, reached.y) + sizeMin.y - 1, Math.min(start.z, reached.z) + sizeMin.z - 1),
-      max: vec3(Math.max(start.x, reached.x) + sizeMax.x + 1, Math.max(start.y, reached.y) + sizeMax.y + 1, Math.max(start.z, reached.z) + sizeMax.z + 1) };
-    const map = this.#map, candidates: number[] = [];
+    const envelope: Bounds = {
+      min: vec3(Math.min(start.x, reached.x) + sizeMin.x - 1, Math.min(start.y, reached.y) + sizeMin.y - 1, Math.min(start.z, reached.z) + sizeMin.z - 1),
+      max: vec3(Math.max(start.x, reached.x) + sizeMax.x + 1, Math.max(start.y, reached.y) + sizeMax.y + 1, Math.max(start.z, reached.z) + sizeMax.z + 1),
+    };
+    const map = this.#map,
+      candidates: number[] = [];
     if (modelIndex !== 0) {
       const brushes = at(map.models, modelIndex).brushes;
       for (let index = 0; index < brushes.length; index++) candidates.push(brushes.at(index));
-    } else this.#topology.visitLeaves(envelope, leafIndex => {
-      const leaf = at(map.leaves, leafIndex);
-      for (let index = 0; index < leaf.brushCount; index++) candidates.push(map.leafBrushes.at(leaf.firstBrush + index));
-    });
-    const seen = this.#mediaBrushStamps; seen.begin();
+    } else
+      this.#topology.visitLeaves(envelope, leafIndex => {
+        const leaf = at(map.leaves, leafIndex);
+        for (let index = 0; index < leaf.brushCount; index++) candidates.push(map.leafBrushes.at(leaf.firstBrush + index));
+      });
+    const seen = this.#mediaBrushStamps;
+    seen.begin();
     function* brushes(): Generator<MediumBrush, undefined, unknown> {
       for (const index of candidates) {
         if (!seen.mark(index)) continue;
         const brush = at(map.brushes, index);
-        if (convertContents(brush.contents, 'q3', 'q1') === -1) continue;
-        yield { contents: brush.contents, planes: Array.from({ length: brush.sideCount }, (_, side) =>
-          at(map.planes, at(map.brushSides, brush.firstSide + side).plane)) };
+        if (convertContents(brush.contents, "q3", "q1") === -1) continue;
+        yield {
+          contents: brush.contents,
+          planes: Array.from({ length: brush.sideCount }, (_, side) => at(map.planes, at(map.brushSides, brush.firstSide + side).plane)),
+        };
       }
     }
-    const numeric = createNumericOperations({ id: 'collision:q3-binary32', arithmetic: { kind: 'binary32', round: 'each-operation' },
-      scalarStorage: 'binary32', floatToInt: 'checked-c-truncation', integerOverflow: 'wrap32' });
-    return traceBrushMedia(brushes(), 'q3', (plane, endpoint) => {
-      let point = endpoint === 'start' ? start : end;
-      const distance = Math.fround(plane.distance + (shape.kind === 'capsule' ? shape.radius : expansion(shape, plane)));
-      if (shape.kind === 'capsule') point = dot3(plane.normal, shape.offset) > 0 ? sub3(point, shape.offset) : add3(point, shape.offset);
-      return Math.fround(dot3(point, plane.normal) - distance);
-    }, numeric, fraction);
+    const numeric = createNumericOperations({
+      id: "collision:q3-binary32",
+      arithmetic: { kind: "binary32", round: "each-operation" },
+      scalarStorage: "binary32",
+      floatToInt: "checked-c-truncation",
+      integerOverflow: "wrap32",
+    });
+    return traceBrushMedia(
+      brushes(),
+      "q3",
+      (plane, endpoint) => {
+        let point = endpoint === "start" ? start : end;
+        const distance = Math.fround(plane.distance + (shape.kind === "capsule" ? shape.radius : expansion(shape, plane)));
+        if (shape.kind === "capsule") point = dot3(plane.normal, shape.offset) > 0 ? sub3(point, shape.offset) : add3(point, shape.offset);
+        return Math.fround(dot3(point, plane.normal) - distance);
+      },
+      numeric,
+      fraction,
+    );
   }
 
-  #trace(query: TraceQuery, start: Vec3, end: Vec3, shape: PatchShape, sizeMins: Vec3, stationary: boolean, replacement: CapsuleReplacementTrace | null): SourceTraceResult {
-    if (!finite(query.start) || !finite(query.end) || !Number.isInteger(query.mask)) throw new RangeError("trace requires finite coordinates and integer contents mask");
+  #trace(
+    query: TraceQuery,
+    start: Vec3,
+    end: Vec3,
+    shape: PatchShape,
+    sizeMins: Vec3,
+    stationary: boolean,
+    replacement: CapsuleReplacementTrace | null,
+  ): SourceTraceResult {
+    if (!finite(query.start) || !finite(query.end) || !Number.isInteger(query.mask))
+      throw new RangeError("trace requires finite coordinates and integer contents mask");
     const map = this.#map;
     const modelIndex = query.modelIndex ?? 0;
     const model = at(map.models, modelIndex);
@@ -331,7 +436,8 @@ export class CollisionWorld {
       this.counters.c_traces = (this.counters.c_traces + 1) | 0;
     }
     let fraction = 1;
-    let allSolid = false, startSolid = false;
+    let allSolid = false,
+      startSolid = false;
     let tracePlane = emptySourceTrace().plane;
     let contents = 0;
     let surfaceFlags = 0;
@@ -341,8 +447,16 @@ export class CollisionWorld {
       if (replacement !== null) positionBounds = replacement.bounds;
       else if (shape.kind === "capsule") {
         positionBounds = {
-          min: vec3(start.x - Math.abs(shape.offset.x) - shape.radius, start.y - Math.abs(shape.offset.y) - shape.radius, start.z - Math.abs(shape.offset.z) - shape.radius),
-          max: vec3(start.x + Math.abs(shape.offset.x) + shape.radius, start.y + Math.abs(shape.offset.y) + shape.radius, start.z + Math.abs(shape.offset.z) + shape.radius),
+          min: vec3(
+            start.x - Math.abs(shape.offset.x) - shape.radius,
+            start.y - Math.abs(shape.offset.y) - shape.radius,
+            start.z - Math.abs(shape.offset.z) - shape.radius,
+          ),
+          max: vec3(
+            start.x + Math.abs(shape.offset.x) + shape.radius,
+            start.y + Math.abs(shape.offset.y) + shape.radius,
+            start.z + Math.abs(shape.offset.z) + shape.radius,
+          ),
         };
       } else {
         const extents = shape.kind === "point" ? vec3(0, 0, 0) : shape.extents;
@@ -357,25 +471,38 @@ export class CollisionWorld {
       const flags = brush.contents;
       if ((flags & query.mask) === 0 || brush.sideCount === 0) return;
       if (!stationary) this.counters.c_brush_traces = (this.counters.c_brush_traces + 1) | 0;
-      let enter = -1, leave = 1, startOut = false, getOut = false;
+      let enter = -1,
+        leave = 1,
+        startOut = false,
+        getOut = false;
       let lead: { plane: CollisionPlane; surfaceFlags: number } | null = null;
       if (positionBounds !== null) {
         // CM_TestBoxInBrush reads retained bounds, including the capsule swap's original bounds.
         const bounds = positionBounds;
         const brushBounds = brush.bounds;
-        if (bounds.min.x > brushBounds.max.x || bounds.min.y > brushBounds.max.y || bounds.min.z > brushBounds.max.z
-          || bounds.max.x < brushBounds.min.x || bounds.max.y < brushBounds.min.y || bounds.max.z < brushBounds.min.z) return;
+        if (
+          bounds.min.x > brushBounds.max.x ||
+          bounds.min.y > brushBounds.max.y ||
+          bounds.min.z > brushBounds.max.z ||
+          bounds.max.x < brushBounds.min.x ||
+          bounds.max.y < brushBounds.min.y ||
+          bounds.max.z < brushBounds.min.z
+        )
+          return;
       }
       for (let i = stationary ? 6 : 0; i < brush.sideCount; i++) {
         const side = at(map.brushSides, brush.firstSide + i);
         const plane = at(map.planes, side.plane);
         const distance = Math.fround(plane.distance + (shape.kind === "capsule" ? shape.radius : expansion(shape, plane)));
-        let first = start, last = end;
+        let first = start,
+          last = end;
         if (shape.kind === "capsule") {
           if (dot3(plane.normal, shape.offset) > 0) {
-            first = sub3(start, shape.offset); last = sub3(end, shape.offset);
+            first = sub3(start, shape.offset);
+            last = sub3(end, shape.offset);
           } else {
-            first = add3(start, shape.offset); last = add3(end, shape.offset);
+            first = add3(start, shape.offset);
+            last = add3(end, shape.offset);
           }
         }
         const d1 = Math.fround(dot3(first, plane.normal) - distance);
@@ -390,16 +517,26 @@ export class CollisionWorld {
         if (d1 <= 0 && d2 <= 0) continue;
         if (d1 > d2) {
           const f = Math.max(0, Math.fround(Math.fround(d1 - 0.125) / Math.fround(d1 - d2)));
-          if (f > enter) { enter = f; lead = { plane, surfaceFlags: side.surfaceFlags }; }
+          if (f > enter) {
+            enter = f;
+            lead = { plane, surfaceFlags: side.surfaceFlags };
+          }
         } else leave = Math.min(leave, Math.min(1, Math.fround(Math.fround(d1 + 0.125) / Math.fround(d1 - d2))));
       }
       if (!startOut) {
         startSolid = true;
-        if (!getOut) { allSolid = true; fraction = 0; contents = flags; }
+        if (!getOut) {
+          allSolid = true;
+          fraction = 0;
+          contents = flags;
+        }
         return;
       }
       if (enter < leave && enter > -1 && enter < fraction && lead !== null) {
-        fraction = Math.max(0, enter); tracePlane = bspTracePlane(lead.plane); contents = flags; surfaceFlags = lead.surfaceFlags;
+        fraction = Math.max(0, enter);
+        tracePlane = bspTracePlane(lead.plane);
+        contents = flags;
+        surfaceFlags = lead.surfaceFlags;
       }
     };
     const patchTrace = (index: number): void => {
@@ -412,47 +549,76 @@ export class CollisionWorld {
         const patch = surface.collide;
         // CM_Trace sets isPoint only for moving traces; zero-size position tests use the box path.
         const positionShape: PatchShape = shape.kind === "point" ? { kind: "box", mins: shape.mins, extents: shape.extents } : shape;
-        if (positionInPatch(patch, start, positionShape)) { allSolid = true; startSolid = true; fraction = 0; contents = surface.contents; }
+        if (positionInPatch(patch, start, positionShape)) {
+          allSolid = true;
+          startSolid = true;
+          fraction = 0;
+          contents = surface.contents;
+        }
       } else {
         this.counters.c_patch_traces = (this.counters.c_patch_traces + 1) | 0;
         // cm_patch.c gates only CM_TracePointThroughPatchCollide, despite the cvar's name.
         const patchShape: PatchShape = (replacement === null ? pointTrace : replacement.pointTrace)
-          ? { kind: "point", mins: sizeMins, extents: shape.extents } : shape;
+          ? { kind: "point", mins: sizeMins, extents: shape.extents }
+          : shape;
         if (patchShape.kind === "point" && (query.playerCurveClip === false || (this.#settings !== null && !this.#settings.playerCurveClip))) return;
         const patch = surface.collide;
         const hit = tracePatch(patch, start, end, patchShape, fraction, this.#debug);
         if (hit !== null) {
           fraction = hit.fraction;
           tracePlane = { ...tracePlane, normal: vec3(hit.plane.normal.x, hit.plane.normal.y, hit.plane.normal.z), distance: hit.plane.distance };
-          contents = surface.contents; surfaceFlags = surface.surfaceFlags;
+          contents = surface.contents;
+          surfaceFlags = surface.surfaceFlags;
         }
       }
     };
     const leafTrace = (index: number): void => {
       const leaf = at(map.leaves, index);
-      for (let i = 0; i < leaf.brushCount; i++) { brushTrace(map.leafBrushes.at(leaf.firstBrush + i)); if (fraction === 0) return; }
+      for (let i = 0; i < leaf.brushCount; i++) {
+        brushTrace(map.leafBrushes.at(leaf.firstBrush + i));
+        if (fraction === 0) return;
+      }
       if (query.curves === false || (this.#settings !== null && this.#settings.noCurves)) return;
-      for (let i = 0; i < leaf.surfaceCount; i++) { patchTrace(map.leafSurfaces.at(leaf.firstSurface + i)); if (fraction === 0) return; }
+      for (let i = 0; i < leaf.surfaceCount; i++) {
+        patchTrace(map.leafSurfaces.at(leaf.firstSurface + i));
+        if (fraction === 0) return;
+      }
     };
     const treeTrace = (index: number, p1f: number, p2f: number, p1: Vec3, p2: Vec3): void => {
       if (fraction <= p1f) return;
-      if (index < 0) { leafTrace(-1 - index); return; }
+      if (index < 0) {
+        leafTrace(-1 - index);
+        return;
+      }
       const node = at(map.nodes, index);
       const plane = at(map.planes, node.plane);
-      const t1 = Math.fround((plane.type === 0 ? p1.x : plane.type === 1 ? p1.y
-        : plane.type === 2 ? p1.z : dot3(p1, plane.normal)) - plane.distance);
-      const t2 = Math.fround((plane.type === 0 ? p2.x : plane.type === 1 ? p2.y
-        : plane.type === 2 ? p2.z : dot3(p2, plane.normal)) - plane.distance);
+      const t1 = Math.fround((plane.type === 0 ? p1.x : plane.type === 1 ? p1.y : plane.type === 2 ? p1.z : dot3(p1, plane.normal)) - plane.distance);
+      const t2 = Math.fround((plane.type === 0 ? p2.x : plane.type === 1 ? p2.y : plane.type === 2 ? p2.z : dot3(p2, plane.normal)) - plane.distance);
       let offset = 0;
       if (!pointTrace && shape.kind !== "point") {
         offset = plane.type === 0 ? shape.extents.x : plane.type === 1 ? shape.extents.y : plane.type === 2 ? shape.extents.z : 2048;
       }
-      if (t1 >= offset + 1 && t2 >= offset + 1) { treeTrace(node.children[0], p1f, p2f, p1, p2); return; }
-      if (t1 < -offset - 1 && t2 < -offset - 1) { treeTrace(node.children[1], p1f, p2f, p1, p2); return; }
-      let side: 0 | 1 = 0, f1 = 1, f2 = 0;
-      if (t1 < t2) { side = 1; f2 = (t1 + offset + 0.125) / (t1 - t2); f1 = (t1 - offset + 0.125) / (t1 - t2); }
-      else if (t1 > t2) { f2 = (t1 - offset - 0.125) / (t1 - t2); f1 = (t1 + offset + 0.125) / (t1 - t2); }
-      f1 = Math.max(0, Math.min(1, Math.fround(f1))); f2 = Math.max(0, Math.min(1, Math.fround(f2)));
+      if (t1 >= offset + 1 && t2 >= offset + 1) {
+        treeTrace(node.children[0], p1f, p2f, p1, p2);
+        return;
+      }
+      if (t1 < -offset - 1 && t2 < -offset - 1) {
+        treeTrace(node.children[1], p1f, p2f, p1, p2);
+        return;
+      }
+      let side: 0 | 1 = 0,
+        f1 = 1,
+        f2 = 0;
+      if (t1 < t2) {
+        side = 1;
+        f2 = (t1 + offset + 0.125) / (t1 - t2);
+        f1 = (t1 - offset + 0.125) / (t1 - t2);
+      } else if (t1 > t2) {
+        f2 = (t1 - offset - 0.125) / (t1 - t2);
+        f1 = (t1 + offset + 0.125) / (t1 - t2);
+      }
+      f1 = Math.max(0, Math.min(1, Math.fround(f1)));
+      f2 = Math.max(0, Math.min(1, Math.fround(f2)));
       treeTrace(node.children[side], p1f, Math.fround(p1f + (p2f - p1f) * f1), p1, lerp3(p1, p2, f1));
       treeTrace(node.children[side === 0 ? 1 : 0], Math.fround(p1f + (p2f - p1f) * f2), p2f, lerp3(p1, p2, f2), p2);
     };
@@ -471,7 +637,14 @@ export class CollisionWorld {
         if (allSolid) break;
       }
     } else treeTrace(map.nodes.length === 0 ? -1 : 0, 0, 1, start, end);
-    return { fraction, end: fraction === 1 ? query.end : sourceTraceEnd(query.start, query.end, fraction),
-      allSolid, startSolid, plane: tracePlane, contents, surfaceFlags };
+    return {
+      fraction,
+      end: fraction === 1 ? query.end : sourceTraceEnd(query.start, query.end, fraction),
+      allSolid,
+      startSolid,
+      plane: tracePlane,
+      contents,
+      surfaceFlags,
+    };
   }
 }

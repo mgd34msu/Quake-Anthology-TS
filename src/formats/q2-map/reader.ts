@@ -1,21 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Adapted from the reference port and q2repro/src/common/bsp_template.c.
  * Copyright (C) 1997-2001 Id Software, Inc.; 2008 Andrey Nazarov.
  * GPL-2.0-or-later. */
 import type { Bounds, Vec3, Vec4 } from "../../contracts/math.ts";
 import type {
-  BspChild, BspEdge, BspFace, BspNode, BspPlane, IndexRange, Q2Area, Q2AreaPortal,
-  Q2Brush, Q2BrushSide, Q2Leaf, Q2TextureInfo, Q2Visibility, Q2WorldModel,
+  BspChild,
+  BspEdge,
+  BspFace,
+  BspNode,
+  BspPlane,
+  IndexRange,
+  Q2Area,
+  Q2AreaPortal,
+  Q2Brush,
+  Q2BrushSide,
+  Q2Leaf,
+  Q2TextureInfo,
+  Q2Visibility,
+  Q2WorldModel,
 } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import { readQ2Bspx } from "./bspx.ts";
 import type { Q2BspxDirectory } from "./bspx.ts";
 
-export interface Q2Lump { readonly offset: number; readonly length: number; }
+export interface Q2Lump {
+  readonly offset: number;
+  readonly length: number;
+}
 export interface Q2RawFace extends Omit<BspFace, "back" | "lightingOffset"> {
   readonly drawFlags: number;
   readonly lightingOffset: number;
 }
-export interface Q2RawTextureInfo extends Omit<Q2TextureInfo, "material" | "next"> { readonly next: number; }
+export interface Q2RawTextureInfo extends Omit<Q2TextureInfo, "material" | "next"> {
+  readonly next: number;
+}
 export type Q2RawLeaf = Omit<Q2Leaf, "mergedContents">;
 
 /** Source records retain on-disk bounds, indices, light offsets and animation sentinels. */
@@ -51,14 +69,18 @@ export interface Q2Bsp {
 function vector(reader: BinaryReader): Vec3 {
   return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32() };
 }
-function shortVector(reader: BinaryReader): Vec3 { return { x: reader.i16(), y: reader.i16(), z: reader.i16() }; }
+function shortVector(reader: BinaryReader): Vec3 {
+  return { x: reader.i16(), y: reader.i16(), z: reader.i16() };
+}
 function projection(reader: BinaryReader): Vec4 {
   return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32(), w: reader.finiteF32() };
 }
 function bounds(reader: BinaryReader, extended: boolean): Bounds {
   return extended ? { min: vector(reader), max: vector(reader) } : { min: shortVector(reader), max: shortVector(reader) };
 }
-function index(reader: BinaryReader, extended: boolean): number { return extended ? reader.u32() : reader.u16(); }
+function index(reader: BinaryReader, extended: boolean): number {
+  return extended ? reader.u32() : reader.u16();
+}
 function nullableIndex(reader: BinaryReader, extended: boolean): number {
   const value = index(reader, extended);
   return value === (extended ? 0xffffffff : 0xffff) ? -1 : value;
@@ -139,11 +161,17 @@ export function readQ2Bsp(bytes: Uint8Array, source = "<q2-map>"): Q2Bsp {
   const visibilityLump = lump(3);
   const vis = visibility(reader.section(visibilityLump.offset, visibilityLump.length));
   const nodes = records<BspNode>(reader, lump(4), extended ? 44 : 28, row => ({
-    plane: row.u32(), children: [child(row.i32()), child(row.i32())], bounds: bounds(row, extended), faces: range(row, extended),
+    plane: row.u32(),
+    children: [child(row.i32()), child(row.i32())],
+    bounds: bounds(row, extended),
+    faces: range(row, extended),
   }));
   const textureInfo = records<Q2RawTextureInfo>(reader, lump(5), 76, row => ({
-    projection: { s: projection(row), t: projection(row) }, flags: row.i32(), value: row.i32(),
-    name: row.fixedByteString(32), next: row.i32(),
+    projection: { s: projection(row), t: projection(row) },
+    flags: row.i32(),
+    value: row.i32(),
+    name: row.fixedByteString(32),
+    next: row.i32(),
   }));
   const faces = records<Q2RawFace>(reader, lump(6), extended ? 28 : 20, row => {
     const plane = index(row, extended);
@@ -157,19 +185,27 @@ export function readQ2Bsp(bytes: Uint8Array, source = "<q2-map>"): Q2Bsp {
   });
   const lighting = raw(7);
   const leaves = records<Q2RawLeaf>(reader, lump(8), extended ? 52 : 28, row => ({
-    contents: row.i32(), cluster: nullableIndex(row, extended), area: index(row, extended),
-    bounds: bounds(row, extended), faces: range(row, extended), brushes: range(row, extended),
+    contents: row.i32(),
+    cluster: nullableIndex(row, extended),
+    area: index(row, extended),
+    bounds: bounds(row, extended),
+    faces: range(row, extended),
+    brushes: range(row, extended),
   }));
   const leafFaces = records(reader, lump(9), extended ? 4 : 2, row => index(row, extended));
   const leafBrushes = records(reader, lump(10), extended ? 4 : 2, row => index(row, extended));
   const edges = records<BspEdge>(reader, lump(11), extended ? 8 : 4, row => ({ vertices: [index(row, extended), index(row, extended)] }));
   const surfaceEdges = records(reader, lump(12), 4, row => row.i32());
   const models = records<Q2WorldModel>(reader, lump(13), 48, row => ({
-    bounds: bounds(row, true), origin: vector(row), headnode: row.i32(), faces: range(row, true),
+    bounds: bounds(row, true),
+    origin: vector(row),
+    headnode: row.i32(),
+    faces: range(row, true),
   }));
   const brushes = records<Q2Brush>(reader, lump(14), 12, row => ({ sides: range(row, true), contents: row.i32() }));
   const brushSides = records<Q2BrushSide>(reader, lump(15), extended ? 8 : 4, row => ({
-    plane: index(row, extended), textureInfo: nullableIndex(row, extended),
+    plane: index(row, extended),
+    textureInfo: nullableIndex(row, extended),
   }));
   const pop = raw(16);
   const areas = records<Q2Area>(reader, lump(17), 8, row => {
@@ -178,15 +214,42 @@ export function readQ2Bsp(bytes: Uint8Array, source = "<q2-map>"): Q2Bsp {
   });
   const areaPortals = records<Q2AreaPortal>(reader, lump(18), 8, row => ({ portal: row.u32(), otherArea: row.u32() }));
   const bspx = readQ2Bspx(reader, endOfLumps);
-  const result: Q2Bsp = { source, format: extended ? "qbsp" : "ibsp38", version, lumps, entities, entityBytes,
-    planes, vertices, edges, surfaceEdges, nodes, leaves, leafFaces, leafBrushes, textureInfo, faces, brushes,
-    brushSides, models, areas, areaPortals, visibility: vis, lighting, pop, bspx, diagnostics };
+  const result: Q2Bsp = {
+    source,
+    format: extended ? "qbsp" : "ibsp38",
+    version,
+    lumps,
+    entities,
+    entityBytes,
+    planes,
+    vertices,
+    edges,
+    surfaceEdges,
+    nodes,
+    leaves,
+    leafFaces,
+    leafBrushes,
+    textureInfo,
+    faces,
+    brushes,
+    brushSides,
+    models,
+    areas,
+    areaPortals,
+    visibility: vis,
+    lighting,
+    pop,
+    bspx,
+    diagnostics,
+  };
   validateQ2Bsp(result);
   return result;
 }
 
 function validateQ2Bsp(map: Q2Bsp): void {
-  function fail(message: string): never { throw new BinaryError(map.source, 0, message); }
+  function fail(message: string): never {
+    throw new BinaryError(map.source, 0, message);
+  }
   function reference(value: number, count: number, label: string): void {
     if (value < 0 || value >= count) fail(`Invalid ${label} index ${value} for ${count} records`);
   }
@@ -244,7 +307,11 @@ function validateQ2Bsp(map: Q2Bsp): void {
       const item = pending.pop();
       if (item === undefined || item.child.kind === "leaf") continue;
       const number = item.child.index;
-      if (item.leaving) { active.delete(number); complete.add(number); continue; }
+      if (item.leaving) {
+        active.delete(number);
+        complete.add(number);
+        continue;
+      }
       if (active.has(number)) fail("Cycle in BSP nodes");
       if (complete.has(number)) continue;
       const node = map.nodes[number];
@@ -271,7 +338,10 @@ export function decompressQ2Visibility(visibility: Q2Visibility | null, cluster:
   let output = 0;
   while (output < row.length) {
     const value = reader.u8();
-    if (value !== 0) { row[output++] = value; continue; }
+    if (value !== 0) {
+      row[output++] = value;
+      continue;
+    }
     const run = reader.u8();
     if (run === 0 || run > row.length - output) throw new BinaryError(reader.source, reader.offset - 1, "invalid visibility zero run");
     output += run;

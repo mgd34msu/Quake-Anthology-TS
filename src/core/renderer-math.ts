@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Renderer lookup and fast-normalization math translated from id Software's
  * code/renderer/tr_init.c and code/game/q_math.c.
@@ -12,8 +13,8 @@ import { bitsToFloat32, float32ToBits, int32 } from "./numeric.ts";
 const FUNCTION_TABLE_SIZE = 1024;
 const FUNCTION_TABLE_MASK = FUNCTION_TABLE_SIZE - 1;
 const sineTable = Array.from({ length: FUNCTION_TABLE_SIZE }, (_, index) => {
-  const degrees = Math.fround(index * 360 / (FUNCTION_TABLE_SIZE - 1));
-  return Math.fround(Math.sin(degrees * Math.PI / 180));
+  const degrees = Math.fround((index * 360) / (FUNCTION_TABLE_SIZE - 1));
+  return Math.fround(Math.sin((degrees * Math.PI) / 180));
 });
 
 /** Returns tr.sinTable[index & FUNCTABLE_MASK]. */

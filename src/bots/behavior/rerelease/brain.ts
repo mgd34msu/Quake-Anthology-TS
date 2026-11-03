@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // The bot brain proper: one instance per bot, one `think()` per server
 // frame, one usercmd out.
 //
@@ -76,8 +77,29 @@ import { aimError, aimLeadPoint, aimStep, newAimState, type BotAimStateT } from 
 import { angleBetween, angleMod, angleVectors, bvec, bvecDistance, bvecSub, bvecMA, type BotVec3 } from "./math.ts";
 import { BotGameType, INTERACTION, ITEM_FLAG, chooseWeapon, itemValue, type BotGameModeT, type BotKnowledge } from "./data/knowledge.ts";
 import { PLAN_START_ABOVE, defaultTraverseCaps, type NavPathT, type NavTraverseCapsT, NavLinkType } from "./nav.ts";
-import { BOT_RUN_SPEED, BOT_WALK_SPEED, BotPathStatus, clearPath, followPath, newPathState, rollCombatJump, setPath, steerDirect, type BotPathStateT } from "./path-follow.ts";
-import { canFire, evaluateSightGeometry, isAware, newAwareness, senseStep, shouldForget, soundAudible, type BotAwarenessT, type BotContactT } from "./senses.ts";
+import {
+  BOT_RUN_SPEED,
+  BOT_WALK_SPEED,
+  BotPathStatus,
+  clearPath,
+  followPath,
+  newPathState,
+  rollCombatJump,
+  setPath,
+  steerDirect,
+  type BotPathStateT,
+} from "./path-follow.ts";
+import {
+  canFire,
+  evaluateSightGeometry,
+  isAware,
+  newAwareness,
+  senseStep,
+  shouldForget,
+  soundAudible,
+  type BotAwarenessT,
+  type BotContactT,
+} from "./senses.ts";
 import { randomChance, randomIndex, randomRange, type BotRandomT } from "./rng.ts";
 import {
   BOT_BUTTON_ATTACK,
@@ -141,9 +163,13 @@ export interface BotBrainConfigT {
   walkSpeed?: number;
   /** Geometry and jump values projected from the actor's selected movement provider. */
   movement?: {
-    readonly gravity: number; readonly jumpVelocity: number; readonly jumpAirSeconds: number;
-    readonly maximumLandingRise: number; readonly startAbove: number;
-    readonly bodyMins: BotVec3; readonly bodyMaxs: BotVec3;
+    readonly gravity: number;
+    readonly jumpVelocity: number;
+    readonly jumpAirSeconds: number;
+    readonly maximumLandingRise: number;
+    readonly startAbove: number;
+    readonly bodyMins: BotVec3;
+    readonly bodyMaxs: BotVec3;
   };
   /** True when a human teammate is nearby, for behaviors.defer_power_items_to_humans. */
   humanTeammateNear?: () => boolean;
@@ -461,9 +487,15 @@ export class BotBrain {
   /** Node hazard contents are a property of the map, so they outlive a plan; derived, so not checkpointed. */
   private hazardNodes: readonly unknown[] | null = null;
   private readonly hazardByNode = new Map<number, boolean>();
-  get guardRefusals(): number { return this.state.guardRefusals; }
-  get gapJumps(): number { return this.state.gapJumps; }
-  get hazardFrames(): number { return this.state.hazardFrames; }
+  get guardRefusals(): number {
+    return this.state.guardRefusals;
+  }
+  get gapJumps(): number {
+    return this.state.gapJumps;
+  }
+  get hazardFrames(): number {
+    return this.state.hazardFrames;
+  }
   readonly config: BotBrainConfigT;
   readonly settings: BotSkillSettings;
 
@@ -477,21 +509,34 @@ export class BotBrain {
   /** Only behavior memory is copied. The population owns actors, clocks, callbacks, and RNG state. */
   checkpoint(): BotBrainCheckpoint {
     const { awareness, unreachableUntil, objectiveHome, saidThisLevel, ...scalars } = this.state;
-    return structuredClone({ version: 1, skill: this.settings.skill, gameMode: this.config.gameMode,
-      memory: { ...scalars, awareness: [...awareness].map(([entity, value]) => ({ entity, value })),
+    return structuredClone({
+      version: 1,
+      skill: this.settings.skill,
+      gameMode: this.config.gameMode,
+      memory: {
+        ...scalars,
+        awareness: [...awareness].map(([entity, value]) => ({ entity, value })),
         unreachableUntil: [...unreachableUntil].map(([entity, time]) => ({ entity, time })),
         objectiveHome: [...objectiveHome].map(([entity, origin]) => ({ entity, origin })),
-        saidThisLevel: [...saidThisLevel] } });
+        saidThisLevel: [...saidThisLevel],
+      },
+    });
   }
 
   restore(checkpoint: BotBrainCheckpoint): void {
-    if (checkpoint.version !== 1 || checkpoint.skill !== this.settings.skill) throw new Error("Bot behavior checkpoint has another source skill/profile version");
+    if (checkpoint.version !== 1 || checkpoint.skill !== this.settings.skill)
+      throw new Error("Bot behavior checkpoint has another source skill/profile version");
     const copy = structuredClone(checkpoint);
-    this.failedPlanGoal = null; this.plannedGoal = null;
+    this.failedPlanGoal = null;
+    this.plannedGoal = null;
     const { awareness, unreachableUntil, objectiveHome, saidThisLevel, ...scalars } = copy.memory;
-    this.state = { ...scalars, awareness: new Map(awareness.map(record => [record.entity, record.value])),
+    this.state = {
+      ...scalars,
+      awareness: new Map(awareness.map(record => [record.entity, record.value])),
       unreachableUntil: new Map(unreachableUntil.map(record => [record.entity, record.time])),
-      objectiveHome: new Map(objectiveHome.map(record => [record.entity, record.origin])), saidThisLevel: new Set(saidThisLevel) };
+      objectiveHome: new Map(objectiveHome.map(record => [record.entity, record.origin])),
+      saidThisLevel: new Set(saidThisLevel),
+    };
     this.config.gameMode = copy.gameMode;
   }
 
@@ -499,7 +544,9 @@ export class BotBrain {
   // the QuakeC's own goal API
 
   /** `bot_movetopoint`: path to a world point. */
-  requestMoveToPoint(point: BotVec3): void { this.setPointGoal(point, "external"); }
+  requestMoveToPoint(point: BotVec3): void {
+    this.setPointGoal(point, "external");
+  }
 
   setObjectiveGoal(point: BotVec3 | null): void {
     if (this.state.explicitGoal?.owner === "external") return;
@@ -511,7 +558,11 @@ export class BotBrain {
   }
 
   private setPointGoal(point: BotVec3, owner: ExplicitGoalT["owner"]): void {
-    const same = this.state.explicitGoal !== null && this.state.explicitGoal.owner === owner && this.state.explicitGoal.kind === "point" && bvecDistance(this.state.explicitGoal.point, point) < 8;
+    const same =
+      this.state.explicitGoal !== null &&
+      this.state.explicitGoal.owner === owner &&
+      this.state.explicitGoal.kind === "point" &&
+      bvecDistance(this.state.explicitGoal.point, point) < 8;
     if (same) return;
     this.state.explicitGoal = { owner, kind: "point", point: { x: point.x, y: point.y, z: point.z }, entityId: -1 };
     this.state.explicitGoalDone = false;
@@ -557,7 +608,9 @@ export class BotBrain {
    * back into a freshly spawned server.
    */
   resetForLevel(): void {
-    this.state.triggerWeapon = 0; this.state.triggerHeldSince = -1; this.state.triggerReadyAt = 0;
+    this.state.triggerWeapon = 0;
+    this.state.triggerHeldSince = -1;
+    this.state.triggerReadyAt = 0;
     clearPath(this.state.pathState);
     this.state.awareness.clear();
     this.clearExplicitGoal();
@@ -656,7 +709,9 @@ export class BotBrain {
     this.state.aim.yaw = self.viewAngles.y;
 
     if (self.dead) {
-      this.state.triggerWeapon = 0; this.state.triggerHeldSince = -1; this.state.triggerReadyAt = 0;
+      this.state.triggerWeapon = 0;
+      this.state.triggerHeldSince = -1;
+      this.state.triggerReadyAt = 0;
       cmd.viewAngles = bvec(this.state.aim.pitch, this.state.aim.yaw, 0);
       if (this.state.deadSince < 0) {
         this.state.deadSince = now;
@@ -722,13 +777,21 @@ export class BotBrain {
 
       const follow = followPath(
         this.state.pathState,
-        { origin: self.origin, pitch: this.state.aim.pitch, yaw: this.state.aim.yaw, onGround: self.onGround, waterLevel: self.waterLevel,
+        {
+          origin: self.origin,
+          pitch: this.state.aim.pitch,
+          yaw: this.state.aim.yaw,
+          onGround: self.onGround,
+          waterLevel: self.waterLevel,
           transport: (link, origin) => world.nav()?.transport?.(link, origin) ?? null,
           ...(self.airSeconds === undefined ? {} : { airSeconds: self.airSeconds }),
           ...(self.waterLevel >= 3 ? { airAbove: this.airAbove(world, self) } : {}),
-          velocity: self.velocity, now, stuckTime: STUCK_SECONDS,
+          velocity: self.velocity,
+          now,
+          stuckTime: STUCK_SECONDS,
           ...(this.config.runSpeed === undefined ? {} : { runSpeed: this.config.runSpeed }),
-          ...(this.config.walkSpeed === undefined ? {} : { walkSpeed: this.config.walkSpeed }) },
+          ...(this.config.walkSpeed === undefined ? {} : { walkSpeed: this.config.walkSpeed }),
+        },
         this.settings.movement,
       );
 
@@ -911,7 +974,14 @@ export class BotBrain {
           // Direct steering at a roam point with no route: the point is
           // across a pit with no landing. Drop it now instead of standing
           // until it rests (7 s stalls on ctf6).
-          if (this.state.pathState.path === null && this.state.roamPoint !== null && this.state.goalEntityId < 0 && !this.state.touchGoal && !this.state.holdPosition) this.abandonGoal();
+          if (
+            this.state.pathState.path === null &&
+            this.state.roamPoint !== null &&
+            this.state.goalEntityId < 0 &&
+            !this.state.touchGoal &&
+            !this.state.holdPosition
+          )
+            this.abandonGoal();
         }
       }
       if ((cmd.buttons & BOT_BUTTON_JUMP) !== 0 && !plannedJump && !gapJumpPressed && this.jumpLandsInHazard(world, self, cmd)) {
@@ -966,8 +1036,10 @@ export class BotBrain {
     cmd.viewAngles = bvec(this.state.aim.pitch, angleMod(this.state.aim.yaw), 0);
     if (this.state.aim.yaw !== yawBefore && (cmd.forwardmove !== 0 || cmd.sidemove !== 0)) {
       // The move fields were projected onto yawBefore but the server applies them to the new view; carry the same world direction over.
-      const before = angleVectors(0, yawBefore, 0), after = angleVectors(0, this.state.aim.yaw, 0);
-      const wx = before.forward.x * cmd.forwardmove + before.right.x * cmd.sidemove, wy = before.forward.y * cmd.forwardmove + before.right.y * cmd.sidemove;
+      const before = angleVectors(0, yawBefore, 0),
+        after = angleVectors(0, this.state.aim.yaw, 0);
+      const wx = before.forward.x * cmd.forwardmove + before.right.x * cmd.sidemove,
+        wy = before.forward.y * cmd.forwardmove + before.right.y * cmd.sidemove;
       cmd.forwardmove = wx * after.forward.x + wy * after.forward.y;
       cmd.sidemove = wx * after.right.x + wy * after.right.y;
     }
@@ -1019,7 +1091,14 @@ export class BotBrain {
 
   //--------------------------------------------------------------------------
 
-  private updateSenses(world: BotWorldT, self: ReturnType<BotWorldT["self"]>, entities: readonly BotEntityT[], sounds: readonly { origin: BotVec3; sourceId: number; time: number; loudness: number }[], dt: number, now: number): void {
+  private updateSenses(
+    world: BotWorldT,
+    self: ReturnType<BotWorldT["self"]>,
+    entities: readonly BotEntityT[],
+    sounds: readonly { origin: BotVec3; sourceId: number; time: number; loudness: number }[],
+    dt: number,
+    now: number,
+  ): void {
     const senses = this.settings.senses;
     const weapons = { ...this.settings.weapons, fovAngle: this.weaponCone(self.currentWeapon) };
 
@@ -1326,13 +1405,26 @@ export class BotBrain {
    * walks through. Pushable gates need nothing here: the route walks into
    * them. Plats and trains have their own link types.
    */
-  private gateToShoot(world: BotWorldT, entities: readonly BotEntityT[], self: ReturnType<BotWorldT["self"]>, bounds: { mins: BotVec3; maxs: BotVec3 } | null): BotVec3 | null {
+  private gateToShoot(
+    world: BotWorldT,
+    entities: readonly BotEntityT[],
+    self: ReturnType<BotWorldT["self"]>,
+    bounds: { mins: BotVec3; maxs: BotVec3 } | null,
+  ): BotVec3 | null {
     if (bounds === null) return null;
     const knowledge = this.config.knowledge;
     for (const ent of entities) {
       if (ent.kind !== BotEntityKind.Interactable) continue;
       const c = ent.center;
-      if (c.x < bounds.mins.x - 8 || c.x > bounds.maxs.x + 8 || c.y < bounds.mins.y - 8 || c.y > bounds.maxs.y + 8 || c.z < bounds.mins.z - 8 || c.z > bounds.maxs.z + 8) continue;
+      if (
+        c.x < bounds.mins.x - 8 ||
+        c.x > bounds.maxs.x + 8 ||
+        c.y < bounds.mins.y - 8 ||
+        c.y > bounds.maxs.y + 8 ||
+        c.z < bounds.mins.z - 8 ||
+        c.z > bounds.maxs.z + 8
+      )
+        continue;
       if (knowledge.interactionFor(ent.classname, ent) !== INTERACTION.shoot) return null;
       if (bvecDistance(self.eye, c) > GATE_SHOOT_RANGE) return null;
       if (world.traceLine(self.eye, c).fraction < 1 && world.traceLine(self.eye, c).hitId !== ent.id) return null;
@@ -1418,7 +1510,12 @@ export class BotBrain {
    * near-instant in Quake, so a bot pressing forward is at its cap by the
    * rim): a crossable gap, or a pit.
    */
-  private gapAhead(world: BotWorldT, self: ReturnType<BotWorldT["self"]>, cmd: BotUsercmdT, steerAt: BotVec3 | null): { hazardAt: number; crossable: boolean } | null {
+  private gapAhead(
+    world: BotWorldT,
+    self: ReturnType<BotWorldT["self"]>,
+    cmd: BotUsercmdT,
+    steerAt: BotVec3 | null,
+  ): { hazardAt: number; crossable: boolean } | null {
     const dir = this.moveDirection(cmd);
     if (dir === null) return null;
     const { x: mx, y: my } = dir;
@@ -1443,23 +1540,33 @@ export class BotBrain {
     // A landing is two probes in a row (the box is 32 wide) of floor at
     // one height: a single 16-u probe of "floor" past the lava was a rail
     // at chest height on ctf6, and bots jumped onto it and into the lava.
-    let landingStart = -1, landingZ = 0;
+    let landingStart = -1,
+      landingZ = 0;
     for (let d = hazardAt + EDGE_PROBE_STEP; d <= hazardAt + GAP_LANDING_SEARCH; d += EDGE_PROBE_STEP) {
-      const x = self.origin.x + mx * d, y = self.origin.y + my * d;
+      const x = self.origin.x + mx * d,
+        y = self.origin.y + my * d;
       const trace = world.traceLine({ x, y, z: self.origin.z }, { x, y, z: self.origin.z - EDGE_DROP_CHECK });
       if (trace.startsolid) return { hazardAt, crossable: false }; // a wall past the pit
       const landZ = trace.endpos.z;
       const c = trace.fraction < 1 ? world.pointContents({ x, y, z: landZ + 2 }) : BotContents.Lava;
       const floorHere = trace.fraction < 1 && c !== BotContents.Lava && c !== BotContents.Slime;
-      if (!floorHere) { landingStart = -1; continue; } // no floor, or still the pit
+      if (!floorHere) {
+        landingStart = -1;
+        continue;
+      } // no floor, or still the pit
       if (landZ > floorZ + (this.config.movement?.maximumLandingRise ?? GAP_LANDING_RISE)) return { hazardAt, crossable: false };
-      if (landingStart < 0 || Math.abs(landZ - landingZ) > 8) { landingStart = d; landingZ = landZ; continue; }
+      if (landingStart < 0 || Math.abs(landZ - landingZ) > 8) {
+        landingStart = d;
+        landingZ = landZ;
+        continue;
+      }
       // the second probe of a landing: within reach? The jump's air time
       // over a drop of h: t = (v_jump + sqrt(v_jump^2 + 2 g h)) / g; the box
       // must land fully on the floor, so the centre needs 16 more than the
       // landing's edge.
       const drop = Math.max(0, floorZ - landingZ);
-      const jumpVelocity = this.config.movement?.jumpVelocity ?? JUMP_VELOCITY, gravity = this.config.movement?.gravity ?? GRAVITY;
+      const jumpVelocity = this.config.movement?.jumpVelocity ?? JUMP_VELOCITY,
+        gravity = this.config.movement?.gravity ?? GRAVITY;
       const airtime = (jumpVelocity + Math.sqrt(jumpVelocity * jumpVelocity + 2 * gravity * drop)) / gravity;
       const reach = runSpeed * airtime * GAP_REACH_MARGIN;
       return { hazardAt, crossable: landingStart + 16 <= reach };
@@ -1470,8 +1577,10 @@ export class BotBrain {
   /** The world-space horizontal direction the command's move presses, or null for no move. */
   private moveDirection(cmd: BotUsercmdT): { x: number; y: number } | null {
     const yaw = (this.state.aim.yaw * Math.PI) / 180;
-    const fx = Math.cos(yaw), fy = Math.sin(yaw);
-    const rx = Math.sin(yaw), ry = -Math.cos(yaw);
+    const fx = Math.cos(yaw),
+      fy = Math.sin(yaw);
+    const rx = Math.sin(yaw),
+      ry = -Math.cos(yaw);
     const mx = fx * cmd.forwardmove + rx * cmd.sidemove;
     const my = fy * cmd.forwardmove + ry * cmd.sidemove;
     const ml = Math.hypot(mx, my);
@@ -1485,7 +1594,8 @@ export class BotBrain {
    * move it presses, for JUMP_AIR_SECONDS) is probed every EDGE_PROBE_STEP.
    */
   private jumpLandsInHazard(world: BotWorldT, self: ReturnType<BotWorldT["self"]>, cmd: BotUsercmdT): boolean {
-    let vx = self.velocity.x, vy = self.velocity.y;
+    let vx = self.velocity.x,
+      vy = self.velocity.y;
     let speed = Math.hypot(vx, vy);
     if (speed < 1) {
       const dir = this.moveDirection(cmd);
@@ -1495,7 +1605,8 @@ export class BotBrain {
       vy = dir.y * speed;
     }
     const reach = speed * (this.config.movement?.jumpAirSeconds ?? JUMP_AIR_SECONDS);
-    const ux = vx / speed, uy = vy / speed;
+    const ux = vx / speed,
+      uy = vy / speed;
     for (let d = EDGE_PROBE_STEP; d <= reach + 0.01; d += EDGE_PROBE_STEP) {
       if (hazardBelow(world, self.origin.x + ux * d, self.origin.y + uy * d, self.origin.z)) return true;
     }
@@ -1640,7 +1751,7 @@ export class BotBrain {
     if (this.state.explicitGoal !== null && !this.state.explicitGoalDone && !this.state.explicitGoalFailed) {
       if (this.state.explicitGoal.kind === "entity") {
         const explicitGoal = this.state.explicitGoal;
-        const ent = entities.find((e) => e.id === explicitGoal.entityId);
+        const ent = entities.find(e => e.id === explicitGoal.entityId);
         if (ent === undefined) {
           this.state.explicitGoalFailed = true;
         } else {
@@ -1738,10 +1849,10 @@ export class BotBrain {
       if (inCombat) {
         const behavior = this.settings.behaviors;
         if (item.isWeapon && !behavior.combatGrabWeapons) continue;
-        if (item.isHealth && self.health >= (this.config.maxHealth ?? 100) * behavior.combatMinHealthPct / 100) continue;
-        if (item.isArmor && self.armor >= (self.maxArmor ?? 200) * behavior.combatMinArmorPct / 100) continue;
+        if (item.isHealth && self.health >= ((this.config.maxHealth ?? 100) * behavior.combatMinHealthPct) / 100) continue;
+        if (item.isArmor && self.armor >= ((self.maxArmor ?? 200) * behavior.combatMinArmorPct) / 100) continue;
         const weapon = knowledge.weaponByNumber(self.currentWeapon);
-        if (item.isAmmo && weapon !== undefined && (self.ammo[weapon.ammoName] ?? 0) >= weapon.maxAmmo * behavior.combatMinAmmoPct / 100) continue;
+        if (item.isAmmo && weapon !== undefined && (self.ammo[weapon.ammoName] ?? 0) >= (weapon.maxAmmo * behavior.combatMinAmmoPct) / 100) continue;
       }
       if ((item.isPowerup || item.isMega) && deferPower) continue;
 
@@ -1777,7 +1888,8 @@ export class BotBrain {
     const nav = world.nav();
     if (nav === null || nav.nodeCount === 0) return this.blindRoamGoal(world, now);
     const self = world.self();
-    if (this.state.roamPoint !== null && bvecDistance(self.origin, this.state.roamPoint) > 64 && this.state.pathState.path !== null) return this.state.roamPoint;
+    if (this.state.roamPoint !== null && bvecDistance(self.origin, this.state.roamPoint) > 64 && this.state.pathState.path !== null)
+      return this.state.roamPoint;
 
     for (let tries = 0; tries < 8; tries++) {
       const node = nav.nodes[randomIndex(this.config.rng, nav.nodeCount)];
@@ -1845,7 +1957,10 @@ export class BotBrain {
     caps.jump = !this.settings.movement.walkOnly || this.settings.movement.allowJumpingInCombat;
 
     const nodes = world.nav()?.nodes ?? null;
-    if (nodes !== this.hazardNodes) { this.hazardNodes = nodes; this.hazardByNode.clear(); }
+    if (nodes !== this.hazardNodes) {
+      this.hazardNodes = nodes;
+      this.hazardByNode.clear();
+    }
     const hazard = this.hazardByNode;
     caps.avoid = (node): boolean => {
       const cached = hazard.get(node.index);
@@ -1871,23 +1986,29 @@ export class BotBrain {
       return;
     }
 
-    const followed = this.state.pathState, currentLink = followed.path?.links[followed.index], previousLink = followed.path?.links[followed.index - 1];
+    const followed = this.state.pathState,
+      currentLink = followed.path?.links[followed.index],
+      previousLink = followed.path?.links[followed.index - 1];
     const train = currentLink?.type === NavLinkType.Train ? currentLink : previousLink?.type === NavLinkType.Train ? previousLink : null;
     if (train !== null) {
       const step = nav.transport?.(train, self.origin);
-      if (step?.kind === "ride" || step?.kind === "wait" || step?.kind === "move" && step.stage === "exit") return;
+      if (step?.kind === "ride" || step?.kind === "wait" || (step?.kind === "move" && step.stage === "exit")) return;
     }
     // Bots start their replan clocks together, so spread the interval by id: a quarter-second step per bot, repeating every four.
     const interval = REPLAN_SECONDS + (self.id & 3) * 0.25;
-    const pacedFailure = this.state.pathState.path === null && this.failedPlanGoal !== null && bvecDistance(this.failedPlanGoal, goal) < 96
-      && now - this.state.pathState.plannedAt <= interval;
+    const pacedFailure =
+      this.state.pathState.path === null &&
+      this.failedPlanGoal !== null &&
+      bvecDistance(this.failedPlanGoal, goal) < 96 &&
+      now - this.state.pathState.plannedAt <= interval;
     if (pacedFailure) return;
     const stale = this.state.pathState.path === null || !nav.pathValid(this.state.pathState.path) || now - this.state.pathState.plannedAt > interval;
     if (!stale) {
       // A followed entity that has walked away from the path's end needs a
       // fresh plan even before the timer runs out.
-      if (this.plannedGoal !== null) { if (bvecDistance(this.plannedGoal, goal) < 96) return; }
-      else {
+      if (this.plannedGoal !== null) {
+        if (bvecDistance(this.plannedGoal, goal) < 96) return;
+      } else {
         const points = this.state.pathState.path?.points;
         const end = points === undefined ? undefined : points[points.length - 1];
         if (end === undefined || bvecDistance(end, goal) < 96) return;
@@ -1958,15 +2079,20 @@ export class BotBrain {
   private trigger(weaponNumber: number, aimed: boolean, now: number): boolean {
     const weapon = this.config.knowledge.weaponByNumber(weaponNumber);
     if (weapon === undefined || weapon.triggerType === "continuous") {
-      this.state.triggerWeapon = 0; this.state.triggerHeldSince = -1; this.state.triggerReadyAt = 0;
+      this.state.triggerWeapon = 0;
+      this.state.triggerHeldSince = -1;
+      this.state.triggerReadyAt = 0;
       return aimed;
     }
     if (this.state.triggerWeapon !== weaponNumber) {
-      this.state.triggerWeapon = weaponNumber; this.state.triggerHeldSince = -1; this.state.triggerReadyAt = 0;
+      this.state.triggerWeapon = weaponNumber;
+      this.state.triggerHeldSince = -1;
+      this.state.triggerReadyAt = 0;
     }
     if (this.state.triggerHeldSince >= 0) {
       if (aimed && now - this.state.triggerHeldSince < weapon.triggerHold) return true;
-      this.state.triggerHeldSince = -1; this.state.triggerReadyAt = now + weapon.triggerCooldown;
+      this.state.triggerHeldSince = -1;
+      this.state.triggerReadyAt = now + weapon.triggerCooldown;
       return false;
     }
     if (!aimed || now < this.state.triggerReadyAt) return false;

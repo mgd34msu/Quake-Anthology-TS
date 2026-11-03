@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Rogue p_view.c and g_sphere.c presentation state. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import { perspectiveProjection } from "../../../render/scene/view.ts";
@@ -11,13 +12,20 @@ interface PlayerEffects {
   nukeUntil: number;
   sphere: Extract<Q2MissionPackPlayerEffect, { readonly kind: "sphere-camera" }> | null;
 }
-export interface Q2EffectPlayerView { readonly camera: SceneCamera; readonly infrared: boolean; readonly blend: Vec4 | null; }
+export interface Q2EffectPlayerView {
+  readonly camera: SceneCamera;
+  readonly infrared: boolean;
+  readonly blend: Vec4 | null;
+}
 
 export class Q2EffectViews {
   private readonly players = new Map<ActorId, PlayerEffects>();
   receive(event: Exclude<Q2MissionPackPlayerEffect, { readonly kind: "tracker-pain" }>): void {
     let state = this.players.get(event.actor);
-    if (state === undefined) { state = { irUntil: 0, nukeUntil: 0, sphere: null }; this.players.set(event.actor, state); }
+    if (state === undefined) {
+      state = { irUntil: 0, nukeUntil: 0, sphere: null };
+      this.players.set(event.actor, state);
+    }
     if (event.kind === "ir") state.irUntil = event.until;
     else if (event.kind === "nuke-blind") state.nukeUntil = event.until;
     else state.sphere = event.sphere === null ? null : { ...event, origin: { ...event.origin }, angles: { ...event.angles } };
@@ -34,9 +42,11 @@ export class Q2EffectViews {
     const sphere = state.sphere;
     let selected = camera;
     if (sphere !== null && sphere.sphere !== null) {
-      const vertical = Math.atan(camera.viewport.height / camera.viewport.width * Math.tan(140 * Math.PI / 360)) * 360 / Math.PI;
-      const lens = perspectiveProjection(140, vertical, 16384), projection = [...camera.projection] satisfies Mat4;
-      projection[0] = lens[0]; projection[5] = lens[5];
+      const vertical = (Math.atan((camera.viewport.height / camera.viewport.width) * Math.tan((140 * Math.PI) / 360)) * 360) / Math.PI;
+      const lens = perspectiveProjection(140, vertical, 16384),
+        projection = [...camera.projection] satisfies Mat4;
+      projection[0] = lens[0];
+      projection[5] = lens[5];
       selected = { ...camera, projection, origin: pose(sphere.sphere)?.origin ?? sphere.origin, axis: anglesToAxis(sphere.angles) };
     }
     return { camera: selected, infrared, blend };
@@ -47,5 +57,7 @@ export class Q2EffectViews {
       else if (state.sphere?.sphere !== undefined && state.sphere.sphere !== null && !actors.has(state.sphere.sphere)) state.sphere = null;
     }
   }
-  clear(): void { this.players.clear(); }
+  clear(): void {
+    this.players.clear();
+  }
 }

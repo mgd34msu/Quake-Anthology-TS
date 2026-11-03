@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from id Software's code/renderer/tr_image.c LoadPCX and LoadPCX32.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -31,8 +32,7 @@ export function decodePcxIndexed(bytes: Uint8Array, source = "<buffer>"): Indexe
   const ymax = reader.u16();
   const width = xmax + 1;
   const height = ymax + 1;
-  if (manufacturer !== 0x0a || version !== 5 || encoding !== 1 || bitsPerPixel !== 8
-    || xmax >= 1024 || ymax >= 1024) {
+  if (manufacturer !== 0x0a || version !== 5 || encoding !== 1 || bitsPerPixel !== 8 || xmax >= 1024 || ymax >= 1024) {
     return { kind: "rejected", message: `Bad pcx file ${source} (${width} x ${height}) (${xmax} x ${ymax})\n` };
   }
 

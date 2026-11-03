@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Port of id Software's CL_WritePacket, SV_ExecuteClientMessage, SV_UserMove and Com_HashKey.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { BinaryError } from "../../core/binary/index.ts";
@@ -5,18 +6,32 @@ import { MAX_MESSAGE_LENGTH, MessageReader, MessageWriter, readDeltaUserCommand,
 import type { SourceMessageState, WireUserCommand } from "./message.ts";
 import type { ReliableCommand } from "./reliable.ts";
 
-export enum ClientOpcode { Nop = 1, Move = 2, MoveNoDelta = 3, Command = 4, Eof = 5 }
+export enum ClientOpcode {
+  Nop = 1,
+  Move = 2,
+  MoveNoDelta = 3,
+  Command = 4,
+  Eof = 5,
+}
 export const MAX_PACKET_USER_COMMANDS = 32;
 
 export class InvalidClientOpcodeError extends BinaryError {
-  constructor(source: string, offset: number, readonly opcode: number) {
+  constructor(
+    source: string,
+    offset: number,
+    readonly opcode: number,
+  ) {
     super(source, offset, `Invalid client opcode ${opcode}`);
     this.name = "InvalidClientOpcodeError";
   }
 }
 
 export class InvalidClientCommandCountError extends BinaryError {
-  constructor(source: string, offset: number, readonly count: number) {
+  constructor(
+    source: string,
+    offset: number,
+    readonly count: number,
+  ) {
     super(source, offset, `Invalid user command count ${count}`);
     this.name = "InvalidClientCommandCountError";
   }
@@ -75,8 +90,25 @@ type ClientReadPhase =
   | { readonly kind: "failed" };
 
 export type DecodedClientMessage =
-  | { readonly kind: "accepted"; readonly header: ClientHeader; readonly commands: readonly ReliableCommand[]; readonly lastClientCommand: number; readonly movement: DecodedClientMovement | null }
-  | { readonly kind: "rejected"; readonly header: ClientHeader; readonly commands: readonly ReliableCommand[]; readonly lastClientCommand: number; readonly reason: "negative-message-acknowledge" | "negative-reliable-acknowledge" | "stale-reliable-acknowledge" | "future-reliable-acknowledge" | "lost-reliable-command" };
+  | {
+      readonly kind: "accepted";
+      readonly header: ClientHeader;
+      readonly commands: readonly ReliableCommand[];
+      readonly lastClientCommand: number;
+      readonly movement: DecodedClientMovement | null;
+    }
+  | {
+      readonly kind: "rejected";
+      readonly header: ClientHeader;
+      readonly commands: readonly ReliableCommand[];
+      readonly lastClientCommand: number;
+      readonly reason:
+        | "negative-message-acknowledge"
+        | "negative-reliable-acknowledge"
+        | "stale-reliable-acknowledge"
+        | "future-reliable-acknowledge"
+        | "lost-reliable-command";
+    };
 
 /** Source Com_HashKey uses signed char bytes and arithmetic shifts on the x86 baseline. */
 export function commandHash(text: string, maxLength = 32): number {
@@ -105,9 +137,11 @@ function copyCommand(command: WireUserCommand): WireUserCommand {
 
 /** CL_WritePacket prefix precedes packetdup clamping and movement diagnostics. */
 export function beginClientMessage(header: ClientHeader, commands: readonly ReliableCommand[], sourceState: SourceMessageState | null = null): MessageWriter {
-  if (!Number.isInteger(header.serverId) || header.serverId < -0x80000000 || header.serverId > 0x7fffffff) throw new RangeError("Client serverId must be int32");
+  if (!Number.isInteger(header.serverId) || header.serverId < -0x80000000 || header.serverId > 0x7fffffff)
+    throw new RangeError("Client serverId must be int32");
   for (const acknowledge of [header.messageAcknowledge, header.reliableAcknowledge]) {
-    if (!Number.isInteger(acknowledge) || acknowledge < 0 || acknowledge > 0x7fffffff) throw new RangeError("Client acknowledgements must be nonnegative int32 values");
+    if (!Number.isInteger(acknowledge) || acknowledge < 0 || acknowledge > 0x7fffffff)
+      throw new RangeError("Client acknowledgements must be nonnegative int32 values");
   }
   const writer = new MessageWriter("bitstream", MAX_MESSAGE_LENGTH, sourceState);
   writer.writeLong(header.serverId);
@@ -115,9 +149,16 @@ export function beginClientMessage(header: ClientHeader, commands: readonly Reli
   writer.writeLong(header.reliableAcknowledge);
   let previousSequence: number | null = null;
   for (const command of commands) {
-    if (!Number.isInteger(command.sequence) || command.sequence < -0x80000000 || command.sequence > 0x7fffffff
-      || (previousSequence !== null && command.sequence <= previousSequence)) throw new RangeError("Client reliable commands must have increasing int32 sequences");
-    writer.writeByte(ClientOpcode.Command); writer.writeLong(command.sequence); writer.writeString(command.text);
+    if (
+      !Number.isInteger(command.sequence) ||
+      command.sequence < -0x80000000 ||
+      command.sequence > 0x7fffffff ||
+      (previousSequence !== null && command.sequence <= previousSequence)
+    )
+      throw new RangeError("Client reliable commands must have increasing int32 sequences");
+    writer.writeByte(ClientOpcode.Command);
+    writer.writeLong(command.sequence);
+    writer.writeString(command.text);
     previousSequence = command.sequence;
   }
   return writer;
@@ -164,7 +205,9 @@ export class ClientMessageReader {
     this.reader = new MessageReader(new Uint8Array(validated.data), "bitstream", source);
     this.prefix = { serverId: this.reader.readLong(), messageAcknowledge: this.reader.readLong() };
   }
-  get readCount(): number { return this.reader.readCount; }
+  get readCount(): number {
+    return this.reader.readCount;
+  }
 
   /** Call only after accepting prefix.messageAcknowledge; no payload opcode is read. */
   readHeader(): ClientHeader {
@@ -186,8 +229,12 @@ export class ClientMessageReader {
       this.phase = phase;
       return { kind: "command", command };
     }
-    if (opcode === ClientOpcode.Eof) { this.phase = { kind: "done" }; return { kind: "eof" }; }
-    if (opcode !== ClientOpcode.Move && opcode !== ClientOpcode.MoveNoDelta) throw new InvalidClientOpcodeError(this.reader.source, this.reader.readCount, opcode);
+    if (opcode === ClientOpcode.Eof) {
+      this.phase = { kind: "done" };
+      return { kind: "eof" };
+    }
+    if (opcode !== ClientOpcode.Move && opcode !== ClientOpcode.MoveNoDelta)
+      throw new InvalidClientOpcodeError(this.reader.source, this.reader.readCount, opcode);
     const movementKind = opcode === ClientOpcode.Move ? "move" : "move-no-delta";
     this.phase = { kind: "movement", header: phase.header, movementKind };
     return { kind: "movement", movementKind, deltaMessage: movementKind === "move" ? phase.header.messageAcknowledge : -1 };
@@ -215,7 +262,8 @@ export class ClientMessageReader {
   validateTerminal(): void {
     if (this.phase.kind !== "terminal") throw new Error(`Cannot validate client terminal during ${this.phase.kind}`);
     this.phase = { kind: "failed" };
-    if (this.reader.readByte() !== ClientOpcode.Eof) throw new BinaryError(this.reader.source, this.reader.readCount, "Missing terminal clc_EOF after movement");
+    if (this.reader.readByte() !== ClientOpcode.Eof)
+      throw new BinaryError(this.reader.source, this.reader.readCount, "Missing terminal clc_EOF after movement");
     this.phase = { kind: "done" };
   }
 }
@@ -243,10 +291,17 @@ export function decodeClientMessage(bytes: Uint8Array, context: ClientDecodeCont
   const header = reader.readHeader();
   const commands: ReliableCommand[] = [];
   let lastClientCommand = context.lastClientCommand;
-  const reject = (reason: Extract<DecodedClientMessage, { kind: "rejected" }>["reason"], rejectedHeader = header): DecodedClientMessage => ({ kind: "rejected", header: rejectedHeader, commands, lastClientCommand, reason });
+  const reject = (reason: Extract<DecodedClientMessage, { kind: "rejected" }>["reason"], rejectedHeader = header): DecodedClientMessage => ({
+    kind: "rejected",
+    header: rejectedHeader,
+    commands,
+    lastClientCommand,
+    reason,
+  });
   if (header.messageAcknowledge < 0) return reject("negative-message-acknowledge");
   if (header.reliableAcknowledge < 0) return reject("negative-reliable-acknowledge");
-  if (header.reliableAcknowledge < context.reliableSequence - 64) return reject("stale-reliable-acknowledge", { ...header, reliableAcknowledge: context.reliableSequence });
+  if (header.reliableAcknowledge < context.reliableSequence - 64)
+    return reject("stale-reliable-acknowledge", { ...header, reliableAcknowledge: context.reliableSequence });
   if (header.reliableAcknowledge > context.reliableSequence) return reject("future-reliable-acknowledge");
   while (true) {
     const part = reader.next();

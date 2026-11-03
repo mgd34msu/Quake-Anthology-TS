@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { SaveReader } from "../../persistence/value.ts";
 import { float64Bits } from "../../foundation/binary.ts";
 
@@ -37,21 +38,33 @@ const snapshots = new WeakMap<ScriptToken, TokenSnapshot>();
 
 function tokenType(token: ScriptToken): number {
   switch (token.kind) {
-    case "primitive": return 0;
-    case "string": return 1;
-    case "literal": return 2;
-    case "number": return 3;
-    case "name": return 4;
-    case "punctuation": return 5;
+    case "primitive":
+      return 0;
+    case "string":
+      return 1;
+    case "literal":
+      return 2;
+    case "number":
+      return 3;
+    case "name":
+      return 4;
+    case "punctuation":
+      return 5;
   }
 }
 
 function tokenSubtype(token: ScriptToken): number {
   switch (token.kind) {
-    case "primitive": return 0;
-    case "string": case "literal": case "name": return token.length;
-    case "number": return token.flags;
-    case "punctuation": return token.punctuation;
+    case "primitive":
+      return 0;
+    case "string":
+    case "literal":
+    case "name":
+      return token.length;
+    case "number":
+      return token.flags;
+    case "punctuation":
+      return token.punctuation;
   }
 }
 
@@ -89,9 +102,7 @@ function readFloat(view: DataView): number {
   if (exponent === 0x7fff && significand > 0x8000000000000000n) return NaN;
   const power = exponent - 16383;
   const fraction = Number(significand) / 0x8000000000000000;
-  const magnitude = power < -1022
-    ? fraction * 2 ** (power + 1022) * 2 ** -1022
-    : fraction * 2 ** power;
+  const magnitude = power < -1022 ? fraction * 2 ** (power + 1022) * 2 ** -1022 : fraction * 2 ** power;
   const value = negative ? -magnitude : magnitude;
   const check = floatCheck;
   writeFloat(check, value, 0);
@@ -112,14 +123,20 @@ export class SourceTokenMemory {
 
   constructor(private readonly borrow: () => Uint8Array) {}
 
-  captureSaveState() { return { bytes: this.bytes.slice(), textExtent: this.textExtent }; }
+  captureSaveState() {
+    return { bytes: this.bytes.slice(), textExtent: this.textExtent };
+  }
   restoreSaveState(value: unknown, verifyBytes = false): void {
-    const reader = new SaveReader(value, "script.token"), bytes = reader.field("bytes").bytes();
+    const reader = new SaveReader(value, "script.token"),
+      bytes = reader.field("bytes").bytes();
     const extent = reader.field("textExtent").nullable(cell => cell.integer(0));
     if (bytes.length !== SOURCE_TOKEN_BYTES || (extent !== null && extent > 1024)) reader.fail("invalid token extent");
     if (verifyBytes && bytes.some((byte, index) => byte !== this.bytes[index])) reader.fail("token bytes disagree with restored allocation");
     if (!verifyBytes) this.bytes.set(bytes);
-    this.textExtent = extent; this.snapshot = null; this.cachedView = null; this.cachedBytes = null;
+    this.textExtent = extent;
+    this.snapshot = null;
+    this.cachedView = null;
+    this.cachedBytes = null;
   }
   get bytes(): Uint8Array {
     const bytes = this.borrow();
@@ -152,26 +169,68 @@ export class SourceTokenMemory {
     this.snapshot = other.snapshot;
   }
 
-  get type(): number { return this.view.getInt32(TYPE, true); }
-  set type(value: number) { this.view.setInt32(TYPE, value, true); }
-  get subtype(): number { return this.view.getInt32(SUBTYPE, true); }
-  set subtype(value: number) { this.view.setInt32(SUBTYPE, value, true); }
-  get integerValue(): number { return this.view.getUint32(INTEGER, true); }
-  set integerValue(value: number) { this.view.setUint32(INTEGER, value, true); }
-  get floatValue(): number { return readFloat(this.view); }
-  set floatValue(value: number) { writeFloat(this.view, value); }
-  get whitespaceStart(): number { return this.view.getUint32(WHITESPACE, true); }
-  set whitespaceStart(value: number) { this.view.setUint32(WHITESPACE, value, true); }
-  get whitespaceEnd(): number { return this.view.getUint32(END_WHITESPACE, true); }
-  set whitespaceEnd(value: number) { this.view.setUint32(END_WHITESPACE, value, true); }
-  get line(): number { return this.view.getInt32(LINE, true); }
-  set line(value: number) { this.view.setInt32(LINE, value, true); }
-  get linesCrossed(): number { return this.view.getInt32(LINES_CROSSED, true); }
-  set linesCrossed(value: number) { this.view.setInt32(LINES_CROSSED, value, true); }
-  get whitespaceBefore(): boolean { return this.whitespaceEnd - this.whitespaceStart > 0; }
-  clearWhitespace(): void { this.whitespaceStart = 0; this.whitespaceEnd = 0; this.linesCrossed = 0; }
-  get next(): number { return this.view.getUint32(NEXT, true); }
-  set next(value: number) { this.view.setUint32(NEXT, value, true); }
+  get type(): number {
+    return this.view.getInt32(TYPE, true);
+  }
+  set type(value: number) {
+    this.view.setInt32(TYPE, value, true);
+  }
+  get subtype(): number {
+    return this.view.getInt32(SUBTYPE, true);
+  }
+  set subtype(value: number) {
+    this.view.setInt32(SUBTYPE, value, true);
+  }
+  get integerValue(): number {
+    return this.view.getUint32(INTEGER, true);
+  }
+  set integerValue(value: number) {
+    this.view.setUint32(INTEGER, value, true);
+  }
+  get floatValue(): number {
+    return readFloat(this.view);
+  }
+  set floatValue(value: number) {
+    writeFloat(this.view, value);
+  }
+  get whitespaceStart(): number {
+    return this.view.getUint32(WHITESPACE, true);
+  }
+  set whitespaceStart(value: number) {
+    this.view.setUint32(WHITESPACE, value, true);
+  }
+  get whitespaceEnd(): number {
+    return this.view.getUint32(END_WHITESPACE, true);
+  }
+  set whitespaceEnd(value: number) {
+    this.view.setUint32(END_WHITESPACE, value, true);
+  }
+  get line(): number {
+    return this.view.getInt32(LINE, true);
+  }
+  set line(value: number) {
+    this.view.setInt32(LINE, value, true);
+  }
+  get linesCrossed(): number {
+    return this.view.getInt32(LINES_CROSSED, true);
+  }
+  set linesCrossed(value: number) {
+    this.view.setInt32(LINES_CROSSED, value, true);
+  }
+  get whitespaceBefore(): boolean {
+    return this.whitespaceEnd - this.whitespaceStart > 0;
+  }
+  clearWhitespace(): void {
+    this.whitespaceStart = 0;
+    this.whitespaceEnd = 0;
+    this.linesCrossed = 0;
+  }
+  get next(): number {
+    return this.view.getUint32(NEXT, true);
+  }
+  set next(value: number) {
+    this.view.setUint32(NEXT, value, true);
+  }
 
   get string(): string {
     const bytes = this.bytes;
@@ -220,9 +279,12 @@ export class SourceTokenMemory {
       this.writeRecord(captured.record);
       return;
     }
-    this.writeRecord({ token, subtype: tokenSubtype(token),
+    this.writeRecord({
+      token,
+      subtype: tokenSubtype(token),
       integerValue: token.kind === "number" ? token.integerValue : 0,
-      floatValue: token.kind === "number" ? token.floatValue : 0 });
+      floatValue: token.kind === "number" ? token.floatValue : 0,
+    });
   }
 
   readRecord(context: SourceTokenContext, textExtent?: number): ScriptTokenRecord {
@@ -233,8 +295,13 @@ export class SourceTokenMemory {
       this.textExtent = this.string.length < textExtent ? textExtent : null;
     }
     const previous = this.snapshot;
-    if (previous !== null && previous.context.path === context.path && previous.context.column === context.column
-      && previous.context.leadingWhitespace === context.leadingWhitespace && this.sameValue(previous.storage)) {
+    if (
+      previous !== null &&
+      previous.context.path === context.path &&
+      previous.context.column === context.column &&
+      previous.context.leadingWhitespace === context.leadingWhitespace &&
+      this.sameValue(previous.storage)
+    ) {
       return previous.record;
     }
     let text = this.string;
@@ -250,19 +317,37 @@ export class SourceTokenMemory {
         text += String.fromCharCode(byte);
       }
     }
-    const base = { text, location: Object.freeze({ path: context.path, line: this.line, column: context.column }),
-      leadingWhitespace: context.leadingWhitespace, linesCrossed: this.linesCrossed };
-    const subtype = this.subtype, integerValue = this.integerValue, floatValue = this.floatValue;
+    const base = {
+      text,
+      location: Object.freeze({ path: context.path, line: this.line, column: context.column }),
+      leadingWhitespace: context.leadingWhitespace,
+      linesCrossed: this.linesCrossed,
+    };
+    const subtype = this.subtype,
+      integerValue = this.integerValue,
+      floatValue = this.floatValue;
     let token: ScriptToken;
     switch (this.type) {
-      case 0: token = Object.freeze({ ...base, kind: "primitive", value: text }); break;
-      case 1: token = Object.freeze({ ...base, kind: "string", value: text.slice(1, -1), length: text.length }); break;
-      case 2: token = Object.freeze({ ...base, kind: "literal", value: text.slice(1, -1), length: text.length }); break;
-      case 3: token = Object.freeze({ ...base, kind: "number", flags: subtype, integerValue, floatValue }); break;
-      case 4: token = Object.freeze({ ...base, kind: "name", value: text, length: text.length }); break;
+      case 0:
+        token = Object.freeze({ ...base, kind: "primitive", value: text });
+        break;
+      case 1:
+        token = Object.freeze({ ...base, kind: "string", value: text.slice(1, -1), length: text.length });
+        break;
+      case 2:
+        token = Object.freeze({ ...base, kind: "literal", value: text.slice(1, -1), length: text.length });
+        break;
+      case 3:
+        token = Object.freeze({ ...base, kind: "number", flags: subtype, integerValue, floatValue });
+        break;
+      case 4:
+        token = Object.freeze({ ...base, kind: "name", value: text, length: text.length });
+        break;
       case 5:
-        token = Object.freeze({ ...base, kind: "punctuation", value: text, punctuation: subtype }); break;
-      default: throw new RangeError("token_t has no completed typed token");
+        token = Object.freeze({ ...base, kind: "punctuation", value: text, punctuation: subtype });
+        break;
+      default:
+        throw new RangeError("token_t has no completed typed token");
     }
     const record = Object.freeze({ token, subtype, integerValue, floatValue });
     const bytes = this.bytes.slice();
@@ -277,7 +362,8 @@ export class SourceTokenMemory {
 
   private sameValue(other: SourceTokenMemory): boolean {
     if (this.textExtent !== other.textExtent) return false;
-    const left = this.bytes, right = other.bytes;
+    const left = this.bytes,
+      right = other.bytes;
     for (let index = 0; index < SOURCE_TOKEN_BYTES; index++) {
       if (left[index] !== right[index]) return false;
     }

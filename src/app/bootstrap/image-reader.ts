@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentMount } from "../../contracts/content.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 import type { MountedContent, OpenedResource } from "../../content/mounts/index.ts";
@@ -10,8 +11,8 @@ export function mountedImageReader(catalog: InstalledCatalog, mounts: MountedCon
     const user = catalog.product(mount.identity.content).userContent;
     return user !== null && (mount.kind === "loose" ? mount.rootPath === user.root : user.archives.some(archive => archive.path === mount.archivePath));
   };
-  const image = (asset: OpenedResource | null): SceneAsset | null => asset === null ? null
-    : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
+  const image = (asset: OpenedResource | null): SceneAsset | null =>
+    asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
   return {
     read: async path => {
       const asset = await mounts.open(path);

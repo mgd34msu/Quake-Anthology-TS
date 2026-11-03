@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Bot view and command conversion translated from id Software's game/ai_main.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -18,7 +19,9 @@ import type { BotState } from "./ai-state.ts";
 const f = Math.fround;
 const viewAxes: readonly ("x" | "y")[] = ["x", "y"];
 
-function sourceAbs(value: number): number { return value < 0 ? (-value) | 0 : value; }
+function sourceAbs(value: number): number {
+  return value < 0 ? -value | 0 : value;
+}
 
 export function botAngleDifference(first: number, second: number): number {
   let difference = f(first - second);
@@ -46,14 +49,13 @@ export function botChangeViewAngles(context: GameAiContext, state: BotState, thi
   if (state.idealViewangles.x > 180) {
     Object.assign(state.idealViewangles, { x: f(state.idealViewangles.x - 360) });
   }
-  const factor = state.enemy >= 0
-    ? context.library.characters.boundedFloat(state.character, Characteristic.ViewFactor, f(0.01), 1) : f(0.05);
-  let maximum = state.enemy >= 0
-    ? context.library.characters.boundedFloat(state.character, Characteristic.ViewMaxChange, 1, 1800) : 360;
+  const factor = state.enemy >= 0 ? context.library.characters.boundedFloat(state.character, Characteristic.ViewFactor, f(0.01), 1) : f(0.05);
+  let maximum = state.enemy >= 0 ? context.library.characters.boundedFloat(state.character, Characteristic.ViewMaxChange, 1, 1800) : 360;
   if (maximum < 240) maximum = 240;
   maximum = f(maximum * thinkTime);
   for (const axis of viewAxes) {
-    let angle = state.viewangles[axis], ideal = state.idealViewangles[axis];
+    let angle = state.viewangles[axis],
+      ideal = state.idealViewangles[axis];
     let angularVelocity = state.viewangleSpeed[axis];
     if (context.cvar("bot_challenge").integerValue !== 0) {
       const difference = sourceAbs(qvmFloatToInt(botAngleDifference(angle, ideal)));
@@ -81,7 +83,9 @@ export function botChangeViewAngles(context: GameAiContext, state: BotState, thi
   context.library.actions.view(state.client, state.viewangles);
 }
 
-function signedByte(value: number): number { return (value << 24) >> 24; }
+function signedByte(value: number): number {
+  return (value << 24) >> 24;
+}
 function commandAngle(angle: number, delta: number): number {
   const encoded = qvmFloatToInt(f(f(angle * 65536) / 360)) & 65535;
   return ((encoded - delta) << 16) >> 16;
@@ -95,15 +99,23 @@ export function botInputToUserCommand(input: BotInput, command: UserCommand, del
   command.buttons = 0;
   if ((flags & (BotActionFlag.RESPAWN | BotActionFlag.ATTACK)) !== 0) command.buttons = CommandButtons.ATTACK;
   const buttons: readonly (readonly [BotActionFlag, CommandButtons])[] = [
-    [BotActionFlag.TALK, CommandButtons.TALK], [BotActionFlag.GESTURE, CommandButtons.GESTURE],
-    [BotActionFlag.USE, CommandButtons.USE_HOLDABLE], [BotActionFlag.WALK, CommandButtons.WALKING],
-    [BotActionFlag.AFFIRMATIVE, CommandButtons.AFFIRMATIVE], [BotActionFlag.NEGATIVE, CommandButtons.NEGATIVE],
-    [BotActionFlag.GET_FLAG, CommandButtons.GETFLAG], [BotActionFlag.GUARD_BASE, CommandButtons.GUARDBASE],
-    [BotActionFlag.PATROL, CommandButtons.PATROL], [BotActionFlag.FOLLOW_ME, CommandButtons.FOLLOWME],
+    [BotActionFlag.TALK, CommandButtons.TALK],
+    [BotActionFlag.GESTURE, CommandButtons.GESTURE],
+    [BotActionFlag.USE, CommandButtons.USE_HOLDABLE],
+    [BotActionFlag.WALK, CommandButtons.WALKING],
+    [BotActionFlag.AFFIRMATIVE, CommandButtons.AFFIRMATIVE],
+    [BotActionFlag.NEGATIVE, CommandButtons.NEGATIVE],
+    [BotActionFlag.GET_FLAG, CommandButtons.GETFLAG],
+    [BotActionFlag.GUARD_BASE, CommandButtons.GUARDBASE],
+    [BotActionFlag.PATROL, CommandButtons.PATROL],
+    [BotActionFlag.FOLLOW_ME, CommandButtons.FOLLOWME],
   ];
   for (const [action, button] of buttons) if ((flags & action) !== 0) command.buttons |= button;
   command.weapon = input.weapon & 255;
-  Object.assign(command.angles, vec3(commandAngle(input.viewAngles.x, deltaAngles.x), commandAngle(input.viewAngles.y, deltaAngles.y), commandAngle(input.viewAngles.z, deltaAngles.z)));
+  Object.assign(
+    command.angles,
+    vec3(commandAngle(input.viewAngles.x, deltaAngles.x), commandAngle(input.viewAngles.y, deltaAngles.y), commandAngle(input.viewAngles.z, deltaAngles.z)),
+  );
   const angles = vec3(input.direction.z !== 0 ? input.viewAngles.x : 0, input.viewAngles.y, 0);
   const vectors = qvmAngleVectors(angles);
   const speed = f(f(input.speed * 127) / 400);
@@ -119,15 +131,29 @@ export function botInputToUserCommand(input: BotInput, command: UserCommand, del
 }
 
 export function botAddDeltaAngles(state: BotState): void {
-  const angles = state.viewangles, delta = state.curPs.deltaAngles;
-  Object.assign(state.viewangles, vec3(qvmAngleMod(f(angles.x + f(f(delta.x) * f(360 / 65536)))),
-    qvmAngleMod(f(angles.y + f(f(delta.y) * f(360 / 65536)))), qvmAngleMod(f(angles.z + f(f(delta.z) * f(360 / 65536))))));
+  const angles = state.viewangles,
+    delta = state.curPs.deltaAngles;
+  Object.assign(
+    state.viewangles,
+    vec3(
+      qvmAngleMod(f(angles.x + f(f(delta.x) * f(360 / 65536)))),
+      qvmAngleMod(f(angles.y + f(f(delta.y) * f(360 / 65536)))),
+      qvmAngleMod(f(angles.z + f(f(delta.z) * f(360 / 65536)))),
+    ),
+  );
 }
 
 export function botSubtractDeltaAngles(state: BotState): void {
-  const angles = state.viewangles, delta = state.curPs.deltaAngles;
-  Object.assign(state.viewangles, vec3(qvmAngleMod(f(angles.x - f(f(delta.x) * f(360 / 65536)))),
-    qvmAngleMod(f(angles.y - f(f(delta.y) * f(360 / 65536)))), qvmAngleMod(f(angles.z - f(f(delta.z) * f(360 / 65536))))));
+  const angles = state.viewangles,
+    delta = state.curPs.deltaAngles;
+  Object.assign(
+    state.viewangles,
+    vec3(
+      qvmAngleMod(f(angles.x - f(f(delta.x) * f(360 / 65536)))),
+      qvmAngleMod(f(angles.y - f(f(delta.y) * f(360 / 65536)))),
+      qvmAngleMod(f(angles.z - f(f(delta.z) * f(360 / 65536)))),
+    ),
+  );
 }
 
 export function botUpdateInput(context: GameAiContext, state: BotState, time: number, elapsedTime: number): void {

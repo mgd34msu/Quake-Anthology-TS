@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { normalizeResourcePath } from "../../../content/mounts/paths.ts";
 
 /** Embedded model image names are content-root relative, including sibling-directory references. */

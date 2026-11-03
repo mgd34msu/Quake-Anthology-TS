@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import type { ResolvedResourceReference } from "../../contracts/content.ts";
 import type { Q1AliasModel, Q2AliasModel, SpriteModel } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
@@ -14,16 +15,24 @@ export { sampleTimedFrame, interpolateAliasFrames, buildMdlGeometry, buildMd2Geo
 export type { AliasGeometry, AliasMeshVertex } from "./animation.ts";
 
 export type Q12Model = Q1AliasModel | Q2AliasModel | SpriteModel;
-export interface Q12ModelResource { readonly source: ResolvedResourceReference; readonly model: Q12Model; }
+export interface Q12ModelResource {
+  readonly source: ResolvedResourceReference;
+  readonly model: Q12Model;
+}
 
 export function parseQ12Model(data: Uint8Array, source = "<model>"): Q12Model {
   const magic = new BinaryReader(data, source).fixedByteString(4);
   switch (magic) {
-    case "IDPO": return parseMdl(data, source);
-    case "IDP2": return parseMd2(data, source);
-    case "IDSP": return parseSpr(data, source);
-    case "IDS2": return parseSp2(data, source);
-    default: throw new BinaryError(source, 0, `Unknown Q1/Q2 model magic ${JSON.stringify(magic)}`);
+    case "IDPO":
+      return parseMdl(data, source);
+    case "IDP2":
+      return parseMd2(data, source);
+    case "IDSP":
+      return parseSpr(data, source);
+    case "IDS2":
+      return parseSp2(data, source);
+    default:
+      throw new BinaryError(source, 0, `Unknown Q1/Q2 model magic ${JSON.stringify(magic)}`);
   }
 }
 

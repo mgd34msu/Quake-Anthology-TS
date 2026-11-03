@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Player animation.cfg parsing translated from Quake III Arena's
  * cgame/cg_players.c CG_ParseAnimationFile.
@@ -72,11 +73,26 @@ function cell(target: PlayerAnimationTarget, index: PlayerAnimation): AnimationC
 }
 
 /** Parse into retained clientInfo_t cells; standalone callers receive an owned diagnostic snapshot. */
-export function parsePlayerAnimationConfig(text: string, source = "<animation.cfg>", context: PlayerAnimationParseContext | null = null): PlayerAnimationConfig {
+export function parsePlayerAnimationConfig(
+  text: string,
+  source = "<animation.cfg>",
+  context: PlayerAnimationParseContext | null = null,
+): PlayerAnimationConfig {
   const target: PlayerAnimationTarget = context?.target ?? {
-    footsteps: "normal", headOffset: { x: 0, y: 0, z: 0 }, gender: "male", fixedLegs: false, fixedTorso: false,
-    animations: Array.from({ length: TOTAL_ANIMATION_COUNT }, () => ({ firstFrame: 0, numFrames: 0,
-      loopFrames: 0, frameLerp: 0, initialLerp: 0, reversed: false, flipflop: false })),
+    footsteps: "normal",
+    headOffset: { x: 0, y: 0, z: 0 },
+    gender: "male",
+    fixedLegs: false,
+    fixedTorso: false,
+    animations: Array.from({ length: TOTAL_ANIMATION_COUNT }, () => ({
+      firstFrame: 0,
+      numFrames: 0,
+      loopFrames: 0,
+      frameLerp: 0,
+      initialLerp: 0,
+      reversed: false,
+      flipflop: false,
+    })),
   };
   const parser = context?.parser ?? new CommonParseState();
   const warnings: AnimationWarning[] = [];
@@ -104,9 +120,12 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
   target.fixedTorso = false;
 
   while (true) {
-    const previous = cursor.offset, token = parser.parse(cursor), directive = token.toLowerCase();
+    const previous = cursor.offset,
+      token = parser.parse(cursor),
+      directive = token.toLowerCase();
     if (directive === "footsteps") {
-      const value = parser.parse(cursor), footstep = value.toLowerCase();
+      const value = parser.parse(cursor),
+        footstep = value.toLowerCase();
       if (footstep === "default" || footstep === "normal") target.footsteps = "normal";
       else if (footstep === "boot" || footstep === "flesh" || footstep === "mech" || footstep === "energy") target.footsteps = footstep;
       else warn("Bad footsteps parm in %s: %s\n", [source, value]);
@@ -124,15 +143,21 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
       target.fixedTorso = true;
     } else {
       const first = token.charAt(0);
-      if (first >= "0" && first <= "9") { cursor.offset = previous; break; }
+      if (first >= "0" && first <= "9") {
+        cursor.offset = previous;
+        break;
+      }
       warn("unknown token '%s' is %s\n", [token, source]);
-      if (previous === cursor.offset) throw new PlayerAnimationParseError(source, (parser.line + 1) | 0, 1, "animation prelude reached the source nonprogress cycle");
+      if (previous === cursor.offset)
+        throw new PlayerAnimationParseError(source, (parser.line + 1) | 0, 1, "animation prelude reached the source nonprogress cycle");
     }
   }
 
-  let skip = 0, index = 0;
+  let skip = 0,
+    index = 0;
   for (; index < SOURCE_ANIMATION_COUNT; index++) {
-    const firstToken = parser.parse(cursor), animation = cell(target, index);
+    const firstToken = parser.parse(cursor),
+      animation = cell(target, index);
     if (!firstToken) {
       if (index >= PlayerAnimation.TORSO_GETFLAG && index <= PlayerAnimation.TORSO_NEGATIVE) {
         const gesture = cell(target, PlayerAnimation.TORSO_GESTURE);
@@ -157,7 +182,10 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
     animation.numFrames = gameAtoi(countToken);
     animation.reversed = false;
     animation.flipflop = false;
-    if (animation.numFrames < 0) { animation.numFrames = -animation.numFrames | 0; animation.reversed = true; }
+    if (animation.numFrames < 0) {
+      animation.numFrames = -animation.numFrames | 0;
+      animation.reversed = true;
+    }
     const loopToken = parser.parse(cursor);
     if (!loopToken) break;
     animation.loopFrames = gameAtoi(loopToken);
@@ -178,7 +206,13 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
   Object.assign(cell(target, PlayerAnimation.FLAG_RUN), { firstFrame: 0, numFrames: 16, loopFrames: 16, frameLerp: 66, initialLerp: 66, reversed: false });
   Object.assign(cell(target, PlayerAnimation.FLAG_STAND), { firstFrame: 16, numFrames: 5, loopFrames: 0, frameLerp: 50, initialLerp: 50, reversed: false });
   Object.assign(cell(target, PlayerAnimation.FLAG_STAND2RUN), { firstFrame: 16, numFrames: 5, loopFrames: 1, frameLerp: 66, initialLerp: 66, reversed: true });
-  return { footsteps: target.footsteps, headOffset: { ...target.headOffset }, gender: target.gender,
-    fixedLegs: target.fixedLegs, fixedTorso: target.fixedTorso,
-    animations: target.animations.map((animation, index) => index === MAX_ANIMATIONS_SENTINEL ? null : { ...animation }), warnings };
+  return {
+    footsteps: target.footsteps,
+    headOffset: { ...target.headOffset },
+    gender: target.gender,
+    fixedLegs: target.fixedLegs,
+    fixedTorso: target.fixedTorso,
+    animations: target.animations.map((animation, index) => (index === MAX_ANIMATIONS_SENTINEL ? null : { ...animation })),
+    warnings,
+  };
 }

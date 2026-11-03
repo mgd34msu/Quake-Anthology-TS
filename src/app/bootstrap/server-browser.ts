@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import { KexMdns, kexDiscoveryQuery, readKexDiscovery } from "../../network/q2/kex/discovery.ts";
 import { fetchServerMasterList } from "./server-master-list.ts";
 import { ServerBrowser } from "../../network/services/discovery.ts";
@@ -16,13 +17,21 @@ import { directServerText, maximumDirectServers, readDirectServers } from "./ser
 import type { DirectServerAddress } from "./server-browser-addresses.ts";
 
 export type BrowserProtocol = "q1" | "qw" | "q2" | "q3";
-export interface BrowserConnection { readonly protocol: BrowserProtocol; readonly remote: string; readonly q2Protocol?: { readonly kind: "q2-kex"; readonly version: 2023 }; }
+export interface BrowserConnection {
+  readonly protocol: BrowserProtocol;
+  readonly remote: string;
+  readonly q2Protocol?: { readonly kind: "q2-kex"; readonly version: 2023 };
+}
 export type BrowserSortOrder = "ping-low" | "ping-high" | "name-az" | "name-za" | "map-az" | "map-za" | "players-most" | "players-fewest";
 export const browserSortOrders: readonly { readonly id: BrowserSortOrder; readonly label: string }[] = [
-  { id: "ping-low", label: "Ping: lowest first" }, { id: "ping-high", label: "Ping: highest first" },
-  { id: "name-az", label: "Name: A to Z" }, { id: "name-za", label: "Name: Z to A" },
-  { id: "map-az", label: "Map: A to Z" }, { id: "map-za", label: "Map: Z to A" },
-  { id: "players-most", label: "Players: most first" }, { id: "players-fewest", label: "Players: fewest first" },
+  { id: "ping-low", label: "Ping: lowest first" },
+  { id: "ping-high", label: "Ping: highest first" },
+  { id: "name-az", label: "Name: A to Z" },
+  { id: "name-za", label: "Name: Z to A" },
+  { id: "map-az", label: "Map: A to Z" },
+  { id: "map-za", label: "Map: Z to A" },
+  { id: "players-most", label: "Players: most first" },
+  { id: "players-fewest", label: "Players: fewest first" },
 ];
 const protocols: readonly BrowserProtocol[] = ["q1", "qw", "q2", "q3"];
 const ports = { q1: 26000, qw: 27500, q2: 27910, q3: 27960 };
@@ -53,11 +62,19 @@ export class StartupServerBrowser {
   private readonly kexQueries = new Map<string, number>();
   private readonly pendingStatus = new Map<string, { readonly protocol: BrowserProtocol; readonly address: NetworkAddress }>();
   private readonly masterAddresses = new Map<BrowserProtocol, string>();
-  get masterAddress(): string { return this.masterAddresses.get(this.protocol) ?? ""; }
-  set masterAddress(value: string) { this.masterAddresses.set(this.protocol, value); }
+  get masterAddress(): string {
+    return this.masterAddresses.get(this.protocol) ?? "";
+  }
+  set masterAddress(value: string) {
+    this.masterAddresses.set(this.protocol, value);
+  }
   protocol: BrowserProtocol = "q1";
-  get address(): string { return this.addresses.get(this.protocol) ?? `localhost:${ports[this.protocol]}`; }
-  set address(value: string) { this.addresses.set(this.protocol, value); }
+  get address(): string {
+    return this.addresses.get(this.protocol) ?? `localhost:${ports[this.protocol]}`;
+  }
+  set address(value: string) {
+    this.addresses.set(this.protocol, value);
+  }
   filter = "";
   favoritesOnly = false;
   sortOrder: BrowserSortOrder = "ping-low";
@@ -65,42 +82,75 @@ export class StartupServerBrowser {
   hideFull = false;
   selected: string | null = null;
   status = "";
-  private constructor(private readonly transport: UdpTransport, private readonly config: ConfigStore) {
-    const sender = { send: (to: NetworkAddress, bytes: Uint8Array): boolean =>
-      to.kind === "ipv4" || to.kind === "ipv6" ? transport.send(to, bytes) : false };
-    this.browsers = new Map<BrowserProtocol, ServerBrowser>(protocols.map(protocol => [protocol, new ServerBrowser(protocol === "q1" ? netQuakeDiscoveryWire()
-      : protocol === "qw" ? quakeWorldDiscoveryWire() : protocol === "q2" ? (() => { const wire = q2DiscoveryWire({ kind: "q2-classic", version: 34 }, () => ({ serverInfo: "", players: [] })); return { ...wire, query: (_kind: "info" | "status", challenge: string) => wire.query("status", challenge) }; })() : q3DiscoveryWire(), sender)]));
+  private constructor(
+    private readonly transport: UdpTransport,
+    private readonly config: ConfigStore,
+  ) {
+    const sender = { send: (to: NetworkAddress, bytes: Uint8Array): boolean => (to.kind === "ipv4" || to.kind === "ipv6" ? transport.send(to, bytes) : false) };
+    this.browsers = new Map<BrowserProtocol, ServerBrowser>(
+      protocols.map(protocol => [
+        protocol,
+        new ServerBrowser(
+          protocol === "q1"
+            ? netQuakeDiscoveryWire()
+            : protocol === "qw"
+              ? quakeWorldDiscoveryWire()
+              : protocol === "q2"
+                ? (() => {
+                    const wire = q2DiscoveryWire({ kind: "q2-classic", version: 34 }, () => ({ serverInfo: "", players: [] }));
+                    return { ...wire, query: (_kind: "info" | "status", challenge: string) => wire.query("status", challenge) };
+                  })()
+                : q3DiscoveryWire(),
+          sender,
+        ),
+      ]),
+    );
   }
   static async open(config: ConfigStore): Promise<StartupServerBrowser> {
     const transport = await UdpTransport.bind({ host: "0.0.0.0", port: 0, broadcast: true });
     const result = new StartupServerBrowser(transport, config);
     // Text that is not JSON at all behaves like the absent saved list;
     // parsed lists still face their validation below.
-    const isJsonText = (text: string): boolean => { try { const value: unknown = JSON.parse(text); return value !== undefined; } catch { return false; } };
+    const isJsonText = (text: string): boolean => {
+      try {
+        const value: unknown = JSON.parse(text);
+        return value !== undefined;
+      } catch {
+        return false;
+      }
+    };
     // An optional list or cache that fails validation is skipped and reported; it must not stop the launch.
     const skipped: string[] = [];
     const tolerate = (name: string, load: () => void): void => {
-      try { load(); } catch (error) { skipped.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
+      try {
+        load();
+      } catch (error) {
+        skipped.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     };
     try {
       for (const protocol of protocols) {
-        const name = `servers-${protocol}`, saved = await config.loadText(name);
-        if (saved !== null && isJsonText(saved)) tolerate(name, () => {
-          if (saved.length > 65536) throw new Error("Saved server list is too large");
-          const core = result.browser(protocol);
-          core.restoreFavorites(saved);
-          try { for (const address of core.favoriteAddresses()) browserAddress(address); }
-          catch (error) {
-            // Do not keep a half-valid list: an address the browser cannot use would fail every later row read.
-            for (const address of core.favoriteAddresses()) core.removeFavorite(address);
-            throw error;
-          }
-        });
+        const name = `servers-${protocol}`,
+          saved = await config.loadText(name);
+        if (saved !== null && isJsonText(saved))
+          tolerate(name, () => {
+            if (saved.length > 65536) throw new Error("Saved server list is too large");
+            const core = result.browser(protocol);
+            core.restoreFavorites(saved);
+            try {
+              for (const address of core.favoriteAddresses()) browserAddress(address);
+            } catch (error) {
+              // Do not keep a half-valid list: an address the browser cannot use would fail every later row read.
+              for (const address of core.favoriteAddresses()) core.removeFavorite(address);
+              throw error;
+            }
+          });
       }
       for (const protocol of protocols) {
         const master = await config.loadText(`servers-master-${protocol}`);
         if (master !== null && master.trim().length <= 2048) result.masterAddresses.set(protocol, master.trim());
-        const name = `servers-direct-${protocol}`, saved = await config.loadText(name);
+        const name = `servers-direct-${protocol}`,
+          saved = await config.loadText(name);
         if (saved === null || !isJsonText(saved)) continue;
         tolerate(name, () => {
           const servers = readDirectServers(saved);
@@ -110,30 +160,58 @@ export class StartupServerBrowser {
           if (last !== undefined) result.addresses.set(protocol, last.remote);
         });
       }
-      try { await result.loadQ3Cache(); } catch (error) { skipped.push(`servers-cache-q3: ${error instanceof Error ? error.message : String(error)}`); }
+      try {
+        await result.loadQ3Cache();
+      } catch (error) {
+        skipped.push(`servers-cache-q3: ${error instanceof Error ? error.message : String(error)}`);
+      }
       if (skipped.length !== 0) result.status = `Ignored invalid saved server data (${skipped.join("; ")})`;
       return result;
-    } catch (error) { transport.close(); throw error; }
+    } catch (error) {
+      transport.close();
+      throw error;
+    }
   }
   private browser(protocol = this.protocol): ServerBrowser {
-    const value = this.browsers.get(protocol); if (value === undefined) throw new Error("Unsupported browser protocol"); return value;
+    const value = this.browsers.get(protocol);
+    if (value === undefined) throw new Error("Unsupported browser protocol");
+    return value;
   }
-  assertOpen(): void { if (this.closing || this.closed) throw new Error("Server browser is closed"); }
+  assertOpen(): void {
+    if (this.closing || this.closed) throw new Error("Server browser is closed");
+  }
   private assertGeneration(generation: number, draining = false): void {
-    if (this.closed || !draining && this.closing || generation !== this.generation) throw new Error("Server browser operation was retired");
+    if (this.closed || (!draining && this.closing) || generation !== this.generation) throw new Error("Server browser operation was retired");
   }
-  get q3Core(): ServerBrowser { this.assertOpen(); return this.browser("q3"); }
-  q3List(source: Q3BrowserSource): { readonly addresses: readonly NetworkAddress[]; readonly pending: boolean; readonly generation: number; readonly resetGeneration: number } {
+  get q3Core(): ServerBrowser {
+    this.assertOpen();
+    return this.browser("q3");
+  }
+  q3List(source: Q3BrowserSource): {
+    readonly addresses: readonly NetworkAddress[];
+    readonly pending: boolean;
+    readonly generation: number;
+    readonly resetGeneration: number;
+  } {
     this.assertOpen();
     const generation = this.listGenerations.get(source) ?? 0;
     let snapshot = this.listSnapshots.get(source);
     if (snapshot === undefined || snapshot.generation !== generation) {
-      snapshot = { generation, addresses: this.browser("q3").list().filter(entry => entry.sources.includes(q3Sources[source])).map(entry => entry.address) };
+      snapshot = {
+        generation,
+        addresses: this.browser("q3")
+          .list()
+          .filter(entry => entry.sources.includes(q3Sources[source]))
+          .map(entry => entry.address),
+      };
       this.listSnapshots.set(source, snapshot);
     }
-    return { addresses: snapshot.addresses,
+    return {
+      addresses: snapshot.addresses,
       pending: this.master?.source === source && !this.master.received,
-      generation, resetGeneration: this.listResets.get(source) ?? 0 };
+      generation,
+      resetGeneration: this.listResets.get(source) ?? 0,
+    };
   }
   private clearQ3(source: Q3BrowserSource): void {
     const core = this.browser("q3");
@@ -142,17 +220,23 @@ export class StartupServerBrowser {
     this.listResets.set(source, (this.listResets.get(source) ?? 0) + 1);
   }
   async resolveQ3(text: string): Promise<NetworkAddress | null> {
-    this.assertOpen(); const generation = this.generation;
+    this.assertOpen();
+    const generation = this.generation;
     let address: NetworkAddress;
-    try { address = await resolveAddress(directServerText(text), 27960, 4); }
-    catch { this.assertGeneration(generation); return null; }
+    try {
+      address = await resolveAddress(directServerText(text), 27960, 4);
+    } catch {
+      this.assertGeneration(generation);
+      return null;
+    }
     this.assertGeneration(generation);
     return address.kind === "ipv4" && address.port !== 0 && !address.host.every(octet => octet === 255) ? address : null;
   }
   addQ3(source: Q3BrowserSource, address: NetworkAddress): void {
     this.assertOpen();
     if (address.kind !== "ipv4" || address.port === 0) throw new Error("Q3 browser requires an IPv4 endpoint");
-    const core = this.browser("q3"), entries = core.list().filter(entry => entry.sources.includes(q3Sources[source]));
+    const core = this.browser("q3"),
+      entries = core.list().filter(entry => entry.sources.includes(q3Sources[source]));
     if (entries.some(entry => addressKey(entry.address) === addressKey(address))) return;
     if (entries.length >= (source === 2 ? 8192 : 128)) throw new Error("Q3 browser list is full");
     core.add(address, q3Sources[source]);
@@ -161,54 +245,91 @@ export class StartupServerBrowser {
   /** Adds a master packet's addresses with one pass over the list, up to the source's capacity; returns those newly added. */
   private addQ3Many(source: Q3BrowserSource, addresses: readonly NetworkAddress[]): NetworkAddress[] {
     this.assertOpen();
-    const core = this.browser("q3"), known = new Set(core.list().filter(entry => entry.sources.includes(q3Sources[source])).map(entry => addressKey(entry.address)));
-    const limit = source === 2 ? 8192 : 128, added: NetworkAddress[] = [];
+    const core = this.browser("q3"),
+      known = new Set(
+        core
+          .list()
+          .filter(entry => entry.sources.includes(q3Sources[source]))
+          .map(entry => addressKey(entry.address)),
+      );
+    const limit = source === 2 ? 8192 : 128,
+      added: NetworkAddress[] = [];
     for (const address of addresses) {
       if (known.size >= limit) break;
       if (address.kind !== "ipv4" || address.port === 0 || known.has(addressKey(address))) continue;
-      core.add(address, q3Sources[source]); known.add(addressKey(address)); added.push(address);
+      core.add(address, q3Sources[source]);
+      known.add(addressKey(address));
+      added.push(address);
     }
     if (added.length > 0) this.listGenerations.set(source, (this.listGenerations.get(source) ?? 0) + 1);
     return added;
   }
   removeQ3(source: Q3BrowserSource, address: NetworkAddress): void {
-    this.assertOpen(); this.browser("q3").removeSource(address, q3Sources[source]);
+    this.assertOpen();
+    this.browser("q3").removeSource(address, q3Sources[source]);
     this.listGenerations.set(source, (this.listGenerations.get(source) ?? 0) + 1);
   }
   scanQ3(): void {
-    this.assertOpen(); this.clearQ3(0);
-    this.browser("q3").broadcast(Array.from({ length: 4 }, (_, index) => ipv4Address([255, 255, 255, 255], 27960 + index)), performance.now());
+    this.assertOpen();
+    this.clearQ3(0);
+    this.browser("q3").broadcast(
+      Array.from({ length: 4 }, (_, index) => ipv4Address([255, 255, 255, 255], 27960 + index)),
+      performance.now(),
+    );
   }
   async requestQ3Master(source: 1 | 2, remote: string, protocol: number, keywords: readonly string[], assertCurrent: () => void = () => {}): Promise<void> {
-    this.assertOpen(); assertCurrent(); const bytes = q3DiscoveryWire(keywords, protocol).masterQuery(), generation = this.generation, epoch = ++this.masterEpoch;
-    this.clearQ3(source); this.master = { source, address: null, startedAt: performance.now(), received: false };
+    this.assertOpen();
+    assertCurrent();
+    const bytes = q3DiscoveryWire(keywords, protocol).masterQuery(),
+      generation = this.generation,
+      epoch = ++this.masterEpoch;
+    this.clearQ3(source);
+    this.master = { source, address: null, startedAt: performance.now(), received: false };
     try {
       const address = await resolveAddress(directServerText(remote), 27950, 4);
-      this.assertGeneration(generation); assertCurrent();
+      this.assertGeneration(generation);
+      assertCurrent();
       if (epoch !== this.masterEpoch) return;
       this.master = { source, address, startedAt: performance.now(), received: false };
       if (!this.transport.send(address, bytes)) throw new Error("Could not send Q3 master query");
-    } catch (error) { if (epoch === this.masterEpoch) this.master = null; throw error; }
+    } catch (error) {
+      if (epoch === this.masterEpoch) this.master = null;
+      throw error;
+    }
   }
   loadQ3Cache(assertCurrent: () => void = () => {}): Promise<Q3BrowserCacheView | null> {
     assertCurrent();
     let view: Q3BrowserCacheView | null = null;
     return this.persist(async () => {
-      const generation = this.generation, saved = await this.config.loadText("servers-cache-q3");
-      this.assertGeneration(generation, true); assertCurrent();
+      const generation = this.generation,
+        saved = await this.config.loadText("servers-cache-q3");
+      this.assertGeneration(generation, true);
+      assertCurrent();
       if (saved === null) return;
       // A cache that is not JSON at all means no cache; parsed caches
       // still face version and shape validation.
       let parsedCache: unknown;
-      try { parsedCache = JSON.parse(saved); } catch { return; }
+      try {
+        parsedCache = JSON.parse(saved);
+      } catch {
+        return;
+      }
       if (parsedCache === undefined) return;
       const cache = readQ3BrowserCache(saved);
-      const live = new Map(this.browser("q3").list().filter(entry => entry.status !== null).map(entry => [addressKey(entry.address), entry]));
+      const live = new Map(
+        this.browser("q3")
+          .list()
+          .filter(entry => entry.status !== null)
+          .map(entry => [addressKey(entry.address), entry]),
+      );
       for (const source of [1, 2, 3] satisfies readonly Q3BrowserSource[]) this.clearQ3(source);
-      this.masterEpoch++; this.master = null;
+      this.masterEpoch++;
+      this.master = null;
       for (const entry of cache.entries) {
         const current = live.get(addressKey(entry.address));
-        this.browser("q3").restoreEntry(current === undefined ? entry : { ...entry, status: current.status, pingMilliseconds: current.pingMilliseconds, updatedAt: current.updatedAt });
+        this.browser("q3").restoreEntry(
+          current === undefined ? entry : { ...entry, status: current.status, pingMilliseconds: current.pingMilliseconds, updatedAt: current.updatedAt },
+        );
       }
       view = cache.view;
       this.cachedView = cache.view;
@@ -225,103 +346,175 @@ export class StartupServerBrowser {
   private currentCacheView(): Q3BrowserCacheView | null {
     const cached = this.cachedView;
     if (cached === null) return null;
-    return { lists: cached.lists.map(list => {
-      const entries = this.browser("q3").list().filter(entry => entry.sources.includes(q3Sources[list.source])), keys = new Set(entries.map(entry => addressKey(entry.address)));
-      const rows = list.rows.filter(row => keys.has(addressKey(row.address))), retained = new Set(rows.map(row => addressKey(row.address))), capacity = list.source === 2 ? 4096 : 128;
-      for (const entry of entries) {
-        if (rows.length >= capacity) break;
-        if (!retained.has(addressKey(entry.address))) rows.push({ address: entry.address, name: entry.status?.name.slice(0, 31) ?? "", visible: 1, ping: -1 });
-      }
-      return { source: list.source, rows };
-    }) };
+    return {
+      lists: cached.lists.map(list => {
+        const entries = this.browser("q3")
+            .list()
+            .filter(entry => entry.sources.includes(q3Sources[list.source])),
+          keys = new Set(entries.map(entry => addressKey(entry.address)));
+        const rows = list.rows.filter(row => keys.has(addressKey(row.address))),
+          retained = new Set(rows.map(row => addressKey(row.address))),
+          capacity = list.source === 2 ? 4096 : 128;
+        for (const entry of entries) {
+          if (rows.length >= capacity) break;
+          if (!retained.has(addressKey(entry.address)))
+            rows.push({ address: entry.address, name: entry.status?.name.slice(0, 31) ?? "", visible: 1, ping: -1 });
+        }
+        return { source: list.source, rows };
+      }),
+    };
   }
   choose(protocol: string): void {
     if (protocol !== "q1" && protocol !== "qw" && protocol !== "q2" && protocol !== "q3") throw new Error("Unsupported server protocol");
-    this.protocol = protocol; this.selected = null;
+    this.protocol = protocol;
+    this.selected = null;
   }
   chooseSort(order: string): void {
     const selected = browserSortOrders.find(choice => choice.id === order);
     if (selected === undefined) throw new Error("Unsupported server sort order");
     this.sortOrder = selected.id;
   }
-  get selectedEntry(): BrowserEntry | null { return this.browser().list().find(entry => addressKey(entry.address) === this.selected) ?? null; }
+  get selectedEntry(): BrowserEntry | null {
+    return (
+      this.browser()
+        .list()
+        .find(entry => addressKey(entry.address) === this.selected) ?? null
+    );
+  }
   details(): readonly string[] {
     const entry = this.selectedEntry;
     if (entry === null) return ["Select a server first."];
     const status = entry.status;
     if (status === null) return [browserAddress(entry.address), "No status response yet."];
     const clean = (value: string): string => value.replace(/[\x00-\x1f\x7f]/g, " ");
-    return [clean(status.name), browserAddress(entry.address), `Map: ${clean(status.map)}  Players: ${status.players}/${status.maxPlayers}`,
+    return [
+      clean(status.name),
+      browserAddress(entry.address),
+      `Map: ${clean(status.map)}  Players: ${status.players}/${status.maxPlayers}`,
       ...status.playerDetails.map(player => `${clean(player.name)}  score ${player.score}  ping ${player.ping}`),
-      ...[...status.rules].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${clean(key)}: ${clean(value)}`)];
+      ...[...status.rules].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${clean(key)}: ${clean(value)}`),
+    ];
   }
   private queueStatus(protocol: BrowserProtocol, address: NetworkAddress): void {
     this.pendingStatus.set(`${protocol}:${addressKey(address)}`, { protocol, address });
   }
   async discover(): Promise<void> {
     this.assertOpen();
-    const protocol = this.protocol, remote = this.masterAddress.trim(), generation = this.generation;
+    const protocol = this.protocol,
+      remote = this.masterAddress.trim(),
+      generation = this.generation;
     if (remote === "") throw new Error("Enter a master address or HTTP list URL");
-    this.masterFetch?.abort(); const controller = new AbortController(); this.masterFetch = controller;
+    this.masterFetch?.abort();
+    const controller = new AbortController();
+    this.masterFetch = controller;
     const timeout = setTimeout(() => controller.abort(), 4000);
     try {
       if (/^https?:\/\//i.test(remote)) {
         let skipped = 0;
-        const names = await fetchServerMasterList(remote, controller.signal, count => { skipped += count; }), addresses: NetworkAddress[] = [];
+        const names = await fetchServerMasterList(remote, controller.signal, count => {
+            skipped += count;
+          }),
+          addresses: NetworkAddress[] = [];
         for (let offset = 0; offset < names.length; offset += 16) {
           const batch = await Promise.allSettled(names.slice(offset, offset + 16).map(name => resolveAddress(name, ports[protocol], 4)));
-          this.assertGeneration(generation); controller.signal.throwIfAborted();
-          for (const result of batch) { if (result.status === "fulfilled") addresses.push(result.value); else skipped++; }
+          this.assertGeneration(generation);
+          controller.signal.throwIfAborted();
+          for (const result of batch) {
+            if (result.status === "fulfilled") addresses.push(result.value);
+            else skipped++;
+          }
         }
         const core = this.browser(protocol);
         for (const address of addresses) {
           if (core.size >= 4096 && core.entry(address) === null) break;
-          if (protocol === "q3") this.addQ3(2, address); else core.add(address, "master");
+          if (protocol === "q3") this.addQ3(2, address);
+          else core.add(address, "master");
           this.queueStatus(protocol, address);
         }
         this.status = `Found ${addresses.length} servers; querying status${skipped === 0 ? "" : ` (${skipped} skipped)`}`;
       } else if (protocol === "q2") {
         const address = await resolveAddress(directServerText(remote.replace(/^udp:\/\//, "")), 27900, 4);
-        this.assertGeneration(generation); controller.signal.throwIfAborted();
+        this.assertGeneration(generation);
+        controller.signal.throwIfAborted();
         this.q2Master = { address, startedAt: performance.now() };
         if (!this.browser(protocol).queryMaster(address)) throw new Error("Could not send master query");
         this.status = "Querying master...";
-      } else if (protocol === "q3") { await this.requestQ3Master(2, remote.replace(/^udp:\/\//, ""), 68, ["empty", "full"]); this.status = "Querying master..."; }
-      else throw new Error("Use an HTTP master list for Quake or QuakeWorld");
-      await this.persist(async () => { this.assertGeneration(generation); await this.config.dump(`servers-master-${protocol}`, remote); });
+      } else if (protocol === "q3") {
+        await this.requestQ3Master(2, remote.replace(/^udp:\/\//, ""), 68, ["empty", "full"]);
+        this.status = "Querying master...";
+      } else throw new Error("Use an HTTP master list for Quake or QuakeWorld");
+      await this.persist(async () => {
+        this.assertGeneration(generation);
+        await this.config.dump(`servers-master-${protocol}`, remote);
+      });
       this.assertGeneration(generation);
-    } finally { clearTimeout(timeout); if (this.masterFetch === controller) this.masterFetch = null; }
+    } finally {
+      clearTimeout(timeout);
+      if (this.masterFetch === controller) this.masterFetch = null;
+    }
   }
   get emptyMessage(): string {
     return this.browser().list().length === 0 ? "No servers yet. Enter an address or find LAN." : "No servers match these filters.";
   }
-  private rowsCache: { readonly protocol: BrowserProtocol; readonly inputs: string; readonly source: readonly BrowserEntry[]; readonly rows: readonly BrowserEntry[] } | null = null;
+  private rowsCache: {
+    readonly protocol: BrowserProtocol;
+    readonly inputs: string;
+    readonly source: readonly BrowserEntry[];
+    readonly rows: readonly BrowserEntry[];
+  } | null = null;
   /** The menu asks several times per frame; entries are replaced, never edited, so identity of each one validates the cache. */
   rows(): readonly BrowserEntry[] {
-    const source = this.browser().list(), inputs = `${this.filter}\0${this.favoritesOnly}\0${this.sortOrder}\0${this.hideEmpty}\0${this.hideFull}`;
+    const source = this.browser().list(),
+      inputs = `${this.filter}\0${this.favoritesOnly}\0${this.sortOrder}\0${this.hideEmpty}\0${this.hideFull}`;
     const cached = this.rowsCache;
-    if (cached !== null && cached.protocol === this.protocol && cached.inputs === inputs && cached.source.length === source.length && cached.source.every((entry, index) => entry === source[index])) return cached.rows;
+    if (
+      cached !== null &&
+      cached.protocol === this.protocol &&
+      cached.inputs === inputs &&
+      cached.source.length === source.length &&
+      cached.source.every((entry, index) => entry === source[index])
+    )
+      return cached.rows;
     const rows = this.computeRows(source);
     this.rowsCache = { protocol: this.protocol, inputs, source, rows };
     return rows;
   }
   private computeRows(entries: readonly BrowserEntry[]): readonly BrowserEntry[] {
     const search = this.filter.trim().toLowerCase();
-    return entries.filter(entry => (!this.favoritesOnly || entry.sources.includes("favorite"))
-      && (entry.status === null || entry.status.maxPlayers <= 0 || (!this.hideEmpty || entry.status.players > 0) && (!this.hideFull || entry.status.players < entry.status.maxPlayers))
-      && `${entry.status?.name ?? ""} ${entry.status?.map ?? ""} ${entry.status?.rules.get("gamedir") ?? entry.status?.rules.get("game") ?? ""} ${entry.status?.playerDetails.map(player => player.name.replace(/\^[0-9]/g, "")).join(" ") ?? ""} ${browserAddress(entry.address)}`.toLowerCase().includes(search))
+    return entries
+      .filter(
+        entry =>
+          (!this.favoritesOnly || entry.sources.includes("favorite")) &&
+          (entry.status === null ||
+            entry.status.maxPlayers <= 0 ||
+            ((!this.hideEmpty || entry.status.players > 0) && (!this.hideFull || entry.status.players < entry.status.maxPlayers))) &&
+          `${entry.status?.name ?? ""} ${entry.status?.map ?? ""} ${entry.status?.rules.get("gamedir") ?? entry.status?.rules.get("game") ?? ""} ${entry.status?.playerDetails.map(player => player.name.replace(/\^[0-9]/g, "")).join(" ") ?? ""} ${browserAddress(entry.address)}`
+            .toLowerCase()
+            .includes(search),
+      )
       .sort((a, b) => {
         // Q2's source keeps unanswered rows last in either direction and treats 0/0 as unknown capacity.
         if ((a.status === null) !== (b.status === null)) return a.status === null ? 1 : -1;
         let compared = 0;
         switch (this.sortOrder) {
-          case "ping-low": case "ping-high": {
+          case "ping-low":
+          case "ping-high": {
             if ((a.pingMilliseconds === null) !== (b.pingMilliseconds === null)) return a.pingMilliseconds === null ? 1 : -1;
-            compared = ((a.pingMilliseconds ?? 0) - (b.pingMilliseconds ?? 0)) * (this.sortOrder === "ping-low" ? 1 : -1); break;
+            compared = ((a.pingMilliseconds ?? 0) - (b.pingMilliseconds ?? 0)) * (this.sortOrder === "ping-low" ? 1 : -1);
+            break;
           }
-          case "name-az": case "name-za": compared = (a.status?.name ?? "").localeCompare(b.status?.name ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "name-az" ? 1 : -1); break;
-          case "map-az": case "map-za": compared = (a.status?.map ?? "").localeCompare(b.status?.map ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "map-az" ? 1 : -1); break;
-          case "players-most": case "players-fewest": compared = ((a.status?.players ?? 0) - (b.status?.players ?? 0)) * (this.sortOrder === "players-fewest" ? 1 : -1); break;
+          case "name-az":
+          case "name-za":
+            compared = (a.status?.name ?? "").localeCompare(b.status?.name ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "name-az" ? 1 : -1);
+            break;
+          case "map-az":
+          case "map-za":
+            compared = (a.status?.map ?? "").localeCompare(b.status?.map ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "map-az" ? 1 : -1);
+            break;
+          case "players-most":
+          case "players-fewest":
+            compared = ((a.status?.players ?? 0) - (b.status?.players ?? 0)) * (this.sortOrder === "players-fewest" ? 1 : -1);
+            break;
         }
         return compared || browserAddress(a.address).localeCompare(browserAddress(b.address));
       });
@@ -330,10 +523,12 @@ export class StartupServerBrowser {
     const entry = this.rows().find(entry => addressKey(entry.address) === key);
     if (entry === undefined) return;
     const direct = entry.sources.includes("direct") ? this.directServers.get(this.protocol)?.find(server => addressKey(server.address) === key) : undefined;
-    this.selected = key; this.address = direct?.remote ?? browserAddress(entry.address);
+    this.selected = key;
+    this.address = direct?.remote ?? browserAddress(entry.address);
   }
   async query(): Promise<void> {
-    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    const protocol = this.protocol,
+      remote = directServerText(this.address.trim());
     await this.persist(async () => {
       const generation = this.generation;
       const address = await resolveAddress(remote, ports[protocol], 4);
@@ -346,34 +541,68 @@ export class StartupServerBrowser {
   }
   scan(): void {
     this.assertOpen();
-    if (this.protocol === "q3") { this.scanQ3(); this.status = "Searching local network..."; return; }
+    if (this.protocol === "q3") {
+      this.scanQ3();
+      this.status = "Searching local network...";
+      return;
+    }
     if (this.protocol === "q2") {
       if (this.kexDiscovery !== null) this.kexDiscovery.query();
-      else if (this.kexOpening === null) this.kexOpening = KexMdns.open({ found: address => {
-        if (this.closing || this.closed) return;
-        const key = addressKey(address), now = performance.now();
-        if (now - (this.kexQueries.get(key) ?? -Infinity) < 1000 || this.kexQueries.size >= 256) return;
-        this.kexQueries.set(key, now); this.transport.send(address, kexDiscoveryQuery());
-      }, failed: error => { if (!this.closing && !this.closed) this.status = error.message; } }).then(owner => {
-        if (this.closing || this.closed) owner.close(); else { this.kexDiscovery = owner; owner.query(); }
-      }, (error: unknown) => { if (!this.closing && !this.closed) this.status = error instanceof Error ? error.message : String(error); }).finally(() => { this.kexOpening = null; });
+      else if (this.kexOpening === null)
+        this.kexOpening = KexMdns.open({
+          found: address => {
+            if (this.closing || this.closed) return;
+            const key = addressKey(address),
+              now = performance.now();
+            if (now - (this.kexQueries.get(key) ?? -Infinity) < 1000 || this.kexQueries.size >= 256) return;
+            this.kexQueries.set(key, now);
+            this.transport.send(address, kexDiscoveryQuery());
+          },
+          failed: error => {
+            if (!this.closing && !this.closed) this.status = error.message;
+          },
+        })
+          .then(
+            owner => {
+              if (this.closing || this.closed) owner.close();
+              else {
+                this.kexDiscovery = owner;
+                owner.query();
+              }
+            },
+            (error: unknown) => {
+              if (!this.closing && !this.closed) this.status = error instanceof Error ? error.message : String(error);
+            },
+          )
+          .finally(() => {
+            this.kexOpening = null;
+          });
     }
-    this.browser().broadcast([ipv4Address([255, 255, 255, 255], ports[this.protocol])], performance.now()); this.status = "Searching local network...";
+    this.browser().broadcast([ipv4Address([255, 255, 255, 255], ports[this.protocol])], performance.now());
+    this.status = "Searching local network...";
   }
   async favorite(): Promise<void> {
-    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    const protocol = this.protocol,
+      remote = directServerText(this.address.trim());
     await this.persist(async () => {
       const generation = this.generation;
-      const address = await resolveAddress(remote, ports[protocol], 4), browser = this.browser(protocol);
+      const address = await resolveAddress(remote, ports[protocol], 4),
+        browser = this.browser(protocol);
       this.assertGeneration(generation, true);
-      const before = browser.saveFavorites(), existing = browser.list().find(entry => addressKey(entry.address) === addressKey(address));
+      const before = browser.saveFavorites(),
+        existing = browser.list().find(entry => addressKey(entry.address) === addressKey(address));
       const removing = existing?.sources.includes("favorite") === true;
-      if (removing) browser.removeFavorite(address); else browser.add(address, "favorite");
+      if (removing) browser.removeFavorite(address);
+      else browser.add(address, "favorite");
       if (protocol === "q3") this.listGenerations.set(3, (this.listGenerations.get(3) ?? 0) + 1);
       const view = protocol === "q3" ? this.currentCacheView() : null;
-      try { await this.config.dump(protocol === "q3" ? "servers-cache-q3" : `servers-${protocol}`,
-        protocol === "q3" ? writeQ3BrowserCache(browser.list(), view) : browser.saveFavorites()); this.assertGeneration(generation, true); }
-      catch (error) {
+      try {
+        await this.config.dump(
+          protocol === "q3" ? "servers-cache-q3" : `servers-${protocol}`,
+          protocol === "q3" ? writeQ3BrowserCache(browser.list(), view) : browser.saveFavorites(),
+        );
+        this.assertGeneration(generation, true);
+      } catch (error) {
         browser.restoreFavorites(before);
         if (protocol === "q3") this.listGenerations.set(3, (this.listGenerations.get(3) ?? 0) + 1);
         throw error;
@@ -383,7 +612,8 @@ export class StartupServerBrowser {
     });
   }
   async connection(): Promise<BrowserConnection> {
-    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    const protocol = this.protocol,
+      remote = directServerText(this.address.trim());
     const resolved: { address: NetworkAddress | null } = { address: null };
     await this.persist(async () => {
       const generation = this.generation;
@@ -395,7 +625,9 @@ export class StartupServerBrowser {
     });
     // The entry is found by the resolved address, since `remote` may be a hostname.
     const targetKey = resolved.address === null ? null : addressKey(resolved.address);
-    const selected = this.browser(protocol).list().find(entry => targetKey === null ? browserAddress(entry.address) === remote : addressKey(entry.address) === targetKey);
+    const selected = this.browser(protocol)
+      .list()
+      .find(entry => (targetKey === null ? browserAddress(entry.address) === remote : addressKey(entry.address) === targetKey));
     const wire = selected?.status?.wire;
     return { protocol, remote, ...(protocol === "q2" && wire?.kind === "source" && wire.protocol.kind === "q2-kex" ? { q2Protocol: wire.protocol } : {}) };
   }
@@ -407,8 +639,9 @@ export class StartupServerBrowser {
   }
   private async rememberDirect(protocol: BrowserProtocol, server: DirectServerAddress): Promise<void> {
     const generation = this.generation;
-    const servers = [server, ...this.directServers.get(protocol) ?? []].filter((entry, index, entries) =>
-      entries.findIndex(candidate => addressKey(candidate.address) === addressKey(entry.address)) === index).slice(0, maximumDirectServers);
+    const servers = [server, ...(this.directServers.get(protocol) ?? [])]
+      .filter((entry, index, entries) => entries.findIndex(candidate => addressKey(candidate.address) === addressKey(entry.address)) === index)
+      .slice(0, maximumDirectServers);
     await this.config.dump(`servers-direct-${protocol}`, `${JSON.stringify({ version: 1, servers })}\n`);
     this.assertGeneration(generation, true);
     this.directServers.set(protocol, servers);
@@ -417,17 +650,28 @@ export class StartupServerBrowser {
   poll(): void {
     this.assertOpen();
     for (let event = this.transport.poll(); event !== null; event = this.transport.poll()) {
-      if (event.kind === "error") { this.status = event.error.message; continue; }
+      if (event.kind === "error") {
+        this.status = event.error.message;
+        continue;
+      }
       if (event.kind !== "packet") continue;
       if (this.q2Master !== null && addressKey(this.q2Master.address) === addressKey(event.from)) {
         try {
           const addresses = readQ2MasterReply(event.payload);
           if (addresses !== null) {
             const core = this.browser("q2");
-            for (const address of addresses) { if (core.size >= 4096 && core.entry(address) === null) break; core.add(address, "master"); this.queueStatus("q2", address); }
-            this.status = `Found ${addresses.length} servers; querying status`; continue;
+            for (const address of addresses) {
+              if (core.size >= 4096 && core.entry(address) === null) break;
+              core.add(address, "master");
+              this.queueStatus("q2", address);
+            }
+            this.status = `Found ${addresses.length} servers; querying status`;
+            continue;
           }
-        } catch { this.status = "Malformed master reply"; continue; }
+        } catch {
+          this.status = "Malformed master reply";
+          continue;
+        }
       }
       const master = this.master;
       if (master !== null && master.address !== null && addressKey(master.address) === addressKey(event.from)) {
@@ -436,56 +680,122 @@ export class StartupServerBrowser {
           for (const address of this.addQ3Many(master.source, packet.addresses)) this.queueStatus("q3", address);
           this.master = packet.complete ? null : { ...master, received: true };
           continue;
-        } catch { /* A queried master may also answer a direct server query. */ }
+        } catch {
+          /* A queried master may also answer a direct server query. */
+        }
       }
       const kexSent = this.kexQueries.get(addressKey(event.from));
-      if (kexSent !== undefined) try {
-        const status = readKexDiscovery(event.payload), core = this.browser("q2"), now = performance.now();
-        const entry = core.add(event.from, "lan", now);
-        core.restoreEntry({ ...entry, status, pingMilliseconds: Math.max(0, now - kexSent), updatedAt: now });
-        this.kexQueries.delete(addressKey(event.from)); this.status = "Server updated"; continue;
-      } catch { /* A discovered endpoint may also answer a legacy query. */ }
-      for (const protocol of protocols) try {
-        const decoded = protocol === "q1" ? { status: readNetQuakeDiscovery(event.payload), challenge: null }
-          : protocol === "qw" ? { status: readQuakeWorldDiscovery(event.payload), challenge: null } : protocol === "q2" ? { status: (() => { const message = readQ2OutOfBand(event.payload); return message === null ? null : readQ2Status(message, { kind: "q2-classic", version: 34 }); })(), challenge: null }
-          : decodeQ3ServerStatus(event.payload);
-        if (decoded.status !== null) {
-          const status = decoded.status;
-          if (!Number.isSafeInteger(status.players) || !Number.isSafeInteger(status.maxPlayers) || status.players < 0 || status.maxPlayers < 0
-            || status.players > 1024 || status.maxPlayers > 1024 || status.name.length > 1024 || status.map.length > 1024) continue;
-          const clean = (text: string): string => text.replace(/[\x00-\x1f\x7f]/g, " ");
-          // The UI rebuilds these rules as one info string that cannot exceed 1023 bytes, so extra rules are dropped here.
-          const rules = new Map<string, string>();
-          let ruleBytes = 0;
-          for (const [key, value] of status.rules) {
-            ruleBytes += key.length + value.length + 2;
-            if (ruleBytes > 1000) break;
-            rules.set(key, value);
-          }
-          const core = this.browser(protocol), wasLan = core.entry(event.from)?.sources.includes("lan") === true;
-          if (core.receive(event.from, { ...status, rules, name: clean(status.name), map: clean(status.map),
-            playerDetails: status.playerDetails.slice(0, 1024).map(player => player.name.length > 1024 ? { ...player, name: player.name.slice(0, 1024) } : player) }, decoded.challenge, performance.now())) {
-            this.status = "Server updated";
-            if (protocol === "q3" && !wasLan && core.entry(event.from)?.sources.includes("lan")) this.listGenerations.set(0, (this.listGenerations.get(0) ?? 0) + 1);
-          }
+      if (kexSent !== undefined)
+        try {
+          const status = readKexDiscovery(event.payload),
+            core = this.browser("q2"),
+            now = performance.now();
+          const entry = core.add(event.from, "lan", now);
+          core.restoreEntry({ ...entry, status, pingMilliseconds: Math.max(0, now - kexSent), updatedAt: now });
+          this.kexQueries.delete(addressKey(event.from));
+          this.status = "Server updated";
+          continue;
+        } catch {
+          /* A discovered endpoint may also answer a legacy query. */
         }
-      } catch { /* Other source packets and malformed datagrams are not browser entries. */ }
+      for (const protocol of protocols)
+        try {
+          const decoded =
+            protocol === "q1"
+              ? { status: readNetQuakeDiscovery(event.payload), challenge: null }
+              : protocol === "qw"
+                ? { status: readQuakeWorldDiscovery(event.payload), challenge: null }
+                : protocol === "q2"
+                  ? {
+                      status: (() => {
+                        const message = readQ2OutOfBand(event.payload);
+                        return message === null ? null : readQ2Status(message, { kind: "q2-classic", version: 34 });
+                      })(),
+                      challenge: null,
+                    }
+                  : decodeQ3ServerStatus(event.payload);
+          if (decoded.status !== null) {
+            const status = decoded.status;
+            if (
+              !Number.isSafeInteger(status.players) ||
+              !Number.isSafeInteger(status.maxPlayers) ||
+              status.players < 0 ||
+              status.maxPlayers < 0 ||
+              status.players > 1024 ||
+              status.maxPlayers > 1024 ||
+              status.name.length > 1024 ||
+              status.map.length > 1024
+            )
+              continue;
+            const clean = (text: string): string => text.replace(/[\x00-\x1f\x7f]/g, " ");
+            // The UI rebuilds these rules as one info string that cannot exceed 1023 bytes, so extra rules are dropped here.
+            const rules = new Map<string, string>();
+            let ruleBytes = 0;
+            for (const [key, value] of status.rules) {
+              ruleBytes += key.length + value.length + 2;
+              if (ruleBytes > 1000) break;
+              rules.set(key, value);
+            }
+            const core = this.browser(protocol),
+              wasLan = core.entry(event.from)?.sources.includes("lan") === true;
+            if (
+              core.receive(
+                event.from,
+                {
+                  ...status,
+                  rules,
+                  name: clean(status.name),
+                  map: clean(status.map),
+                  playerDetails: status.playerDetails
+                    .slice(0, 1024)
+                    .map(player => (player.name.length > 1024 ? { ...player, name: player.name.slice(0, 1024) } : player)),
+                },
+                decoded.challenge,
+                performance.now(),
+              )
+            ) {
+              this.status = "Server updated";
+              if (protocol === "q3" && !wasLan && core.entry(event.from)?.sources.includes("lan"))
+                this.listGenerations.set(0, (this.listGenerations.get(0) ?? 0) + 1);
+            }
+          }
+        } catch {
+          /* Other source packets and malformed datagrams are not browser entries. */
+        }
     }
-    for (const [protocol, browser] of this.browsers) if (browser.expireQueries(performance.now(), 3000).length > 0 && protocol === this.protocol) this.status = "No response from server";
+    for (const [protocol, browser] of this.browsers)
+      if (browser.expireQueries(performance.now(), 3000).length > 0 && protocol === this.protocol) this.status = "No response from server";
     let sent = 0;
     for (const [key, query] of this.pendingStatus) {
       const core = this.browser(query.protocol);
       if (core.pendingRequests >= 16) continue;
-      this.pendingStatus.delete(key); core.query(query.address, performance.now(), "status");
+      this.pendingStatus.delete(key);
+      core.query(query.address, performance.now(), "status");
       if (++sent === 4) break;
     }
     if (this.q2Master !== null && performance.now() - this.q2Master.startedAt >= 3000) this.q2Master = null;
-    if (this.master !== null && performance.now() - this.master.startedAt >= 3000) { this.master = null; this.masterEpoch++; }
+    if (this.master !== null && performance.now() - this.master.startedAt >= 3000) {
+      this.master = null;
+      this.masterEpoch++;
+    }
   }
   close(): Promise<void> {
     if (this.closeResult !== null) return this.closeResult;
-    this.closing = true; this.kexDiscovery?.close(); this.kexDiscovery = null; this.kexQueries.clear(); this.masterFetch?.abort(); this.masterFetch = null; this.q2Master = null; this.pendingStatus.clear(); this.masterEpoch++; this.master = null;
-    this.closeResult = this.writes.finally(() => { this.closed = true; this.generation++; this.transport.close(); });
+    this.closing = true;
+    this.kexDiscovery?.close();
+    this.kexDiscovery = null;
+    this.kexQueries.clear();
+    this.masterFetch?.abort();
+    this.masterFetch = null;
+    this.q2Master = null;
+    this.pendingStatus.clear();
+    this.masterEpoch++;
+    this.master = null;
+    this.closeResult = this.writes.finally(() => {
+      this.closed = true;
+      this.generation++;
+      this.transport.close();
+    });
     return this.closeResult;
   }
 }
