@@ -20,7 +20,7 @@ import { QvmOpcode } from '../../src/compat/qvm/image.ts';
 import { QvmGameExport, QvmGameImport } from '../../src/compat/qvm/abi.ts';
 import { resolveQvmArtifact } from '../../src/compat/qvm/artifacts.ts';
 import { UserFileStore } from '../../src/core/files/writable.ts';
-import { Q3QvmServerGame } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
+import { Q3ServerGame } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
 import type { Q3GuestOutput, Q3GuestRuntimeOptions } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
 import { Q3ServerState } from '../../src/app/bootstrap/simulation/q3/server-state.ts';
 
@@ -61,7 +61,7 @@ async function fixture(branches: ReadonlyMap<QvmGameExport, readonly Operation[]
     worldActor: () => null, onBlocked: () => { throw new Error('No source traversal'); } });
   const printed: string[] = [], state = new Q3ServerState({ session: identities.session, settings: { gameType: 4, singlePlayer: false, maxClients: 2, mapName: 'q3dm7' }, now: () => 1000, print: text => { printed.push(text); } });
   state.cvars.set('bot_enable', '0', true);
-  const game = new Q3QvmServerGame({ ...observers, artifact: artifact(branches), state, mounts, writable: new UserFileStore(root), maxClients: 2, seed: 42, entityText: '{}', now: () => 1000, assertCurrent: () => {},
+  const game = new Q3ServerGame({ ...observers, artifact: artifact(branches), state, mounts, writable: new UserFileStore(root), maxClients: 2, seed: 42, entityText: '{}', now: () => 1000, assertCurrent: () => {},
     records: { actors, bodies: physics.bodies, scene, provider: 'q3:guest', collision: (actor, collision) => physics.setCollision(actor, collision) },
     common: { milliseconds: () => 1, realTime: () => 0, commands: { executeNow: () => { throw new Error('No immediate commands'); }, append: () => {}, insert: () => {} } } });
   const close = async (): Promise<void> => { try { await game.shutdown(); } finally { actors.close(); mounts.close(); await rm(root, { recursive: true, force: true }); } };
@@ -241,7 +241,7 @@ test.skipIf(!existsSync(archivePath))('engine warmup updates use the guest outpu
 
 test.skipIf(!existsSync(archivePath))('component disconnect sees the live source identity once before direct or authored drop', async () => {
   const events: string[] = [];
-  let current: Q3QvmServerGame | null = null;
+  let current: Q3ServerGame | null = null;
   const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate], [QvmGameExport.GAME_CLIENT_COMMAND, trap(QvmGameImport.G_DROP_CLIENT, [0, 256])]]), undefined, {
     clientChanged: (kind, actor) => { expect(current?.players().some(player => player.actor.equals(actor))).toBe(true); events.push(kind); },
     beforeDisconnect: actor => { const player = current?.players().find(player => player.actor.equals(actor));

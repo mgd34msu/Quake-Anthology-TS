@@ -59,18 +59,25 @@ function catalogWeapons(artifact: QvmModuleOptions["artifact"], layout: QvmItemL
   });
 }
 
-/** One live original module owns discovery; preparation never executes a second game initialization. */
+/** One live original module owns discovery; preparation never executes a second game initialization.
+ * A native module has no readable item table, so it carries the weapons it was prepared with. */
 export class Q3GuestCatalog {
   private readonly table: QvmSourceItemCatalog | null;
   private closed = false;
   private previous: readonly QvmCatalogRecord[] | null = null;
   private weapons_: readonly Q3GuestWeapon[];
   private readonly privateItems: ReadonlySet<ItemId> | null;
-  constructor(private readonly artifact: QvmModuleOptions["artifact"], module: QvmModule, private readonly layout: QvmItemLayout | undefined,
+  private readonly artifact: QvmModuleOptions["artifact"] | null;
+  constructor(source: { readonly artifact: QvmModuleOptions["artifact"]; readonly module: QvmModule } | null, private readonly layout: QvmItemLayout | undefined,
     initial: readonly Q3GuestWeapon[], private readonly selection: readonly { readonly value: number; readonly item: ItemId }[] | undefined, inventory: QvmInventoryProfile | null) {
-    if (module.profile.module.digest !== artifact.module.digest || module.profile.module.id !== artifact.module.id
-      || module.profile.module.artifactPath !== artifact.module.artifactPath || module.profile.module.revision !== artifact.module.revision) throw new Error("QVM item catalog belongs to a different original module");
-    this.table = layout === undefined ? null : new QvmSourceItemCatalog(module.memory, layout, artifact.image.initializedData);
+    if (source === null && layout !== undefined) throw new Error("A native module has no readable item table");
+    if (source !== null) {
+      const { artifact, module } = source;
+      if (module.profile.module.digest !== artifact.module.digest || module.profile.module.id !== artifact.module.id
+        || module.profile.module.artifactPath !== artifact.module.artifactPath || module.profile.module.revision !== artifact.module.revision) throw new Error("QVM item catalog belongs to a different original module");
+    }
+    this.artifact = source === null ? null : source.artifact;
+    this.table = layout === undefined || source === null ? null : new QvmSourceItemCatalog(source.module.memory, layout, source.artifact.image.initializedData);
     this.weapons_ = initial;
     this.privateItems = inventory !== null && "storage" in inventory ? new Set(inventory.storage.flatMap(storage => storage.kind === "counter" ? [storage.item] : storage.items.map(item => item.item))) : null;
     this.validate(initial);
@@ -82,7 +89,7 @@ export class Q3GuestCatalog {
   }
   weapons(): readonly Q3GuestWeapon[] {
     if (this.closed) throw new Error("QVM item catalog owner is retired");
-    if (this.table === null || this.layout === undefined || this.layout.source !== "live") return this.weapons_;
+    if (this.table === null || this.artifact === null || this.layout === undefined || this.layout.source !== "live") return this.weapons_;
     const entries = this.table.records();
     if (entries === this.previous) return this.weapons_;
     const weapons = catalogWeapons(this.artifact, this.layout, entries, this.selection);

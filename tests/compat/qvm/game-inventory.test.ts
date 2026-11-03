@@ -111,7 +111,7 @@ test("original QVM initialization publishes a live catalog with private inventor
   ] }), f.artifact, { entityStride: 808, clientStride: 776 });
   const layout = parseQvmItemLayout(new SaveReader({ source: "live", address: { global: 8800 }, count: { global: 8804, maximum: 4 }, stride: 20,
     fields: { className: 4, pickupName: 12, type: 0, tag: 8 }, weaponType: 7, ammoType: 9 }));
-  const catalog = new Q3GuestCatalog(f.artifact, f.module, layout, [], [{ value: 36, item: "test:arc" }], profile);
+  const catalog = new Q3GuestCatalog({ artifact: f.artifact, module: f.module }, layout, [], [{ value: 36, item: "test:arc" }], profile);
   const options = { ...f.options, profile, weapons: () => catalog.weapons() }, inventory = qvmInventoryBinding(options);
   try {
     expect(catalog.weapons()).toEqual([]);

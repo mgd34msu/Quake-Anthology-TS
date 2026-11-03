@@ -80,7 +80,7 @@ import type { SourceLevelAuthority } from "./source-transition.ts";
 import type { DebugLine } from "../../../debug/shapes.ts";
 import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
-import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
+import { Q3ServerGame } from "./q3/guest-runtime.ts";
 import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
@@ -285,7 +285,7 @@ type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
-  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly catalog: Q3GuestCatalog; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null; readonly weapons: QvmPrimaryWeapons | null; readonly pickups: QvmPrimaryPickups | null }
+  | { readonly kind: "q3-qvm"; readonly game: Q3ServerGame; readonly catalog: Q3GuestCatalog; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null; readonly weapons: QvmPrimaryWeapons | null; readonly pickups: QvmPrimaryPickups | null }
   | { readonly kind: "q2-native"; readonly edition: "classic"; readonly game: ClassicGuestWorld; readonly files: ClassicOriginalSaveFiles; readonly visited: Map<string, Q2ClassicVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | { readonly kind: "q2-native"; readonly edition: "rerelease"; readonly game: RereleaseGuestWorld; readonly visited: Map<string, Q2RereleaseVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | ({ readonly kind: "q2"; readonly product: Q2ProductRuntime } & Pick<Q2ProductRuntime, "game" | "weapons" | "monsters" | "movers" | "items" | "players" | "baseEntities">);
@@ -3301,7 +3301,7 @@ export class SharedSimulation implements Simulation {
       // Without a qualified primary weapon interface the guest runs as a
       // black box: its own weapons stay silent while a foreign weapon is
       // active, exactly like the native command gating below.
-      const guestGame: { current: Q3QvmServerGame | null } = { current: null };
+      const guestGame: { current: Q3ServerGame | null } = { current: null };
       const state = new Q3ServerState({ session: this.session, now, print: guest.print,
         filterUserCommand: (slot, command) => {
           const game = guestGame.current;
@@ -3324,7 +3324,7 @@ export class SharedSimulation implements Simulation {
       let primaryWeapons: QvmPrimaryWeapons | null = null;
       let catalog: Q3GuestCatalog | null = null;
       const nativeInventory = guest.prepared.primary.inventory;
-      const game: Q3QvmServerGame = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
+      const game: Q3ServerGame = new Q3ServerGame({ artifact: guest.prepared.artifact, state,
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
           admit: actor => {
             combatBindings?.admit(actor);
@@ -6670,7 +6670,7 @@ export class SharedSimulation implements Simulation {
       yield frameMilliseconds;
     }
   }
-  q3Guest(): Q3QvmServerGame | null { return this.source.kind === "q3-qvm" ? this.source.game : null; }
+  q3Guest(): Q3ServerGame | null { return this.source.kind === "q3-qvm" ? this.source.game : null; }
   async shutdownQ3Guest(): Promise<void> { await this.q3Guest()?.shutdown(); }
   sourceRestartPlan(): { readonly kind: "source-reset" } | { readonly kind: "replace-world"; readonly reason: string } {
     this.assertOpen();
@@ -6928,7 +6928,7 @@ export class SharedSimulation implements Simulation {
     const { fraction, backLerp } = this.presentationFraction();
     if (this.source.kind === "q2-native") {
       const source = this.source, content = this.recipe.map.entities.content;
-      if (process.env.SRRDBG) { let t = ""; for (let i = 1; i < 14; i++) { const q = source.game.entityInfo(i); t += ` ${i}:${q.active ? 1 : 0}/${q.serverFlags}/${q.actor !== null ? 1 : 0}/${source.game.entityState(i).modelIndexes[0]}`; } require("node:fs").appendFileSync(process.env.SRRDBG, `ALL${t}\n`); } // SRRTEMP
+      if (process.env.SRRDBG) { let t = ""; for (let i = 1; i < 60; i++) { const q = source.game.entityInfo(i); if (q.active) t += ` ${i}:${q.serverFlags}/${q.actor !== null ? this.classname(q.actor) : "-"}/${source.game.entityState(i).modelIndexes[0]}`; } require("node:fs").appendFileSync(process.env.SRRDBG, `ALL${t}\n`); } // SRRTEMP
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
         if (process.env.SRRDBG && state.number >= 1 && state.number <= 10) require("node:fs").appendFileSync(process.env.SRRDBG, `E${state.number} actor=${info.actor !== null} active=${info.active} sv=${info.serverFlags} mi=${JSON.stringify(state.modelIndexes)} fr=${state.frame}\n`); // SRRTEMP

@@ -15,12 +15,13 @@ import { X64Cpu } from "../../../../guest/x64/index.ts";
 import { I386Cpu } from "../../../../guest/x86/index.ts";
 import { QvmGameExport, QvmGameImport } from "../../../../compat/qvm/abi.ts";
 import { QvmGameData } from "../../../../compat/qvm/game-data.ts";
+import type { Q3GameMemory } from "../../../../compat/qvm/game-memory.ts";
 import type { QvmHostState } from "../../../../compat/qvm/module.ts";
 import { qvmIntrinsicSyscall } from "../../../../compat/qvm/syscalls.ts";
 import type { QvmHostResult, SharedHostCall } from "../../../../compat/qvm/syscalls.ts";
 import { NativeGameMemory, nativeQ3GameCall, NativeQ3Syscalls, QuakeLiveGameImports, QuakeLiveGameModule, Quake3VmModule, nativeQ3Export } from "../../../../compat/q3/native/index.ts";
 import type { NativeQ3GameServices } from "../../../../compat/q3/native/index.ts";
-import type { Q3GameEngine } from "./engine.ts";
+import type { Q3GameEngine, Q3GuestCheckpoint } from "./engine.ts";
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: "native" }>;
 /** A Windows PE or a Linux ELF with vmMain runs id's dllEntry(syscall) / vmMain interface; a Linux ELF without it is the Quake Live table interface. */
@@ -134,7 +135,7 @@ export class Q3NativeGuestSource implements Q3GameEngine {
         return layouts;
       } });
       const guest = width === 4 ? new NativeGameMemory(memory) : null;
-      const data = new QvmGameData(guest ?? unavailableMemory(), "q3-modern");
+      const data = new QvmGameData(guest ?? unlocatedMemory(), "q3-modern");
       const argv = (): readonly string[] => argumentsOf.current ?? options.services?.commandArguments() ?? [];
       const withArguments = async <T>(values: readonly string[], run: () => Promise<T>): Promise<T> => {
         const previous = argumentsOf.current; argumentsOf.current = values;
@@ -285,7 +286,7 @@ export class Q3NativeGuestSource implements Q3GameEngine {
   }
 
   /** Overlays a saved process image on this freshly started, identical process, then restores the server game's record from it. */
-  restore(checkpoint: Parameters<Q3GameEngine["restore"]>[0]): void {
+  restore(checkpoint: Q3GuestCheckpoint): void {
     if (checkpoint.kind !== "native-guest") throw new Error("Native Q3 restore requires a native-guest checkpoint");
     if (this.phase !== "created") throw new Error("Native Q3 restore requires a freshly started module");
     if (this.hostState === undefined) throw new Error("Native Q3 host has not bound checkpoint services");
@@ -333,8 +334,11 @@ export class Q3NativeGuestSource implements Q3GameEngine {
 function layoutOf(memory: SparseGuestMemory): string {
   return memory.mappings().map(mapping => `${mapping.base}:${mapping.byteLength}:${mapping.permissions}`).join(",");
 }
-function unavailableMemory(): never {
-  throw new Error("Native Q3 game tables require a 32-bit module; the Quake Live table interface locates no game data");
+/** The Quake Live table interface never locates game data through G_LOCATE_GAME_DATA; any access to this memory is a defect. */
+function unlocatedMemory(): Q3GameMemory {
+  const refuse = (): never => { throw new Error("The Quake Live table interface locates no Q3 game data"); };
+  return { pointer: refuse, span: refuse, view: refuse, readString: refuse, writeString: refuse, address: refuse, pointerWord: refuse, viewAt: refuse,
+    regionView: refuse, regionWrite: refuse, regionFill: refuse };
 }
 function releaseMemory(memory: SparseGuestMemory): void {
   for (const mapping of memory.mappings()) {

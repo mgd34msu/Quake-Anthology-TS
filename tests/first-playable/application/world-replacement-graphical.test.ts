@@ -52,10 +52,10 @@ test("six map changes with a local seat on the hidden CPU renderer carry present
       expect(preferences()).toBe(preferencesBefore);
     }
     for (let round = 0; round < 8; round++) { await Bun.sleep(25); Bun.gc(true); }
-    // The collector is conservative about the stack and the engine may pin the first world through its startup scope, so a couple of worlds may survive; a chain of every world must not.
+    // Every tracked world is a previous one; none may survive a full collection.
     for (const name of ["simulation", "assets", "input", "presentation"]) {
       const alive = released.filter(entry => entry.name === name && entry.ref.deref() !== undefined).length;
-      expect(`${name}:${alive <= 2}`).toBe(`${name}:true`);
+      expect(`${name}:${alive}`).toBe(`${name}:0`);
     }
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 }, 240000);

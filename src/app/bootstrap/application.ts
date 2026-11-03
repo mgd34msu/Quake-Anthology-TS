@@ -1074,7 +1074,7 @@ export class Application {
           playerColors: { top: Math.min(13, Math.max(0, Math.trunc(options.characterTopColor ?? 0))), bottom: Math.min(13, Math.max(0, Math.trunc(options.characterBottomColor ?? 0))) },
           promptSupported: client => !options.dedicated && localSeats.has(client),
           playerIdentity: client => networkPlayerIdentities.get(client) ?? ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) }, nextFrame);
-        const simulation = host.loading?.nextFrame === undefined ? await serviceLoading(loadSource, () => {}) : await loadSource(host.loading.nextFrame);
+        let simulation: SharedSimulation | null = host.loading?.nextFrame === undefined ? await serviceLoading(loadSource, () => {}) : await loadSource(host.loading.nextFrame);
         if (ownership.kind === "owned") session.attachWorld(simulation);
         if (options.botSkill !== undefined) {
           const source = simulation.q3Source();
@@ -1108,22 +1108,22 @@ export class Application {
         if (profileConfiguration !== null) if (profileConfiguration.requests.length !== 0) application.requestedCommands.admitAll(profileConfiguration.requests);
         application.frontendOverrides = preferences ?? {};
         application.elapsed = savedSettings?.hostMilliseconds ?? 0;
-        if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
+        if (initialSave !== undefined && application.simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
         await application.bindSourceCommands(initialSave !== undefined);
         guestConsole = application.sourceCommands;
         modCommands.flush();
-        await application.prepareGuestBots(content, simulation);
-        if (!options.dedicated && simulation.q3Guest() !== null) {
-          const authority = createQ3ApplicationServerHost({ session, simulation, content, print: Application.hostPrint(host), ...(initialSave === undefined ? {} : { mode: "restore" }) });
+        await application.prepareGuestBots(content, application.simulation);
+        if (!options.dedicated && application.simulation.q3Guest() !== null) {
+          const authority = createQ3ApplicationServerHost({ session, simulation: application.simulation, content, print: Application.hostPrint(host), ...(initialSave === undefined ? {} : { mode: "restore" }) });
           application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: new EventRing<ApplicationCommandRequest>(16384) };
-          await authority.prepare(0, initialSave === undefined ? 1 : simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
+          await authority.prepare(0, initialSave === undefined ? 1 : application.simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
           if (initialSave === undefined) {
-            await simulation.q3Guest()?.initialize(application.guestOutput());
+            await application.simulation.q3Guest()?.initialize(application.guestOutput());
             const initialized = application;
             await initialized.sourceCommands?.executeAsync(() => initialized.commands());
           }
         }
-        if (initialSave !== undefined) simulation.q3Guest()?.completeRestore(application.guestOutput());
+        if (initialSave !== undefined) application.simulation.q3Guest()?.completeRestore(application.guestOutput());
         if (options.dedicated) application.openDedicatedConsole();
         else {
           if (startup === null && ownership.kind === "owned") await application.viewSettings.load(application.inputConfig);
@@ -1138,13 +1138,13 @@ export class Application {
           await application.publishBorrowed(ownership.client, borrowedImages);
         } else { application.sourcePublished = true; application.publishKeys(); }
         host.loading?.stage("Starting game...");
-        if (initialSave === undefined) application.bots = await application.createBots(content, simulation);
-        else if (savedBots !== null) application.bots = await application.createBots(content, simulation, { restore: {
+        if (initialSave === undefined) application.bots = await application.createBots(content, application.simulation);
+        else if (savedBots !== null) application.bots = await application.createBots(content, application.simulation, { restore: {
           image: savedBots, resolveClient: saved => savedBots.transport.connections.some(connection => connection.client.slot === saved.slot && connection.client.generation === saved.generation)
             ? restoredClients.get(saved.slot) ?? null : null,
         } });
         if (ownership.kind === "owned") await application.openNetwork();
-        const guest = simulation.q3Guest();
+        const guest = application.simulation.q3Guest();
         if (guest !== null && options.dedicated && initialSave === undefined) {
           await guest.initialize(application.guestOutput());
           const initialized = application;
@@ -1157,9 +1157,11 @@ export class Application {
         if (initialSave === undefined) {
           if (options.teamArenaSkirmish !== undefined) application.startTeamArenaSkirmish(options.teamArenaSkirmish);
           await application.autosaveLevel();
-          if (authoredStart !== null && authoredStart.target.kind !== "map") await application.advanceQ2Travel(authoredStart.target, simulation.captureTravel());
+          if (authoredStart !== null && authoredStart.target.kind !== "map") await application.advanceQ2Travel(authoredStart.target, application.simulation.captureTravel());
         }
         else application.requestRestoredScores();
+        // The scope outlives this call through closures stored on the application; it must not keep the first world.
+        simulation = null;
         return application;
       } catch (error) {
         const errors: unknown[] = [error];

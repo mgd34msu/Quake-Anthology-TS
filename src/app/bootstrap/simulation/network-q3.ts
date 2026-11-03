@@ -1,4 +1,4 @@
-import { Q3QvmServerGame } from './q3/guest-runtime.ts';
+import { Q3ServerGame } from './q3/guest-runtime.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import { setInfoValue } from '../../../core/cvars/info.ts';
@@ -22,7 +22,7 @@ export interface Q3ApplicationServerAuthority extends Q3ApplicationServerHost {
 export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindingOptions): Q3ApplicationServerAuthority {
   const simulation = options.simulation, source = simulation.q3Guest() ?? simulation.q3Source();
   if (source === null) throw new Error('Q3 network requires a Q3 game provider');
-  const guest = source instanceof Q3QvmServerGame;
+  const guest = source instanceof Q3ServerGame;
   let nativeRound = guest ? null : source;
   const nativeSource = () => {
     if (nativeRound === null) throw new Error('Native source round binding is unavailable');

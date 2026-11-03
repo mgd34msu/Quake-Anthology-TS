@@ -8,10 +8,10 @@ import { MoveFlags } from "../../../../movement/q3/constants.ts";
 import { fromQ3PlayerState } from "../../../../network/q3/adapters.ts";
 import type { Q3ApplicationPlayer } from "../../network/q3-types.ts";
 import { locomotionTemplate, type MovementPredictionPlayer } from "../player-movement.ts";
-import type { Q3QvmServerGame } from "./guest-runtime.ts";
+import type { Q3ServerGame } from "./guest-runtime.ts";
 
 /** Read public VM records at use time; navigation never owns a second gameplay player. */
-export function guestMovementProjection(guest: Q3QvmServerGame, player: Q3ApplicationPlayer, recipe: ExecutableRecipe): MovementPredictionPlayer {
+export function guestMovementProjection(guest: Q3ServerGame, player: Q3ApplicationPlayer, recipe: ExecutableRecipe): MovementPredictionPlayer {
   const template = locomotionTemplate(recipe), profile = template.profile;
   if (profile.kind !== "q3") throw new Error("QVM movement projection requires its selected movement adapter");
   const product = recipe.map.entities.content.includes(":missionpack:") ? "missionpack" : "baseq3";
