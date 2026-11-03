@@ -80,8 +80,7 @@ export class Q2Horde implements Q2SpawnModule {
     this.wave = saved.wave; this.spawnedThisWave = saved.spawned; this.intermissionTicks = saved.intermission;
     this.waveMonsters.clear();
     for (const savedId of saved.monsters) {
-      const id = game.host.actors.resolveSaved(savedId)?.id ?? game.host.actors.referenceSaved(savedId);
-      if (id !== null && id !== undefined) this.waveMonsters.add(id);
+      this.waveMonsters.add(game.host.actors.resolveSaved(savedId)?.id ?? game.host.actors.referenceSaved(savedId));
     }
     // Manager/point entities are re-spawned from the restored world state;
     // re-acquire them so waves resume after a save load.

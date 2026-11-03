@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -11,11 +11,11 @@ import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBo
 import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { inertAuthority } from "../../support/authority.ts";
 
-const path = copperProgramPath();
-test.skipIf(!copperAvailable())("QC source items share capacity fields while count and capacity aliases remain invalid", async () => {
+for (const variant of copperVariants()) {
+test.skipIf(!variant.available)(`QC source items share capacity fields while count and capacity aliases remain invalid (${variant.name})`, async () => {
   const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
   const { validateQcItems } = await import("../../../src/compat/qc/mod-items.ts");
-  const program = loadQcProgram(await Bun.file(path).bytes());
+  const program = loadQcProgram(await variant.bytes());
   const items: ModQcItems = { definitions: [{ kind: "counter", item: "test:shells", label: "Shells", admission: "add" },
     { kind: "counter", item: "test:nails", label: "Nails", admission: "add" }], storage: [
     { kind: "counter", item: "test:shells", field: "ammo_shells", capacity: { kind: "field", field: "max_health" } },
@@ -29,8 +29,8 @@ test.skipIf(!copperAvailable())("QC source items share capacity fields while cou
     items: { ...items, storage: items.storage.map((storage, index) => index === 1 ? { ...storage, field: overlap } : storage) } })).toThrow("overlap");
 });
 
-test.skipIf(!copperAvailable())("original Copper healing executes through declared actor callbacks in isolated mod instances", async () => {
-  const bytes = new Uint8Array(await Bun.file(path).arrayBuffer()), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
+test.skipIf(!variant.available)(`${variant.name} Copper healing executes through declared actor callbacks in isolated mod instances`, async () => {
+  const bytes = await variant.bytes(), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-mods")), callbacks = new ActorCallbackTable(actors);
   const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -70,11 +70,11 @@ test.skipIf(!copperAvailable())("original Copper healing executes through declar
   } finally { mods.close(); actors.close(); }
 });
 
-test.skipIf(!copperAvailable())("original Copper helper spawn and scheduled removal retain shared actor ownership across save", async () => {
+test.skipIf(!variant.available)(`${variant.name} Copper helper spawn and scheduled removal retain shared actor ownership across save`, async () => {
   const { QcModProvider } = await import("../../../src/compat/qc/mod-provider.ts");
   const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
   const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
-  const program = loadQcProgram(await Bun.file(path).bytes());
+  const program = loadQcProgram(await variant.bytes());
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest }, callbacks: [],
     actorFields: [{ field: "version", binding: "private" }, { field: "spawnflags", binding: "private" },
       { field: "impulse", binding: "constant", value: { kind: "float", value: 20 } },
@@ -121,3 +121,4 @@ test.skipIf(!copperAvailable())("original Copper helper spawn and scheduled remo
     expect(restored.ownedBy("q2:game")).toHaveLength(1);
   } finally { resumed?.close(); restored?.close(); source.close(); original.close(); }
 });
+}

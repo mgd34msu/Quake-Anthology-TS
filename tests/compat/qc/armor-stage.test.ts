@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { copperAvailable, copperProgramPath, testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, copperProgramPath } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 import { dirname } from "node:path";
 
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -26,7 +27,6 @@ import { qcArmorStage } from "../../../src/content/q1/quakec/armor-stage.ts";
 import type { QcInlineBoundary } from "../../../src/compat/qc/machine.ts";
 
 const corpus = `${testCorpusRoot()}/q1/`;
-const copper = copperProgramPath();
 async function readProgram(path: string): Promise<QcProgram> {
   const archive = await openArchive(corpus + path);
   try {
@@ -35,16 +35,24 @@ async function readProgram(path: string): Promise<QcProgram> {
     return loadQcProgram(await archive.readEntry(entry));
   } finally { await archive.close(); }
 }
-/** The statement window below is a position in this exact Copper progs.dat; the pin makes a different build fail here rather than slice the wrong statements. */
+/** The installed Copper build's statement window is a position in this exact progs.dat; the pin makes a different build fail here rather than slice the wrong statements. */
 const COPPER_DIGEST = "sha256:56055d61bac438c227f88b89a03e81401fdd52b10f6d3def0a3d9d261d223e9c";
 const COPPER_STAGE_ENTRY = 5592, COPPER_STAGE_EXIT = 5606;
+/** The region runs from T_DamageApply's armor-type read down to the damage-minus-savings join; the synthetic program is searched for the same landmarks. */
+function stageWindow(program: QcProgram): { readonly entry: number; readonly exit: number } {
+  const apply = program.functionNamed("T_DamageApply");
+  if (program.digest === COPPER_DIGEST) return { entry: COPPER_STAGE_ENTRY, exit: COPPER_STAGE_EXIT };
+  const exit = program.statements.findIndex((statement, index) => index >= apply.firstStatement && statement.opcode === QcOpcode.SubF
+    && statement.a === apply.parameterStart + 3 && statement.b === apply.parameterStart + 9);
+  if (exit < 0) throw new Error("Synthetic armor region has no join");
+  return { entry: apply.firstStatement, exit };
+}
 function copperStage(program: QcProgram): ModQcArmorStage {
-  expect(program.digest).toBe(COPPER_DIGEST);
-  const apply = program.functionNamed("T_DamageApply"), target = apply.parameterStart;
-  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec",
+  const apply = program.functionNamed("T_DamageApply"), target = apply.parameterStart, { entry, exit } = stageWindow(program);
+  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec", 
     program: { path: "progs.dat", digest: program.digest }, actorFields: [], callbacks: [], combat: { damage: { function: "T_Damage", arguments: [], globals: [] },
-      armorStage: { function: "T_DamageApply", entry: COPPER_STAGE_ENTRY, exit: COPPER_STAGE_EXIT, target, damage: target + 3, saved: target + 9,
-        flags: { kind: "bits", word: target + 4, noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0 }, statements: program.statements.slice(COPPER_STAGE_ENTRY, COPPER_STAGE_EXIT + 1) } } })));
+      armorStage: { function: "T_DamageApply", entry, exit, target, damage: target + 3, saved: target + 9,
+        flags: { kind: "bits", word: target + 4, noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0 }, statements: program.statements.slice(entry, exit + 1) } } })));
   const stage = declaration.combat?.armorStage;
   if (stage === undefined) throw new Error("Missing declared stage");
   return stage;
@@ -168,8 +176,8 @@ test("effectful QC power rebases nested damage and cancels the exact retired sou
   } finally { nested.actors.close(); retired.actors.close(); }
 });
 
-test.skipIf(!copperAvailable())("declared original Copper helper debits only regular savings and preserves no-armor flags", async () => {
-  const program = loadQcProgram(await Bun.file(copper).bytes()), declaration = copperStage(program);
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`declared ${variant.name} Copper helper debits only regular savings and preserves no-armor flags`, async () => {
+  const program = loadQcProgram(await variant.bytes()), declaration = copperStage(program);
   expect(qcArmorStage(program)).toBeNull();
   for (const flags of [0, 4]) {
     const run = fixture(program, declaration);
@@ -224,8 +232,8 @@ test("inline QC continuations execute once and preserve the original instruction
   expect(() => twice.execute(damage, 4)).toThrow("once inside its boundary"); twice.snapshot();
 });
 
-test.skipIf(!copperAvailable())("declared original Copper region supplies regular armor after power to original Hipnotic", async () => {
-  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`declared ${variant.name} Copper region supplies regular armor after power to original Hipnotic`, async () => {
+  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await variant.bytes());
   const fields: ModActorField[] = [], occupied = new Set<number>();
   for (const field of program.fields) {
     const width = field.type === "vector" ? 3 : 1, words = Array.from({ length: width }, (_, index) => field.offset + index);
@@ -298,8 +306,8 @@ test.skipIf(!copperAvailable())("declared original Copper region supplies regula
   } finally { source.close(); primary.actors.close(); }
 });
 
-test.skipIf(!copperAvailable())("original Copper pickups decide refusal and publish each tier store during nested source damage", async () => {
-  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`${variant.name} Copper pickups decide refusal and publish each tier store during nested source damage`, async () => {
+  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await variant.bytes());
   const fields: ModActorField[] = [], occupied = new Set<number>();
   for (const field of program.fields) {
     const width = field.type === "vector" ? 3 : 1, words = Array.from({ length: width }, (_, index) => field.offset + index);
@@ -387,8 +395,8 @@ test("QC armor admission validates original profiles", async () => {
   }
 });
 
-test.skipIf(!copperAvailable())("QC armor admission validates declared Copper statement control flow", async () => {
-  const program = loadQcProgram(await Bun.file(copper).bytes()), declaration = copperStage(program);
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`QC armor admission validates declared ${variant.name} Copper statement control flow`, async () => {
+  const program = loadQcProgram(await variant.bytes()), declaration = copperStage(program);
   expect(() => qcArmorStage(program, { ...declaration, entry: declaration.entry + 1 })).toThrow("incomplete instruction");
   expect(() => qcArmorStage(program, { ...declaration, target: declaration.damage })).toThrow("typed frame");
   expect(() => qcArmorStage(program, { ...declaration, statements: declaration.statements.map((statement, index) => index === 0 ? { ...statement, a: 0 } : statement) })).toThrow("differs from artifact");
@@ -426,7 +434,7 @@ test("standalone QC regions reject a caller local read through nested helpers", 
 });
 
 
-test.skipIf(!copperAvailable())("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
+test.skipIf(!copperVariants()[1]?.available)("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
   const { Application } = await import("../../../src/app/bootstrap/application.ts");
   const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
@@ -439,7 +447,7 @@ test.skipIf(!copperAvailable())("primary Copper declaration preserves five-argum
   try {
     await mkdir(mod, { recursive: true });
     await cp(dirname(copperProgramPath()), mod, { recursive: true });
-    const program = loadQcProgram(await Bun.file(copper).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
+    const program = loadQcProgram(await Bun.file(copperProgramPath()).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
       damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
         { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },
       armorStage: copperStage(program), emptyArmor: { item: "q1:item_armorInv", absorption: 0.8 },

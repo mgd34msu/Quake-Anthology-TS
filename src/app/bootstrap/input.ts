@@ -595,6 +595,7 @@ export class ApplicationInput {
     this.controllers = client?.controllers ?? previous?.controllers ?? SdlControllers.open();
     this.inputDevices = client?.inputDevices ?? previous?.inputDevices ?? new InputDevices(this.sharedOwner ?? this.cvars, inputDeviceStore(options.userContentRoot), actions.print);
     this.ownsInputDevices = client === undefined && previous === undefined;
+    if (!this.ownsInputDevices) this.inputDevices.bindPrint(actions.print);
     const previousKeyboard = previous?.router.keyboardSeat() ?? null;
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
       controller: previous !== undefined && previous.router.seat(local.player.seat.id) !== null ? previous.router.controllerSelection(local.player.seat.id) : saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),

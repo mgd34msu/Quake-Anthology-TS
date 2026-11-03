@@ -157,7 +157,7 @@ test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original gi
       selectionMode = () => mode;
       offers.length = 0; clearStores();
       for (const slot of slots) touchItem(slot);
-      expect(offers.map(offer => offer.item)).toEqual(classnames.map(name => `q2:${name}`));
+      expect(offers.map(offer => offer.item)).toEqual(classnames.map((name): ItemId => `q2:${name}`));
       expect(counts(index("q2:item_armor_jacket"))).toBeGreaterThan(0);
       expect(counts(index("q2:ammo_shells"))).toBeGreaterThan(0);
       expect(counts(index("q2:weapon_shotgun"))).toBe(1);
@@ -165,7 +165,7 @@ test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original gi
       mode = "replacement"; offers.length = 0; clearStores();
       const untouched = stores();
       for (const slot of others) touchItem(slot);
-      expect(offers.map(offer => offer.item)).toEqual(classnames.map(name => `q2:${name}`));
+      expect(offers.map(offer => offer.item)).toEqual(classnames.map((name): ItemId => `q2:${name}`));
       expect(stores()).toEqual(untouched);
     } finally { drop.close(); inventory.close(); commands.close(); }
   } finally { world.close(); }

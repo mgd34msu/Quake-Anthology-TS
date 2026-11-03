@@ -842,10 +842,16 @@ export class Application {
     return Application.openSource({ kind: "borrowed", client }, options, host, recipe, preferences, initialSave);
   }
 
+  /** Built outside openSource: the host lives as long as the application, and openSource's scope also holds the first world (AUDIT-001). */
+  private static operatorHost(host: ApplicationHost, operatorOutput: { write: ((text: string) => void) | null }): ApplicationHost {
+    const originalPrint = (text: string): void => host.print(text);
+    return { ...host, print: text => { (operatorOutput.write ?? originalPrint)(text); return undefined; } };
+  }
+
   private static async openSource(ownership: Application["ownership"], options: ApplicationOptions, host: ApplicationHost,
     recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
-    const originalHost = host, originalPrint = (text: string): void => originalHost.print(text), operatorOutput: { write: ((text: string) => void) | null } = { write: null };
-    host = { ...host, print: text => { (operatorOutput.write ?? originalPrint)(text); return undefined; } };
+    const operatorOutput: { write: ((text: string) => void) | null } = { write: null };
+    host = Application.operatorHost(host, operatorOutput);
     if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client" || options.network.kind === "unified-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     if (initialSave !== undefined && options.dedicated) requireComponentClientPresentation(initialSave);
     const savedSettings = initialSave === undefined ? null : savedSimulationSettings(initialSave);

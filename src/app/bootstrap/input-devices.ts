@@ -27,12 +27,14 @@ export class InputDevices {
   private retryAt = 0;
   private closed = false;
   constructor(private readonly cvars: CvarRegistry, private readonly store: ConfigStore,
-    private readonly print: (text: string) => void, midiBoundary?: MidiInputBoundary) {
+    private print: (text: string) => void, midiBoundary?: MidiInputBoundary) {
     registerInputDeviceCvars(cvars);
-    const options = { cvars, print: (text: string): undefined => { print(text); return undefined; } };
+    const options = { cvars, print: (text: string): undefined => { this.print(text); return undefined; } };
     this.midi = new SourceMidiInput(options, midiBoundary);
     this.joystick = new SourceInputState(options);
   }
+  /** The devices outlive each world's input, so the sink follows the adopting input instead of pinning the first world's closures. */
+  bindPrint(print: (text: string) => void): void { this.print = print; }
   private selection(): string {
     return ["in_midi", "in_mididevice", "in_midichannel", "in_midiseat", "in_joystick", "in_joystickProfile", "in_joystickSeat"]
       .map(name => this.cvars.variableString(name)).join("/");

@@ -4,6 +4,7 @@ import type { GuestCallbackTable, MappedGuestMemory } from "../../../guest/core/
 import type { Q3SourceHost } from "../../../app/bootstrap/simulation/q3/types.ts";
 import { integer, pointer, readString, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import { nativeQ3Signature } from "./module.ts";
+import { updateGuestCvar, writeGuestString } from "./guest-services.ts";
 
 export interface NativeQ3ServiceCoverage { readonly slot: number; readonly name: string; readonly implemented: boolean; readonly reached: number; }
 export class NativeQ3ServiceUnavailable extends Error {
@@ -70,22 +71,6 @@ export class QuakeLiveGameImports {
     this.memory.writePointer(this.memory.offset(this.address, BigInt(slot * this.abi.pointerBytes)), target);
     this.calls.set(slot, record); return target;
   }
-  writeString(address: GuestAddress, value: string, capacity: number): void {
-    if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Native string output requires positive source capacity");
-    this.memory.check(address, capacity, "write");
-    const bytes = new Uint8Array(capacity), end = Math.min(value.length, capacity - 1);
-    for (let i = 0; i < end; i++) bytes[i] = value.charCodeAt(i) & 255;
-    this.memory.write(address, bytes);
-  }
-  private updateCvar(address: GuestAddress): void {
-    const m = this.memory, value = this.host.cvars.readVm(m.readInt32(address));
-    if (value === undefined || m.readInt32(m.offset(address, 4n)) === value.modificationCount) return;
-    // vmCvar_t has the same int/int/float/int/char[256] ABI on both guest widths.
-    m.check(address, 272, "write");
-    m.writeInt32(m.offset(address, 4n), value.modificationCount);
-    if (value.value.length >= 256) throw new RangeError("Cvar_Update: source value exceeds MAX_CVAR_VALUE_STRING");
-    this.writeString(m.offset(address, 16n), value.value, 256);
-    m.writeFloat32(m.offset(address, 8n), Math.fround(value.numericValue));
-    m.writeInt32(m.offset(address, 12n), value.integerValue);
-  }
+  writeString(address: GuestAddress, value: string, capacity: number): void { writeGuestString(this.memory, address, value, capacity); }
+  private updateCvar(address: GuestAddress): void { updateGuestCvar(this.memory, this.host.cvars, address); }
 }

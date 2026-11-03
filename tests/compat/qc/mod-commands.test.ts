@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { CommandContext } from "../../../src/contracts/common.ts";
@@ -15,9 +15,8 @@ import { ModCommands } from "../../../src/world/session/mod-commands.ts";
 import { SessionMods } from "../../../src/world/session/mods.ts";
 import { inertAuthority } from "../../support/authority.ts";
 
-const artifact = copperProgramPath();
-test.skipIf(!copperAvailable())("original Copper console functions and localcmd retain component cvars and source ownership", async () => {
-  const program = await Bun.file(artifact).bytes(), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(program).digest("hex"));
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`${variant.name} Copper console functions and localcmd retain component cvars and source ownership`, async () => {
+  const program = await variant.bytes(), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(program).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-console")), callbacks = new ActorCallbackTable(actors);
   const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });

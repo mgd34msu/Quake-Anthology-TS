@@ -1,6 +1,7 @@
 import type { QcPrimaryWeaponStageDeclaration } from "../../../src/contracts/qc-weapon-stage.ts";
 
-import { copperAvailable, copperProgramPath, corpusFile } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { readQuakeCCompatibility } from "../../../src/compat/qc/compatibility.ts";
@@ -87,8 +88,8 @@ for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "
 });
 
 
-test.skipIf(!copperAvailable())("declared client calls execute original Copper parameters, globals and entity results with nested staging restored", async () => {
-  const program = loadQcProgram(await Bun.file(copperProgramPath()).bytes());
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`declared client calls execute ${variant.name} Copper parameters, globals and entity results with nested staging restored`, async () => {
+  const program = loadQcProgram(await variant.bytes());
   const declaration: QcPrimaryWeaponStageDeclaration = { dispatcher: "W_WeaponFrame", continuations: ["player_axe1"], repeats: [], client: {
     spawn: { function: "autosave", arguments: [{ kind: "input", name: "self" }, { kind: "string", value: "stage-check" }],
       globals: [{ name: "isKex", value: { kind: "float", value: 0 } }, { name: "v_forward", value: { kind: "vector", value: { x: 1, y: 2, z: 3 } } }] },

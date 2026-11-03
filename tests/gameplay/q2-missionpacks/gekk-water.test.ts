@@ -6,12 +6,14 @@ import type { Q2Monsters } from "../../../src/content/q2/foundation/monsters/ind
 import type { MonsterContext } from "../../../src/content/q2/foundation/monsters/types.ts";
 
 const FL_SWIM = 2;
+/** The gekk code under test reads only the fields the scene declares. */
+function stand<T>(value: object): T { return value as T; }
 interface Scene { readonly edition: "classic" | "rerelease"; readonly flags?: number; readonly spawnflags?: number; readonly distance: number; readonly submerged?: boolean; readonly rolls?: readonly number[]; readonly waterLevel?: 0 | 1 | 2 | 3 }
 
 /** A gekk at the origin whose enemy stands `distance` units away along +x (boxes of half-width 16 on both sides, so the box gap is distance - 32 + 32 = distance). */
 function scene(input: Scene) {
   const rolls = [...input.rolls ?? []], moves: string[] = [], bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 24 } };
-  const state = { waterLevel: input.waterLevel ?? 2, locomotion: "swim", nextFrame: 0, attackFinished: 0, move: "gekk_move_swim_loop" };
+  const state = { waterLevel: input.waterLevel ?? 2, locomotion: "swim", nextFrame: 0, attackFinished: 0, move: { name: "gekk_move_swim_loop" } };
   const entity = { flags: input.flags ?? 0, spawnflags: input.spawnflags ?? 0, enemy: "enemy", actor: { id: "gekk" } };
   const enemy = { actor: { id: "enemy" } };
   let moved = 0;
@@ -26,7 +28,7 @@ function scene(input: Scene) {
       pointContents: () => (input.submerged === true ? 56 : 0), now: () => 100, random: () => rolls.shift() ?? 0,
     },
   };
-  const context = { entity, game, state, setMove: (name: string) => { moves.push(name); return undefined; } } as MonsterContext;
+  const context = stand<MonsterContext>({ entity, game, state, setMove: (name: string) => { moves.push(name); return undefined; } });
   return { context, entity, state, moves, moved: () => moved, rolls };
 }
 const attack = (input: Scene) => {

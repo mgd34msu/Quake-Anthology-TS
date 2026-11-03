@@ -122,7 +122,7 @@ corpusTest(path)("1998 Xatrix command, inventory and drop entries sit on the ori
   // SelectNextItem and SelectPrevItem: scan regions are the item loops; the cursor store is skipped and the final epilogue is the join.
   for (const [entry, scan, join, head, edi] of [[inventory.next.entry, inventory.next.scan, inventory.next.join, [0x8b, 0xc6, 0x99], 0x87], [inventory.previous.entry, inventory.previous.scan, inventory.previous.join, [0x8b, 0xc1, 0x99], 0x86]] as const) {
     const span = slice(file, entry, join - entry);
-    expect(slice(file, scan, 3)).toEqual(head);
+    expect(slice(file, scan, 3)).toEqual([...head]);
     expect(slice(file, join, 6)).toEqual([...epilogue, 0x90]);
     expect(contains(span, [0xc7, edi, ...le32(inventory.cursor), 0xff, 0xff, 0xff, 0xff])).toBe(true);
     expect(contains(span, [0x89, edi, ...le32(inventory.cursor)])).toBe(true);

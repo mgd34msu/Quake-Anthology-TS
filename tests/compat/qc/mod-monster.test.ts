@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { DamageOutcome } from "../../../src/contracts/gameplay.ts";
@@ -17,11 +17,10 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { parseEntities } from "../../../src/core/common-parse.ts";
 
-const path = copperProgramPath();
-test.skipIf(!copperAvailable())("original Copper monster spawns, acquires a canonical Q2 client and runs source AI", async () => {
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`${variant.name} Copper monster spawns, acquires a canonical Q2 client and runs source AI`, async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
   if (command.kind !== "run") throw new Error("Missing Q2 destination");
-  const content = await loadApplicationContent(command.options), program = loadQcProgram(await Bun.file(path).bytes());
+  const content = await loadApplicationContent(command.options), program = loadQcProgram(await variant.bytes());
   const coordinates = parseEntities(content.world.entities).find(entity => entity.get("classname") === "info_player_start")?.get("origin")?.split(/\s+/).map(Number);
   const [x, y, z] = coordinates ?? [];
   if (x === undefined || y === undefined || z === undefined) throw new Error("Destination has no player start");

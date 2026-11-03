@@ -169,7 +169,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
     initialMove: "gekk_move_stand", moves: [...gekkMoves, ...rereleaseJumpMoves], stand(context) {
       if (!rerelease(context)) return context.setMove(wet(context) ? "gekk_move_standunderwater" : "gekk_move_stand");
       if (wet(context)) { enterWater(context); return context.setMove("gekk_move_standunderwater"); }
-      return context.state.move === "gekk_move_idle2" ? undefined : context.setMove("gekk_move_stand");
+      return context.state.move.name === "gekk_move_idle2" ? undefined : context.setMove("gekk_move_stand");
     }, walk: move("gekk_move_walk"), run: runStart, melee,
     sight: sound("gek/gk_sght1.wav"), search, idle(context) { return context.setMove(swims(context) ? "gekk_move_swim_start" : "gekk_move_idle"); },
     afterSpawn(context) { if ((context.entity.spawnflags & 8) !== 0) context.setMove("gekk_move_chant"); return undefined; },

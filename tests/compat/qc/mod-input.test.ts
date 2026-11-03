@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { copperAvailable, copperProgramPath, testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import type { ModActorField, ModCallbackDeclaration, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
@@ -18,7 +19,6 @@ import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { inertAuthority } from "../../support/authority.ts";
 
-const copper = copperProgramPath();
 const zero = { x: 0, y: 0, z: 0 };
 const globals = [
   { name: "self", value: { kind: "input", name: "self" } },
@@ -26,11 +26,11 @@ const globals = [
   { name: "frametime", value: { kind: "input", name: "elapsed" } },
 ] satisfies ModSourceCall["globals"];
 
-test.skipIf(!copperAvailable())("original Copper applied callbacks use effective input and retain private continuation in a Q2 world", async () => {
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`${variant.name} Copper applied callbacks use effective input and retain private continuation in a Q2 world`, async () => {
   const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), scene = createSceneQueries(content.world);
-  const program = loadQcProgram(await Bun.file(copper).bytes());
+  const program = loadQcProgram(await variant.bytes());
   const fields: readonly ModActorField[] = [
     { field: "health", binding: "health" }, { field: "max_health", binding: "constant", value: { kind: "float", value: 100 } },
     { field: "healthtime", binding: "private" }, { field: "waterlevel", binding: "private" }, { field: "dmg", binding: "private" },

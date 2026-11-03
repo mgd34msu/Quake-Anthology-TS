@@ -18,16 +18,16 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
     entities.push(entity); health.set(actor.id, 100); origins.set(actor.id, origin);
     return entity;
   };
-  const resolveSaved = (savedId: { slot: number; generation: number }): ActorId | null => {
+  const resolveSaved = (savedId: { slot: number; generation: number }): ActorId => {
     for (const entity of entities) if (entity.actor.id.slot === savedId.slot && entity.actor.id.generation === savedId.generation) return entity.actor.id;
-    return null;
+    throw new Error("unknown saved actor");
   };
   const game: Q2HordeGame = {
     entities: { values: () => entities.values() },
     host: {
       actors: { resolveSaved: () => null, referenceSaved: resolveSaved },
       combat: { read: id => ({ health: health.get(id) ?? 0 }) },
-      trace: () => ({ startSolid: false, hit: { kind: "world" } }),
+      trace: () => ({ startSolid: false, hit: { kind: "world", model: 0 } }),
       emit: () => undefined,
     },
     solid: () => undefined,

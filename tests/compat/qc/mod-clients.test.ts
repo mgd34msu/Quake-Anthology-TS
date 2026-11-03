@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { copperAvailable, copperProgramPath, testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+import { copperVariants } from "../../support/qc-copper.ts";
 
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { FrameContext } from "../../../src/contracts/time.ts";
@@ -24,7 +25,6 @@ import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { inertAuthority } from "../../support/authority.ts";
 
-const copper = copperProgramPath();
 const selfGlobal = [{ name: "self", value: { kind: "input", name: "self" } }] satisfies ModSourceCall["globals"];
 const inputs = (actor: ActorId) => new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }]]);
 function clients() {
@@ -40,10 +40,10 @@ function clients() {
   } };
 }
 
-test.skipIf(!copperAvailable())("original Copper client callbacks reserve edicts and retain private state and targeted stuffcmd through save", async () => {
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`${variant.name} Copper client callbacks reserve edicts and retain private state and targeted stuffcmd through save`, async () => {
   const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
-  const content = await loadApplicationContent(options.options), program = loadQcProgram(await Bun.file(copper).bytes());
+  const content = await loadApplicationContent(options.options), program = loadQcProgram(await variant.bytes());
   const resources = await prepareQuakeCResources(program, await content.forContent("q1:classic:id1:installed")), occupied = new Set<number>(), actorFields: ModActorField[] = [];
   for (const field of program.fields) {
     const width = field.type === "vector" ? 3 : 1;
