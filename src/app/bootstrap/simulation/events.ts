@@ -14,8 +14,8 @@ import { PresentationState } from "../presentation-state.ts";
 import type { SimulationQ1FogOptions } from "./q1-fog.ts";
 import type { SimulationPresentationEvent, SourcePresentationEvent } from "./types.ts";
 import { EventRing, type EventCursor } from "../../../foundation/index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 /** Undrained authoritative events retained between publications; sized at load like the C output ring. */
 const SIMULATION_EVENT_CAPACITY = 16384;
 

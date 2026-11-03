@@ -5,6 +5,7 @@ import type { NumericProfile } from "../../../contracts/numeric.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { CollisionWorld, TraceQuery, TraceResult } from "../../../content/q3/presentation/collision-host.ts";
 import { CollisionCounters } from "../../../world/collision/q3/counters.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 const numeric: NumericProfile = {
   id: "q3:cgame",
@@ -13,7 +14,6 @@ const numeric: NumericProfile = {
   floatToInt: "qvm-indefinite",
   integerOverflow: "wrap32",
 };
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export function q3ClientCollision(queries: SceneQueries, settings: CollisionMapSettings): CollisionWorld {
   const counters = new CollisionCounters();
   // Cgame clips its own snapshot entities after the geometry trace.

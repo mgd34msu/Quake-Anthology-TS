@@ -11,6 +11,7 @@ import type { Q1EntityServices } from "../../../content/q1/foundation/entity-ser
 import type { Q1BaseWeapon, Q1PlayerState, Q1Weapon } from "../../../content/q1/foundation/types.ts";
 import { WEAPONS, isQ1BaseWeapon } from "../../../content/q1/foundation/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 interface Shot {
   readonly damage: number;
@@ -31,7 +32,6 @@ interface Entry {
   readonly item: ItemId;
   readonly ammo: ItemId | null;
 }
-const zero = { x: 0, y: 0, z: 0 };
 
 /** progs106 weapons.qc/player.qc and foundation/weapons.ts; continuous frames fire every 0.1 seconds. */
 function shot(game: Q1EntityServices, weapon: Q1BaseWeapon, player: Q1PlayerState | null): Shot {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../contracts/math.ts";
 import type { TraceResult } from "../contracts/scene.ts";
+import { zeroVec3 as zero } from "../core/math.ts";
 
 export interface SweptBodyState {
   readonly origin: Vec3;
@@ -51,7 +52,6 @@ export interface SweptBodyServices<Trace extends SweptBodyTrace = TraceResult> {
   };
 }
 export type SweepStop = "complete" | "removed" | "solid" | "plane-limit" | "crease-blocked" | "reversed";
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** Swept movement; source adapters own state access, contact effects and arithmetic. */
 export function sweepBody<Trace extends SweptBodyTrace>(services: SweptBodyServices<Trace>, elapsed: number): SweepStop {

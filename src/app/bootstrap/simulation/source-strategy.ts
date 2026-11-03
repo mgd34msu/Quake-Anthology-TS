@@ -50,7 +50,7 @@ import { classicGuestPlayerView, classicGuestPlayerUi } from "./classic-guest-pl
 import { q1WeaponStatus, q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "./arsenal/weapon-status.ts";
 import { q3WeaponItem, Q3_WEAPON_ITEMS } from "../../../content/q3/foundation/arsenal.ts";
 import { q1PowerupTimers, q2PowerupTimers, q3PowerupTimers } from "./powerup-timers.ts";
-import { add } from "./vec.ts";
+import { add3 as add } from "../../../core/math.ts";
 import { providerFamily } from "./players.ts";
 import type { PlayerUi, PlayerUiItem, PlayerView, SimulationPresentation } from "./types.ts";
 import type { Q1SelectedArsenal } from "./arsenal/q1.ts";

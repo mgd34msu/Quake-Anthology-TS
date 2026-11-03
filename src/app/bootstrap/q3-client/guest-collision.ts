@@ -11,8 +11,7 @@ import { createBoxModel, createCapsuleModel } from "../../../world/collision/q3/
 import type { TemporaryTraceQuery } from "../../../world/collision/q3/model.ts";
 import { emptySourceTrace } from "../../../world/collision/q3/world.ts";
 import type { SourceTraceResult } from "../../../world/collision/q3/world.ts";
-
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 /** Cgame traces geometry only; its entity clipping remains in the guest module. */
 export class SharedQvmClientClipModels implements QvmClientClipModels {

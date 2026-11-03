@@ -8,8 +8,8 @@ import { advanceQ1Particle, sampleQ2Particle } from "../../../render/scene/parti
 import type { Q1ParticleState, Q2ParticleState } from "../../../render/scene/particles/legacy.ts";
 import { SourceRandom } from "../simulation/random.ts";
 import { ALIAS_NORMALS } from "../../../formats/q12-model/normals.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const gravity: Vec3 = { x: 0, y: 0, z: -40 };
 const q1FireRamp: readonly number[] = [109, 107, 6, 5, 4, 3];
 export class SourceParticles {

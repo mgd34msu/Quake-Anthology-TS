@@ -18,6 +18,7 @@ import type { EquipmentWeaponHandoff, WeaponReference } from "./weapon-slot.ts";
 import type { SourceRandom } from "./random.ts";
 import type { QvmGrappleSource, QvmGrappleSourceCheckpoint } from "./qvm-grapple-source.ts";
 import type { QvmGrappleProvider } from "../../../compat/qvm/grapple-provider.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export type GrappleSource =
   | { readonly kind: "q1-threewave"; readonly game: Q1EntityServices; readonly core: ThreewaveGrapple }
@@ -64,7 +65,6 @@ export interface GrappleRuntimeCheckpoint {
       }
     | { readonly kind: "q3-qvm"; readonly component: QvmGrappleSourceCheckpoint; readonly holstered: readonly SavedActorId[] };
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function saved(actor: ActorId): SavedActorId {
   return { slot: actor.slot, generation: actor.generation };
 }

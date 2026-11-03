@@ -48,8 +48,7 @@ import type { ModClientApplication, ModClientCommand } from "../../../world/sess
 import type { ModClientApplications } from "../../../world/session/mod-client-applications.ts";
 import type { MovementInputApplication } from "../../../contracts/movement.ts";
 import { movementApplicationAim, movementApplicationFrame } from "./player-input-application.ts";
-
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export interface NetQuakeClientBinding {
   readonly projection: { read(state: Q1MovementState): Q1MovementState; write(state: Q1MovementState): undefined } | null;

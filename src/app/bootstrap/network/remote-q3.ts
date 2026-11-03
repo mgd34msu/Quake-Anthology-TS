@@ -4,11 +4,11 @@ import { RemoteWorldContent } from "./remote-world.ts";
 import type { CollisionMapSettings } from "../../../world/collision/q3/settings.ts";
 import type { WorldText } from "../../../text/world.ts";
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 /* Q3 CL_ParseGamestate / CL_SetCGameTime and cgame host projection. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner, SeatId } from "../../../contracts/identity.ts";
 import type { ContentId, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { ActorCommand, SimulationOutput } from "../../../contracts/session.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q3ClientConnection } from "../../../network/q3/client.ts";
 import { q3InfoValue } from "../../../network/q3/admission.ts";
 import { Q3ClientClock } from "../../../network/q3/clock.ts";
@@ -60,7 +60,6 @@ export interface Q3RemotePresentationOptions {
   publish(output: SimulationOutput): void;
   print(text: string): void;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const bounds = { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 32 } };
 export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePresentationAccess {
   readonly client;

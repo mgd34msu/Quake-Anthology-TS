@@ -10,6 +10,7 @@ import { DAMAGE_TYPE_IMPACT, DAMAGE_TYPE_RADIAL } from "../../../bots/behavior/l
 import type { Q2WeaponDefinition } from "../../../content/q2/foundation/weapons/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import { createBotArsenalKnowledge } from "../../../bots/behavior/q3/arsenal-knowledge.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 interface Ballistics {
   readonly damage: number;
@@ -31,7 +32,6 @@ interface Entry {
   readonly ballistics: Ballistics;
   readonly info: WeaponInfo;
 }
-const zero = { x: 0, y: 0, z: 0 };
 
 /** p_weapon callbacks provide these unpowered shot values; random damage uses its arithmetic mean. */
 function ballistics(name: string, rerelease: boolean, deathmatch: boolean): Ballistics | null {

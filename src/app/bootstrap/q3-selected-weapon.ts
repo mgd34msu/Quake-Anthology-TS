@@ -15,8 +15,8 @@ import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models
 import type { ApplicationAssets, ModelAsset } from "./assets.ts";
 import type { SimulationPresentation } from "./simulation/types.ts";
 import { add3, scale3 } from "../../core/math.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 
-const zero = { x: 0, y: 0, z: 0 };
 const unit = { x: 1, y: 1, z: 1 };
 
 /** CG_AddViewWeapon uses the hand model as a tag anchor, then draws gun, barrel and flash. */

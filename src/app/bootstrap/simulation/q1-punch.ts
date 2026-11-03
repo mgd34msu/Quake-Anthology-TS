@@ -7,12 +7,12 @@ import { savedActorId, readSavedActor } from "../../../persistence/save-image.ts
 import { readVector } from "../../../persistence/shared.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import type { SessionActorRegistry } from "../../../world/actors/index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export interface Q1PunchOwner {
   read(): Vec3;
   write(angles: Vec3): void;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** One original-style Q1 field per player. Bound fields remain saved by their source. */
 export class Q1PlayerPunch {

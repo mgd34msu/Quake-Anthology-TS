@@ -8,7 +8,7 @@ import { traceQ1Hull } from "./q1/index.ts";
 import { createBoxModel, createCapsuleModel } from "./q3/model.ts";
 import { sourceTraceView } from "./q3/world.ts";
 import { CollisionCounters } from "./q3/counters.ts";
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
+import { zeroVec3 as zero } from "../../core/math.ts";
 const AXIS_NORMALS: readonly Vec3[] = [
   { x: 1, y: 0, z: 0 },
   { x: 0, y: 1, z: 0 },

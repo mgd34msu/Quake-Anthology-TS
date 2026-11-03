@@ -5,6 +5,7 @@ import { pushQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { Q1PhysicsEntity, Q1PusherServices } from "../../../movement/q1/types.ts";
 import { touchQ1Triggers } from "../../../world/actors/triggers.ts";
 import { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 /* Shared body physics adapted from Quake sv_phys.c/sv_move.c and Quake II
  * g_phys.c/m_move.c. Copyright (C) 1996-2005 Id Software. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -90,7 +91,6 @@ export interface PhysicsEvent {
   readonly kind: "water-enter" | "water-leave" | "land";
   readonly origin: Vec3;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const defaultMask = 0x02020003;
 
 /** The scheduler calls one actor at a time. This owner never starts a family loop. */

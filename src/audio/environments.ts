@@ -4,6 +4,7 @@
 import type { Vec3 } from "../contracts/math.ts";
 import { REVERB_PRESET_NAMES, REVERB_PRESETS, REVERB_PRESET_PLAIN } from "./reverb-presets.ts";
 import type { EfxReverbParamsT } from "./reverb-presets.ts";
+import { zeroVec3 as zero } from "../core/math.ts";
 export interface ReverbMaterial {
   readonly materials: readonly string[] | null;
   readonly presetIndex: number;
@@ -84,7 +85,6 @@ const probes: readonly Vec3[] = [
   { x: -0.499999911, y: -0.866025448, z: -4.37113883e-8 },
   { x: 0.499999911, y: -0.866025448, z: -4.37113883e-8 },
 ];
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function interpolate(a: EfxReverbParamsT, b: EfxReverbParamsT, f: number): EfxReverbParamsT {
   return {
     density: a.density + f * (b.density - a.density),

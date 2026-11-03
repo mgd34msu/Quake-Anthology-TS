@@ -5,11 +5,11 @@ import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 import type { NumericOperations, NumericProfile } from "../../../contracts/numeric.ts";
 import type { Q1ClipChild, Q1ClipNode, Q1Hull, Q1WorldGeometry } from "../../../contracts/scene.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export const Q1_CONTENTS_EMPTY = -1;
 export const Q1_CONTENTS_SOLID = -2;
 export const Q1_DISTANCE_EPSILON = 1 / 32;
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export const Q1_HULL_BOUNDS: readonly Bounds[] = [
   { min: zero, max: zero },
   { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },

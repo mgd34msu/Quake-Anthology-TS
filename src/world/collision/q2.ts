@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { StampSet } from "../../foundation/stamp.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 /* Quake II brush tracing and area connectivity from id Software cmodel.c and
  * q2repro cmodel.c. Copyright (C) 1997-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
@@ -35,7 +36,6 @@ interface Work {
   surface: Q2SurfaceInfo | null;
   secondary: Q2Trace["secondary"];
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const noPlane: BspPlane = { normal: zero, distance: 0, type: 0, signbits: 0 };
 const epsilon = 0.03125;
 function at<T>(values: readonly T[], index: number): T {

@@ -9,7 +9,6 @@ import type { NavigationEntityBinding } from "../../../bots/navigation/types.ts"
 import type { BotMovementPrediction } from "../../../bots/behavior/q3/navigation-types.ts";
 import { createMovementAdmission, createMovementRouteAdmission, loadNavigation, NavigationRuntime } from "../../../bots/navigation/index.ts";
 import type { NavigationPredictionDriver, NavigationProfile, NavigationWorld, TravelMode } from "../../../bots/navigation/index.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
 import type { LoadedApplicationContent } from "../content.ts";
 import { movementOrigin } from "./players.ts";
 import type { MovementPredictionPlayer } from "./player-movement.ts";
@@ -27,8 +26,8 @@ import {
 } from "./player-movement.ts";
 import type { LocomotionPlayer } from "./player-movement.ts";
 import { MoverState } from "../../../content/q3/base/game/state.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export function botNavigationProfile(player: LocomotionPlayer): NavigationProfile {
   const movement = selectedMovementProfile(player);
   const crouches = movement.kind === "q2-classic" || movement.kind === "q2-rerelease" || movement.kind === "q3";

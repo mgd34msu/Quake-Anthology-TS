@@ -29,7 +29,6 @@ import type { FrameContext } from "../../contracts/time.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, ModuleIdentity, RawEntityView } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
-import type { Vec3 } from "../../contracts/math.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModCallbackInput, ModClientInputOutput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type {
@@ -64,6 +63,7 @@ import {
   readClassicVector,
   writeClassicVector,
 } from "./classic/records.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
 type SharedField = Extract<
@@ -89,7 +89,6 @@ interface InputScope {
   readonly application: ModClientApplication;
   readonly values: Inputs;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function shared(field: NativeModActorField): field is SharedField {
   return (
     field.binding === "team" ||

@@ -30,8 +30,8 @@ import { RereleaseSourceClient } from "../../../compat/q2/rerelease/source-state
 import { rereleaseInventoryItems } from "../../../compat/q2/rerelease/semantics.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import { ResourceNameIndex } from "../../../core/resource-name-index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const resourceRanges = { model: { base: 62, count: 8192 }, sound: { base: 8254, count: 2048 }, image: { base: 10302, count: 512 } };
 const resourceKinds: readonly (keyof typeof resourceRanges)[] = ["model", "sound", "image"];
 interface LinkMetadata {

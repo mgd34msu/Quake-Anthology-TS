@@ -3,6 +3,7 @@ import { QwSpectatorCamera } from "./qw-camera.ts";
 import type { QwCameraOptions, QwCameraPlayer } from "./qw-camera.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { RemoteWorldContent } from "./remote-world.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 /* QW decoded protocol state shares the Q1 scene/session presentation. GPL-2.0-or-later. */
 import type { IndexedModelSkin } from "../../../contracts/scene.ts";
 import { QwPlayerSkins } from "./qw-skins.ts";
@@ -28,7 +29,6 @@ export interface QwRemotePresentationOptions extends Q1RemotePresentationOptions
   prepareServerData(data: QwServerData): Promise<void>;
   mapChecksum(world: Q1RemoteWorld, gameDirectory: string): Promise<number>;
 }
-const zero = { x: 0, y: 0, z: 0 };
 function playerEntity(state: QwPlayerState): Q1ExtendedEntityState {
   return {
     number: state.number + 1,

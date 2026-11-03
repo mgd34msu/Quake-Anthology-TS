@@ -21,6 +21,9 @@ export function vec3(x: number, y: number, z: number): Vec3 {
   return { x: Math.fround(x), y: Math.fround(y), z: Math.fround(z) };
 }
 
+/** The shared zero vector. Frozen, so no caller can mutate the one instance everyone reads. */
+export const zeroVec3: Vec3 = Object.freeze({ x: 0, y: 0, z: 0 });
+
 export function vec4(x: number, y: number, z: number, w: number): Vec4 {
   return {
     x: Math.fround(x),

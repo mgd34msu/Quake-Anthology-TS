@@ -13,6 +13,7 @@ import { GameMemory } from "../../../content/q3/base/game/memory.ts";
 import type { BotObservedEntity, BotObservedPickup, SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
 import { createBotArsenalBinding } from "./bot-arsenal.ts";
 import type { SharedSimulation } from "./runtime.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 interface Options {
   readonly restoring?: boolean;
@@ -26,7 +27,6 @@ interface Options {
   console(text: string): void;
   message(client: number, text: string): void;
 }
-const zero = { x: 0, y: 0, z: 0 };
 
 /** A sensory projection and ID lookup over existing shared actors, with no entity or physics ownership. */
 export function createSharedBotWorld(options: Options) {

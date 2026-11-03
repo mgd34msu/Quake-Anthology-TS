@@ -16,6 +16,7 @@ import { traceActorBody } from "./body.ts";
 import { SpatialIndex } from "../spatial/index.ts";
 import type { SharedBodyTable } from "../actors/body.ts";
 import type { ActorCollision, SpatialActor } from "../spatial/index.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 export type { ActorCollision, SpatialActor } from "../spatial/index.ts";
 export { convertContents, convertSurfaceFlags } from "./contents.ts";
 type ActorStateSource = SharedBodyTable | ((actor: ActorId) => BodyState | null);
@@ -32,7 +33,6 @@ type GeometryCollision =
       readonly kind: "q3";
       readonly provider: Q3Collision;
     };
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function sweptBounds(query: TraceQuery): Bounds {
   const b = query.shape.kind === "point" ? { min: zero, max: zero } : query.shape.bounds;
   if (query.policy.kind === "q3") {

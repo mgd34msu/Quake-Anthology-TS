@@ -11,6 +11,7 @@ import type { Q2RereleaseMovementContext } from "../../../movement/q2/rerelease.
 import { plane } from "../../../movement/q2/types.ts";
 import type { CplaneT, KexTouchListT, MovementEntity, TraceT, Vec3 as SourceVector } from "../../../movement/q2/types.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export interface Q2RereleaseFlyMoveServices {
   readonly actors: SessionActorRegistry;
@@ -27,7 +28,6 @@ const vector = (value: SourceVector): Vec3 => ({ x: value[0], y: value[1], z: va
 const sourceVector = (value: Vec3): SourceVector => [value.x, value.y, value.z];
 const sourcePlane = (value: BspPlane): CplaneT => ({ normal: sourceVector(value.normal), dist: value.distance, type: value.type, signbits: value.signbits });
 const scenePlane = (value: CplaneT): BspPlane => ({ normal: vector(value.normal), distance: value.dist, type: value.type, signbits: value.signbits });
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** Creates the source movement routines once per physics owner. Impacts occur
  * after all bumps, in first-contact order, with the final body already visible. */

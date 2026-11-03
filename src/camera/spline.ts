@@ -3,6 +3,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec3 } from "../contracts/math.ts";
 import { add3, length3, normalize3, scale3, sub3 } from "../core/math.ts";
+import { zeroVec3 as zero } from "../core/math.ts";
 export interface CameraVelocity {
   readonly start: number;
   readonly duration: number;
@@ -32,7 +33,6 @@ export interface CameraDefinition {
   readonly events: readonly CameraEvent[];
   readonly fov: { readonly value: number; readonly start: number; readonly end: number; readonly time: number };
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 class Tokens {
   private index = 0;
   private readonly tokens: readonly string[];

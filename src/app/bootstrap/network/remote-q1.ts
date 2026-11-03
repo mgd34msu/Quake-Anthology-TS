@@ -5,6 +5,7 @@ import { updateQ1ClientMetadata, type Q1ClientRow } from "../q1-service-presenta
 import { asciiFold, commandSeparatorOffset, tokenizeCommand } from "../../../core/commands/text.ts";
 import { RemoteWorldContent } from "./remote-world.ts";
 import type { WorldText } from "../../../text/world.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 /* WinQuake cl_parse.c and cl_main.c decoded presentation. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner } from "../../../contracts/identity.ts";
 import type { ContentId, ResolvedResourceReference } from "../../../contracts/content.ts";
@@ -39,7 +40,6 @@ export interface Q1RemotePresentationOptions {
   publish(output: SimulationOutput): void;
   disconnected(reason: string): void;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const weapons = [
   { bit: 4096, name: "axe", ammo: null },
   { bit: 1, name: "shotgun", ammo: "shells" },

@@ -14,10 +14,10 @@ import type { QvmFunctionCall } from "./interpreter.ts";
 import { QvmOpcode } from "./image.ts";
 import type { QvmModule, QvmModuleOptions } from "./module.ts";
 import { QVM_TRACE_BYTES, writeQvmTrace } from "./trace-record.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 
 type ReactionKind = "touch" | "use" | "pain" | "die";
 const callbackKinds: readonly ReactionKind[] = ["touch", "use", "pain", "die"];
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const legacyCalls: QvmModCombatCalls = {
   damage: { roles: { target: 0, inflictor: 1, attacker: 2, direction: 3, point: 4, amount: 5, flags: 6, method: 7 }, extras: [] },
   touch: { roles: { target: 0, other: 1, trace: 2 }, extras: [] },

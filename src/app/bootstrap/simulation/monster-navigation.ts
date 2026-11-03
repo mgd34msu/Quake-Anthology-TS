@@ -9,11 +9,11 @@ import { createQ1MonsterMovement, type Q1MonsterMovement, type Q1MonsterMoveStat
 import type { LoadedApplicationContent } from "../content.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import { movementProfile } from "./players.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export interface ApplicationMonsterNavigation {
   install(simulation: SharedSimulation, movement: Q1MonsterMovement): undefined;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function distance(a: Vec3, b: Vec3): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }

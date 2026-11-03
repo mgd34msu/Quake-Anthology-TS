@@ -30,6 +30,7 @@ import type {
   RouteQuery,
   RouteResult,
 } from "./navigation-types.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 export interface SourceBotNavigationHost {
   readonly runtime: NavigationRuntime;
@@ -55,7 +56,6 @@ export interface SourceBotNavigationHost {
 }
 
 const f = Math.fround;
-const zero = { x: 0, y: 0, z: 0 };
 /** Source area zero remains invalid even when a foreign navigation graph uses node zero. */
 export class SourceBotNavigation implements BotNavigation {
   private readonly offset: number;

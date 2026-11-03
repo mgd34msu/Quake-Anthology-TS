@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { clientMovementMode, clientMovementType, clientStanceCommand } from "../client-outputs.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 /* Quake II ClientThink/Pmove and rerelease game/cgame integration.
  * Copyright id Software / ZeniMax. GPL-2.0-or-later. */
 import { sameActor, type ProviderId } from "../../contracts/identity.ts";
@@ -46,7 +47,6 @@ export { Q2_PLAYER_BOUNDS } from "./dimensions.ts";
 export { ButtonT, ContentsT, KexPmTypeT, PmflagsT, PmTypeT, WaterLevelT } from "./types.ts";
 export type { ClassicPmove, KexPmoveT, PmConfigT, PmTraceFn, TraceT } from "./types.ts";
 
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const vector = (source: SourceVec3): Vec3 => ({ x: source[0], y: source[1], z: source[2] });
 const sourceVector = (value: Vec3): SourceVec3 => [value.x, value.y, value.z];
 const bodyBounds = (shape: TraceShape): Bounds => (shape.kind === "point" ? { min: zero, max: zero } : shape.bounds);

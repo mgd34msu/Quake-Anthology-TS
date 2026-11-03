@@ -316,7 +316,7 @@ import type {
   SimulationPresentation,
   SimulationPresentationEvent,
 } from "./types.ts";
-import { add, zero } from "./vec.ts";
+import { add3 as add, zeroVec3 as zero } from "../../../core/math.ts";
 import { createSourceStrategy, type SourceStrategy, type SourceStrategyHost } from "./source-strategy.ts";
 
 function subtract(a: Vec3, b: Vec3): Vec3 {

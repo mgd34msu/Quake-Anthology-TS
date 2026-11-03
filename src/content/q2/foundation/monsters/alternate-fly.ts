@@ -7,12 +7,12 @@ import type { BodyState } from "../../../../contracts/world.ts";
 import type { Q2RereleaseRandomSource } from "../../../../core/random/q2-rerelease.ts";
 import type { Q2AlternateFlyState } from "./alternate-fly-state.ts";
 import type { MonsterContext, MonsterState } from "./types.ts";
+import { zeroVec3 as zero } from "../../../../core/math.ts";
 
 const f = Math.fround;
 const minimum = (a: number, b: number): number => (b < a ? b : a);
 const maximum = (a: number, b: number): number => (a < b ? b : a);
 const pi = f(Math.PI);
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const up: Vec3 = { x: 0, y: 0, z: 1 };
 const fitBounds: Bounds = { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } };
 const solidMask = 1 | 2 | 0x20000;

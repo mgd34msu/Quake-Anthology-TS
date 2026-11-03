@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { StampSet } from "../../../foundation/stamp.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 /* Quake hull selection/PVS derive from id Software world.c/model.c.
  * Arbitrary shapes use derived BSP cells or authored BSPX BRUSHLIST.
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
@@ -35,7 +36,6 @@ export type Q1CollisionTrace = Extract<TraceResult, { kind: "q1" }> & { readonly
 export interface Q1CollisionOptions {
   readonly blocksContents?: (contents: number, policy: TracePolicy) => boolean;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const zeroPlane: Plane = { normal: zero, distance: 0 };
 const envelopeCoordinate = (value: number): string => (Object.is(value, -0) ? "-0" : String(value));
 const dimensions = (bounds: Bounds): Vec3 => sub(bounds.max, bounds.min);

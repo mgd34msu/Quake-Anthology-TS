@@ -43,6 +43,7 @@ import {
 } from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
 import { ResourceNameIndex } from "../../../core/resource-name-index.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 
 const resourceBases = { model: 32, sound: 288, image: 544 };
 const resourceKinds: readonly (keyof typeof resourceBases)[] = ["model", "sound", "image"];
@@ -78,7 +79,6 @@ export type ClassicGuestMapServices = Pick<
   ClassicGuestServicesOptions,
   "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance" | "pickups"
 >;
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(view: DataView, offset: number): Vec3 {
   return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
 }

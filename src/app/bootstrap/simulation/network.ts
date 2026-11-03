@@ -21,6 +21,7 @@ import { q2ApplicationLayout } from "../network/q2-layout.ts";
 import { q2EffectToWire } from "../network/q2-effects.ts";
 import { createQ2ApplicationDownloads } from "../network/q2-downloads.ts";
 import type { SharedSimulation } from "./runtime.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 export interface Q2ApplicationServerBindingOptions {
   readonly session: EngineSession;
   readonly rejects?: (address: import("../../../network/common/endpoint.ts").NetworkAddress) => boolean;
@@ -32,7 +33,6 @@ export interface Q2ApplicationServerBindingOptions {
   readonly playerIdentity?: (client: ClientId, identity: { readonly seat: number; readonly socialId: string } | null) => void;
   print(text: string): void;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(target: Float32Array, value: Vec3): void {
   target.set([value.x, value.y, value.z]);
 }

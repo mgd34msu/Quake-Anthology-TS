@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from "../../../contracts/content.ts";
+import { zeroVec3 as ZERO } from "../../../core/math.ts";
 /* CG_Player, CG_PlayerAnimation and player powerup pass selection.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -49,7 +50,6 @@ export interface Q3CharacterPass {
   options(entity: SceneEntity): ModelSourceOptions;
 }
 
-const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
 const UNIT: Vec3 = { x: 1, y: 1, z: 1 };
 
 /** One instance per actor and viewing seat; presentation clocks never change simulation state. */

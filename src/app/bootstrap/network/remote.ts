@@ -43,6 +43,7 @@ import { q2BeamFromWire, q2EffectFromWire } from "./q2-effects.ts";
 import { SelectedMovementPrediction } from "../simulation/prediction.ts";
 import type { MovementPredictionResult, MovementPredictionSnapshot } from "../simulation/prediction.ts";
 import { movementOrigin, movementProfile } from "../simulation/players.ts";
+import { zeroVec3 as zero } from "../../../core/math.ts";
 export interface Q2RemotePresentationOptions {
   readonly recordedProfile?: MvdProfile;
   readonly seat: import("../../../contracts/identity.ts").SeatId;
@@ -67,7 +68,6 @@ export interface Q2RemotePresentationOptions {
 export function q2RemoteEntityBounds(solid: number, longSolid: boolean): Bounds {
   return unpackQ2Solid(solid, longSolid ? "r1q2" : "short");
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(values: Float32Array): Vec3 {
   return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) };
 }

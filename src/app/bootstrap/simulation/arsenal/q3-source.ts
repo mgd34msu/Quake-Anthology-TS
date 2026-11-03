@@ -57,6 +57,7 @@ import type { DamageRequest } from "../../../../contracts/gameplay.ts";
 import type { Q2Motion } from "../../../../content/q2/foundation/host.ts";
 import type { SharedSolid } from "../physics.ts";
 import { q3InvulnerabilityBlocks } from "../../../../content/q3/base/game/combat.ts";
+import { zeroVec3 as zero } from "../../../../core/math.ts";
 
 /** Current destination pose only; source equipment and timers remain in their original private records. */
 export interface Q3SelectedClientPose {
@@ -127,7 +128,6 @@ export interface Q3SelectedClientEffects {
 
 export type Q3SelectedEquipmentState = Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
 
-const zero = { x: 0, y: 0, z: 0 };
 function sameVector(a: Vec3, b: Vec3): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z;
 }

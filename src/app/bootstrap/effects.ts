@@ -7,6 +7,7 @@ import type { Q3Hardware } from "../../render/q3-hardware.ts";
 import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
 import { sequenceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 /* Application joins for Quake cl_tent/r_part and Quake II cl_tent/cl_fx.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ContentId } from "../../contracts/content.ts";
@@ -92,7 +93,6 @@ interface Steam {
   next: number;
 }
 const MAX_BEAM_SEGMENTS = 512;
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const white: Vec3 = { x: 1, y: 1, z: 1 };
 const orange: Vec3 = { x: 1, y: 0.5, z: 0.5 };
 const q1BeamModels: Readonly<Record<Q1BeamStyle, string>> = {

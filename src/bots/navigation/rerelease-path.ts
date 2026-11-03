@@ -5,6 +5,7 @@ import type { NavigationEdge, NavigationNode } from "./types.ts";
 import { distance } from "./helpers.ts";
 import { navigationEdgeIsBarrierJump } from "./graph.ts";
 import { MinHeap } from "./heap.ts";
+import { zeroVec3 as zero } from "../../core/math.ts";
 
 export interface RereleasePathRequest {
   readonly start: Vec3;
@@ -26,7 +27,6 @@ export interface RereleasePathInfo {
   readonly second: Vec3;
   readonly linkType: number;
 }
-const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function failure(code: number): RereleasePathInfo {
   return { code, distanceSquared: 0, points: [], first: zero, second: zero, linkType: 0 };
 }
