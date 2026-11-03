@@ -22,7 +22,7 @@ class ScriptedTransport implements DatagramTransport<NetworkAddress> {
   poll(): ReceiveEvent<NetworkAddress> | null { return this.incoming.shift() ?? null; }
   subscribeReadable(listener: () => void): () => void { this.listener = listener; return () => {}; }
   close(): void {}
-  deliver(from: NetworkAddress, payload: Uint8Array): void { this.incoming.push({ kind: 'packet', from, payload }); this.listener(); }
+  deliver(from: NetworkAddress, payload: Uint8Array): void { this.incoming.push({ kind: 'packet', from, payload, receivedAt: performance.now() }); this.listener(); }
 }
 
 test('private-address classification covers loopback, RFC 1918, link-local, unique-local and public hosts', () => {

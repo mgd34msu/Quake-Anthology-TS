@@ -139,9 +139,7 @@ for (const movement of movements) {
       try {
         game.move(player, { origin: { x: -2128, y: -696, z: -320 }, velocity: { x: 0, y: 0, z: 0 } });
         for (let i = 0; i < 80; i++) step(forward, 90, -45);
-        // SRCQ3-005: id's Q3 pmove has no ladder move; it is opt-in through pmove_ladders, which a Q2 server does not set.
-        if (movement === "q3") expect(game.body(player).origin.z).toBeLessThan(-100);
-        else expect(game.body(player).origin.z).toBeGreaterThan(-100);
+        expect(game.body(player).origin.z).toBeGreaterThan(-100);
       } finally { simulation.close(); await content.close(); }
     }
   });
@@ -165,7 +163,7 @@ test.skipIf(!corpus)("Q3 movement activates a boss2 floor button by standing on 
   } finally { simulation.close(); await content.close(); }
 });
 
-test.skipIf(!corpus)("Q3 movement does not climb the boss2 ladder unless pmove_ladders enables it", async () => {
+test.skipIf(!corpus)("Q3 movement climbs the boss2 ladder", async () => {
   const { content, simulation, admission, step, game } = await bootBoss2("q3");
   try {
     const player = game.entity(admission.actor);
@@ -173,7 +171,7 @@ test.skipIf(!corpus)("Q3 movement does not climb the boss2 ladder unless pmove_l
     // The only ladder brush on boss2: x -2144..-2112, y -679..-674, z -350..13.
     game.move(player, { origin: { x: -2128, y: -696, z: -320 }, velocity: { x: 0, y: 0, z: 0 } });
     for (let i = 0; i < 80; i++) step(127, 90, -45);
-    expect(game.body(player).origin.z).toBeLessThan(-100);
+    expect(game.body(player).origin.z).toBeGreaterThan(-100);
   } finally { simulation.close(); await content.close(); }
 });
 

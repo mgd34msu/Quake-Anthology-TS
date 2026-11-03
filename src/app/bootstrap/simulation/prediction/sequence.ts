@@ -18,7 +18,7 @@ export function predictMovementSequence(options: MovementProbeOptions, initial: 
     const result = predictMovementCommand(options, player, command, { scene: options.scene,
       rereleaseMovement,
       fixedMilliseconds: options.profile.kind === "q3" ? options.profile.fixedMilliseconds : null,
-      noFootsteps: options.profile.kind === "q3" && options.profile.noFootsteps, ladders: options.profile.kind === "q3" && options.profile.ladders === true, gauntletHit: false, traceMask: null, firstCommand: first }, shape);
+      noFootsteps: options.profile.kind === "q3" && options.profile.noFootsteps, ladders: options.profile.kind === "q3" && options.profile.ladders !== false, gauntletHit: false, traceMask: null, firstCommand: first }, shape);
     player = result.player; effects.push(...result.result.effects); trajectory.push(origin()); first = false;
   }
   return { player, effects, trajectory, seconds: (player.commandTimeMilliseconds - initial.commandTimeMilliseconds) / 1000 };

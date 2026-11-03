@@ -120,7 +120,7 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
         },
       },
     }).move({ ...base, kind: state.kind, state, command,
-      profile: { ...profile, fixedMilliseconds: options.fixedMilliseconds, noFootsteps: options.noFootsteps, ladders: options.ladders ?? profile.ladders === true } }, services);
+      profile: { ...profile, fixedMilliseconds: options.fixedMilliseconds, noFootsteps: options.noFootsteps, ladders: options.ladders ?? profile.ladders !== false } }, services);
   } else throw new Error(`Prediction command ${command.kind} and state ${state.kind} do not match selected ${profile.kind}`);
   if (result.status !== "active") throw new Error("Private movement prediction cannot remove an authoritative actor");
   if ((result.kind === "q2-classic" || result.kind === "q2-rerelease") && result.arsenal.state.kind === "q3") {

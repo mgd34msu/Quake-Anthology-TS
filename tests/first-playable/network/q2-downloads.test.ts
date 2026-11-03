@@ -442,14 +442,14 @@ test('a deliberate close keeps a resumable native partial and a receive fault di
         const first = make(); receivers.push(first);
         expect(await first.prepare(state)).toBe('waiting');
         expect(requests).toEqual(['download sound/resume.wav']);
-        expect(first.receive({ bytes: Uint8Array.of(1, 2, 3, 4), percent: 40 })).toBe('waiting');
+        expect(first.receive({ kind: 'download', bytes: Uint8Array.of(1, 2, 3, 4), percent: 40 })).toBe('waiting');
         first.close();
         expect(await parts()).toEqual(['resume.wav.part']);
 
         const second = make(); receivers.push(second);
         expect(await second.prepare(state)).toBe('waiting');
         expect(requests.at(-1)).toBe('download sound/resume.wav 4');
-        expect(() => second.receive({ bytes: Uint8Array.of(5), percent: 100 + 1 })).toThrow('Invalid Q2 download progress');
+        expect(() => second.receive({ kind: 'download', bytes: Uint8Array.of(5), percent: 100 + 1 })).toThrow('Invalid Q2 download progress');
         expect(await parts()).toHaveLength(0);
         expect((await readdir(join(temporary, 'q2/baseq2/sound')))).toEqual([]);
     } finally { for (const receiver of receivers) receiver.close(); await content.close(); await rm(temporary, { recursive: true, force: true }); }

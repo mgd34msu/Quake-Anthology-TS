@@ -38,18 +38,20 @@ function run(ladders: boolean | undefined) {
   return { probes, velocityZ: state.velocity.z };
 }
 
-test("stock Q3 movement ignores SURF_LADDER and spends no ladder probe", () => {
-  for (const option of [undefined, false]) {
+test("Q3 movement with pmove_ladders 0 ignores SURF_LADDER and spends no ladder probe", () => {
+  for (const option of [false]) {
     const result = run(option);
     expect(result.probes).toBe(0);
     expect(result.velocityZ).toBeLessThan(0);
   }
 });
 
-test("the ladders option climbs SURF_LADDER surfaces with the Quake II ladder model", () => {
-  const result = run(true);
-  expect(result.probes).toBeGreaterThan(0);
-  expect(result.velocityZ).toBeGreaterThan(0);
+test("Q3 movement climbs SURF_LADDER surfaces with the Quake II ladder model by default", () => {
+  for (const option of [undefined, true]) {
+    const result = run(option);
+    expect(result.probes).toBeGreaterThan(0);
+    expect(result.velocityZ).toBeGreaterThan(0);
+  }
 });
 
 test("a dead player standing up applies the posture hull even when the new hull overlaps solid, as id does", () => {

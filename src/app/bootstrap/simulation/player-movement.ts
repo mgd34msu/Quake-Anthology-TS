@@ -65,7 +65,7 @@ export function selectedMovementProfile(player: Pick<MovementPlayer, "profile" |
   profile: MovementProfile = player.profile): MovementProfile {
   if (profile.kind === "q1-netquake" || profile.kind === "q1-quakeworld") return { ...profile, parameters: { ...profile.parameters, gravity: player.worldGravity } };
   if (profile.kind === "q3" && player.sourceMovement !== null) return { ...profile,
-    fixedMilliseconds: player.sourceMovement.fixedMsec, noFootsteps: player.sourceMovement.noFootsteps, ladders: player.sourceMovement.ladders === true };
+    fixedMilliseconds: player.sourceMovement.fixedMsec, noFootsteps: player.sourceMovement.noFootsteps, ladders: player.sourceMovement.ladders !== false };
   const q2 = player.q2MovementConfig;
   if (q2 !== null && profile.kind === "q2-classic") return { ...profile, airAccelerate: q2.airAccelerate };
   if (q2 !== null && profile.kind === "q2-rerelease") return { ...profile, ...q2 };

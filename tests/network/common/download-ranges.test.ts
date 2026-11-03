@@ -126,7 +126,7 @@ test("a corrupted, truncated or unrecorded partial download is discarded and res
   const stage = (): void => { const sink = DownloadSink.resumable(root, "a.pk3", bounded); sink.append(bytes); sink.suspend(); };
   const part = join(root, "a.pk3.part");
   try {
-    for (const damage of [() => { const copy = readFileSync(part); copy[100] ^= 1; writeFileSync(part, copy); }, () => writeFileSync(part, bytes.subarray(0, 10)),
+    for (const damage of [() => { const copy = readFileSync(part); copy[100] = (copy[100] ?? 0) ^ 1; writeFileSync(part, copy); }, () => writeFileSync(part, bytes.subarray(0, 10)),
       () => rmSync(`${part}.sha256`), () => writeFileSync(`${part}.sha256`, "garbage")]) {
       stage(); damage();
       const sink = DownloadSink.resumable(root, "a.pk3", bounded);

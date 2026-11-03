@@ -207,12 +207,12 @@ class MoveStep implements SlideMoveContext {
     if (this.groundNormal !== null) this.state.velocity = clipVelocity(this.state.velocity, this.groundNormal);
     stepSlideMove(this, true);
   }
-  // Unified-engine extension behind the `ladders` option: stock Q3 pmove has no
-  // ladder move, so SURF_LADDER surfaces climb with Quake II's ladder model only
-  // when the server enables it; otherwise no extra trace is spent.
+  // Unified-engine extension: stock Q3 pmove has no ladder move, but retail Q3 maps
+  // have no SURF_LADDER surfaces either, so ladders default on for foreign maps that
+  // do; a server can turn them off with pmove_ladders 0.
   private checkLadder(): void {
     this.ladder = false;
-    if (this.options.ladders !== true || this.state.pmTime) return;
+    if (this.options.ladders === false || this.state.pmTime) return;
     const flat = normalize3(vec3(this.forward.x, this.forward.y, 0));
     const trace = this.test(this.state.origin, add3(this.state.origin, flat));
     if (trace.fraction < 1 && trace.kind === "q3" && (trace.surfaceFlags & SURF_LADDER) !== 0) this.ladder = true;

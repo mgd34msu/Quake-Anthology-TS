@@ -119,7 +119,7 @@ export class PresentationPredictionAdapter implements PresentationMovementHost {
           buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } };
     const output = predictMovementCommand(this.options.movement, seed, entry, { scene: this.scene(ps, movement),
       rereleaseMovement: this.rereleaseMovement,
-      fixedMilliseconds: movement.fixedMsec, noFootsteps: movement.noFootsteps, ladders: movement.ladders === true, gauntletHit: movement.gauntletHit,
+      fixedMilliseconds: movement.fixedMsec, noFootsteps: movement.noFootsteps, ladders: movement.ladders !== false, gauntletHit: movement.gauntletHit,
       traceMask: movement.traceMask, firstCommand: !this.states.has(ps) || this.states.get(ps)?.commandTimeMilliseconds !== ps.commandTime });
     writePredictionSourceState(ps, output.player, this.options.entities);
     for (const effect of output.result.effects) if (effect.effect.kind === "event" && effect.effect.value.provider.startsWith("q3:")

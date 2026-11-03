@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference } from "../../../src/contracts/content.ts";
-import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { UdpTransport } from "../../../src/network/common/transport.ts";
 import type { DatagramTransport, ReceiveEvent } from "../../../src/network/common/transport.ts";
 import type { NetworkAddress } from "../../../src/network/common/endpoint.ts";

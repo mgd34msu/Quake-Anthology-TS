@@ -199,7 +199,7 @@ export class ClientThinkRuntime {
       debugLevel: settings.debugMove,
       traceMask, fixedMsec: fixed ? settings.pmoveMsec : null, gauntletHit,
       noFootsteps: (settings.dmflags & 32) !== 0,
-      ...(settings.ladders === true ? { ladders: true } : {}),
+      ladders: settings.ladders !== false,
     });
     if (ps.eventSequence !== oldEventSequence) entity.eventTime = frame.time;
     if (settings.smoothClients) playerStateToEntityStateExtraPolate(ps, entity.s, ps.commandTime, true);

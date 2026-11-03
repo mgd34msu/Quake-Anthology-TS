@@ -256,7 +256,7 @@ export class PredictionRuntime {
       if (settings.pmoveFixed && this.host.commandTiming === "q3") this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
       const result = this.host.movePlayer(ps, this.command, { trace: (start, end, bounds, skip, contents) => this.trace(start, end, bounds, skip, contents),
         pointContents: (point, pass) => this.pointContents(point, pass), originalServerTime, traceMask: mask, fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
-        noFootsteps: (settings.dmFlags & 32) !== 0, ...(settings.ladders === true ? { ladders: true } : {}), gauntletHit: false });
+        noFootsteps: (settings.dmFlags & 32) !== 0, ladders: settings.ladders !== false, gauntletHit: false });
       moved = true;
       this.touchTriggerPrediction(result.bounds, settings);
     }
