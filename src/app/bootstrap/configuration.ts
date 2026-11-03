@@ -410,6 +410,8 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     const teamArenaLaunch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     let resolved = { options, maxClients: defaultCapacity };
     onPrepared?.(prepared);
+    // Closures stored on the prepared startup share this scope; the caller's callback must not outlive the call through it.
+    onPrepared = undefined;
     await prepared.execute({ nextFrame, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
       read: configurationScriptReader(content, options, scripts),
       sourceArchive, sharedArchive,

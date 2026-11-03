@@ -100,6 +100,7 @@ export class QcAsmFn {
   bitAnd(a: number, b: number): number { return this.binary(QcOpcode.BitAnd, a, b); }
   bitOr(a: number, b: number): number { return this.binary(QcOpcode.BitOr, a, b); }
   not(a: number): number { const dst = this.local(); this.op(QcOpcode.NotF, a, 0, dst); return dst; }
+  unset(pointer: number): number { const dst = this.local(); this.op(QcOpcode.NotFn, pointer, 0, dst); return dst; }
   isNull(entity: number): number { const dst = this.local(); this.op(QcOpcode.NotEnt, entity, 0, dst); return dst; }
   /** Call `name` with word-sized arguments; vectors are passed as three words from their first word. Returns the return-value word (global 1). */
   call(name: string, ...args: readonly (number | readonly [number, "vector"])[]): number {

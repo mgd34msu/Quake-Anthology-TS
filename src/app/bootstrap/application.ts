@@ -848,6 +848,40 @@ export class Application {
     return { ...host, print: text => { (operatorOutput.write ?? originalPrint)(text); return undefined; } };
   }
 
+  /**
+   * The helpers below create closures that live as long as the application, outside openSource: its scope also holds the
+   * first world, and every closure created there would keep that world alive through the scope (AUDIT-001).
+   */
+  private static hostPrint(host: Pick<ApplicationHost, "print">): (text: string) => void {
+    return text => { host.print(text); };
+  }
+
+  private static frontendPrint(host: Pick<ApplicationHost, "print">, owner: { readonly application: Application | null }): (text: string) => void {
+    return text => { host.print(text); for (const local of owner.application?.graphical?.input.locals ?? []) local.console.print(text); };
+  }
+
+  private static startupDemoService(dedicated: boolean, prepared: PreparedStartup, host: Pick<ApplicationHost, "print">, owner: { readonly application: Application | null }): ClientDemoCommands {
+    return localWorldDemoCommands({ dedicated, commands: prepared.commands,
+      source: () => {
+        if (owner.application === null) return prepared.source;
+        const current = owner.application.sourceCvars();
+        if (current === null) throw new Error("Local demo commands require the active world's source cvars");
+        return current;
+      },
+      print: text => {
+        if (owner.application === null || owner.application.graphical === null) host.print(text);
+        else owner.application.graphical.input.print(text, prepared.commands.executionContext);
+      } });
+  }
+
+  private static forwardStartupCommands(prepared: PreparedStartup, application: Application): void {
+    prepared.forwardCommands((name, args, source) => {
+      let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+      application.requestedCommands.admit({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
+      return undefined;
+    });
+  }
+
   private static async openSource(ownership: Application["ownership"], options: ApplicationOptions, host: ApplicationHost,
     recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
     const operatorOutput: { write: ((text: string) => void) | null } = { write: null };
@@ -886,6 +920,7 @@ export class Application {
       const localSeats = new Map<ClientId, SessionSeat>();
       const networkPlayerIdentities = new Map<ClientId, { readonly seat: number; readonly socialId: string }>();
       let application: Application | null = null;
+      const startupOwner: { application: Application | null } = { application: null };
       let guestConsole: CommandBuffer | null = null;
       const modCommands = new ModCommands({ context: { session: session.session, origin: { kind: "server-console" } }, commands: () => guestConsole });
       let startup: Awaited<ReturnType<typeof prepareInitialConfiguration>> | null = null;
@@ -959,7 +994,7 @@ export class Application {
             && ownership.client.prepared.commands.dialect === configurationDialect(preparation.content)
             && ownership.client.prepared.movement.dialect === movement) {
             const source = ownership.client.prepared.source;
-            borrowedSource = new CvarRegistry({ dialect: source.dialect, context: source.context, print: text => host.print(text) });
+            borrowedSource = new CvarRegistry({ dialect: source.dialect, context: source.context, print: Application.hostPrint(host) });
             borrowedSource.restoreSaveState(source.captureWorldTransferState());
             if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(borrowedSource, options.q3MapLaunch);
             const resolved = resolveStartupRules(options, borrowedSource, options.q3MapLaunch?.maxClients ?? defaultCapacity, definitions, options.q3MapLaunch === undefined);
@@ -982,17 +1017,7 @@ export class Application {
         if (preparation.kind === "configuration") {
           const configuration = preparation.content;
           const prepare = (nextFrame: () => Promise<void>) => prepareInitialConfiguration(options, configuration, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame, prepared => {
-            const service = localWorldDemoCommands({ dedicated: options.dedicated, commands: prepared.commands,
-              source: () => {
-                if (application === null) return prepared.source;
-                const current = application.sourceCvars();
-                if (current === null) throw new Error("Local demo commands require the active world's source cvars");
-                return current;
-              },
-              print: text => {
-                if (application === null || application.graphical === null) host.print(text);
-                else application.graphical.input.print(text, prepared.commands.executionContext);
-              } });
+            const service = Application.startupDemoService(options.dedicated, prepared, host, startupOwner);
             startupDemos = { service, release: service.attach(prepared.commands) };
           });
           startup = host.loading?.nextFrame === undefined ? await serviceLoading(prepare, () => {}) : await prepare(host.loading.nextFrame);
@@ -1055,6 +1080,7 @@ export class Application {
         }
         const { authoredCampaignStart: consumedCampaignStart, q3MapLaunch: consumedMapLaunch, ...retainedOptions } = options;
         application = new Application(retainedOptions, content, session, simulation, host, identity, localSeats, networkPlayerIdentities, inputConfig, ownership);
+        startupOwner.application = application;
         application.ownedDemos = startupDemos;
         application.operatorOutput = operatorOutput;
         application.operatorState = await ServerOperatorState.open(Application.sourceConfig(options, content), "settings/server-operator.json");
@@ -1074,12 +1100,7 @@ export class Application {
           application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
           if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
         }
-        const startupApplication = application;
-        startup?.prepared.forwardCommands((name, args, source) => {
-          let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
-          startupApplication.requestedCommands.admit({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
-          return undefined;
-        });
+        if (startup !== null) Application.forwardStartupCommands(startup.prepared, application);
         if (startup !== null) if (startup.requests.length !== 0) application.requestedCommands.admitAll(startup.requests);
         if (profileConfiguration !== null) if (profileConfiguration.requests.length !== 0) application.requestedCommands.admitAll(profileConfiguration.requests);
         application.frontendOverrides = preferences ?? {};
@@ -1090,7 +1111,7 @@ export class Application {
         modCommands.flush();
         await application.prepareGuestBots(content, simulation);
         if (!options.dedicated && simulation.q3Guest() !== null) {
-          const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text), ...(initialSave === undefined ? {} : { mode: "restore" }) });
+          const authority = createQ3ApplicationServerHost({ session, simulation, content, print: Application.hostPrint(host), ...(initialSave === undefined ? {} : { mode: "restore" }) });
           application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: new EventRing<ApplicationCommandRequest>(16384) };
           await authority.prepare(0, initialSave === undefined ? 1 : simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
           if (initialSave === undefined) {
@@ -1103,11 +1124,8 @@ export class Application {
         if (options.dedicated) application.openDedicatedConsole();
         else {
           if (startup === null && ownership.kind === "owned") await application.viewSettings.load(application.inputConfig);
-          const frontend = application;
           application.imageSettings ??= await ApplicationImageSettings.open({ audioOutputFormat: (await loadAudioSettings(application.inputConfig)).outputFormat ?? defaultAudioOutputFormat, deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
-            dialect: application.sourceDialect(), gamma: options.gamma, ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }), ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
-              host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
-            } });
+            dialect: application.sourceDialect(), gamma: options.gamma, ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }), ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: Application.frontendPrint(host, startupOwner) });
           application.releaseViewCvars = application.imageSettings.bindViewSettings(application.viewSettings);
           await application.openGraphical(initialSave);
         }
@@ -1411,28 +1429,33 @@ export class Application {
     mods.execute(selection, text, command.source);
   }
 
+  /** A separate method: the buffer outlives every world, and this method's scope must not hold the first world's prepared bindings (AUDIT-001). */
+  private createSourceCommandBuffer(options: NonNullable<PreparedSourceCommands["options"]>): CommandBuffer {
+    return new CommandBuffer({ dialect: options.dialect, context: options.context,
+      cvarRouting: {
+        owner: (name, source) => {
+          const current = this.sourceCommandBinding?.options;
+          const cvars = current?.cvarRouting?.owner(name, source) ?? current?.cvars;
+          if (cvars === undefined) throw new Error("Published authority requires a source registry");
+          return cvars;
+        },
+        visible: source => { const current = this.sourceCommandBinding?.options;
+          return current?.cvarRouting?.visible(source) ?? (current?.cvars === undefined ? [] : [current.cvars]); },
+      }, print: text => this.host.print(text),
+      readScript: (name, source) => this.sourceCommandBinding?.options?.readScript?.(name, source),
+      sourceCommand: (command, registered) => this.sourceCommandBinding?.options?.sourceCommand?.(command, registered) ?? false,
+      clientGame: command => this.sourceCommandBinding?.options?.clientGame?.(command) ?? false,
+      serverGame: command => this.sourceCommandBinding?.options?.serverGame?.(command) ?? false,
+      forwardToServer: command => this.sourceCommandBinding?.options?.forwardToServer?.(command) });
+  }
+
   private publishSourceCommands(prepared: PreparedSourceCommands): void {
     const options = prepared.options;
     if (options === null) throw new Error("Published world requires source command bindings");
     this.releaseSourceCommands();
     this.sourceCommandBinding = { options };
     if (this.sourceCommands === null) {
-      this.sourceCommands = new CommandBuffer({ dialect: options.dialect, context: options.context,
-        cvarRouting: {
-          owner: (name, source) => {
-            const current = this.sourceCommandBinding?.options;
-            const cvars = current?.cvarRouting?.owner(name, source) ?? current?.cvars;
-            if (cvars === undefined) throw new Error("Published authority requires a source registry");
-            return cvars;
-          },
-          visible: source => { const current = this.sourceCommandBinding?.options;
-            return current?.cvarRouting?.visible(source) ?? (current?.cvars === undefined ? [] : [current.cvars]); },
-        }, print: text => this.host.print(text),
-        readScript: (name, source) => this.sourceCommandBinding?.options?.readScript?.(name, source),
-        sourceCommand: (command, registered) => this.sourceCommandBinding?.options?.sourceCommand?.(command, registered) ?? false,
-        clientGame: command => this.sourceCommandBinding?.options?.clientGame?.(command) ?? false,
-        serverGame: command => this.sourceCommandBinding?.options?.serverGame?.(command) ?? false,
-        forwardToServer: command => this.sourceCommandBinding?.options?.forwardToServer?.(command) });
+      this.sourceCommands = this.createSourceCommandBuffer(options);
     } else this.sourceCommands.setProfile(options.dialect, undefined);
     const releaseSource = prepared.activate(this.sourceCommands);
     const releaseDemos = this.ownedDemos?.service.attach(this.sourceCommands);

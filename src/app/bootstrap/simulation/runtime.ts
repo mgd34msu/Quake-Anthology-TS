@@ -6999,11 +6999,13 @@ export class SharedSimulation implements Simulation {
       const source = this.source, content = this.recipe.map.entities.content;
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
+        if (state.number > 0 && state.number < 14) console.log('DBG3', state.number, info.actor === null, info.active, info.serverFlags, state.modelIndexes);
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
         // A foreign selected character replaces the guest player model;
         // the selected-character presentation below draws this actor.
         if (this.foreignNativeCharacter() && this.nativeCharacterHost(info.actor) !== undefined) continue;
         const appearance = source.game.modelAppearance(state.number);
+        if (appearance.path.startsWith('players/')) console.log('DBG2', state.number, appearance.path, state.frame, this.nativeCharacterHost(info.actor) !== undefined);
         const delta = { x: state.origin.x - state.oldOrigin.x, y: state.origin.y - state.oldOrigin.y, z: state.origin.z - state.oldOrigin.z };
         const continuous = fraction < 1 && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 512 * 512;
         const model = { actor: info.actor, content, family: "q2", frame: state.frame, oldFrame: "oldFrame" in state ? state.oldFrame : state.frame,

@@ -17,9 +17,10 @@ export function copperVariants(): readonly QcProgramVariant[] {
   ];
 }
 
-let cached: Uint8Array | null = null;
-export function syntheticCopperProgram(): Uint8Array {
-  if (cached !== null) return cached;
+const cached = new Map<boolean, Uint8Array>();
+/** `primary` builds the program for a game launch, whose client admission runs before the connect announcement has anyone to hear it. */
+export function syntheticCopperProgram(primary = false): Uint8Array {
+  const known = cached.get(primary); if (known !== undefined) return known;
   const asm = new QcAssembler(5927);
   const S = "string" as const, F = "float" as const, E = "entity" as const, V = "vector" as const;
   const bits = (value: number): number => new Uint32Array(new Float32Array([value]).buffer)[0] ?? 0;
@@ -33,7 +34,7 @@ export function syntheticCopperProgram(): Uint8Array {
   for (const name of ["th_stand", "th_walk", "th_run", "th_pain", "th_die", "th_melee", "th_missile"]) asm.defineField(name, "function");
   for (const [name, type] of [["lastspawn", "entity"], ["killed_monsters", F], ["framecount", F], ["skill", F]] as const) asm.defineGlobal(name, type);
   for (const [grade, mask] of [8192, 16384, 32768].entries()) asm.defineGlobal(`IT_ARMOR${grade + 1}`, F, bits(mask));
-  for (const name of ["version", "healthtime", "dmg", "wait", "lifetime_finished", "customflags", "super_damage_finished", "count", "invincible_finished", "state"]) asm.defineField(name);
+  for (const name of ["version", "healthtime", "dmg", "wait", "lifetime_finished", "customflags", "super_damage_finished", "count", "invincible_finished", "state", "attack_finished", "lastruntime", "pain_finished", "air_finished", "invisible_finished", "radsuit_finished"]) asm.defineField(name);
 
   // Console functions: component cvars and deferred commands.
   asm.declare("skill_set", [S], fn => { const value = fn.params[0] ?? 0; fn.call("cvar_set", fn.string("skill"), value); });
@@ -117,7 +118,8 @@ export function syntheticCopperProgram(): Uint8Array {
     fn.jump(joined);
     fn.label(zeroed); fn.assign(save, fn.float(0));
     fn.label(joined);
-    const take = fn.sub(damage, save);
+    const exact = fn.sub(damage, save);
+    fn.call("ceil", exact); const take = fn.result();
     const health = fn.sub(fn.load(target, "health"), take);
     fn.store(target, "health", health);
     const self = fn.global("self"), previous = fn.local(E), painful = fn.fresh(), done = fn.fresh();
@@ -127,11 +129,13 @@ export function syntheticCopperProgram(): Uint8Array {
     fn.branchNot(fn.bitAnd(fn.load(target, "flags"), fn.float(32)), skipCount);
     fn.call("killed_monster");
     fn.label(skipCount);
-    fn.callPointer(fn.load(target, "th_die", "function"));
-    fn.assign(self, previous, E); fn.jump(done);
+    const dying = fn.load(target, "th_die", "function"), noDeath = fn.fresh();
+    fn.branch(fn.unset(dying), noDeath); fn.callPointer(fn.load(target, "th_die", "function"));
+    fn.label(noDeath); fn.assign(self, previous, E); fn.jump(done);
     fn.label(painful);
-    fn.callPointer(fn.load(target, "th_pain", "function"), attacker, take);
-    fn.assign(self, previous, E);
+    const hurt = fn.load(target, "th_pain", "function"), noPain = fn.fresh();
+    fn.branch(fn.unset(hurt), noPain); fn.callPointer(fn.load(target, "th_pain", "function"), attacker, take);
+    fn.label(noPain); fn.assign(self, previous, E);
     fn.label(done);
   }, ["targ", "inflictor", "attacker", "damage", "dflags"]);
   // Armor pickup: refuse unless it protects more than the current armor, then store points, tier and absorption in that order.
@@ -224,15 +228,27 @@ export function syntheticCopperProgram(): Uint8Array {
   asm.declare("ClientConnect", [], fn => {
     const count = asm.globalOffset("clients");
     fn.assign(count, fn.add(count, fn.float(1)));
-    fn.call("bprint", fn.load(fn.global("self"), "netname", "string")); fn.call("bprint", fn.string(" entered the game\n"));
+    if (!primary) { fn.call("bprint", fn.load(fn.global("self"), "netname", "string")); fn.call("bprint", fn.string(" entered the game\n")); }
   });
   asm.declare("ClientDisconnect", [], fn => {
     const count = asm.globalOffset("clients");
     fn.assign(count, fn.sub(count, fn.float(1)));
-    fn.call("bprint", fn.load(fn.global("self"), "netname", "string")); fn.call("bprint", fn.string(" left the game\n"));
+    if (!primary) { fn.call("bprint", fn.load(fn.global("self"), "netname", "string")); fn.call("bprint", fn.string(" left the game\n")); }
+  });
+  // The calls a primary game must supply for the engine to admit a client.
+  for (const name of ["SetNewParms", "SetChangeParms", "PlayerPreThink", "PlayerPostThink", "ClientKill"]) asm.declare(name, [], () => undefined);
+  for (const name of ["worldspawn", "main", "info_player_start"]) asm.declare(name, [], () => undefined);
+  asm.declare("PutClientInServer", [], fn => {
+    const self = fn.global("self");
+    fn.store(self, "classname", fn.string("player"), "string");
+    fn.store(self, "health", fn.float(100)); fn.store(self, "max_health", fn.float(100)); fn.store(self, "takedamage", fn.float(2));
+    fn.store(self, "movetype", fn.float(3)); fn.store(self, "solid", fn.float(3)); fn.store(self, "flags", fn.float(8));
+    fn.store(self, "weapon", fn.float(4096)); fn.store(self, "items", fn.float(4096));
+    fn.call("setsize", self, [fn.vec(-16, -16, -24), "vector"], [fn.vec(16, 16, 32), "vector"]);
   });
   asm.declare("W_WeaponFrame", [], () => undefined);
   asm.declare("player_axe1", [], () => undefined);
-  cached = asm.build();
-  return cached;
+  const image = asm.build();
+  cached.set(primary, image);
+  return image;
 }

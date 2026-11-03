@@ -22,6 +22,7 @@ import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../.
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../../src/persistence/world-state.ts";
 import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint } from "../../../../../src/contracts/session.ts";
 import { impulseAuthority } from "../../../../support/authority.ts";
+import { q1SceneBodies, q1TestHost } from "../../../../support/q1-host.ts";
 const test = corpusTest("q1/rerelease/mg3/pak0.pak");
 
 interface SavedHeavy {
@@ -38,12 +39,9 @@ async function session(name: string, saved?: SavedHeavy) {
   const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${name}`);
   const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); archive.close();
   const identity = createIdentityOwner("mg3-heavy"), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
-  const events: Q1Event[] = [], players: ActorId[] = [], pending = new Map<OwnedActor, number>();
+  const players: ActorId[] = [];
   let active: Q1Foundation | null = null, randomValue = 0.4;
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
-    const entity = active?.entity(body.actor); if (entity === null || entity === undefined || entity.solid === "none" || entity.classname === "worldspawn") return undefined;
-    scene.link(body, { family: "q1", shape: { kind: "box" }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
-  } });
+  const bodies = q1SceneBodies(actors, scene, actor => active?.entity(actor));
   const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, readTarget: actor => {
     const owner = actors.resolveOwned(actor), body = bodies.read(actor);
     return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
@@ -57,13 +55,9 @@ async function session(name: string, saved?: SavedHeavy) {
   }, link: actor => bodies.link(actor) });
   const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => randomValue, trace: request => {
-    const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-    if (trace.kind !== "q1") throw new Error("Q1 trace expected");
-    return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal, actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? active?.world?.actor.id ?? null : null, startSolid: trace.startSolid, allSolid: trace.allSolid, sky: false, inOpen: trace.inOpen, inWater: trace.inWater };
-  }, contents: () => "empty", walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance), changeYaw: actor => movement.changeYaw(actor), moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode), checkBottom: actor => movement.checkBottom(actor), pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
-    scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; }, emit: event => { events.push(event); return undefined; }, transition: () => undefined,
-    players: () => players, checkClient: () => null, classname: actor => active?.entity(actor)?.classname ?? "player", powerup: () => undefined };
+  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => active?.world?.actor.id ?? null, entity: actor => active?.entity(actor), players: () => players }, {
+    random: () => randomValue, contents: () => "empty", walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance), changeYaw: actor => movement.changeYaw(actor),
+    moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode), checkBottom: actor => movement.checkBottom(actor) });
   function provider() {
     const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, campaign: "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" }); active = game;
     const base = registerQ1Base(game), context = new Q1AddonContext(base, "mg3", { emit: () => undefined, isMonster: actor => game.entity(actor)?.monster !== null && game.entity(actor) !== null, cvar: name => name === "skill" ? 1 : 0, setCvar: () => undefined });

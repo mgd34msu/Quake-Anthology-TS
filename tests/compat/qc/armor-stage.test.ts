@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { testCorpusRoot, copperProgramPath } from "../../support/corpus.ts";
-import { copperVariants } from "../../support/qc-copper.ts";
+import { copperVariants, syntheticCopperProgram } from "../../support/qc-copper.ts";
 import { dirname } from "node:path";
 
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -41,7 +41,10 @@ const COPPER_STAGE_ENTRY = 5592, COPPER_STAGE_EXIT = 5606;
 /** The region runs from T_DamageApply's armor-type read down to the damage-minus-savings join; the synthetic program is searched for the same landmarks. */
 function stageWindow(program: QcProgram): { readonly entry: number; readonly exit: number } {
   const apply = program.functionNamed("T_DamageApply");
-  if (program.digest === COPPER_DIGEST) return { entry: COPPER_STAGE_ENTRY, exit: COPPER_STAGE_EXIT };
+  if (apply.file !== "synthetic.qc") {
+    expect(program.digest).toBe(COPPER_DIGEST);
+    return { entry: COPPER_STAGE_ENTRY, exit: COPPER_STAGE_EXIT };
+  }
   const exit = program.statements.findIndex((statement, index) => index >= apply.firstStatement && statement.opcode === QcOpcode.SubF
     && statement.a === apply.parameterStart + 3 && statement.b === apply.parameterStart + 9);
   if (exit < 0) throw new Error("Synthetic armor region has no join");
@@ -49,7 +52,7 @@ function stageWindow(program: QcProgram): { readonly entry: number; readonly exi
 }
 function copperStage(program: QcProgram): ModQcArmorStage {
   const apply = program.functionNamed("T_DamageApply"), target = apply.parameterStart, { entry, exit } = stageWindow(program);
-  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec", 
+  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec",
     program: { path: "progs.dat", digest: program.digest }, actorFields: [], callbacks: [], combat: { damage: { function: "T_Damage", arguments: [], globals: [] },
       armorStage: { function: "T_DamageApply", entry, exit, target, damage: target + 3, saved: target + 9,
         flags: { kind: "bits", word: target + 4, noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0 }, statements: program.statements.slice(entry, exit + 1) } } })));
@@ -434,7 +437,7 @@ test("standalone QC regions reject a caller local read through nested helpers", 
 });
 
 
-test.skipIf(!copperVariants()[1]?.available)("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
+for (const variant of copperVariants()) test.skipIf(!variant.available)(`primary ${variant.name} Copper declaration preserves five-argument damage, borrowed armor and saved identity`, async () => {
   const { Application } = await import("../../../src/app/bootstrap/application.ts");
   const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
@@ -446,8 +449,9 @@ test.skipIf(!copperVariants()[1]?.available)("primary Copper declaration preserv
   let app: import("../../../src/app/bootstrap/application.ts").Application | null = null;
   try {
     await mkdir(mod, { recursive: true });
-    await cp(dirname(copperProgramPath()), mod, { recursive: true });
-    const program = loadQcProgram(await Bun.file(copperProgramPath()).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
+    if (variant.name === "copper") await cp(dirname(copperProgramPath()), mod, { recursive: true });
+    else await Bun.write(join(mod, "progs.dat"), syntheticCopperProgram(true));
+    const program = loadQcProgram(variant.name === "copper" ? await variant.bytes() : syntheticCopperProgram(true)), raw = { version: 1, artifactDigest: program.digest, combat: {
       damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
         { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },
       armorStage: copperStage(program), emptyArmor: { item: "q1:item_armorInv", absorption: 0.8 },

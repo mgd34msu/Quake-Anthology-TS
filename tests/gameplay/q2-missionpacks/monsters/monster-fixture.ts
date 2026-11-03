@@ -14,6 +14,7 @@ import { Q2MissionPackProjectiles } from "../../../../src/content/q2/missionpack
 import { registerQ2MissionPackMonsters } from "../../../../src/content/q2/missionpacks/monsters/index.ts";
 import type { Q2MonsterMissionPack, Q2MissionPackMonsterServices } from "../../../../src/content/q2/missionpacks/monsters/types.ts";
 import { inertAuthority } from "../../../support/authority.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
@@ -21,13 +22,13 @@ export function missionPackMonsterFixture(pack: Q2MonsterMissionPack) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = inertAuthority(actors, callbacks);
-  const inventory = new SharedInventoryTable(actors), scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [];
+  const inventory = new SharedInventoryTable(actors);
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
   bodies.create(player, { origin: { x: 500, y: 0, z: 24 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: world.id });
   combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   let now = 0, rayActor: ActorId = player.id;
-  const random: number[] = [], diagnostics: string[] = [];
+  const random: number[] = [];
   const plane = { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 };
   const trace = (request: Q2TraceRequest): TraceResult => {
     const clear: TraceResult = { kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0, surface: null, sourcePlane: plane, secondary: null };
@@ -38,16 +39,8 @@ export function missionPackMonsterFixture(pack: Q2MonsterMissionPack) {
     if (request.bounds === null && (request.mask & 0x2000000) !== 0 && request.ignore !== rayActor) return { ...clear, fraction: 0.8, hit: { kind: "actor", actor: rayActor } };
     return clear;
   };
-  const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => random.shift() ?? 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
-    trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
-    players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => ((game.entity(actor)?.serverFlags ?? 0) & 4) !== 0,
-    touchTriggers: () => undefined, nearby: () => [...game.entities.values()].map(entity => entity.actor.id), inlineModelBounds: () => ({ min: zero, max: zero }),
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, emit: event => { events.push(event); return undefined; },
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), keyConsumed: () => undefined, prepareLevelChange: () => undefined, transition: () => undefined,
-    diagnostic: message => { diagnostics.push(message); return undefined; },
-  };
+  const { host, scheduled, events, diagnostics } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) }, {
+    now: () => now, random: () => random.shift() ?? 0.5, trace, pointContents: point => point.z < 0 ? 1 : 0, nearby: () => [...game.entities.values()].map(entity => entity.actor.id), });
   combat.register(createQ2CombatPolicy({ id: "q2:combat", armor: nativeVictimArmor(request => ({ arithmetic: "binary64", screenFacingDot: 1, q2: { product: "classic", ctf: false, alive: (combat.read(request.target)?.health ?? 0) > 0 } })),
     context: request => ({ arithmetic: "binary64", player: request.target === player.id, monster: host.isMonster(request.target), attackerPlayer: request.attack.attacker === player.id,
       hasEnemy: game.entity(request.target)?.enemy !== null, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false,

@@ -16,6 +16,7 @@ import { openArchive } from "../../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities, inhibitQ2Spawn } from "../../../../../src/content/q2/foundation/fields.ts";
 import { inertAuthority } from "../../../../support/authority.ts";
+import { q2TestHost } from "../../../../support/q2-host.ts";
 const test = corpusTest("q2/baseq2/pak0.pak");
 const describe = corpusDescribe("q2/baseq2/pak0.pak");
 
@@ -36,7 +37,7 @@ function fixture(edition: Q2Edition, step = 0.1) {
   const callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = inertAuthority(actors, callbacks);
-  const inventory = new SharedInventoryTable(actors), scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [];
+  const inventory = new SharedInventoryTable(actors);
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
   bodies.create(player, { origin: { x: 500, y: 0, z: 24 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: world.id });
@@ -53,15 +54,9 @@ function fixture(edition: Q2Edition, step = 0.1) {
     if (request.bounds === null && (request.mask & 0x2000000) !== 0) return { ...clear, fraction: 0.8, hit: { kind: "actor", actor: player.id } };
     return clear;
   };
-  const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => step, random: () => random.shift() ?? 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
-    trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
-    players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => (game.entity(actor)?.serverFlags ?? 0) % 8 >= 4,
-    touchTriggers: () => { touches++; return undefined; }, nearby: () => [], inlineModelBounds: () => ({ min: zero, max: zero }),
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, emit: event => { events.push(event); return undefined; },
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), keyConsumed: () => undefined, prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: () => undefined,
-  };
+  const { host, scheduled, events } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) }, {
+    now: () => now, frameSeconds: () => step, random: () => random.shift() ?? 0.5, trace, pointContents: point => point.z < 0 ? 1 : 0,
+    touchTriggers: () => { touches++; return undefined; }, });
   const weapons = new RecordedWeapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const monsters = new Q2Monsters(weapons);
   const game = new Q2Foundation(host, { edition, mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1, provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q2:movement" }, [monsters]);

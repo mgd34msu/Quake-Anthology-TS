@@ -20,6 +20,7 @@ import { Q2Monsters } from "../../../../../src/content/q2/foundation/monsters/in
 import { Q2RogueHints, decodeQ2RogueHintsCheckpoint } from "../../../../../src/content/q2/missionpacks/monsters/hints.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../../../../src/persistence/value.ts";
 import { inertAuthority } from "../../../../support/authority.ts";
+import { q2TestHost } from "../../../../support/q2-host.ts";
 const test = corpusTest("q2/rogue/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -35,7 +36,7 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
   combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const queries = map === null ? null : createSceneQueries(map);
   let now = 0, hideEnemy = false;
-  const scheduled = new Map<OwnedActor, number>(), diagnostics: string[] = [];
+  
   const trace = (request: Q2TraceRequest): TraceResult => {
     if (queries !== null) return queries.trace({ start: request.start, end: request.end, shape: request.bounds === null ? { kind: "point" } : { kind: "box", bounds: request.bounds },
       target: { kind: "world" }, policy: { kind: "q2", contentsMask: request.mask, leafContents: edition === "classic" ? "stored" : "merged" }, numeric: Q2_DONOR_PROFILE, passActor: request.ignore });
@@ -49,16 +50,9 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
       return { ...clear, fraction: 0.5, hit: { kind: "world", model: 0 } };
     return clear;
   };
-  const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
-    trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
-    players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => monsters.context(actor) !== null,
-    touchTriggers: () => undefined, nearby: () => [...game.entities.values()].map(entity => entity.actor.id), inlineModelBounds: () => bounds,
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, emit: () => undefined,
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), keyConsumed: () => undefined, prepareLevelChange: () => undefined, transition: () => undefined,
-    diagnostic: message => { diagnostics.push(message); return undefined; },
-  };
+  const { host, scheduled, diagnostics } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: actor => game.entity(actor) }, {
+    now: () => now, trace, pointContents: point => point.z < 0 ? 1 : 0, isMonster: actor => monsters.context(actor) !== null,
+    nearby: () => [...game.entities.values()].map(entity => entity.actor.id), inlineModelBounds: () => bounds, emit: () => undefined, });
   const weapons = new Q2Ballistics({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const monsters = new Q2Monsters(weapons), hints = new Q2RogueHints(monsters); monsters.setHintPaths(hints.hooks);
   const game = new Q2Foundation(host, { edition, mapName: "rhangar2", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1,
