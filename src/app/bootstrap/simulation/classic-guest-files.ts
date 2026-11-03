@@ -5,24 +5,19 @@ import { containedFileParts, openContainedParent } from "../../../core/files/con
 
 /** Files a DLL could use to run code or console commands in a later session, or to replace other content. */
 const PROTECTED_WRITE = /\.(?:cfg|rc|dll|so|dylib|exe|bat|sh|pak|pk3|qvm|bsp)$/i;
-const MAXIMUM_FILE_BYTES = 64 * 1024 * 1024;
-const MAXIMUM_GROWTH_BYTES = 512 * 1024 * 1024;
-const MAXIMUM_WRITTEN_FILES = 256;
 
 /** DLL CRT files are relative to the selected writable game directory, never the installation. */
 export function classicGuestFiles(
   root: string,
   resources: ReadonlyMap<string, Uint8Array> = new Map<string, Uint8Array>(),
 ): NonNullable<WindowsCapabilities["openFile"]> {
-  let grown = 0,
-    writtenFiles = 0;
   return (path, options) => {
     const name = path.replaceAll("\\", "/").replace(/^(\.\/)+/, "");
     containedFileParts(name);
     if (!Number.isInteger(options.creation) || options.creation < 1 || options.creation > 5) throw new RangeError("Invalid native file creation disposition");
     if (!options.write && options.creation !== 3) return null;
     // A refused open reads as a missing file to the guest.
-    if (options.write && (PROTECTED_WRITE.test(name) || writtenFiles >= MAXIMUM_WRITTEN_FILES)) return null;
+    if (options.write && PROTECTED_WRITE.test(name)) return null;
     let parent: ReturnType<typeof openContainedParent> | null = null;
     let descriptor: number | null = null;
     try {
@@ -82,8 +77,6 @@ export function classicGuestFiles(
     }
     if (descriptor === null) throw new Error("Native file descriptor was not opened");
     let owned: number | null = descriptor;
-    if (options.write) writtenFiles++;
-    let highWater = fstatSync(descriptor).size;
     const fd = () => {
       if (owned === null) throw new Error("Native file is closed");
       return owned;
@@ -98,14 +91,7 @@ export function classicGuestFiles(
       write(offset, bytes) {
         if (!options.write) throw new Error("Native file is not writable");
         position(offset, bytes.length);
-        const end = offset + bytes.length,
-          growth = Math.max(0, end - highWater);
-        // Past a quota the guest sees a short write, as on a full disk.
-        if (end > MAXIMUM_FILE_BYTES || grown + growth > MAXIMUM_GROWTH_BYTES) return 0;
-        const written = writeSync(fd(), bytes, 0, bytes.length, offset);
-        grown += growth;
-        highWater = Math.max(highWater, offset + written);
-        return written;
+        return writeSync(fd(), bytes, 0, bytes.length, offset);
       },
       size() {
         return fstatSync(fd()).size;
@@ -113,9 +99,7 @@ export function classicGuestFiles(
       truncate(length) {
         if (!options.write) throw new Error("Native file is not writable");
         position(length, 0);
-        if (length > MAXIMUM_FILE_BYTES) return;
         ftruncateSync(fd(), length);
-        highWater = length;
       },
       flush() {
         fsyncSync(fd());
