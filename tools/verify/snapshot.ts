@@ -46,7 +46,8 @@ export class WorkspaceSnapshot {
   static async capture(directory: string, options: { readonly exclude?: readonly string[] } = {}): Promise<WorkspaceSnapshot> {
     const root = await realpath(directory);
     const dependencyRoot = join(root, "node_modules");
-    const exclusions = [".git", ".artifacts", "dist", ...(options.exclude ?? [])].map(path => resolve(root, path));
+    // Local, gitignored state that is never a build input: plugin state, scratch build output and internal docs.
+    const exclusions = [".git", ".artifacts", "dist", ".goodvibes", "build", "docs/dev", ...(options.exclude ?? [])].map(path => resolve(root, path));
     const entries: SnapshotEntry[] = [];
     async function visit(directoryPath: string, prefix: string): Promise<void> {
       for (const child of await readdir(directoryPath, { withFileTypes: true })) {
