@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { copyFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { InstalledCatalog } from "../../content/catalog/index.ts";
+import { gameWriteRedirect, type InstalledCatalog } from "../../content/catalog/index.ts";
 import { isMissingFile } from "../../content/mounts/paths.ts";
 import { defaultUserContentRoot, userDataDirectory, userProductDirectory } from "../../content/user-data.ts";
 import { readSaveHeader } from "../../persistence/saved-game.ts";
@@ -56,7 +56,7 @@ async function files(directory: string): Promise<readonly string[]> {
  */
 export async function migrateNativeData(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "userContentRoot" | "nativeConfigRoot">): Promise<void> {
   const userRoot = options.userContentRoot ?? defaultUserContentRoot();
-  const key = `${userRoot}\0${options.nativeConfigRoot ?? process.env["QTS_TEST_GAME_WRITE_ROOT"] ?? ""}`;
+  const key = `${userRoot}\0${gameWriteRedirect(options.nativeConfigRoot, catalog.corpusRoot) ?? ""}`;
   if (done.has(key)) return;
   done.add(key);
   const saves = userDataDirectory("saves", options.userContentRoot);

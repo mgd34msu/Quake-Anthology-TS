@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { managedAddonHidden, managedAddonTitle, readNightdiveAddons } from "./addons.ts";
+import { createHash } from "node:crypto";
 import { mkdir, open, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
@@ -119,10 +120,16 @@ export interface DiscoverContentOptions {
   readonly gameWriteRoot?: string;
 }
 
-/** The test redirect for writes into game folders, from the option or `QTS_TEST_GAME_WRITE_ROOT`. */
-export function gameWriteRedirect(explicit?: string): string | undefined {
-  const redirect = explicit ?? process.env["QTS_TEST_GAME_WRITE_ROOT"];
-  return redirect === undefined || redirect === "" ? undefined : resolve(redirect);
+/**
+ * The test redirect for writes into game folders, from the option or `QTS_TEST_GAME_WRITE_ROOT`. The variable is one
+ * root shared by every install a test run opens, so each install root gets its own folder beneath it; otherwise one
+ * fixture's written `config.cfg` or download would shadow another fixture's files.
+ */
+export function gameWriteRedirect(explicit: string | undefined, corpusRoot: string): string | undefined {
+  if (explicit !== undefined && explicit !== "") return resolve(explicit);
+  const shared = process.env["QTS_TEST_GAME_WRITE_ROOT"];
+  if (shared === undefined || shared === "") return undefined;
+  return join(resolve(shared), createHash("sha256").update(resolve(corpusRoot)).digest("hex").slice(0, 16));
 }
 
 /**
@@ -136,7 +143,7 @@ export async function gameDownloadDirectory(
   redirect?: string,
 ): Promise<string> {
   const canonical = expectation.contentDirectory;
-  const base = gameWriteRedirect(redirect);
+  const base = gameWriteRedirect(redirect, corpusRoot);
   const root = base ?? resolve(corpusRoot);
   const gameRoot = base === undefined ? (resolveGameRoots(root).get(expectation.family) ?? null) : null;
   const existing =
@@ -704,7 +711,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const corpusRoot = resolve(options.corpusRoot);
   const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
-  const gameWrites = gameWriteRedirect(options.gameWriteRoot);
+  const gameWrites = gameWriteRedirect(options.gameWriteRoot, corpusRoot);
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
   const selected = options.remoteContent;
   const stock = options.products ?? expectedProducts;

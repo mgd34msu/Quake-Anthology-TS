@@ -361,3 +361,21 @@ test("layer files written under the first vocabulary migrate to canonical cvar n
   const written: unknown = JSON.parse(await readFile(join(layers, "layers", "high.json"), "utf8"));
   expect(written).toMatchObject({ version: 2 });
 });
+
+test("the first game seeds the high level only with bindings that differ from its own default.cfg", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qts-layers-seed-"));
+  const layers = new GameLayers(new LayerStore(root), "quake2", "q2/classic/baseq2");
+  layers.noteDefaultBinds([
+    ["7", "use Rocket Launcher"],
+    ["w", "+forward"],
+  ]);
+  const bind = (key: string, command: string): [string, LayerBind] => [key.toLowerCase(), { key, command }];
+  await layers.resolve({
+    binds: new Map([bind("7", "use Rocket Launcher"), bind("w", "+back"), bind("f", "+use")]),
+    cvars: new Map<string, LayerCvar>(),
+  });
+  const high = await readHigh(root);
+  expect(high?.binds.has("7")).toBe(false);
+  expect(high?.binds.get("w")?.command).toBe("+back");
+  expect(high?.binds.get("f")?.command).toBe("+use");
+});

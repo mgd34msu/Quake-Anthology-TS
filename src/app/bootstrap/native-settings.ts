@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { InstalledCatalog } from "../../content/catalog/index.ts";
+import { gameWriteRedirect, type InstalledCatalog } from "../../content/catalog/index.ts";
 import type { ContentId, ExecutableRecipe } from "../../contracts/content.ts";
 import type { ApplicationOptions } from "./options.ts";
 import { nativeSaveLayout } from "../../settings/native-saves.ts";
@@ -43,7 +43,7 @@ export function stockNativeConfig(
       looseRoot: selected.looseRoot,
     },
     undefined,
-    redirect ?? process.env["QTS_TEST_GAME_WRITE_ROOT"],
+    gameWriteRedirect(redirect, catalog.corpusRoot),
     redirect !== undefined,
   );
   if (layout === null) return null;

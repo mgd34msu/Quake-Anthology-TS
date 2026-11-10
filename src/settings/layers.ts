@@ -130,10 +130,15 @@ export function detectHandEdits(format: LayerFormat, file: LayerSnapshot, record
   return changed;
 }
 
-/** Seed an empty high level from the first native file the engine meets, so existing bindings and settings become the shared defaults. */
-export function seedHigh(format: LayerFormat, file: LayerSnapshot): HighLevel {
+/**
+ * Seed an empty high level from the first native file the engine meets, so the player's existing bindings and settings
+ * become the shared defaults. A binding the game's own default.cfg already gives is that game's default, not the
+ * player's choice, so it stays beneath the high level: Quake II's `bind 7 "use Rocket Launcher"` must not become every
+ * game's `7`.
+ */
+export function seedHigh(format: LayerFormat, file: LayerSnapshot, defaultBinds: ReadonlyMap<string, LayerBind> = new Map()): HighLevel {
   const high = emptyHigh();
-  for (const [key, bind] of file.binds) if (bind.command !== null) high.binds.set(key, bind);
+  for (const [key, bind] of file.binds) if (bind.command !== null && defaultBinds.get(key)?.command !== bind.command) high.binds.set(key, bind);
   for (const [name, entry] of file.cvars) if (spellingIn(format, name) !== null) high.settings.set(name, entry.value);
   return high;
 }
@@ -381,7 +386,7 @@ export class GameLayers {
     let dirtyHigh = false,
       dirtyGame = false;
     if (high === null) {
-      high = game.record === null ? seedHigh(this.format, file) : emptyHigh();
+      high = game.record === null ? seedHigh(this.format, file, this.defaultBinds) : emptyHigh();
       // Nothing to keep leaves the high level unwritten, so the next game with a file can still seed it.
       dirtyHigh = high.binds.size > 0 || high.settings.size > 0;
     } else if (game.record === null) {
