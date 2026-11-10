@@ -122,14 +122,15 @@ export interface DiscoverContentOptions {
 
 /**
  * The test redirect for writes into game folders, from the option or `QTS_TEST_GAME_WRITE_ROOT`. The variable is one
- * root shared by every install a test run opens, so each install root gets its own folder beneath it; otherwise one
- * fixture's written `config.cfg` or download would shadow another fixture's files.
+ * root shared by every launch in a test run, so each install root and user root pair gets its own folder beneath it;
+ * otherwise one test's written `config.cfg`, `q3config.cfg` or download would be mounted into another test's game.
  */
-export function gameWriteRedirect(explicit: string | undefined, corpusRoot: string): string | undefined {
+export function gameWriteRedirect(explicit: string | undefined, corpusRoot: string, userContentRoot?: string | null): string | undefined {
   if (explicit !== undefined && explicit !== "") return resolve(explicit);
   const shared = process.env["QTS_TEST_GAME_WRITE_ROOT"];
   if (shared === undefined || shared === "") return undefined;
-  return join(resolve(shared), createHash("sha256").update(resolve(corpusRoot)).digest("hex").slice(0, 16));
+  const scope = `${resolve(corpusRoot)}\0${userContentRoot === undefined || userContentRoot === null ? "" : resolve(userContentRoot)}`;
+  return join(resolve(shared), createHash("sha256").update(scope).digest("hex").slice(0, 16));
 }
 
 /**
@@ -141,9 +142,10 @@ export async function gameDownloadDirectory(
   corpusRoot: string,
   expectation: Pick<ProductExpectation, "family" | "contentDirectory">,
   redirect?: string,
+  userContentRoot?: string,
 ): Promise<string> {
   const canonical = expectation.contentDirectory;
-  const base = gameWriteRedirect(redirect, corpusRoot);
+  const base = gameWriteRedirect(redirect, corpusRoot, userContentRoot);
   const root = base ?? resolve(corpusRoot);
   const gameRoot = base === undefined ? (resolveGameRoots(root).get(expectation.family) ?? null) : null;
   const existing =
@@ -711,7 +713,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const corpusRoot = resolve(options.corpusRoot);
   const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
-  const gameWrites = gameWriteRedirect(options.gameWriteRoot, corpusRoot);
+  const gameWrites = gameWriteRedirect(options.gameWriteRoot, corpusRoot, userContentRoot);
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
   const selected = options.remoteContent;
   const stock = options.products ?? expectedProducts;
