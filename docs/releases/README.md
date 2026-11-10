@@ -5,6 +5,7 @@ One page per tagged release; [CHANGELOG.md](../../CHANGELOG.md) is the one-line 
 
 | Version | Date | Theme |
 | --- | --- | --- |
+| [1.2.7](1.2.7.md) | 2026-11-10 | Stock games on disk like the originals, settings layering, hardening |
 | [1.2.6](1.2.6.md) | 2026-10-26 | Tossed items no longer hang in mid-air |
 | [1.2.5](1.2.5.md) | 2026-10-25 | Retained model batches, title art |
 | [1.2.4](1.2.4.md) | 2026-10-23 | Retained lit model geometry |

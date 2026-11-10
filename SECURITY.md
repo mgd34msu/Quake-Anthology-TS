@@ -53,8 +53,9 @@ What is isolated:
   product or mod) writes what the original writes, with the original names: `config.cfg` or
   `q3config.cfg`, demos, screenshots and level shots, `listip.cfg`, `qconsole.log`, `games.log`,
   saves and the files its game module creates, in its game folder, or the rerelease files under
-  Saved Games. Mixed combinations, downloads, other settings and the crash log stay under
-  `~/.local/share/quake-typescript/`. On first launch after the update, earlier demos and
+  Saved Games. Downloads go to the game folder of the game they belong to, falling back to
+  `~/.local/share/quake-typescript/` when that folder is read-only. Mixed combinations, other
+  settings and the crash log stay under `~/.local/share/quake-typescript/`. On first launch after the update, earlier demos and
   saves of stock games are moved from there into the game folders; the move never overwrites a
   different file. `--user-content-root` may not be a game install. Because the config files run
   as scripts at startup (as does `listip.cfg` when executed), treat write access to a game
@@ -105,8 +106,8 @@ Things to know before you host:
   `--lan-only` to make NetQuake and KEX LAN hosts ignore every datagram from a non-private
   address (loopback, RFC 1918, link-local, unique-local, IPX). Use it, or a firewall, on any
   host that is not meant to be reachable from the internet.
-- Quake II HTTP downloads are restricted to asset extensions and size limits (128 MiB per
-  asset, 1 GiB per package, 2 GiB per session). HTTP download servers on private, loopback or
+- Quake II HTTP downloads are restricted to asset extensions; their size is not limited. HTTP
+  download servers on private, loopback or
   link-local hosts are refused unless the game server is itself private. Automatic downloads
   are on by default in the Quake II client (`allow_download 1`, `cl_http_downloads 1`, as in
   Q2PRO, with `allow_download_maps`, `_models`, `_sounds` and `_players` also 1), and downloaded

@@ -5,11 +5,10 @@ the code disagree, the code is right.
 
 ## Version
 
-- Latest tagged release: **1.2.6** ([release notes](releases/1.2.6.md)).
-- The tree on `main` is ahead of it and reports **1.2.7-dev** (`package.json`,
-  `src/version.ts`, `--version`). A `-dev` build never claims to be a tagged release: `bun run build`
-  accepts it and `bun run release` refuses it. See the [changelog](../CHANGELOG.md) for what
-  has changed since 1.2.6.
+- Latest tagged release: **1.2.7** ([release notes](releases/1.2.7.md)). Builds made from
+  `main` after a tag report the next version with a `-dev` suffix (`package.json`,
+  `src/version.ts`, `--version`); `bun run build` accepts it and `bun run release` refuses it.
+  See the [changelog](../CHANGELOG.md) for what has changed since the last tag.
 - Platform: 64-bit Linux, on Bun 1.3.14 or newer. The release executable and the build tooling
   target Linux x64 only. Game data is not included.
 
@@ -42,8 +41,9 @@ Supported behavior:
   `qts://` transport. Details in [protocol.md](protocol.md); hosting in
   [server-guide.md](server-guide.md).
 - **Saves**: the shared `QTSAVE5` format, import of original Quake saves, export of
-  NetQuake `v5`/`v6` saves ([save-format.md](save-format.md)). Native Q3 guest modules save
-  their memory with the checkpoint.
+  NetQuake `v5`/`v6` saves, and stock Quake II saves in the original classic (`save/NAME/`) and
+  rerelease (`NAME.pak.gz`) formats, read and written ([save-format.md](save-format.md)).
+  Native Q3 guest modules save their memory with the checkpoint.
 - **Optional LLM console assistant** with a validated command batch
   ([console-and-llm.md](console-and-llm.md)).
 - **Fault containment**: a fault from one network peer drops that peer; a frame fault

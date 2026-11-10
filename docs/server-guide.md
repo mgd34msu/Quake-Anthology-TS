@@ -101,8 +101,8 @@ would from the local console.
   in coop and deathmatch.
 - **Quake III movement.** `pmove_ladders` (default 1) lets Quake III movement climb ladders on
   Quake and Quake II maps; set it to 0 to disable.
-- **Downloads.** Servers offer files with asset extensions only. Client-side limits are
-  128 MiB per asset, 1 GiB per package and 2 GiB per Quake II session.
+- **Downloads.** Servers offer files with asset extensions only. Clients place no size limit
+  on downloads.
 
 ## Faults
 
