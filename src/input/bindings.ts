@@ -107,6 +107,14 @@ function quoted(value: string): string {
   if (/["\r\n\0]/.test(value)) throw new Error("Source cfg cannot represent a binding containing quotes or newlines; use the seat settings document");
   return `"${value}"`;
 }
+/**
+ * Whether a game's own config file carries this binding: a console command on a key or mouse button. Controller
+ * bindings and engine action targets live only in the seat settings, so they are restored from there even when a
+ * stock game's file holds the rest of the bindings.
+ */
+export function nativeConfigCarries(binding: InputBinding): boolean {
+  return binding.target.kind === "command" && (binding.input.kind === "key" || binding.input.kind === "mouse-button");
+}
 /** Dedicated profiles include named device-zero controls; graphical profiles retain controllers in seat settings. */
 export function archivedBindingPairs(
   input: Pick<BindingStore, "bindings">,

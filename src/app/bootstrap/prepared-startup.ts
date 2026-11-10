@@ -14,7 +14,14 @@ import type { InputBinding } from "../../contracts/ui.ts";
 import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting, type CommandBufferOptions } from "../../core/commands/index.ts";
 import { SeatInput, physicalInputKey } from "../../input/seat.ts";
-import { archivedBindingPairs, archivedBindings, defaultBindings, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
+import {
+  archivedBindingPairs,
+  archivedBindings,
+  defaultBindings,
+  nativeConfigCarries,
+  registerBindingCommands,
+  type BindingCommandSeat,
+} from "../../input/bindings.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConfigStore, type SeatSettings } from "../../settings/config.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
@@ -517,6 +524,13 @@ export class PreparedStartup {
           if (seat === undefined || saved === undefined) return;
           seat.cvars.applyArchive(owned(saved.archive));
           seat.mouse.cvars.applyArchive(owned(saved.mouseArchive));
+          // A stock game's own file holds its key and mouse bindings; what that file cannot express stays with the seat.
+          if (saved.profile !== null && index === 0 && native?.suppressesProfileBindings() === true)
+            for (const binding of saved.profile.bindings)
+              if (!nativeConfigCarries(binding)) {
+                seat.input.bind(binding);
+                seat.overriddenKeys.add(physicalInputKey(binding.input));
+              }
           if (saved.profile !== null && !(index === 0 && native?.suppressesProfileBindings() === true)) {
             seat.input.unbindAll();
             for (const binding of saved.profile.bindings) seat.input.bind(binding);

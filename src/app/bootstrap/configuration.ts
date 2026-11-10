@@ -26,7 +26,7 @@ import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
 import { PreparedStartup, allowSeatConfigurationCommand, type PreparedClientCommands, type PreparedSeatConfiguration } from "./prepared-startup.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { StartupConfig, type StartupConfigOptions } from "./startup-config.ts";
-import { archivedBindingPairs, defaultBindings, namedPhysicalInput } from "../../input/bindings.ts";
+import { archivedBindingPairs, defaultBindings, namedPhysicalInput, nativeConfigCarries } from "../../input/bindings.ts";
 import { physicalInputKey, type SeatInput } from "../../input/seat.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
@@ -385,7 +385,12 @@ export async function prepareProfileConfiguration(args: {
               if (!nativeBindings) {
                 bindings().unbindAll();
                 for (const binding of retained.bindings) bindings().bind(binding);
-              }
+              } else
+                for (const binding of retained.bindings)
+                  if (!nativeConfigCarries(binding)) {
+                    bindings().bind(binding);
+                    choices.overridden.add(physicalInputKey(binding.input));
+                  }
               choices.all = retained.allBindingsChosen;
               for (const key of retained.overriddenKeys) choices.overridden.add(key);
               const expected = new Map(retained.selectedBindings.map(binding => [physicalInputKey(binding.input), binding.target]));
@@ -394,6 +399,13 @@ export async function prepareProfileConfiguration(args: {
                 if (JSON.stringify(expected.get(key)) !== JSON.stringify(current.get(key))) choices.overridden.add(key);
               if (!nativeBindings) currentSeat(seat.id).mouse.write(retained.mouse);
               if (retained.run !== undefined && !nativeBindings) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", retained.run, "archive");
+            } else if (seat.profile !== null && nativeBindings) {
+              // The game's own file holds its key and mouse bindings; controller and action bindings stay with the seat.
+              for (const binding of seat.profile.bindings)
+                if (!nativeConfigCarries(binding)) {
+                  bindings().bind(binding);
+                  choices.overridden.add(physicalInputKey(binding.input));
+                }
             } else if (seat.profile !== null && !nativeBindings) {
               bindings().unbindAll();
               for (const binding of seat.profile.bindings) bindings().bind(binding);

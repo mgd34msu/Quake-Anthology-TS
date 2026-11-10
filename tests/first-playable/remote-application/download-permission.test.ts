@@ -19,8 +19,10 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
   test(`Q2 remote applies saved ${mode} download permission before signon`, async () => {
     const root = await tempDirectory("q2-remote-policy-"),
       serverUsers = join(root, "server"),
-      clientUsers = join(root, "client");
-    const destination = join(clientUsers, "q2/baseq2/sound/permission-fixture.wav"),
+      clientUsers = join(root, "client"),
+      // Downloads go to the game's own folder; the test sends game-folder writes here instead of the read-only install.
+      gameWrites = join(root, "game-writes");
+    const destination = join(gameWrites, "q2/baseq2/sound/permission-fixture.wav"),
       cfg = join(clientUsers, "q2/baseq2/settings/client.cfg");
     await mkdir(join(clientUsers, "q2/baseq2/settings"), { recursive: true });
     await Bun.write(cfg, `set allow_download ${mode === "disabled" ? 0 : 1}\nset cl_http_downloads ${mode === "http-off" ? 0 : 1}\n`);
@@ -105,7 +107,7 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
         "--hidden",
       ]);
       if (selected.kind !== "run") throw new Error("Missing client options");
-      client = await RemoteApplication.open({ ...selected.options, userContentRoot: clientUsers }, host);
+      client = await RemoteApplication.open({ ...selected.options, userContentRoot: clientUsers, nativeConfigRoot: gameWrites }, host);
       const remote = client,
         authoritative = server;
       expect(remote.clientCommands?.cvars.dialect).toBe("q2-classic");
@@ -127,7 +129,8 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
         expect(native.mock.calls).toHaveLength(0);
         expect(created.mock.calls.length + resumed.mock.calls.length).toBe(0);
         expect(await Bun.file(destination).exists()).toBe(false);
-        expect((await readdir(join(clientUsers, "q2/baseq2"), { recursive: true })).some(path => path.includes(".download-"))).toBe(false);
+        for (const folder of [join(clientUsers, "q2/baseq2"), join(gameWrites, "q2/baseq2")])
+          expect((await readdir(folder, { recursive: true }).catch(() => [])).some(path => path.includes(".download-"))).toBe(false);
       } else {
         expect(native.mock.calls.map(call => call[1])).toContain("sound/permission-fixture.wav");
         expect(created.mock.calls.length + resumed.mock.calls.length).toBeGreaterThan(0);
