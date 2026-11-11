@@ -54,7 +54,8 @@ test("music traversal accepts source archive directory records and nested loose 
       prefixOrders: [],
     });
     expect(await mounts.listFiles("", "/")).toContain("music/");
-    expect(await mounts.listFiles("music", "/")).toEqual(["", "nested/", "loose", "nested"]);
+    // Loose directories list in the filesystem's own order, which differs between filesystems.
+    expect([...(await mounts.listFiles("music", "/"))].sort()).toEqual(["", "loose", "nested", "nested/"]);
     expect(await mounts.listFiles("music/nested", "/")).toEqual(["", "deep/"]);
     expect(await mountedMusicTracks(mounts)).toEqual(["music/intro.ogg", "music/loose/track.wav", "music/nested/deep/ending.ogg", "music/nested/title.wav"]);
   } finally {
