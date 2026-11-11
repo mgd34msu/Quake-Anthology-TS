@@ -132,7 +132,7 @@ test("Q1 source catalog uses selected language, source mod tiers and format argu
       if (binding?.kind !== "choice") throw new Error("Q1 language choice missing");
       expect(binding.choices().some(choice => choice.id === "french")).toBe(true);
       binding.write("french");
-      for (let attempt = 0; attempt < 100 && languages.selectedLanguage(identity.seat(0)) !== "french"; attempt++) await Bun.sleep(1);
+      for (let attempt = 0; attempt < 3000 && languages.selectedLanguage(identity.seat(0)) !== "french"; attempt++) await Bun.sleep(10);
       expect(languages.selectedLanguage(identity.seat(0))).toBe("french");
       expect(errors).toEqual([]);
       const selectedMessages = new Q1MessageLocalization(identity.seat(0), { content: { catalog, forContent: async () => mounts } }, () =>

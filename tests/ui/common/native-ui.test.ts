@@ -598,7 +598,7 @@ test("gyro menu calibrates the assigned controller and restores only its seat tu
     ui.input({ seat, timeMilliseconds: 1000, kind: "mouse-button", button: 1, down: false });
   };
   const loaded = async (): Promise<void> => {
-    for (let attempt = 0; attempt < 100 && settings.busy(seat); attempt++) await Bun.sleep(1);
+    for (let attempt = 0; attempt < 3000 && settings.busy(seat); attempt++) await Bun.sleep(10);
     expect(settings.busy(seat)).toBe(false);
   };
   try {

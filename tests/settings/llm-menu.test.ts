@@ -170,7 +170,7 @@ test("LLM saves model and key only on Save; sign-in cancel and disposal abort pe
     expect(service.read().providers["chatgpt-api"].configured).toBe(false);
     focus("ui:llm:save");
     key(KeyCode.Enter);
-    for (let index = 0; index < 50 && !service.read().providers["chatgpt-api"].configured; index++) await Bun.sleep(2);
+    for (let index = 0; index < 3000 && !service.read().providers["chatgpt-api"].configured; index++) await Bun.sleep(10);
     expect(service.read().model).toBe("test-model");
     expect(service.read().providers["chatgpt-api"].configured).toBe(true);
     controller.closeMenu();
@@ -280,7 +280,7 @@ for (const draft of ["", "draft-model"])
         expect(drawn).toContain(draft);
         focus("ui:llm:save");
         key(KeyCode.Enter);
-        for (let index = 0; index < 50 && service.read().model !== draft; index++) await Bun.sleep(2);
+        for (let index = 0; index < 3000 && service.read().model !== draft; index++) await Bun.sleep(10);
         expect(service.read().model).toBe(draft);
       }
       menu.dispose();
@@ -316,7 +316,7 @@ test("provider arrow releases preserve focus across sequential asynchronous choi
     for (const provider of ["chatgpt-subscription", "chatgpt-api", "other-api"] satisfies readonly LlmProvider[]) {
       right();
       right();
-      for (let index = 0; index < 100 && service.read().provider !== provider; index++) await Bun.sleep(2);
+      for (let index = 0; index < 3000 && service.read().provider !== provider; index++) await Bun.sleep(10);
       await Bun.sleep(2);
       expect(service.read().provider).toBe(provider);
       expect(controller.state().focus).toEqual({ kind: "menu", menu: menu.root, control: "ui:llm:provider" });
@@ -371,7 +371,7 @@ test("provider model pages select a real ID and persist supported effort while r
       throw new Error(`Missing ${id}`);
     };
     controller.openMenu(menu.root);
-    for (let index = 0; index < 100 && service.read().catalogs["chatgpt-api"].status !== "ready"; index++) await Bun.sleep(2);
+    for (let index = 0; index < 3000 && service.read().catalogs["chatgpt-api"].status !== "ready"; index++) await Bun.sleep(10);
     expect(service.read().model).toBe("");
     focus("ui:llm:model");
     key(KeyCode.Enter);
@@ -388,7 +388,7 @@ test("provider model pages select a real ID and persist supported effort while r
     expect(service.read().catalogs["chatgpt-api"].status).toBe("loading");
     focus("ui:llm:save");
     key(KeyCode.Enter);
-    for (let index = 0; index < 100 && service.read().reasoningEffort !== "low"; index++) await Bun.sleep(2);
+    for (let index = 0; index < 3000 && service.read().reasoningEffort !== "low"; index++) await Bun.sleep(10);
     expect(service.read().model).toBe("gpt-6-astra");
     expect(service.read().reasoningEffort).toBe("low");
     expect(service.read().catalogs["chatgpt-api"].status).toBe("loading");

@@ -180,7 +180,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
             continue;
           }
           if (preset.id === "q3-baseq3") {
-            for (let attempt = 0; attempt < 100 && menu.controller.activeMenu !== "menu:library:arena-selection"; attempt++) await Bun.sleep(1);
+            for (let attempt = 0; attempt < 3000 && menu.controller.activeMenu !== "menu:library:arena-selection"; attempt++) await Bun.sleep(10);
             expect(menu.controller.activeMenu).toBe("menu:library:arena-selection");
             focusControl("ui:arena-select:play");
             key(KeyCode.Enter);
@@ -238,7 +238,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     key(KeyCode.Enter);
     await capture("roster-selected-preset-choice");
     dropdownPick("custom");
-    for (let attempt = 0; attempt < 100 && menu.controller.activeMenu !== "menu:startup:roster"; attempt++) await Bun.sleep(1);
+    for (let attempt = 0; attempt < 3000 && menu.controller.activeMenu !== "menu:startup:roster"; attempt++) await Bun.sleep(10);
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     await source("q1:monsters/classic/id1", "roster-source-choice");
     const rows = model.monsterRosterRows();

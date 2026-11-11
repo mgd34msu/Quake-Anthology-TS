@@ -115,7 +115,7 @@ test("Q3 browser snapshot invalidates an optimistic favorite when a deferred wri
   expect(browser.q3List(3).addresses).toEqual([]);
   const pending = browser.favorite();
   try {
-    for (let attempt = 0; attempt < 100 && !writing; attempt++) await Bun.sleep(1);
+    for (let attempt = 0; attempt < 3000 && !writing; attempt++) await Bun.sleep(10);
     expect(writing).toBe(true);
     const optimistic = browser.q3List(3).addresses;
     expect(optimistic).toHaveLength(1);

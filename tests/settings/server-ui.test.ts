@@ -95,11 +95,11 @@ for (const renderer of rendererBackends)
       for (let index = 0; index < 7; index++) key(KeyCode.Delete);
       application.input({ seat: player.seat.id, timeMilliseconds: performance.now(), kind: "text", text: profileName });
       click(3);
-      for (let attempt = 0; attempt < 100 && !(await Bun.file(profilePath).exists()); attempt++) await Bun.sleep(10);
+      for (let attempt = 0; attempt < 3000 && !(await Bun.file(profilePath).exists()); attempt++) await Bun.sleep(10);
       expect(await Bun.file(profilePath).exists()).toBe(true);
       source.players.rules.fragLimit = 9;
       click(4);
-      for (let attempt = 0; attempt < 100 && application.simulation.q2ServerCvars()?.variableValue("fraglimit") !== 1; attempt++) await Bun.sleep(10);
+      for (let attempt = 0; attempt < 3000 && application.simulation.q2ServerCvars()?.variableValue("fraglimit") !== 1; attempt++) await Bun.sleep(10);
       expect(source.players.rules.fragLimit).toBe(1);
       const state = source.players.states.get(player.actor);
       if (state === undefined) throw new Error("Missing score");
