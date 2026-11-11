@@ -60,12 +60,15 @@ for (const renderer of rendererBackends)
         root,
       ]);
       if (launch.kind !== "run") throw new Error("Expected QW run");
-      app = await RemoteApplication.open(launch.options, {
-        print: text => {
-          prints.push(text);
-          return undefined;
+      app = await RemoteApplication.open(
+        { ...launch.options, nativeConfigRoot: root },
+        {
+          print: text => {
+            prints.push(text);
+            return undefined;
+          },
         },
-      });
+      );
       const remote = app,
         cvars = remote.clientCommands?.cvars;
       if (cvars === undefined || !(remote.remote instanceof QwRemotePresentation)) throw new Error("No QW client controls");

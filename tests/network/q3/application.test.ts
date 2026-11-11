@@ -661,7 +661,7 @@ test("native Q3 downloads a referenced user package before guest init and pure a
     const disabledUsers = join(root, "disabled-content");
     mkdirSync(join(disabledUsers, "q3a/baseq3/settings"), { recursive: true });
     writeFileSync(join(disabledUsers, "q3a/baseq3/settings/client.cfg"), 'seta cl_allowDownload "0"\nseta rate "10000"\n');
-    client = await RemoteApplication.open({ ...selectedClient.options, userContentRoot: disabledUsers }, host);
+    client = await RemoteApplication.open({ ...selectedClient.options, userContentRoot: disabledUsers, nativeConfigRoot: disabledUsers }, host);
     expect(client.clientCommands?.cvars.get("rate")?.integerValue).toBe(10000);
     for (let tick = 0; tick < 100 && !messages.some(text => text.includes("Downloads are disabled")); tick++) {
       await client.step(50);
@@ -684,7 +684,7 @@ test("native Q3 downloads a referenced user package before guest init and pure a
     init.mockClear();
     pure.mockClear();
     client = await RemoteApplication.open(
-      { ...selectedClient.options, network: { kind: "q3-client", remote: `127.0.0.1:${nextAddress.port}` }, userContentRoot: users },
+      { ...selectedClient.options, network: { kind: "q3-client", remote: `127.0.0.1:${nextAddress.port}` }, userContentRoot: users, nativeConfigRoot: users },
       host,
     );
     const remote = client;
@@ -794,7 +794,7 @@ test("native Q3 retries an interrupted second referenced package before guest in
     if (options.kind !== "run") throw new Error("Missing client options");
     mkdirSync(join(destination, "settings"), { recursive: true });
     writeFileSync(join(destination, "settings/client.cfg"), 'seta cl_allowDownload "1"\n');
-    client = await RemoteApplication.open({ ...options.options, userContentRoot: users }, host);
+    client = await RemoteApplication.open({ ...options.options, userContentRoot: users, nativeConfigRoot: users }, host);
     let published: string | undefined;
     for (let tick = 0; tick < 500; tick++) {
       await client.step(50);
@@ -820,7 +820,7 @@ test("native Q3 retries an interrupted second referenced package before guest in
       await server.step(50);
       await Bun.sleep(2);
     }
-    client = await RemoteApplication.open({ ...options.options, userContentRoot: users }, host);
+    client = await RemoteApplication.open({ ...options.options, userContentRoot: users, nativeConfigRoot: users }, host);
     for (let tick = 0; tick < 1200 && client.networkPhase !== "active"; tick++) {
       await client.step(50);
       await Bun.sleep(2);

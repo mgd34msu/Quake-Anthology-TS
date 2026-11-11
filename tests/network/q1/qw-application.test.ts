@@ -51,12 +51,15 @@ for (const gameDirectory of ["qw", "id1", "mod-alpha"])
         root,
       ]);
       if (launch.kind !== "run") throw new Error("Expected QW run");
-      app = await RemoteApplication.open(launch.options, {
-        print: text => {
-          prints.push(text);
-          return undefined;
+      app = await RemoteApplication.open(
+        { ...launch.options, nativeConfigRoot: root },
+        {
+          print: text => {
+            prints.push(text);
+            return undefined;
+          },
         },
-      });
+      );
       let remote = app;
       const remoteAddress = () => {
         const address = remote.networkAddress;
@@ -290,11 +293,14 @@ for (const gameDirectory of ["qw", "id1", "mod-alpha"])
         await expect(closing).rejects.toThrow("cancelled");
         await closed;
         expect(remote.options.product).toBe("q1-quakeworld-mod-current-mod");
-        const reopened = await RemoteApplication.open(reconnectOptions, {
-          print: text => {
-            prints.push(text);
+        const reopened = await RemoteApplication.open(
+          { ...reconnectOptions, nativeConfigRoot: root },
+          {
+            print: text => {
+              prints.push(text);
+            },
           },
-        });
+        );
         try {
           expect(reopened.session.world).toBeNull();
           expect(reopened.localPlayers).toHaveLength(0);
