@@ -136,7 +136,7 @@ export function detectHandEdits(format: LayerFormat, file: LayerSnapshot, record
  * player's choice, so it stays beneath the high level: Quake II's `bind 7 "use Rocket Launcher"` must not become every
  * game's `7`.
  */
-export function seedHigh(format: LayerFormat, file: LayerSnapshot, defaultBinds: ReadonlyMap<string, LayerBind> = new Map()): HighLevel {
+export function seedHigh(format: LayerFormat, file: LayerSnapshot, defaultBinds: ReadonlyMap<string, LayerBind> = new Map<string, LayerBind>()): HighLevel {
   const high = emptyHigh();
   for (const [key, bind] of file.binds) if (bind.command !== null && defaultBinds.get(key)?.command !== bind.command) high.binds.set(key, bind);
   for (const [name, entry] of file.cvars) if (spellingIn(format, name) !== null) high.settings.set(name, entry.value);
