@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { afterAll, afterEach, mock } from "bun:test";
+import { afterAll, afterEach, mock, setDefaultTimeout } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import * as realOs from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,9 @@ import { join } from "node:path";
  * Temp directories go under the same per-run root, so a failed or timed-out test
  * cannot leave anything behind in the system temp directory.
  */
+// Many tests open real game content or a whole application; bun's 5 s default fails them whenever the machine is
+// busy. A test that needs longer still states its own limit.
+setDefaultTimeout(60_000);
 const realHome = realOs.homedir();
 const runRoot = mkdtempSync(join(realOs.tmpdir(), "qts-test-run-"));
 const home = join(runRoot, "home"),
