@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { afterAll, mock } from "bun:test";
+import { afterAll, afterEach, mock } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import * as realOs from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,11 @@ mkdirSync(temporary);
 process.env["HOME"] = home;
 process.env["TMPDIR"] = temporary;
 // Stock games write their own config beside the game data; tests send those writes here instead of the read-only install.
-process.env["QTS_TEST_GAME_WRITE_ROOT"] = join(runRoot, "game-writes");
+const gameWrites = join(runRoot, "game-writes");
+process.env["QTS_TEST_GAME_WRITE_ROOT"] = gameWrites;
+// Every test starts from untouched game folders, as on a fresh install: one test's written config.cfg, q3config.cfg,
+// saves or downloads would otherwise be mounted into the next test that opens the same install.
+afterEach(() => rmSync(gameWrites, { recursive: true, force: true }));
 process.env["XDG_DATA_HOME"] = join(home, ".local", "share");
 process.env["XDG_CONFIG_HOME"] = join(home, ".config");
 process.env["XDG_STATE_HOME"] = join(home, ".local", "state");

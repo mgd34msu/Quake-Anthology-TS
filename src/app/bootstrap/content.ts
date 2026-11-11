@@ -90,7 +90,7 @@ export async function openRemoteContent(
   // The original clients download into the game's own folder; the user store is only the fallback for a folder that cannot be written.
   const folder = async (contentDirectory: string): Promise<string> => {
     try {
-      return await gameDownloadDirectory(roots.corpusRoot, { family: base.family, contentDirectory }, roots.nativeConfigRoot, roots.userContentRoot);
+      return await gameDownloadDirectory(roots.corpusRoot, { family: base.family, contentDirectory }, roots.nativeConfigRoot);
     } catch (error) {
       if (!(error instanceof Error && "code" in error && (error.code === "EACCES" || error.code === "EROFS" || error.code === "EPERM"))) throw error;
       const stored = userProductDirectory(userRoot, contentDirectory);

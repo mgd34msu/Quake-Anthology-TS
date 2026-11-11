@@ -43,7 +43,7 @@ export function stockNativeConfig(
       looseRoot: selected.looseRoot,
     },
     undefined,
-    gameWriteRedirect(redirect, catalog.corpusRoot, catalog.userContentRoot),
+    gameWriteRedirect(redirect, catalog.corpusRoot),
     redirect !== undefined,
   );
   if (layout === null) return null;

@@ -56,7 +56,7 @@ async function files(directory: string): Promise<readonly string[]> {
  */
 export async function migrateNativeData(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "userContentRoot" | "nativeConfigRoot">): Promise<void> {
   const userRoot = options.userContentRoot ?? defaultUserContentRoot();
-  const key = `${userRoot}\0${gameWriteRedirect(options.nativeConfigRoot, catalog.corpusRoot, catalog.userContentRoot) ?? ""}`;
+  const key = `${userRoot}\0${gameWriteRedirect(options.nativeConfigRoot, catalog.corpusRoot) ?? ""}`;
   if (done.has(key)) return;
   done.add(key);
   const saves = userDataDirectory("saves", options.userContentRoot);
