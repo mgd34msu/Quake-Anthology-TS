@@ -89,10 +89,10 @@ is not a claim that every original game, mod, device or campaign works.
 ```sh
 bun run typecheck
 bun run policy        # slow
-bun run test:unit     # no game data needed; data-dependent tests skip
+bun test path/to/relevant.test.ts
 ```
 
-`bun run check` runs those three plus the format, SPDX and event-codec checks.
+`bun run check` runs typecheck and policy plus the format, SPDX and event-codec checks.
 `bun run test:corpus` (needs `QTS_TEST_CORPUS`) and `bun run test:gl` (adds native
 window and renderer tests) run the data-dependent tiers.
 

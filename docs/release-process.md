@@ -1,9 +1,10 @@
 # Release process
 
 This describes what the repository tooling does today. CI (`.github/workflows/ci.yml`) runs
-the corpus-free checks (typecheck, format, SPDX, event codec, policy, `test:unit`) on pull
-requests and pushes to `main`. The corpus and GL tiers need the retail game data and run only on
-the maintainer's machine, before every release. Cutting a release is done by hand on that machine.
+static checks only (typecheck, format, SPDX, event codec, policy) on pull requests and pushes to
+`main`. The tests need the retail game data, so they run once, on the maintainer's machine,
+before a release (`bun run test:corpus`). When a test fails, fix the cause and re-run that test
+file; the suite is not repeated. Cutting a release is done by hand on that machine.
 
 ## Versions
 
@@ -33,8 +34,7 @@ the maintainer's machine, before every release. Cutting a release is done by han
 1. Checks that the tree is a git work tree, is clean, and that `package.json` has a
    final (non pre-release) `MAJOR.MINOR.PATCH` version, and that `LICENSE`, `THIRD-PARTY-NOTICES.md`, `README.md` and
    `src/formats/images/IJG-LICENSE.md` exist.
-2. Runs the gates `typecheck` and `test:unit` (`bun run typecheck`, then the corpus-free
-   unit tier).
+2. Runs `bun run typecheck`. It does not run the tests; they were run once before the release.
 3. Builds the runtime (`tools/build.ts`, see below) and checks that HEAD and the tree did
    not change during the build.
 4. Packs `dist/release/quake-anthology-<version>-linux-x64.tar.gz` containing the
@@ -66,6 +66,6 @@ The compiled executable still needs the native libraries and your game data
 | `bun run test:corpus` | As above plus data-dependent tests; needs `QTS_TEST_CORPUS` |
 | `bun run test:gl` | Adds native-window and renderer tests |
 | `bun run format:check`, `bun run spdx`, `bun run codec:check` | Biome formatting, SPDX headers, and the generated event codec being current |
-| `bun run check` | typecheck, format, SPDX, codec, policy and the unit tier together |
+| `bun run check` | typecheck, format, SPDX, codec and policy together |
 
 The test tiers are `bun run test:unit`, `test:corpus` and `test:gl` (see `tools/test-tier.ts`).

@@ -161,8 +161,8 @@ compiles the runtime, and prints its output directory
 needs the native libraries and your game data. See
 [setup and build instructions](docs/getting-started.md).
 
-Checks for a change: `bun run typecheck`, `bun run policy`, and
-`bun run test:unit` (no game data needed; data-dependent tests skip). `bun run test:corpus` runs them against
+Checks for a change: `bun run typecheck`, `bun run policy`, and the test files for what you
+changed (`bun test path/to/file.test.ts`). `bun run test:unit` runs everything that needs no game data. `bun run test:corpus` runs them against
 the data in `QTS_TEST_CORPUS` and fails a guard whose file is missing; `bun run test:gl` adds the native window and
 renderer tests (`SDL_VIDEODRIVER=offscreen` by default). Every `bun test` run points `HOME` at a throwaway directory.
 Tests that render screenshots or write JSON evidence only do so when `QTS_TEST_CAPTURE_DIR` names a directory.

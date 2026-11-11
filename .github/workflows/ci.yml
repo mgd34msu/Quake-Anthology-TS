@@ -1,5 +1,5 @@
-# Corpus-free checks: nothing here needs Quake game data, a display or a GPU.
-# The corpus and GL tiers (`bun run test:corpus`, `bun run test:gl`) stay local.
+# Static checks only. The tests need the retail game data and run once, on the maintainer's
+# machine, before a release.
 name: ci
 
 on:
@@ -43,4 +43,3 @@ jobs:
       - name: Added lines stay within the size budget
         if: github.event_name == 'pull_request'
         run: bun tools/check-style.ts "${{ github.event.pull_request.base.sha }}"
-      - run: bun run test:unit

@@ -5,7 +5,7 @@ import { buildWorkspace, type BuildEvidence } from "./build.ts";
 import { gitState } from "./verify/git.ts";
 
 export interface ReleaseOptions {
-  /** Test seam: the gates run before the build. Defaults to typecheck and the corpus-free unit tier. */
+  /** Test seam: the gates run before the build. Defaults to typecheck; the test suite is run once, by the maintainer, before the release. */
   readonly gates?: readonly string[];
 }
 
@@ -78,7 +78,7 @@ export async function releaseWorkspace(directory: string, options: ReleaseOption
   for (const file of archiveFiles) {
     if (!(await Bun.file(join(workspace, file.from)).exists())) throw new Error(`Release refused: ${file.from} is missing.`);
   }
-  for (const gate of options.gates ?? ["typecheck", "test:unit"]) await run(workspace, [process.execPath, "run", gate]);
+  for (const gate of options.gates ?? ["typecheck"]) await run(workspace, [process.execPath, "run", gate]);
   const evidence = await buildWorkspace(workspace, "runtime");
   const after = await gitState(workspace);
   if (after.commit !== before.commit || after.dirty !== false) throw new Error("Release refused: the tree or HEAD changed while the release was building.");

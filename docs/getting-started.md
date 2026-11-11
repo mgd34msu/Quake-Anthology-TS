@@ -93,7 +93,6 @@ Use checks appropriate to the changed code:
 bun run typecheck
 bun run policy
 bun test path/to/relevant.test.ts
-bun run test:unit
 ```
 
 `test:unit` runs the suite without game data or a native window; `test:corpus` and

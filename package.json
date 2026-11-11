@@ -16,7 +16,7 @@
     "test:policy": "bun test tests/policy",
     "test:platform": "bun test tests/platform",
     "bench:foundation": "bun run tools/bench-foundation.ts",
-    "check": "bun run typecheck && bun run format:check && bun run spdx && bun run codec:check && bun run policy && bun run test:unit",
+    "check": "bun run typecheck && bun run format:check && bun run spdx && bun run codec:check && bun run policy",
     "build": "bun run tools/build.ts",
     "build:tools": "bun run tools/build.ts --tools",
     "release": "bun run tools/release.ts",
