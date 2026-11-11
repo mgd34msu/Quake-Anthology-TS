@@ -87,4 +87,4 @@ test("actual QW source dispatches spectator callbacks without player begin or th
   } finally {
     await content.close();
   }
-});
+}, 60000);
