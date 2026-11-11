@@ -2,8 +2,8 @@
 
 This describes what the repository tooling does today. CI (`.github/workflows/ci.yml`) runs
 the corpus-free checks (typecheck, format, SPDX, event codec, policy, `test:unit`) on pull
-requests and pushes to `main`; a weekly self-hosted job (`corpus.yml`) runs the corpus tier.
-Cutting a release is done by hand on the maintainer's machine.
+requests and pushes to `main`. The corpus and GL tiers need the retail game data and run only on
+the maintainer's machine, before every release. Cutting a release is done by hand on that machine.
 
 ## Versions
 
